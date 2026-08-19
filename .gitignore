@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env*.example
 
 # vercel
 .vercel
@@ -39,3 +40,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# backend (Python)
+backend/.venv
+backend/**/__pycache__
+backend/*.egg-info
+backend/*.log
+
+# reference logo images for watermark matching - trademarked third-party
+# assets, sourced locally per-deployment, never committed (see the README
+# in this directory)
+backend/app/assets/watermark_logos/*.png
+
+# local dev logs
+dev.log

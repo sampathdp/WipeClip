@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%">
+  <defs>
+    <linearGradient id="fav-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0e111d" />
+      <stop offset="100%" stop-color="#05060a" />
+    </linearGradient>
+    <linearGradient id="fav-brand" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22d3ee" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+    <linearGradient id="fav-border" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#7c5cff" stop-opacity="0.8" />
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle Base -->
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#fav-bg)" stroke="url(#fav-border)" stroke-width="2" />
+
+  <!-- Subtle Shutter Arc -->
+  <path d="M 24 16 C 36 14, 48 20, 52 30" stroke="#22d3ee" stroke-width="1.8" stroke-linecap="round" fill="none" opacity="0.4" />
+  <path d="M 12 34 C 14 46, 26 52, 38 50" stroke="#a855f7" stroke-width="1.8" stroke-linecap="round" fill="none" opacity="0.4" />
+
+  <!-- Bold Central 'U' -->
+  <path
+    d="M 21 21
+       L 27 21
+       L 27 37
+       C 27 41, 29 43, 32 43
+       C 35 43, 37 41, 37 37
+       L 37 25
+       L 43 25
+       L 43 37
+       C 43 45, 38 49, 32 49
+       C 26 49, 21 45, 21 37
+       Z"
+    fill="url(#fav-brand)"
+  />
+
+  <!-- Crisp AI Star -->
+  <path
+    d="M 43 17
+       C 43.5 21, 44.5 22, 48 22.5
+       C 44.5 23, 43.5 24, 43 28
+       C 42.5 24, 41.5 23, 38 22.5
+       C 41.5 22, 42.5 21, 43 17
+       Z"
+    fill="#ffffff"
+  />
+</svg>

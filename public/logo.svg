@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 64" width="100%" height="100%">
+  <defs>
+    <linearGradient id="logo-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0e111d" />
+      <stop offset="100%" stop-color="#05060a" />
+    </linearGradient>
+    <linearGradient id="logo-brand" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22d3ee" />
+      <stop offset="45%" stop-color="#60a5fa" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+    <linearGradient id="logo-border" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.7" />
+      <stop offset="100%" stop-color="#7c5cff" stop-opacity="0.8" />
+    </linearGradient>
+  </defs>
+
+  <!-- Left Icon Mark -->
+  <g transform="translate(4, 4)">
+    <!-- Squircle container -->
+    <rect x="0" y="0" width="56" height="56" rx="14" fill="url(#logo-bg)" stroke="url(#logo-border)" stroke-width="1.8" />
+    
+    <!-- Shutter Arcs -->
+    <path d="M 21 14 C 32 12, 42 17, 46 26" stroke="#22d3ee" stroke-width="1.6" stroke-linecap="round" fill="none" opacity="0.4" />
+    <path d="M 10 30 C 12 40, 22 46, 33 44" stroke="#a855f7" stroke-width="1.6" stroke-linecap="round" fill="none" opacity="0.4" />
+
+    <!-- Stylized U -->
+    <path
+      d="M 18 18
+         L 23.5 18
+         L 23.5 32.5
+         C 23.5 36, 25.5 38, 28 38
+         C 30.5 38, 32.5 36, 32.5 32.5
+         L 32.5 22
+         L 38 22
+         L 38 32.5
+         C 38 40, 33.5 43.5, 28 43.5
+         C 22.5 43.5, 18 40, 18 32.5
+         Z"
+      fill="url(#logo-brand)"
+    />
+
+    <!-- AI Sparkle -->
+    <path
+      d="M 38 15
+         C 38.5 18.5, 39.5 19.5, 42.5 20
+         C 39.5 20.5, 38.5 21.5, 38 25
+         C 37.5 21.5, 36.5 20.5, 33.5 20
+         C 36.5 19.5, 37.5 18.5, 38 15
+         Z"
+      fill="#ffffff"
+    />
+  </g>
+
+  <!-- Typography: UnmarkAI -->
+  <text x="76" y="39" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif" font-size="26" font-weight="700" letter-spacing="-0.5" fill="#f4f4f6">
+    Unmark<tspan fill="url(#logo-brand)">AI</tspan>
+  </text>
+</svg>

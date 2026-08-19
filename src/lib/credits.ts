@@ -1,0 +1,17 @@
+import type { Resolution } from "./toolsApi";
+
+export const RESOLUTION_CREDIT_COST: Record<Resolution, number> = {
+  "720p": 1,
+  "1080p": 2,
+  "4k": 4,
+};
+
+export const FREE_DAILY_CREDITS = 2;
+
+export const PLANS = {
+  starter: { label: "Starter", priceLabel: "$9/mo", credits: 60 },
+  pro: { label: "Pro", priceLabel: "$24/mo", credits: 200 },
+  payg: { label: "Pay-as-you-go", priceLabel: "$6", credits: 30 },
+} as const;
+
+export type PlanKey = keyof typeof PLANS;
