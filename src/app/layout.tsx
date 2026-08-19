@@ -16,16 +16,16 @@ const jakarta = Plus_Jakarta_Sans({
   display: "swap",
 });
 
-const siteUrl = "https://wipeclip.io";
+const siteUrl = "https://wipeclip.co";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "WipeClip.io — Video Watermark & Object Remover",
-    template: "%s | WipeClip.io",
+    default: "WipeClip.co — Video Watermark & Object Remover",
+    template: "%s | WipeClip.co",
   },
   description:
-    "WipeClip.io removes watermarks, logos, timestamps and unwanted objects from video you own or have rights to edit. Fast, private, no quality loss.",
+    "WipeClip.co removes watermarks, logos, timestamps and unwanted objects from video you own or have rights to edit. Fast, private, no quality loss.",
   keywords: [
     "remove watermark from video",
     "video watermark remover",
@@ -34,17 +34,17 @@ export const metadata: Metadata = {
     "video inpainting tool",
     "wipeclip",
   ],
-  authors: [{ name: "WipeClip.io" }],
-  creator: "WipeClip.io",
-  publisher: "WipeClip.io",
+  authors: [{ name: "WipeClip.co" }],
+  creator: "WipeClip.co",
+  publisher: "WipeClip.co",
   alternates: {
     canonical: "/",
   },
   openGraph: {
     type: "website",
     url: siteUrl,
-    siteName: "WipeClip.io",
-    title: "WipeClip.io — Video Watermark & Object Remover",
+    siteName: "WipeClip.co",
+    title: "WipeClip.co — Video Watermark & Object Remover",
     description:
       "Remove watermarks, logos, timestamps and unwanted objects from video you own or have rights to edit. Fast, private, no quality loss.",
     locale: "en_US",
@@ -53,13 +53,13 @@ export const metadata: Metadata = {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "WipeClip.io — video watermark & object remover",
+        alt: "WipeClip.co — video watermark & object remover",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "WipeClip.io — Video Watermark & Object Remover",
+    title: "WipeClip.co — Video Watermark & Object Remover",
     description:
       "Remove watermarks, logos, timestamps and unwanted objects from video you own or have rights to edit.",
     images: ["/opengraph-image"],
@@ -99,7 +99,7 @@ const jsonLd = {
     {
       "@type": "Organization",
       "@id": `${siteUrl}/#organization`,
-      name: "WipeClip.io",
+      name: "WipeClip.co",
       url: siteUrl,
       logo: `${siteUrl}/logo.png`,
     },
@@ -107,12 +107,12 @@ const jsonLd = {
       "@type": "WebSite",
       "@id": `${siteUrl}/#website`,
       url: siteUrl,
-      name: "WipeClip.io",
+      name: "WipeClip.co",
       publisher: { "@id": `${siteUrl}/#organization` },
     },
     {
       "@type": "SoftwareApplication",
-      name: "WipeClip.io",
+      name: "WipeClip.co",
       applicationCategory: "MultimediaApplication",
       operatingSystem: "Web",
       url: siteUrl,

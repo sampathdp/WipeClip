@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 
-export const alt = "WipeClip.io — AI video watermark remover";
+export const alt = "WipeClip.co — AI video watermark remover";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -80,7 +80,7 @@ export default function Image() {
               display: "flex",
             }}
           >
-            WipeClip<span style={{ color: "#7c5cff" }}>.io</span>
+            WipeClip<span style={{ color: "#7c5cff" }}>.co</span>
           </div>
         </div>
 

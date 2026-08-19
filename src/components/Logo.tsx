@@ -101,7 +101,7 @@ export default function Logo({
       {/* Typography */}
       {showText && (
         <span className={`${textSize} font-bold tracking-tight text-foreground leading-none`}>
-          WipeClip<span className="text-gradient">.io</span>
+          WipeClip<span className="text-gradient">.co</span>
         </span>
       )}
     </div>

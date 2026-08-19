@@ -10,7 +10,7 @@ const features = [
   },
   {
     title: "Universal Mark Detection",
-    desc: "Mark any badge, dynamic overlay or timestamp. WipeClip.io works across all corners, shapes and brand logos.",
+    desc: "Mark any badge, dynamic overlay or timestamp. WipeClip.co works across all corners, shapes and brand logos.",
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="10" />
@@ -83,7 +83,7 @@ export default function Features() {
             Built to <span className="text-gradient">inpaint</span>, not blur or crop
           </h2>
           <p className="mt-4 text-muted text-base leading-relaxed">
-            Legacy tools smudge or cut your video frame. WipeClip.io uses deep motion inpainting to recreate authentic background detail.
+            Legacy tools smudge or cut your video frame. WipeClip.co uses deep motion inpainting to recreate authentic background detail.
           </p>
         </div>
 

@@ -31,7 +31,7 @@ export default function HowItWorks() {
             Zero editing skills required
           </h2>
           <p className="mt-4 text-muted text-base leading-relaxed">
-            WipeClip.io handles temporal frame alignment and neural reconstruction automatically. Simply upload, mark, and download.
+            WipeClip.co handles temporal frame alignment and neural reconstruction automatically. Simply upload, mark, and download.
           </p>
         </div>
 

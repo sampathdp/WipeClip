@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-const siteUrl = "https://wipeclip.io";
+const siteUrl = "https://wipeclip.co";
 
 export default function robots(): MetadataRoute.Robots {
   return {

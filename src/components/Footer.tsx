@@ -25,7 +25,7 @@ export default function Footer() {
         <p className="mt-6 text-xs text-muted">
           For content you own or have permission to edit only. Not affiliated
           with any third-party video platform or AI model provider. Using
-          WipeClip.io to infringe copyright or to violate another platform&apos;s
+          WipeClip.co to infringe copyright or to violate another platform&apos;s
           terms of service is strictly prohibited. Please review our{" "}
           <Link href="/terms" className="underline hover:text-foreground">
             Terms of Service

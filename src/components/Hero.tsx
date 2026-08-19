@@ -57,7 +57,7 @@ export default function Hero() {
 
             {/* Subtitle */}
             <p className="mx-auto mt-7 max-w-md text-base leading-relaxed text-muted sm:text-lg lg:mx-0 lg:border-l-2 lg:border-accent/40 lg:pl-5">
-              Mark any badge, timestamp or logo once WipeClip.io reconstructs
+              Mark any badge, timestamp or logo once WipeClip.co reconstructs
               the pixels beneath every frame from surrounding motion. No blur
               box, no crop, zero quality loss.
             </p>

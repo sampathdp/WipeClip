@@ -3,11 +3,11 @@ import Link from "next/link";
 const faqs = [
   {
     q: "Can I use this on any video I find online?",
-    a: "No. WipeClip.io is for content you own or have explicit permission to edit, such as your own AI-generated video drafts, personal B-roll, or footage with client authorization. You confirm this before every job.",
+    a: "No. WipeClip.co is for content you own or have explicit permission to edit, such as your own AI-generated video drafts, personal B-roll, or footage with client authorization. You confirm this before every job.",
   },
   {
     q: "Does this actually remove the watermark, or just blur it?",
-    a: "WipeClip.io blends the marked region in from surrounding pixels and temporal motion vectors rather than covering it with a static blur box or destructive crop.",
+    a: "WipeClip.co blends the marked region in from surrounding pixels and temporal motion vectors rather than covering it with a static blur box or destructive crop.",
   },
   {
     q: "Which watermarks or logos are supported?",

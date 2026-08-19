@@ -6,7 +6,7 @@ import Footer from "@/components/Footer";
 export const metadata: Metadata = {
   title: "Copyright / DMCA Policy",
   description:
-    "How to report suspected copyright infringement involving WipeClip.io, and our policy on repeat offenders.",
+    "How to report suspected copyright infringement involving WipeClip.co, and our policy on repeat offenders.",
   alternates: { canonical: "/dmca" },
 };
 
@@ -33,7 +33,7 @@ export default function DmcaPage() {
       <p className="mt-2 text-sm text-muted">Last updated: {updated}</p>
 
       <P>
-        WipeClip.io is a self-serve editing tool: users upload their own media,
+        WipeClip.co is a self-serve editing tool: users upload their own media,
         we process it, and we return the result — we do not host, index, or
         make user content available to anyone else. Even so, we take
         copyright seriously and require every user to confirm they own or
@@ -47,7 +47,7 @@ export default function DmcaPage() {
       <H2>1. Reporting suspected infringement</H2>
       <P>
         If you are a copyright owner, or authorized to act on one&apos;s
-        behalf, and believe WipeClip.io has been used to infringe your work,
+        behalf, and believe WipeClip.co has been used to infringe your work,
         send a notice to our designated agent below. To be effective, your
         notice should include, consistent with 17 U.S.C. § 512(c)(3):
       </P>
@@ -75,8 +75,8 @@ export default function DmcaPage() {
       </P>
       <P>
         Until then, reports can be sent to{" "}
-        <a href="mailto:legal@wipeclip.io" className="underline hover:text-foreground">
-          legal@wipeclip.io
+        <a href="mailto:legal@wipeclip.co" className="underline hover:text-foreground">
+          legal@wipeclip.co
         </a>
         .
       </P>

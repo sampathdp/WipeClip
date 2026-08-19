@@ -18,8 +18,26 @@ these are filled in with real values.
    This creates `profiles`, `credit_transactions`,
    `processed_webhook_events`, the credit RPC functions, and RLS policies.
 
-That's it for Supabase - signing in with a new email auto-creates a
-`profiles` row with 2 free credits via the `on_auth_user_created` trigger.
+That's it for Supabase - signing in with a new email (any provider) auto-
+creates a `profiles` row with 2 free credits via the `on_auth_user_created`
+trigger.
+
+### Google sign-in
+
+The sign-in page's "Continue with Google" button needs a Google OAuth
+client, then a couple minutes wiring it into Supabase:
+
+1. [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+   -> Create Credentials -> OAuth client ID -> Web application.
+2. Authorized redirect URI: `https://<your-project-ref>.supabase.co/auth/v1/callback`
+   (Supabase's own callback, not this app's - find the exact URL on the
+   Supabase provider settings page below, it's shown there).
+3. Copy the generated Client ID and Client Secret.
+4. Supabase dashboard -> Authentication -> Providers -> Google: paste them
+   in and enable the provider.
+
+No separate env vars needed in this app - Supabase holds the Google
+credentials and this app just calls `signInWithOAuth({ provider: "google" })`.
 
 ## 2. Lemon Squeezy
 

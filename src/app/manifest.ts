@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "WipeClip.io — Video Watermark & Object Remover",
-    short_name: "WipeClip.io",
+    name: "WipeClip.co — Video Watermark & Object Remover",
+    short_name: "WipeClip.co",
     description:
       "Remove watermarks, logos, timestamps and unwanted objects from video you own or have rights to edit.",
     start_url: "/",

@@ -6,7 +6,7 @@ import Footer from "@/components/Footer";
 export const metadata: Metadata = {
   title: "Terms of Service",
   description:
-    "The terms that govern your use of WipeClip.io, including acceptable use, content ownership, and liability.",
+    "The terms that govern your use of WipeClip.co, including acceptable use, content ownership, and liability.",
   alternates: { canonical: "/terms" },
 };
 
@@ -34,7 +34,7 @@ export default function TermsPage() {
 
       <P>
         These Terms of Service (&quot;Terms&quot;) govern your access to and
-        use of WipeClip.io (&quot;WipeClip.io&quot;, &quot;we&quot;, &quot;us&quot;,
+        use of WipeClip.co (&quot;WipeClip.co&quot;, &quot;we&quot;, &quot;us&quot;,
         or &quot;our&quot;), including the website and the media-editing
         service it provides (the &quot;Service&quot;). By uploading a file or
         otherwise using the Service, you agree to these Terms. If you do not
@@ -43,7 +43,7 @@ export default function TermsPage() {
 
       <H2>1. What the Service does</H2>
       <P>
-        WipeClip.io lets you mark a region of a video or image you provide and
+        WipeClip.co lets you mark a region of a video or image you provide and
         removes or replaces it — for example a logo, watermark, timestamp, or
         another unwanted object — using automated image/video processing. You
         choose the region; the Service does not automatically detect or
@@ -85,7 +85,7 @@ export default function TermsPage() {
         </li>
       </ul>
       <P>
-        WipeClip.io is a general-purpose retouching tool intended for lawful
+        WipeClip.co is a general-purpose retouching tool intended for lawful
         personal and professional editing — cleaning up your own footage,
         removing incidental artifacts, or retouching assets you have
         permission to modify. It is not intended, and must not be used, to
@@ -154,7 +154,7 @@ export default function TermsPage() {
 
       <H2>9. Limitation of liability</H2>
       <P>
-        To the maximum extent permitted by law, WipeClip.io will not be liable
+        To the maximum extent permitted by law, WipeClip.co will not be liable
         for any indirect, incidental, special, consequential, or punitive
         damages, or any loss of data, revenue, or goodwill, arising from your
         use of the Service. Our total liability for any claim arising from
@@ -164,7 +164,7 @@ export default function TermsPage() {
 
       <H2>10. Indemnification</H2>
       <P>
-        You agree to indemnify and hold WipeClip.io harmless from any claim,
+        You agree to indemnify and hold WipeClip.co harmless from any claim,
         loss, liability, or expense (including reasonable legal fees) arising
         from your content, your use of the Service, or your violation of
         these Terms.
@@ -192,8 +192,8 @@ export default function TermsPage() {
       <H2>14. Contact</H2>
       <P>
         Questions about these Terms can be sent to{" "}
-        <a href="mailto:legal@wipeclip.io" className="underline hover:text-foreground">
-          legal@wipeclip.io
+        <a href="mailto:legal@wipeclip.co" className="underline hover:text-foreground">
+          legal@wipeclip.co
         </a>
         .
       </P>

@@ -246,7 +246,7 @@ export default function UploadDemo() {
 
           {blockReason === "content" && (
             <p className="max-w-md text-xs sm:text-sm text-muted">
-              WipeClip.io doesn&apos;t process explicit or adult content. See our{" "}
+              WipeClip.co doesn&apos;t process explicit or adult content. See our{" "}
               <Link href="/terms" className="underline hover:text-foreground">
                 Terms of Service
               </Link>
@@ -406,7 +406,7 @@ export default function UploadDemo() {
                 />
                 <span>
                   I own this video, or have permission to edit it, and won&apos;t
-                  use WipeClip.io to infringe copyright or violate a platform&apos;s
+                  use WipeClip.co to infringe copyright or violate a platform&apos;s
                   terms of service.{" "}
                   <Link href="/terms" className="underline hover:text-foreground text-cyan-400">
                     Terms of Service

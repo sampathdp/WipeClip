@@ -5,7 +5,7 @@ import Footer from "@/components/Footer";
 export const metadata: Metadata = {
   title: "Privacy Policy",
   description:
-    "How WipeClip.io handles the files you upload and what data we collect.",
+    "How WipeClip.co handles the files you upload and what data we collect.",
   alternates: { canonical: "/privacy" },
 };
 
@@ -32,7 +32,7 @@ export default function PrivacyPage() {
       <p className="mt-2 text-sm text-muted">Last updated: {updated}</p>
 
       <P>
-        This policy explains what happens to your data when you use WipeClip.io
+        This policy explains what happens to your data when you use WipeClip.co
         (&quot;we&quot;, &quot;us&quot;). We built the Service to need as
         little of your data as possible.
       </P>
@@ -107,8 +107,8 @@ export default function PrivacyPage() {
       <H2>9. Contact</H2>
       <P>
         Questions about this policy or a data request can be sent to{" "}
-        <a href="mailto:privacy@wipeclip.io" className="underline hover:text-foreground">
-          privacy@wipeclip.io
+        <a href="mailto:privacy@wipeclip.co" className="underline hover:text-foreground">
+          privacy@wipeclip.co
         </a>
         .
       </P>
