@@ -67,19 +67,25 @@ export default function DmcaPage() {
         </li>
       </ul>
 
-      <H2>2. Designated agent</H2>
+      <H2>2. Designated copyright contact</H2>
       <P>
-        [Insert designated DMCA agent name, mailing address, phone, and email
-        here — and register the agent with the U.S. Copyright Office before
-        launch if you intend to rely on DMCA safe-harbor protection.]
+        Notices of claimed copyright infringement should be submitted via
+        email to our designated copyright and legal team:
       </P>
-      <P>
-        Until then, reports can be sent to{" "}
-        <a href="mailto:legal@wipeclip.co" className="underline hover:text-foreground">
-          legal@wipeclip.co
-        </a>
-        .
-      </P>
+      <div className="mt-3 rounded-lg border border-border/60 bg-surface/50 p-4 text-sm text-muted">
+        <p className="font-semibold text-foreground">WipeClip Legal &amp; Copyright Department</p>
+        <p className="mt-1">
+          Email:{" "}
+          <a href="mailto:dmca@wipeclip.co" className="text-foreground underline">
+            dmca@wipeclip.co
+          </a>{" "}
+          (or{" "}
+          <a href="mailto:legal@wipeclip.co" className="text-foreground underline">
+            legal@wipeclip.co
+          </a>
+          )
+        </p>
+      </div>
 
       <H2>3. Counter-notice</H2>
       <P>

@@ -36,9 +36,11 @@ export default function Footer() {
         </div>
         <p className="mt-4 text-xs text-muted">
           For content you own or have permission to edit only. Not affiliated
-          with any third-party video platform or AI model provider. Using
-          WipeClip.co to infringe copyright or to violate another platform&apos;s
-          terms of service is strictly prohibited. Please review our{" "}
+          with any third-party video platform or AI model provider. All product
+          names, logos, and brands are property of their respective owners and
+          are used for identification purposes only. Using WipeClip.co to
+          infringe copyright or to violate another platform&apos;s terms of
+          service is strictly prohibited. Please review our{" "}
           <Link href="/terms" className="underline hover:text-foreground">
             Terms of Service
           </Link>

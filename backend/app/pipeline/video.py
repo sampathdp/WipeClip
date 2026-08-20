@@ -581,6 +581,7 @@ def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, 
     window: list[np.ndarray] = []
     window_start = 0  # global frame index of window[0]
     next_emit = 0  # global frame index of the next frame to finalize
+    cur_idx = -1  # global frame index of the most recently read frame; -1 if none read yet
 
     def _emit_center() -> None:
         center_pos = next_emit - window_start
@@ -608,11 +609,16 @@ def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, 
                     window_start += 1
 
         # Drain: end of stream - finalize whatever's left with however
-        # much lookahead each one actually has (the clip's tail).
-        while window:
+        # much lookahead each one actually has (the clip's tail). Bounded
+        # by cur_idx (the last frame actually read), NOT by `window` being
+        # non-empty - next_emit can still be behind cur_idx while window
+        # has already been trimmed down by the loop above, and stopping on
+        # an empty window would either exit early or (if window
+        # temporarily has stale entries) index past its end.
+        while next_emit <= cur_idx:
             _emit_center()
             next_emit += 1
-            while window_start < next_emit - radius and window:
+            while window_start < next_emit - radius:
                 window.pop(0)
                 window_start += 1
     finally:

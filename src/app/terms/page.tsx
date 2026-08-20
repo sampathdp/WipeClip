@@ -125,15 +125,56 @@ export default function TermsPage() {
         for details.
       </P>
 
-      <H2>6. Intellectual property</H2>
+      <H2>6. Paid Plans, Credits & Refund Policy</H2>
+      <P>
+        WipeClip.co provides both free credits and paid options (including
+        recurring monthly subscriptions and one-time Pay-As-You-Go credit
+        packs).
+      </P>
+      <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-muted">
+        <li>
+          <strong>Billing &amp; Merchant of Record:</strong> Paid transactions are
+          processed by Lemon Squeezy (our authorized Merchant of Record and
+          payment reseller). When purchasing a plan, you agree to Lemon
+          Squeezy&apos;s customer terms and privacy policy.
+        </li>
+        <li>
+          <strong>Subscriptions &amp; Renewal:</strong> Subscription plans automatically
+          renew at the end of each billing cycle (e.g., monthly) unless cancelled
+          prior to the renewal date via your account settings or customer portal.
+        </li>
+        <li>
+          <strong>Credits:</strong> Credits are consumed upon successful video
+          processing. If a processing job fails due to an internal server error,
+          the consumed credit is automatically refunded to your account balance.
+        </li>
+        <li>
+          <strong>Refund Policy:</strong> We offer a 14-day refund window for paid
+          purchases if you have not used more than 20% of your purchased credits
+          and have experienced unresolved technical difficulties with the Service.
+          To request a refund, contact us at{" "}
+          <a href="mailto:support@wipeclip.co" className="underline hover:text-foreground">
+            support@wipeclip.co
+          </a>
+          .
+        </li>
+      </ul>
+
+      <H2>7. Intellectual property &amp; Trademarks</H2>
       <P>
         We retain all rights in the Service itself, including its software,
         design, and branding. You retain all rights in the content you
         upload; we claim no ownership over it and use it solely to provide
         the Service to you.
       </P>
+      <P>
+        All third-party product names, logos, and trademarks mentioned on the
+        website (e.g., TikTok, CapCut, Canva, Instagram, Snapchat, Facebook,
+        Kapwing, InShot) are the property of their respective owners. Their
+        mention does not imply any affiliation, sponsorship, or endorsement.
+      </P>
 
-      <H2>7. Copyright complaints</H2>
+      <H2>8. Copyright complaints</H2>
       <P>
         If you believe content processed through the Service infringes your
         copyright, see our{" "}
@@ -143,7 +184,7 @@ export default function TermsPage() {
         .
       </P>
 
-      <H2>8. Disclaimer of warranties</H2>
+      <H2>9. Disclaimer of warranties</H2>
       <P>
         The Service is provided &quot;as is&quot; and &quot;as available&quot;
         without warranties of any kind, express or implied, including
@@ -152,7 +193,7 @@ export default function TermsPage() {
         error-free or meet your expectations.
       </P>
 
-      <H2>9. Limitation of liability</H2>
+      <H2>10. Limitation of liability</H2>
       <P>
         To the maximum extent permitted by law, WipeClip.co will not be liable
         for any indirect, incidental, special, consequential, or punitive
@@ -162,7 +203,7 @@ export default function TermsPage() {
         twelve months before the claim arose.
       </P>
 
-      <H2>10. Indemnification</H2>
+      <H2>11. Indemnification</H2>
       <P>
         You agree to indemnify and hold WipeClip.co harmless from any claim,
         loss, liability, or expense (including reasonable legal fees) arising
@@ -170,26 +211,31 @@ export default function TermsPage() {
         these Terms.
       </P>
 
-      <H2>11. Termination</H2>
+      <H2>12. Termination</H2>
       <P>
         We may suspend or terminate your access to the Service at any time,
         with or without notice, for conduct that violates these Terms or is
         otherwise harmful to us, other users, or third parties.
       </P>
 
-      <H2>12. Changes to these Terms</H2>
+      <H2>13. Changes to these Terms</H2>
       <P>
         We may update these Terms from time to time. Continued use of the
         Service after a change becomes effective constitutes acceptance of
         the revised Terms.
       </P>
 
-      <H2>13. Governing law</H2>
+      <H2>14. Governing law &amp; Dispute resolution</H2>
       <P>
-        [Insert governing law / jurisdiction here before launch.]
+        These Terms and any dispute arising out of or related to them shall be
+        governed by and construed in accordance with the laws applicable in your
+        country of residence or operation, without giving effect to any conflict
+        of law principles. Any legal action or proceeding arising under these
+        Terms will be brought exclusively in the courts of competent
+        jurisdiction.
       </P>
 
-      <H2>14. Contact</H2>
+      <H2>15. Contact</H2>
       <P>
         Questions about these Terms can be sent to{" "}
         <a href="mailto:legal@wipeclip.co" className="underline hover:text-foreground">
