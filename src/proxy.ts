@@ -1,7 +1,22 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+const GATE_COOKIE = "wc_bypass";
+
 export async function proxy(request: NextRequest) {
+  const { pathname, searchParams } = request.nextUrl;
+  const secret = process.env.SITE_BYPASS_SECRET;
+  const paramBypass = Boolean(secret && searchParams.get("bypass") === secret);
+  const cookieBypass = Boolean(secret && request.cookies.get(GATE_COOKIE)?.value === secret);
+  const exempt = pathname === "/under-construction" || pathname.startsWith("/api/") || pathname.startsWith("/auth/");
+
+  if (process.env.SITE_UNDER_CONSTRUCTION === "true" && !exempt && !paramBypass && !cookieBypass) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/under-construction";
+    url.search = "";
+    return NextResponse.rewrite(url);
+  }
+
   let response = NextResponse.next({ request });
 
   // Supabase isn't configured yet in every environment (e.g. before
@@ -9,6 +24,9 @@ export async function proxy(request: NextRequest) {
   // nothing to do with auth, so a missing session-refresh capability
   // should mean "nobody is signed in," not a 500 on every page.
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    if (paramBypass && !cookieBypass) {
+      response.cookies.set(GATE_COOKIE, secret!, { maxAge: 60 * 60 * 24 * 30, httpOnly: true });
+    }
     return response;
   }
 
@@ -37,6 +55,14 @@ export async function proxy(request: NextRequest) {
   // a signed-in visitor gets silently logged out mid-session rather than
   // staying signed in across requests.
   await supabase.auth.getUser();
+
+  // First visit with the right ?bypass= param earns a cookie so the rest of
+  // that visitor's session skips the gate too, not just this one request.
+  // Set last: `response` may have been reassigned above by Supabase's own
+  // cookie sync, so setting this any earlier would get silently dropped.
+  if (paramBypass && !cookieBypass) {
+    response.cookies.set(GATE_COOKIE, secret!, { maxAge: 60 * 60 * 24 * 30, httpOnly: true });
+  }
 
   return response;
 }
