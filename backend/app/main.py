@@ -1,9 +1,4 @@
-"""FastAPI backend for the sprite/image cleanup editor.
-
-Every endpoint follows the same shape: accept an uploaded image (and
-optionally a mask), run one pipeline stage, return the resulting PNG. This
-lets the frontend apply tools one at a time with its own undo history,
-rather than committing to one fixed batch pipeline.
+"""FastAPI backend for WipeClip.co's video watermark/object removal.
 
 Run locally:
     uvicorn app.main:app --reload --port 8000
@@ -23,12 +18,27 @@ Environment variables:
                          credit check from being bypassable by calling this
                          backend directly. Unset by default so local dev
                          works with no extra config, same as ALLOWED_ORIGINS.
+    ENABLE_API_DOCS      set to "1" to serve /docs, /redoc and /openapi.json.
+                         Off by default: this API has no per-endpoint auth
+                         beyond INTERNAL_API_SECRET above, so a public
+                         Swagger UI just makes every route easier to find
+                         and hit directly. Turn it on for local debugging
+                         only.
+    REDIS_URL            optional. When set, video/image processing jobs
+                         run through an RQ queue (a separate `python -m
+                         app.worker` process) instead of inline in the
+                         request - see app/queue.py for the full contract
+                         and its filesystem-locality caveat. Unset by
+                         default, same "no-op until configured" pattern as
+                         INTERNAL_API_SECRET above.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
+import time
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -37,25 +47,34 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
+from app import jobs
 from app.config import (
-    DEFAULT_ALPHA_ERODE,
-    DEFAULT_BG_TOLERANCE,
-    DEFAULT_INPAINT_RADIUS,
-    DEFAULT_SHARPEN_AMOUNT,
-    DEFAULT_SHARPEN_RADIUS,
-    DEFAULT_STRENGTH,
     MAX_VIDEO_DURATION_SECONDS,
     MAX_VIDEO_UPLOAD_BYTES,
     MIN_REGION_PX,
     RESOLUTION_HEIGHTS,
 )
-from app.pipeline import alpha_cleanup, bg_removal, decontaminate, manual_inpaint, moderation, sharpen
+from app.pipeline import detect_artifacts, io_utils, moderation
 from app.pipeline import video as video_pipeline
-from app.pipeline.detect_artifacts import detect_artifact_candidates
-from app.pipeline.full_pipeline import auto_enhance
-from app.pipeline.io_utils import decode_mask, decode_upload_to_bgra, encode_bgra_to_png
+from app.queue import get_queue
 
-app = FastAPI(title="Sprite Cleaner API", version="1.0.0")
+# Scaffolded but inert: with SENTRY_DSN unset, sentry_sdk.init() is simply
+# never called, so this has zero effect - same "no-op until configured"
+# pattern as INTERNAL_API_SECRET/MODERATION_PROVIDER/REDIS_URL above.
+_sentry_dsn = os.environ.get("SENTRY_DSN")
+if _sentry_dsn:
+    import sentry_sdk
+
+    sentry_sdk.init(dsn=_sentry_dsn, traces_sample_rate=0.1)
+
+_docs_enabled = os.environ.get("ENABLE_API_DOCS") == "1"
+app = FastAPI(
+    title="WipeClip.co API",
+    version="1.0.0",
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
+)
 
 _origins = os.environ.get("ALLOWED_ORIGINS", "*")
 app.add_middleware(
@@ -69,19 +88,6 @@ app.add_middleware(
     # (X-Video-*) alongside the PNG body, so those need to be listed here.
     expose_headers=["X-Video-Width", "X-Video-Height", "X-Video-Duration", "X-Video-Fps"],
 )
-
-
-async def _read_image(file: UploadFile) -> tuple:
-    data = await file.read()
-    try:
-        return decode_upload_to_bgra(data)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-def _respond_png(bgra, icc_profile=None) -> Response:
-    png_bytes = encode_bgra_to_png(bgra, icc_profile)
-    return Response(content=png_bytes, media_type="image/png")
 
 
 def _assert_internal_caller(request: Request) -> None:
@@ -113,126 +119,62 @@ def _assert_video_safe(path: str) -> None:
         )
 
 
+def _assert_image_safe(bgra) -> None:
+    """Image-upload equivalent of _assert_video_safe: screens a single
+    decoded frame through moderation.screen_frames() - the same
+    MODERATION_PROVIDER-dispatching entrypoint video uses, so a provider
+    switch (e.g. to MODERATION_PROVIDER=aws) covers both without a
+    separate image-specific code path.
+    """
+    try:
+        result = moderation.screen_frames([bgra[..., :3]])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result.flagged:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "content_blocked",
+                "message": "This image appears to contain explicit content and can't be processed here.",
+            },
+        )
+
+
+async def _run_pipeline_job(job_func, *args, timeout: float) -> None:
+    """Runs one of app/jobs.py's synchronous job functions - through the RQ
+    queue when REDIS_URL is configured (see app/queue.py), otherwise inline
+    via asyncio.to_thread so it still doesn't block the event loop. Same
+    call site either way; only where the work actually executes differs.
+
+    Raises:
+        RuntimeError: if a queued job failed on the worker.
+        TimeoutError: if it didn't finish within `timeout` seconds.
+    """
+    queue = get_queue()
+    if queue is None:
+        await asyncio.to_thread(job_func, *args)
+        return
+
+    job = queue.enqueue(job_func, *args, job_timeout=int(timeout) + 30, result_ttl=300, failure_ttl=300)
+
+    def _wait_for_job() -> None:
+        deadline = time.monotonic() + timeout
+        while True:
+            job.refresh()
+            if job.is_finished:
+                return
+            if job.is_failed:
+                raise RuntimeError(f"Processing job failed: {job.exc_info}")
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Processing timed out")
+            time.sleep(0.5)
+
+    await asyncio.to_thread(_wait_for_job)
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
-
-
-@app.post("/api/remove-background")
-async def api_remove_background(
-    file: UploadFile = File(...),
-    mode: str = Form("auto"),  # "auto" | "ml" | "chroma"
-    tolerance: float = Form(DEFAULT_BG_TOLERANCE),
-):
-    """"auto" picks chroma-key for uniform backdrops (the common sprite-
-    sheet case, where it's both faster and more accurate than a general ML
-    segmentation model) and falls back to ML for busy/photographic
-    backgrounds. Pass "ml" or "chroma" explicitly to force one or the other.
-    """
-    bgra, icc = await _read_image(file)
-    if mode not in ("auto", "ml", "chroma"):
-        raise HTTPException(status_code=400, detail="mode must be 'auto', 'ml', or 'chroma'")
-    strategy = bg_removal.pick_auto_strategy(bgra) if mode == "auto" else mode
-    try:
-        out = bg_removal.remove_background(bgra, strategy, tolerance)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Background removal failed: {exc}") from exc
-    return _respond_png(out, icc)
-
-
-@app.post("/api/clean-edges")
-async def api_clean_edges(
-    file: UploadFile = File(...),
-    strength: float = Form(DEFAULT_STRENGTH),
-    alpha_erode: float = Form(DEFAULT_ALPHA_ERODE),
-):
-    bgra, icc = await _read_image(file)
-    out = decontaminate.decontaminate(bgra, strength)
-    alpha = alpha_cleanup.clean_alpha_channel(out[..., 3], alpha_erode)
-    alpha = alpha_cleanup.smooth_alpha_edges(alpha)
-    out = out.copy()
-    out[..., 3] = alpha
-    return _respond_png(out, icc)
-
-
-@app.post("/api/sharpen")
-async def api_sharpen(
-    file: UploadFile = File(...),
-    amount: float = Form(DEFAULT_SHARPEN_AMOUNT),
-    radius: float = Form(DEFAULT_SHARPEN_RADIUS),
-):
-    bgra, icc = await _read_image(file)
-    out = sharpen.sharpen(bgra, radius, amount)
-    return _respond_png(out, icc)
-
-
-@app.post("/api/inpaint")
-async def api_inpaint(
-    file: UploadFile = File(...),
-    mask: UploadFile = File(...),
-    radius: int = Form(DEFAULT_INPAINT_RADIUS),
-):
-    """Manual paint-to-remove: mask is a same-size (or any-size, will be
-    resized) image where painted/white pixels mark what to reconstruct.
-    """
-    bgra, icc = await _read_image(file)
-    mask_data = await mask.read()
-    try:
-        mask_arr = decode_mask(mask_data, bgra.shape[:2])
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    out = manual_inpaint.paint_remove(bgra, mask_arr, radius)
-    return _respond_png(out, icc)
-
-
-@app.post("/api/detect-artifacts")
-async def api_detect_artifacts(file: UploadFile = File(...)):
-    """Suggests candidate watermark/glare/blemish regions for review - this
-    endpoint only ever returns coordinates, it never modifies pixels. The
-    frontend must render these as review boxes and let the user accept or
-    reject each one before calling /api/inpaint on the approved region(s).
-    Tuned conservative (may miss real artifacts) rather than aggressive
-    (never flag legitimate artwork) - see detect_artifacts.py for why.
-    """
-    bgra, _icc = await _read_image(file)
-    try:
-        candidates = detect_artifact_candidates(bgra)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Detection failed: {exc}") from exc
-    return {
-        "candidates": [
-            {"x": c.x, "y": c.y, "w": c.w, "h": c.h, "confidence": c.confidence} for c in candidates
-        ]
-    }
-
-
-@app.post("/api/auto-enhance")
-async def api_auto_enhance(
-    file: UploadFile = File(...),
-    bg_mode: str = Form("auto"),  # "auto" | "ml" | "chroma" | "off"
-    bg_tolerance: float = Form(DEFAULT_BG_TOLERANCE),
-    strength: float = Form(DEFAULT_STRENGTH),
-    alpha_erode: float = Form(DEFAULT_ALPHA_ERODE),
-    sharpen_amount: float = Form(DEFAULT_SHARPEN_AMOUNT),
-    sharpen_radius: float = Form(DEFAULT_SHARPEN_RADIUS),
-):
-    """One-click pipeline: runs every stage in sequence. Prefer the
-    individual endpoints above when the UI wants per-step undo.
-    """
-    bgra, icc = await _read_image(file)
-    try:
-        out = auto_enhance(
-            bgra,
-            bg_mode=bg_mode,  # type: ignore[arg-type]
-            bg_tolerance=bg_tolerance,
-            strength=strength,
-            alpha_erode=alpha_erode,
-            sharpen_amount=sharpen_amount,
-            sharpen_radius=sharpen_radius,
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Processing failed: {exc}") from exc
-    return _respond_png(out, icc)
 
 
 @app.post("/api/video/probe")
@@ -319,6 +261,7 @@ async def api_video_process(
     w: int = Form(...),
     h: int = Form(...),
     resolution: str = Form("720p"),  # "720p" | "1080p" | "4k"
+    quality: str = Form("standard"),  # "standard" | "pro" - see remove_logo() in video.py
     logo: Optional[UploadFile] = File(None),
 ):
     """Removes (delogo) or replaces (overlay) a user-marked rectangular
@@ -334,6 +277,8 @@ async def api_video_process(
             status_code=400,
             detail=f"resolution must be one of {', '.join(RESOLUTION_HEIGHTS)}",
         )
+    if quality not in ("standard", "pro"):
+        raise HTTPException(status_code=400, detail="quality must be 'standard' or 'pro'")
     if w < MIN_REGION_PX or h < MIN_REGION_PX:
         raise HTTPException(status_code=400, detail=f"Region too small; minimum {MIN_REGION_PX}px per side")
     if mode == "replace" and logo is None:
@@ -371,16 +316,45 @@ async def api_video_process(
         requested_height = RESOLUTION_HEIGHTS[resolution]
         output_height = requested_height if requested_height < info.height else None
 
+        # Generous bound relative to remove_logo's own measured ~6.5x
+        # realtime FSR pass (see WATERMARK_FSR_* in config.py), so a queued
+        # job gets real headroom before _run_pipeline_job gives up on it.
+        # quality="pro" does extra per-frame optical-flow work on top of
+        # that (see WATERMARK_FLOW_* in config.py), so it gets a wider bound.
+        job_timeout = max(180.0, info.duration * (16 if quality == "pro" else 10))
+
         try:
             if mode == "remove":
-                await video_pipeline.remove_logo(in_path, out_path, x, y, w, h, output_height)
+                await _run_pipeline_job(
+                    jobs.remove_logo_job,
+                    in_path,
+                    out_path,
+                    x,
+                    y,
+                    w,
+                    h,
+                    output_height,
+                    quality,
+                    timeout=job_timeout,
+                )
             else:
                 assert logo is not None  # checked above
                 logo_data = await logo.read()
                 logo_path = os.path.join(tmp, "logo.png")
                 with open(logo_path, "wb") as f:
                     f.write(logo_data)
-                await video_pipeline.replace_logo(in_path, out_path, logo_path, x, y, w, h, output_height)
+                await _run_pipeline_job(
+                    jobs.replace_logo_job,
+                    in_path,
+                    out_path,
+                    logo_path,
+                    x,
+                    y,
+                    w,
+                    h,
+                    output_height,
+                    timeout=job_timeout,
+                )
         except Exception as exc:  # noqa: BLE001
             # Broad on purpose (not just RuntimeError): ffmpeg failures are
             # RuntimeError, but subprocess-launch failures (e.g. a bad ffmpeg
@@ -397,3 +371,117 @@ async def api_video_process(
             result = f.read()
 
     return Response(content=result, media_type="video/mp4")
+
+
+@app.post("/api/image/detect-artifacts")
+async def api_image_detect_artifacts(file: UploadFile = File(...)):
+    """Suggests likely watermark/blemish regions via detect_artifacts.
+    detect_artifact_candidates() - suggest-only, never processes the image;
+    the frontend prefills RegionSelector with the top candidate, same
+    suggest-then-confirm contract as /api/video/detect-watermark.
+    """
+    data = await file.read()
+    try:
+        bgra, _ = io_utils.decode_upload_to_bgra(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    candidates = detect_artifacts.detect_artifact_candidates(bgra)
+    h, w = bgra.shape[:2]
+    return {
+        "width": w,
+        "height": h,
+        "candidates": [
+            {"x": c.x, "y": c.y, "w": c.w, "h": c.h, "confidence": c.confidence} for c in candidates
+        ],
+    }
+
+
+@app.post("/api/image/remove")
+async def api_image_remove(
+    request: Request,
+    file: UploadFile = File(...),
+    x: int = Form(...),
+    y: int = Form(...),
+    w: int = Form(...),
+    h: int = Form(...),
+):
+    """Reconstructs a user-marked rectangular region via manual_inpaint's
+    paint-to-remove path - the image analogue of /api/video/process's
+    mode='remove'. The mask is built from the same x/y/w/h rectangle
+    RegionSelector already produces, rather than a freehand-drawn mask, so
+    the frontend can reuse RegionSelector as-is.
+    """
+    _assert_internal_caller(request)
+    if w < MIN_REGION_PX or h < MIN_REGION_PX:
+        raise HTTPException(status_code=400, detail=f"Region too small; minimum {MIN_REGION_PX}px per side")
+
+    data = await file.read()
+    try:
+        bgra, icc_profile = io_utils.decode_upload_to_bgra(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    img_h, img_w = bgra.shape[:2]
+    if x < 0 or y < 0 or x + w > img_w or y + h > img_h:
+        raise HTTPException(status_code=400, detail="Region is outside the image")
+
+    _assert_image_safe(bgra)
+
+    # Goes through the same temp-file + _run_pipeline_job path as video, even
+    # inline (no REDIS_URL): image_remove_job re-decodes from in_path itself
+    # (see app/jobs.py), so the icc_profile decoded above is only used for
+    # the moderation/bounds checks here, not passed across the job boundary.
+    with tempfile.TemporaryDirectory() as tmp:
+        in_path = os.path.join(tmp, "input.png")
+        out_path = os.path.join(tmp, "output.png")
+        with open(in_path, "wb") as f:
+            f.write(data)
+
+        try:
+            await _run_pipeline_job(jobs.image_remove_job, in_path, out_path, x, y, w, h, timeout=60.0)
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500, detail=f"Image processing failed: {type(exc).__name__}: {exc}"
+            ) from exc
+
+        with open(out_path, "rb") as f:
+            result = f.read()
+
+    return Response(content=result, media_type="image/png")
+
+
+@app.post("/api/image/auto-enhance")
+async def api_image_auto_enhance(request: Request, file: UploadFile = File(...)):
+    """Runs the full background-removal + halo-decontamination + alpha
+    cleanup + sharpen pipeline (full_pipeline.auto_enhance) at its defaults.
+    """
+    _assert_internal_caller(request)
+
+    data = await file.read()
+    try:
+        bgra, _ = io_utils.decode_upload_to_bgra(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    _assert_image_safe(bgra)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        in_path = os.path.join(tmp, "input.png")
+        out_path = os.path.join(tmp, "output.png")
+        with open(in_path, "wb") as f:
+            f.write(data)
+
+        try:
+            await _run_pipeline_job(jobs.image_auto_enhance_job, in_path, out_path, timeout=60.0)
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500, detail=f"Image processing failed: {type(exc).__name__}: {exc}"
+            ) from exc
+
+        with open(out_path, "rb") as f:
+            result = f.read()
+
+    return Response(content=result, media_type="image/png")

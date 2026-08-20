@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 
 export async function GET() {
   if (!isSupabaseConfigured()) {
@@ -16,8 +16,10 @@ export async function GET() {
   }
 
   // Applies the lazy daily free-credit reset before returning the balance,
-  // so the number shown is never stale from a previous day.
-  const { error: resetErr } = await supabase.rpc("ensure_daily_reset", {
+  // so the number shown is never stale from a previous day. Locked to
+  // service_role at the DB level (see supabase/schema.sql), so this needs
+  // the service client, not the caller's own session.
+  const { error: resetErr } = await createServiceClient().rpc("ensure_daily_reset", {
     p_user_id: user.id,
   });
   if (resetErr) {

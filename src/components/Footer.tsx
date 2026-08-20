@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Logo from "./Logo";
+import { WATERMARK_PLATFORMS } from "@/lib/watermarkPlatforms";
 
 export default function Footer() {
   return (
@@ -22,7 +23,18 @@ export default function Footer() {
             </Link>
           </nav>
         </div>
-        <p className="mt-6 text-xs text-muted">
+        <div className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t border-border/60 pt-6 text-xs text-muted">
+          <span className="font-semibold text-foreground/80">Remove a watermark from:</span>
+          {WATERMARK_PLATFORMS.map((p, i) => (
+            <span key={p.slug} className="flex items-center gap-2">
+              <Link href={`/${p.slug}`} className="transition-colors hover:text-foreground">
+                {p.platform}
+              </Link>
+              {i < WATERMARK_PLATFORMS.length - 1 && <span className="text-border">&middot;</span>}
+            </span>
+          ))}
+        </div>
+        <p className="mt-4 text-xs text-muted">
           For content you own or have permission to edit only. Not affiliated
           with any third-party video platform or AI model provider. Using
           WipeClip.co to infringe copyright or to violate another platform&apos;s

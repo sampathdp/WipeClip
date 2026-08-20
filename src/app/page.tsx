@@ -1,6 +1,7 @@
 import Navbar from "@/components/Navbar";
 import Hero from "@/components/Hero";
 import UploadDemo from "@/components/UploadDemo";
+import HowItWorks from "@/components/HowItWorks";
 import Features from "@/components/Features";
 import Faq from "@/components/Faq";
 import CtaBanner from "@/components/CtaBanner";
@@ -15,6 +16,7 @@ export default function Home() {
         <section className="px-6">
           <UploadDemo />
         </section>
+        <HowItWorks />
         <Features />
         <Faq />
         <CtaBanner />

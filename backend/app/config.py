@@ -151,6 +151,45 @@ WATERMARK_FSR_SCALE: float = 1.0         # working resolution for the FSR
 WATERMARK_PATCH_SHARPEN_KSIZE: int = 7      # unsharp luma_msize_x/y (odd, 3-23)
 WATERMARK_PATCH_SHARPEN_AMOUNT: float = 2.5  # unsharp luma_amount
 
+# --- Optical-flow-assisted reconstruction (Pro-tier quality="pro") ----------
+# CPU-only motion-aware fill: the WATERMARK_FSR_* block above ends by
+# naming the real fix for FSR's fundamental limit (it can only plausibly
+# fill a fully-covered region, never recover it) as "motion-aware
+# multi-frame reconstruction (optical-flow-guided video inpainting)". This
+# is that upgrade, gated behind quality="pro" (see remove_logo()) - free/
+# starter traffic keeps the plain FSR path unchanged.
+#
+# For each covered frame, dense optical flow (Farneback, CPU) checks a
+# window of nearby frames for camera pan/scroll that carried the region's
+# real underlying content to a screen position outside the watermark at
+# some point nearby in time - if so, those are the actual original pixels,
+# not a plausible fill. Any pixel no neighbor frame ever uncovers (a
+# genuinely static/tripod shot, or motion too large for the padded search
+# window below) falls back to _fsr_inpaint_region exactly as quality=
+# "standard" already does.
+WATERMARK_FLOW_SEARCH_RADIUS_FRAMES: int = 6  # neighbor frames searched each
+                                          # direction - also bounds the
+                                          # sliding buffer's memory (at most
+                                          # 2*radius+1 full frames held at
+                                          # once, see
+                                          # _inpaint_region_to_temp_video_flow)
+WATERMARK_FLOW_CONTEXT_PAD_PX: int = 220  # padding beyond the region flow
+                                          # is allowed to search within -
+                                          # larger than WATERMARK_FSR_
+                                          # CONTEXT_PAD_PX since this needs
+                                          # room for real motion to have
+                                          # carried content out from under
+                                          # the region, not just enough
+                                          # context to blend a seam
+WATERMARK_FLOW_ESTIMATION_SCALE: float = 0.5  # the flow FIELD is estimated
+                                          # on a downscaled crop (cheap -
+                                          # flow is smooth/low-frequency,
+                                          # same principle as
+                                          # WATERMARK_FSR_SCALE); recovered
+                                          # pixels are always sampled from
+                                          # the full-resolution buffered
+                                          # frame, never downscaled
+
 # --- Video watermark auto-detection (suggest-only, never auto-applies) ------
 # Finds a region that stays pixel-static across sampled frames while the
 # rest of the frame moves - the signature a fixed corner/overlay logo has

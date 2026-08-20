@@ -1,0 +1,49 @@
+name: Deploy backend to Cloud Run
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write # required for Workload Identity Federation
+
+env:
+  PROJECT_ID: hypnotic-pier-506015-m1
+  REGION: us-central1
+  SERVICE: unmarkai-backend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run
+        working-directory: backend
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --source . \
+            --region "$REGION" \
+            --allow-unauthenticated \
+            --port 8000 \
+            --memory 2Gi \
+            --cpu 2 \
+            --min-instances 0 \
+            --max-instances 3 \
+            --timeout 1800 \
+            --set-env-vars "ALLOWED_ORIGINS=*" \
+            --set-env-vars "INTERNAL_API_SECRET=${{ secrets.INTERNAL_API_SECRET }}" \
+            --project "$PROJECT_ID"

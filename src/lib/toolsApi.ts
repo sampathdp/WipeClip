@@ -12,6 +12,7 @@ export class ApiError extends Error {
 export class ContentBlockedError extends ApiError {}
 export class InsufficientCreditsError extends ApiError {}
 export class AuthRequiredError extends ApiError {}
+export class ProRequiredError extends ApiError {}
 
 async function throwApiError(res: Response, fallback: string): Promise<never> {
   const data = await res.json().catch(() => null);
@@ -22,6 +23,7 @@ async function throwApiError(res: Response, fallback: string): Promise<never> {
   if (code === "content_blocked") throw new ContentBlockedError(msg, code);
   if (code === "insufficient_credits") throw new InsufficientCreditsError(msg, code);
   if (code === "auth_required") throw new AuthRequiredError(msg, code);
+  if (code === "pro_required") throw new ProRequiredError(msg, code);
   throw new ApiError(msg, code);
 }
 
@@ -116,6 +118,57 @@ export async function processVideo(
   if (mode === "replace" && logo) body.append("logo", logo);
 
   const res = await fetch("/api/process", {
+    method: "POST",
+    body,
+  });
+
+  if (!res.ok) {
+    await throwApiError(res, "Processing failed. Try again.");
+  }
+
+  return res.blob();
+}
+
+export interface ArtifactCandidate extends Region {
+  confidence: number;
+}
+
+/** Image analogue of detectWatermark - suggest-only, doesn't touch
+ * billing, so it's called directly against the FastAPI backend like
+ * /probe. Never throws: a failed/empty detection just means no
+ * suggestion, the user still marks the region manually via RegionSelector.
+ */
+export async function detectImageArtifacts(
+  file: File
+): Promise<{ candidates: ArtifactCandidate[]; width: number; height: number }> {
+  const body = new FormData();
+  body.append("file", file);
+  try {
+    const res = await fetch(`${TOOLS_API_URL}/api/image/detect-artifacts`, {
+      method: "POST",
+      body,
+    });
+    if (!res.ok) return { candidates: [], width: 0, height: 0 };
+    const data = await res.json();
+    return { candidates: data.candidates ?? [], width: data.width, height: data.height };
+  } catch {
+    return { candidates: [], width: 0, height: 0 };
+  }
+}
+
+/** Goes through our own /api/process-image route (Pro-plan + credit
+ * gated), not the FastAPI backend directly - same non-bypassable pattern
+ * as processVideo/src/app/api/process/route.ts.
+ */
+export async function processImage(file: File, region: Region): Promise<Blob> {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("x", String(region.x));
+  body.append("y", String(region.y));
+  body.append("w", String(region.w));
+  body.append("h", String(region.h));
+
+  const res = await fetch("/api/process-image", {
     method: "POST",
     body,
   });

@@ -6,7 +6,9 @@ import AuthStatus from "./AuthStatus";
 import Logo from "./Logo";
 
 const links = [
+  { href: "/#how-it-works", label: "How It Works" },
   { href: "/#features", label: "Features" },
+  { href: "/remove-image-watermark", label: "Image Tool" },
   { href: "/pricing", label: "Pricing" },
   { href: "/#faq", label: "FAQ" },
 ];

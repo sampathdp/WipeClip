@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Logo from "@/components/Logo";
@@ -33,6 +34,7 @@ function GoogleIcon() {
 }
 
 export default function SignInClient() {
+  const router = useRouter();
   const [view, setView] = useState<View>("password");
   const [passwordAction, setPasswordAction] = useState<PasswordAction>("signin");
   const [email, setEmail] = useState("");
@@ -75,7 +77,7 @@ export default function SignInClient() {
         return;
       }
       if (data.session) {
-        window.location.href = "/";
+        router.push("/");
         return;
       }
       // Email confirmation is required before a session exists.
@@ -89,7 +91,7 @@ export default function SignInClient() {
       setStatus("error");
       return;
     }
-    window.location.href = "/";
+    router.push("/");
   };
 
   const sendMagicLink = async (e: React.FormEvent) => {

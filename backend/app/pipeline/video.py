@@ -53,6 +53,9 @@ from app.config import (
     WATERMARK_DETECT_MIN_MOTION,
     WATERMARK_DETECT_MIN_SOLIDITY,
     WATERMARK_DETECT_SAMPLE_FRAMES,
+    WATERMARK_FLOW_CONTEXT_PAD_PX,
+    WATERMARK_FLOW_ESTIMATION_SCALE,
+    WATERMARK_FLOW_SEARCH_RADIUS_FRAMES,
     WATERMARK_FSR_CONTEXT_PAD_PX,
     WATERMARK_FSR_SCALE,
     WATERMARK_PATCH_SHARPEN_AMOUNT,
@@ -420,6 +423,95 @@ def _fsr_inpaint_region(frame: np.ndarray, x: int, y: int, w: int, h: int) -> np
     return out
 
 
+def _flow_assisted_inpaint_region(
+    center_frame: np.ndarray, neighbor_frames: list[np.ndarray], x: int, y: int, w: int, h: int
+) -> np.ndarray:
+    """Reconstructs frame[y:y+h, x:x+w] by recovering real pixels from
+    `neighbor_frames` wherever dense optical flow shows the region's
+    underlying content was visible there (camera pan/scroll moved it out
+    from under the fixed watermark position at some nearby point in time),
+    falling back to _fsr_inpaint_region for whatever pixels no neighbor
+    ever uncovers. See WATERMARK_FLOW_* in config.py for the full
+    rationale and tuning knobs.
+
+    `neighbor_frames` is searched in the order given and stops early once
+    the region is fully recovered - the caller (see
+    _inpaint_region_to_temp_video_flow) is expected to order it
+    nearest-in-time first, since closer frames need smaller flow (more
+    reliable) and are more likely to match the center frame's lighting.
+    """
+    fh, fw = center_frame.shape[:2]
+    pad = WATERMARK_FLOW_CONTEXT_PAD_PX
+    cx0 = max(0, x - pad)
+    cy0 = max(0, y - pad)
+    cx1 = min(fw, x + w + pad)
+    cy1 = min(fh, y + h + pad)
+
+    center_crop = center_frame[cy0:cy1, cx0:cx1]
+    crop_h, crop_w = center_crop.shape[:2]
+    center_gray = cv2.cvtColor(center_crop, cv2.COLOR_BGR2GRAY)
+
+    # Region coordinates in crop-space.
+    rx0, ry0 = x - cx0, y - cy0
+    rx1, ry1 = rx0 + w, ry0 + h
+
+    recovered = np.zeros_like(center_crop)
+    filled = np.zeros((crop_h, crop_w), dtype=bool)
+
+    scale = WATERMARK_FLOW_ESTIMATION_SCALE
+    small_center_gray = cv2.resize(center_gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+
+    grid_y, grid_x = np.mgrid[0:crop_h, 0:crop_w].astype(np.float32)
+
+    for neighbor in neighbor_frames:
+        if filled[ry0:ry1, rx0:rx1].all():
+            break  # region fully recovered already - no need to check further neighbors
+
+        n_crop = neighbor[cy0:cy1, cx0:cx1]
+        if n_crop.shape != center_crop.shape:
+            continue  # defensive - every frame in this video shares one resolution
+        n_gray = cv2.cvtColor(n_crop, cv2.COLOR_BGR2GRAY)
+        small_n_gray = cv2.resize(n_gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+
+        # Flow FROM center TO neighbor: for each center-crop pixel, where
+        # that scene point ended up in the neighbor frame - exactly what's
+        # needed to sample the neighbor for a center-frame pixel.
+        flow_small = cv2.calcOpticalFlowFarneback(
+            small_center_gray, small_n_gray, None, 0.5, 3, 15, 3, 5, 1.2, 0
+        )
+        flow = cv2.resize(flow_small, (crop_w, crop_h), interpolation=cv2.INTER_LINEAR) / scale
+
+        map_x = grid_x + flow[..., 0]
+        map_y = grid_y + flow[..., 1]
+        sampled = cv2.remap(n_crop, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+
+        # Only trust a region pixel's sample if the neighbor location it
+        # maps to is (a) inside the crop, and (b) itself NOT inside the
+        # region - i.e. genuinely uncovered content there, not more
+        # watermark. cv2.BORDER_CONSTANT would otherwise make an
+        # out-of-bounds map look like a valid (black) sample.
+        in_bounds = (map_x >= 0) & (map_x < crop_w) & (map_y >= 0) & (map_y < crop_h)
+        outside_region = ~((map_x >= rx0) & (map_x < rx1) & (map_y >= ry0) & (map_y < ry1))
+        trust = in_bounds & outside_region & ~filled
+
+        recovered[trust] = sampled[trust]
+        filled |= trust
+
+    region_filled = filled[ry0:ry1, rx0:rx1]
+    recovered_region = recovered[ry0:ry1, rx0:rx1]
+    if not region_filled.all():
+        # Leftover pixels no neighbor ever uncovered (static shot, or
+        # motion too large for the padded search window) still need a
+        # fill - same exemplar-based reconstruction as quality="standard".
+        fsr_region = _fsr_inpaint_region(center_frame, x, y, w, h)[y : y + h, x : x + w]
+        recovered_region = recovered_region.copy()
+        recovered_region[~region_filled] = fsr_region[~region_filled]
+
+    out = center_frame.copy()
+    out[y : y + h, x : x + w] = recovered_region
+    return out
+
+
 def _inpaint_region_to_temp_video(input_path: str, x: int, y: int, w: int, h: int) -> str:
     """Decodes every frame, reconstructs the fixed region at (x, y, w, h)
     with _fsr_inpaint_region(), and writes the result to a new silent temp
@@ -455,8 +547,89 @@ def _inpaint_region_to_temp_video(input_path: str, x: int, y: int, w: int, h: in
     return tmp_path
 
 
+def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, h: int) -> str:
+    """quality="pro" counterpart to _inpaint_region_to_temp_video(): same
+    contract (silent temp MP4 out), but reconstructs each frame with
+    _flow_assisted_inpaint_region() instead of plain per-frame FSR.
+
+    Streams through the video once, keeping a sliding buffer of at most
+    2*WATERMARK_FLOW_SEARCH_RADIUS_FRAMES+1 full decoded frames - bounded
+    regardless of clip length, since a center frame is only finalized (and
+    the oldest buffered frame dropped) once enough lookahead exists for it.
+    A frame near either end of the clip simply gets fewer neighbors on
+    that side, not an error.
+
+    Raises:
+        ValueError: if the file can't be opened as a video (mirrors
+            probe_video/sample_frames).
+    """
+    radius = WATERMARK_FLOW_SEARCH_RADIUS_FRAMES
+
+    cap = cv2.VideoCapture(input_path)
+    if not cap.isOpened():
+        cap.release()
+        raise ValueError("Could not open this file as a video")
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+    frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    writer = cv2.VideoWriter(tmp_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (frame_w, frame_h))
+
+    window: list[np.ndarray] = []
+    window_start = 0  # global frame index of window[0]
+    next_emit = 0  # global frame index of the next frame to finalize
+
+    def _emit_center() -> None:
+        center_pos = next_emit - window_start
+        neighbors = sorted(
+            (i for i in range(len(window)) if i != center_pos), key=lambda i: abs(i - center_pos)
+        )
+        writer.write(_flow_assisted_inpaint_region(window[center_pos], [window[i] for i in neighbors], x, y, w, h))
+
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            window.append(frame)
+            cur_idx = window_start + len(window) - 1
+
+            # Emit every center that now has full lookahead available -
+            # keeps the buffer from ever growing past radius frames ahead
+            # of next_emit.
+            while next_emit + radius <= cur_idx:
+                _emit_center()
+                next_emit += 1
+                while window_start < next_emit - radius:
+                    window.pop(0)
+                    window_start += 1
+
+        # Drain: end of stream - finalize whatever's left with however
+        # much lookahead each one actually has (the clip's tail).
+        while window:
+            _emit_center()
+            next_emit += 1
+            while window_start < next_emit - radius and window:
+                window.pop(0)
+                window_start += 1
+    finally:
+        cap.release()
+        writer.release()
+    return tmp_path
+
+
 async def remove_logo(
-    input_path: str, output_path: str, x: int, y: int, w: int, h: int, output_height: int | None = None
+    input_path: str,
+    output_path: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    output_height: int | None = None,
+    quality: str = "standard",
 ) -> None:
     """Reconstructs the given region with OpenCV-contrib's FSR inpainting,
     run per-frame in Python (see WATERMARK_FSR_* in config.py for the full
@@ -469,6 +642,13 @@ async def remove_logo(
     - cosmetic contrast restoration, same as before), muxes the original's
     audio back in, and re-encodes to the standard output settings.
 
+    `quality="pro"` swaps the per-frame FSR pass for
+    _inpaint_region_to_temp_video_flow's optical-flow-assisted
+    reconstruction (see WATERMARK_FLOW_* in config.py) - recovers real
+    pixels where camera motion allows it, still falls back to plain FSR
+    per-pixel wherever it can't. `quality="standard"` (default) is
+    byte-for-byte the same path as before this parameter existed.
+
     `output_height`, if given, downscales the result afterward (width kept
     proportional via `-2`), applied in that same final pass - the region
     coordinates the user marked are against the source resolution, so
@@ -476,7 +656,8 @@ async def remove_logo(
     Callers are responsible for never passing a height taller than the
     source (this function does not upscale).
     """
-    tmp_path = await asyncio.to_thread(_inpaint_region_to_temp_video, input_path, x, y, w, h)
+    inpaint_fn = _inpaint_region_to_temp_video_flow if quality == "pro" else _inpaint_region_to_temp_video
+    tmp_path = await asyncio.to_thread(inpaint_fn, input_path, x, y, w, h)
     try:
         # Split the inpainted frame, crop just the patch back out, sharpen
         # only that crop, and overlay it back at the same coordinates - so

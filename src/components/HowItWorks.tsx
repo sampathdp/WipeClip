@@ -19,9 +19,26 @@ const steps = [
   },
 ];
 
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "HowTo",
+  name: "How to remove a watermark from a video with WipeClip.co",
+  step: steps.map((s) => ({
+    "@type": "HowToStep",
+    name: s.title,
+    text: s.desc,
+  })),
+};
+
 export default function HowItWorks() {
   return (
     <section id="how-it-works" className="scroll-mt-28 py-24 relative">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c"),
+        }}
+      />
       <div className="mx-auto max-w-7xl px-6">
         <div className="mx-auto max-w-2xl text-center">
           <div className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-surface-2/90 border border-border px-3.5 py-1 text-xs font-semibold text-muted">

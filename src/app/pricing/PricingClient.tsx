@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { PLANS, type PlanKey } from "@/lib/credits";
@@ -24,9 +25,7 @@ const paygCards: { key: PlanKey; tagline: string; isPopular?: boolean; features:
     features: [
       "200 credits / month",
       "4K Ultra HD unlocked",
-      "Batch parallel processing",
       "Ultra-priority GPU lane",
-      "API access ready",
     ],
   },
   {
@@ -45,6 +44,11 @@ const paygCards: { key: PlanKey; tagline: string; isPopular?: boolean; features:
 export default function PricingClient() {
   const [loading, setLoading] = useState<PlanKey | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (checkoutUrl) window.location.href = checkoutUrl;
+  }, [checkoutUrl]);
 
   const buy = async (plan: PlanKey) => {
     setLoading(plan);
@@ -57,7 +61,7 @@ export default function PricingClient() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Could not start checkout.");
-      window.location.href = data.url;
+      setCheckoutUrl(data.url);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start checkout.");
       setLoading(null);
@@ -120,12 +124,12 @@ export default function PricingClient() {
             </div>
 
             <div className="mt-8">
-              <a
+              <Link
                 href="/#upload"
                 className="btn-secondary block w-full rounded-full py-3 text-center text-xs font-semibold"
               >
                 Use Free
-              </a>
+              </Link>
             </div>
           </div>
 

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RESOLUTION_CREDIT_COST } from "@/lib/credits";
 import { TOOLS_API_URL } from "@/lib/toolsApi";
+import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
+import { isProUser } from "@/lib/plan";
 
 /** Server-side gate in front of the FastAPI processing backend: checks
  * auth, spends credits atomically before forwarding the job, and refunds
@@ -30,6 +32,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 30 processing requests/hour/user - the credit system already caps
+  // spend, this caps raw request/compute volume independent of balance
+  // (e.g. repeated failed attempts, or free-tier requests that cost credits
+  // but still burn a full ffmpeg encode either way).
+  if (!(await checkRateLimit(rateLimitKeyFor(request, user.id), 30, 60 * 60 * 1000))) {
+    return NextResponse.json(
+      { detail: { code: "rate_limited", message: "Too many processing requests. Try again later." } },
+      { status: 429 }
+    );
+  }
+
   const formData = await request.formData();
   const resolution = String(formData.get("resolution") ?? "720p");
   const cost = RESOLUTION_CREDIT_COST[resolution as keyof typeof RESOLUTION_CREDIT_COST];
@@ -41,7 +54,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { data: consumed, error: consumeErr } = await supabase.rpc("consume_credits", {
+  // consume_credits/refund_credits are locked to service_role at the DB
+  // level (see supabase/schema.sql) - they run with elevated privilege and
+  // must never be reachable with the caller's own session, only after this
+  // route has already verified `user` above.
+  const supabaseAdmin = createServiceClient();
+
+  const { data: consumed, error: consumeErr } = await supabaseAdmin.rpc("consume_credits", {
     p_user_id: user.id,
     p_amount: cost,
     p_resolution: resolution,
@@ -66,6 +85,26 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Best-effort: tags the transaction just inserted with which tool ran
+  // and the source filename, for the Job History view. Not billing-
+  // critical, so its result is intentionally not checked.
+  const uploadedFile = formData.get("file");
+  void supabaseAdmin.rpc("tag_last_transaction", {
+    p_user_id: user.id,
+    p_tool: "video",
+    p_filename: uploadedFile instanceof File ? uploadedFile.name : null,
+  });
+
+  // Pro-only quality tier (optical-flow-assisted reconstruction, see
+  // remove_logo() in the backend's video.py) - decided here, server-side,
+  // from the caller's actual plan, never from a client-supplied value, so
+  // it can't be requested by a non-Pro account. mode="replace" ignores
+  // this field entirely (no reconstruction involved), so it's harmless to
+  // always set.
+  if (formData.get("mode") === "remove" && (await isProUser(supabase, user.id))) {
+    formData.set("quality", "pro");
+  }
+
   let backendRes: Response;
   try {
     backendRes = await fetch(`${TOOLS_API_URL}/api/video/process`, {
@@ -76,7 +115,7 @@ export async function POST(request: NextRequest) {
         : undefined,
     });
   } catch (e) {
-    await supabase.rpc("refund_credits", { p_user_id: user.id, p_amount: cost, p_resolution: resolution });
+    await supabaseAdmin.rpc("refund_credits", { p_user_id: user.id, p_amount: cost, p_resolution: resolution });
     return NextResponse.json(
       {
         detail: {
@@ -91,7 +130,7 @@ export async function POST(request: NextRequest) {
   if (!backendRes.ok) {
     // Covers both real failures and a content-moderation rejection - either
     // way the user didn't get a usable result, so they get their credits back.
-    await supabase.rpc("refund_credits", { p_user_id: user.id, p_amount: cost, p_resolution: resolution });
+    await supabaseAdmin.rpc("refund_credits", { p_user_id: user.id, p_amount: cost, p_resolution: resolution });
     const body = await backendRes.text();
     return new NextResponse(body, {
       status: backendRes.status,

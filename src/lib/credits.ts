@@ -8,6 +8,9 @@ export const RESOLUTION_CREDIT_COST: Record<Resolution, number> = {
 
 export const FREE_DAILY_CREDITS = 2;
 
+// Flat cost for the image tool - no resolution tiers, unlike video.
+export const IMAGE_CREDIT_COST = 1;
+
 export const PLANS = {
   starter: { label: "Starter", priceLabel: "$9/mo", credits: 60 },
   pro: { label: "Pro", priceLabel: "$24/mo", credits: 200 },

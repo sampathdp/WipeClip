@@ -14,8 +14,21 @@ create table if not exists profiles (
   paid_credits int not null default 0,
   ls_customer_id text,
   ls_subscription_id text,
+  -- Referral program: this user's own shareable code, and who referred
+  -- them (set at most once - see claim_referral below). Both null
+  -- until first touched; referral_code is generated lazily by
+  -- ensure_referral_code() on a user's first visit to /referrals rather
+  -- than at signup, so most accounts never pay for a code they don't use.
+  referral_code text unique,
+  referred_by uuid references profiles (id),
   created_at timestamptz not null default now()
 );
+
+-- Additive - safe to re-run against a database provisioned before the
+-- referral columns existed (create table if not exists above is a no-op on
+-- an existing table).
+alter table profiles add column if not exists referral_code text unique;
+alter table profiles add column if not exists referred_by uuid references profiles (id);
 
 create table if not exists credit_transactions (
   id bigserial primary key,
@@ -24,9 +37,21 @@ create table if not exists credit_transactions (
   amount int not null, -- positive = credit added, negative = spent
   resolution text,
   ls_event_id text,
+  -- 'video' | 'image', and the uploaded filename - both nullable and set
+  -- after the fact by the /api/process* routes (a follow-up update, not
+  -- part of consume_credits' own insert - see Job History). Purely
+  -- descriptive, never read by the RPCs themselves.
+  tool text,
+  filename text,
   created_at timestamptz not null default now()
 );
 create index if not exists credit_transactions_user_id_idx on credit_transactions (user_id);
+
+-- Additive - safe to re-run against a database that already has this table
+-- from before these two columns existed (create table if not exists above
+-- is a no-op on an existing table, so the columns must be added explicitly).
+alter table credit_transactions add column if not exists tool text;
+alter table credit_transactions add column if not exists filename text;
 
 -- Dedupes Lemon Squeezy webhook deliveries (LS retries on non-2xx, and the
 -- same event can otherwise be replayed) so a purchase is never granted twice.
@@ -155,6 +180,100 @@ begin
 end;
 $$;
 
+-- Returns the caller's own referral code, generating one on first call
+-- (retrying on the rare collision - referral_code has a unique constraint).
+-- Idempotent: a user who already has a code just gets it back unchanged.
+create or replace function ensure_referral_code(p_user_id uuid)
+returns text
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_code text;
+  v_attempt int := 0;
+begin
+  select referral_code into v_code from profiles where id = p_user_id;
+  if v_code is not null then
+    return v_code;
+  end if;
+
+  loop
+    v_code := substr(md5(random()::text || clock_timestamp()::text), 1, 8);
+    begin
+      update profiles set referral_code = v_code where id = p_user_id and referral_code is null;
+      exit;
+    exception when unique_violation then
+      v_attempt := v_attempt + 1;
+      if v_attempt > 5 then
+        raise exception 'Could not generate a unique referral code';
+      end if;
+    end;
+  end loop;
+
+  select referral_code into v_code from profiles where id = p_user_id;
+  return v_code;
+end;
+$$;
+
+-- Credits both the referee (p_referee) and whoever owns p_referrer_code a
+-- fixed bonus, at most once per referee (referred_by is set exactly once -
+-- the update's `where referred_by is null` is what makes a repeat or
+-- concurrent claim a no-op rather than a double grant). Returns false
+-- rather than raising for every "this claim shouldn't go through" case
+-- (unknown code, self-referral, already-referred, race lost) so the
+-- calling route can treat it as "nothing happened", not an error.
+create or replace function claim_referral(p_referee uuid, p_referrer_code text)
+returns boolean
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_referrer uuid;
+  v_bonus constant int := 5;
+begin
+  select id into v_referrer from profiles where referral_code = p_referrer_code;
+  if v_referrer is null or v_referrer = p_referee then
+    return false;
+  end if;
+
+  update profiles set referred_by = v_referrer where id = p_referee and referred_by is null;
+  if not found then
+    return false;
+  end if;
+
+  update profiles set paid_credits = paid_credits + v_bonus where id in (v_referrer, p_referee);
+
+  insert into credit_transactions (user_id, kind, amount)
+  values (v_referrer, 'grant_referral', v_bonus), (p_referee, 'grant_referral', v_bonus);
+
+  return true;
+end;
+$$;
+
+-- Best-effort tagging of the transaction row consume_credits() just
+-- inserted, with which tool ran and the source filename - purely
+-- descriptive metadata for the Job History view, not billing-critical
+-- (consume_credits itself doesn't take these, so its return contract for
+-- existing callers is unchanged). Picks the caller's own most recent
+-- untagged 'consume' row rather than a passed-in id, since consume_credits
+-- only returns a boolean today.
+create or replace function tag_last_transaction(p_user_id uuid, p_tool text, p_filename text)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  update credit_transactions
+  set tool = p_tool, filename = p_filename
+  where id = (
+    select id from credit_transactions
+    where user_id = p_user_id and kind = 'consume' and tool is null
+    order by id desc
+    limit 1
+  );
+end;
+$$;
+
 alter table profiles enable row level security;
 alter table credit_transactions enable row level security;
 
@@ -167,3 +286,28 @@ create policy "read own transactions" on credit_transactions
 -- No insert/update/delete policies for authenticated users on purpose:
 -- all writes go through the SECURITY DEFINER functions above, or the
 -- service-role key (webhook handler), never directly from the client.
+
+-- Postgres grants EXECUTE on new functions to PUBLIC by default, and
+-- Supabase exposes every public-schema function to anon/authenticated over
+-- its RPC endpoint. Without this block, any signed-in user could call
+-- refund_credits or grant_paid_credits directly with the browser's own
+-- anon key and mint themselves unlimited credits, bypassing Lemon Squeezy
+-- entirely - these are SECURITY DEFINER, so they run with elevated
+-- privilege regardless of RLS on the tables they touch. All of the below
+-- are only ever called from server code (API routes / the webhook handler)
+-- using the service-role key, so anon/authenticated get nothing.
+revoke execute on function ensure_daily_reset(uuid) from public, anon, authenticated;
+revoke execute on function consume_credits(uuid, int, text) from public, anon, authenticated;
+revoke execute on function refund_credits(uuid, int, text) from public, anon, authenticated;
+revoke execute on function grant_paid_credits(uuid, int, text, text) from public, anon, authenticated;
+revoke execute on function tag_last_transaction(uuid, text, text) from public, anon, authenticated;
+revoke execute on function ensure_referral_code(uuid) from public, anon, authenticated;
+revoke execute on function claim_referral(uuid, text) from public, anon, authenticated;
+
+grant execute on function ensure_daily_reset(uuid) to service_role;
+grant execute on function consume_credits(uuid, int, text) to service_role;
+grant execute on function refund_credits(uuid, int, text) to service_role;
+grant execute on function grant_paid_credits(uuid, int, text, text) to service_role;
+grant execute on function tag_last_transaction(uuid, text, text) to service_role;
+grant execute on function ensure_referral_code(uuid) to service_role;
+grant execute on function claim_referral(uuid, text) to service_role;

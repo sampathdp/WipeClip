@@ -56,16 +56,6 @@ const features = [
       </svg>
     ),
   },
-  {
-    title: "Batch & API Ready",
-    desc: "Built to power professional workflows. Cleanly integrate watermark removal into automated pipelines.",
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="16 18 22 12 16 6" />
-        <polyline points="8 6 2 12 8 18" />
-      </svg>
-    ),
-  },
 ];
 
 export default function Features() {

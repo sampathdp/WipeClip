@@ -11,12 +11,37 @@ export default function AuthStatus() {
   useEffect(() => {
     const supabase = createClient();
 
+    const REF_STORAGE_KEY = "wipeclip_ref";
+
+    // Claims a stored referral code (see ReferralCapture.tsx) the first
+    // moment a session actually exists - this listener fires for every
+    // auth path (password signup, magic link, OAuth, email-confirm
+    // redirect), so this is the one place that covers all of them.
+    // claim_referral is idempotent per-referee, so calling this more than
+    // once for the same user is harmless; the stored code is cleared
+    // either way so a stale/invalid code doesn't retry forever.
+    const claimReferralIfAny = async () => {
+      const code = localStorage.getItem(REF_STORAGE_KEY);
+      if (!code) return;
+      localStorage.removeItem(REF_STORAGE_KEY);
+      try {
+        await fetch("/api/referrals/claim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code }),
+        });
+      } catch {
+        // Best-effort - a lost referral credit isn't worth surfacing an error for.
+      }
+    };
+
     const load = async () => {
       const {
         data: { user },
       } = await supabase.auth.getUser();
       setEmail(user?.email ?? null);
       if (!user) return;
+      await claimReferralIfAny();
       const res = await fetch("/api/credits");
       if (res.ok) {
         const data = await res.json();
@@ -56,6 +81,18 @@ export default function AuthStatus() {
       >
         <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
         {credits ?? "…"} credits
+      </Link>
+      <Link
+        href="/referrals"
+        className="hidden text-muted transition-colors hover:text-foreground text-xs font-medium md:inline"
+      >
+        Refer a Friend
+      </Link>
+      <Link
+        href="/history"
+        className="hidden text-muted transition-colors hover:text-foreground text-xs font-medium md:inline"
+      >
+        History
       </Link>
       <span className="hidden text-muted md:inline text-xs font-medium max-w-[140px] truncate">{email}</span>
       <form action="/auth/sign-out" method="post">

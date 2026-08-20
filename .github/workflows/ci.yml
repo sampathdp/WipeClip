@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch: {}
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # No test suite exists yet - this is a compile/import gate, not a
+      # test run: catches syntax errors and broken imports across the
+      # pipeline before merge, same bar deploy-backend.yml's Cloud Run
+      # deploy would otherwise be the first thing to catch.
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Compile-check
+        working-directory: backend
+        run: python -m compileall -q app
+
+      - name: Import-check
+        working-directory: backend
+        run: python -c "import app.main"

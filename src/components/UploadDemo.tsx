@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import RegionSelector from "./RegionSelector";
 import VideoCompareSlider from "./VideoCompareSlider";
@@ -55,9 +55,26 @@ export default function UploadDemo() {
   const [progress, setProgress] = useState(0);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isPro, setIsPro] = useState(false);
+  const [queue, setQueue] = useState<File[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Batch upload (multi-file select/drop) is a Pro-plan feature; free/starter
+  // keep the single-file flow untouched below.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/credits")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled) setIsPro(data?.plan === "pro");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const reset = useCallback(() => {
     if (resultUrl) URL.revokeObjectURL(resultUrl);
@@ -78,6 +95,7 @@ export default function UploadDemo() {
     setConsent(false);
     setProgress(0);
     setResultUrl(null);
+    setQueue([]);
   }, [resultUrl, previewUrl, originalUrl]);
 
   const pickFile = useCallback(async (picked: File | undefined) => {
@@ -115,6 +133,30 @@ export default function UploadDemo() {
       setStep("error");
     }
   }, []);
+
+  // Multi-file entry point: Pro users can select/drop several files at
+  // once - the first is processed through the normal single-file flow
+  // below, the rest wait in `queue` and are offered one at a time from the
+  // "done" screen via processNextInQueue. Non-Pro (or a single file) just
+  // behaves like pickFile always did.
+  const pickFiles = useCallback(
+    (list: FileList | null) => {
+      if (!list || list.length === 0) return;
+      const files = Array.from(list);
+      if (isPro && files.length > 1) {
+        setQueue(files.slice(1));
+      }
+      pickFile(files[0]);
+    },
+    [isPro, pickFile]
+  );
+
+  const processNextInQueue = useCallback(() => {
+    if (queue.length === 0) return;
+    const [next, ...rest] = queue;
+    setQueue(rest);
+    pickFile(next);
+  }, [queue, pickFile]);
 
   const process = useCallback(async () => {
     if (!file || !region) return;
@@ -184,7 +226,7 @@ export default function UploadDemo() {
           onDrop={(e) => {
             e.preventDefault();
             setIsDragOver(false);
-            pickFile(e.dataTransfer.files?.[0]);
+            pickFiles(e.dataTransfer.files);
           }}
           onClick={() => inputRef.current?.click()}
           className={`mt-8 flex cursor-pointer flex-col items-center justify-center rounded-[1.75rem] border-2 border-dashed px-6 py-14 text-center transition-all ${
@@ -197,8 +239,9 @@ export default function UploadDemo() {
             ref={inputRef}
             type="file"
             accept="video/*"
+            multiple={isPro}
             className="hidden"
-            onChange={(e) => pickFile(e.target.files?.[0])}
+            onChange={(e) => pickFiles(e.target.files)}
           />
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-accent/20 to-accent-2/20 border border-cyan-400/30 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
@@ -211,8 +254,12 @@ export default function UploadDemo() {
               />
             </svg>
           </div>
-          <p className="text-base font-semibold text-foreground">Drop your video here, or click to browse</p>
-          <p className="mt-1 text-xs sm:text-sm text-muted">MP4, MOV, WebM &bull; Up to 300MB</p>
+          <p className="text-base font-semibold text-foreground">
+            {isPro ? "Drop your videos here, or click to browse" : "Drop your video here, or click to browse"}
+          </p>
+          <p className="mt-1 text-xs sm:text-sm text-muted">
+            MP4, MOV, WebM &bull; Up to 300MB{isPro ? " each &bull; batch upload enabled" : ""}
+          </p>
         </div>
       )}
 
@@ -301,14 +348,21 @@ export default function UploadDemo() {
                   : ""}
               </p>
             </div>
-            {step !== "processing" && (
-              <button
-                onClick={reset}
-                className="shrink-0 text-xs font-semibold text-muted transition-colors hover:text-cyan-400"
-              >
-                Start over
-              </button>
-            )}
+            <div className="flex shrink-0 items-center gap-3">
+              {queue.length > 0 && (
+                <span className="rounded-full bg-surface-3/80 border border-border px-2.5 py-1 text-[11px] font-mono text-muted">
+                  +{queue.length} queued
+                </span>
+              )}
+              {step !== "processing" && (
+                <button
+                  onClick={reset}
+                  className="text-xs font-semibold text-muted transition-colors hover:text-cyan-400"
+                >
+                  Start over
+                </button>
+              )}
+            </div>
           </div>
 
           {step === "select" && previewUrl && videoInfo && (
@@ -458,12 +512,21 @@ export default function UploadDemo() {
                   </svg>
                   <span>Download Clean Video</span>
                 </a>
-                <button
-                  onClick={reset}
-                  className="btn-secondary rounded-full px-6 py-3.5 text-sm font-semibold"
-                >
-                  Process Another
-                </button>
+                {queue.length > 0 ? (
+                  <button
+                    onClick={processNextInQueue}
+                    className="btn-primary rounded-full px-6 py-3.5 text-sm font-semibold"
+                  >
+                    Next file ({queue.length} left)
+                  </button>
+                ) : (
+                  <button
+                    onClick={reset}
+                    className="btn-secondary rounded-full px-6 py-3.5 text-sm font-semibold"
+                  >
+                    Process Another
+                  </button>
+                )}
               </div>
             </div>
           )}

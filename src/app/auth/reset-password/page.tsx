@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Logo from "@/components/Logo";
@@ -50,9 +51,9 @@ export default function ResetPasswordPage() {
             <div className="mt-8 rounded-2xl bg-cyan-950/40 border border-cyan-400/40 p-6 text-sm text-cyan-200 shadow-[0_0_25px_rgba(34,211,238,0.2)]">
               <div className="mb-2 text-2xl">✓</div>
               <p className="font-medium">Password updated</p>
-              <a href="/" className="mt-3 inline-block text-xs font-semibold text-cyan-300 hover:text-cyan-200">
+              <Link href="/" className="mt-3 inline-block text-xs font-semibold text-cyan-300 hover:text-cyan-200">
                 Continue to WipeClip.co →
-              </a>
+              </Link>
             </div>
           ) : (
             <form onSubmit={submit} className="mt-8 flex flex-col gap-4 text-left">

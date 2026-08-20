@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import ReferralCapture from "@/components/ReferralCapture";
 import "./globals.css";
 
 const inter = Inter({
@@ -102,7 +103,7 @@ const jsonLd = {
       "@id": `${siteUrl}/#organization`,
       name: "WipeClip.co",
       url: siteUrl,
-      logo: `${siteUrl}/logo.png`,
+      logo: `${siteUrl}/logo.webp`,
     },
     {
       "@type": "WebSite",
@@ -137,10 +138,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <head>
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c"),
+          }}
         />
       </head>
       <body className="min-h-full flex flex-col bg-background text-foreground font-sans">
+        <ReferralCapture />
         {children}
         <Analytics />
         <SpeedInsights />

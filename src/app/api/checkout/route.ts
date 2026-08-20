@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { PLANS, type PlanKey } from "@/lib/credits";
+import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 
 const VARIANT_ENV: Record<PlanKey, string | undefined> = {
   starter: process.env.LEMONSQUEEZY_VARIANT_STARTER,
@@ -20,6 +21,12 @@ export async function POST(request: NextRequest) {
 
   if (!user) {
     return NextResponse.json({ error: "Sign in first." }, { status: 401 });
+  }
+
+  // 10 checkout attempts/10min/user - generous for legit retries after a
+  // declined card, tight enough to stop scripted checkout-creation abuse.
+  if (!(await checkRateLimit(rateLimitKeyFor(request, user.id), 10, 10 * 60 * 1000))) {
+    return NextResponse.json({ error: "Too many attempts. Try again in a few minutes." }, { status: 429 });
   }
 
   const body = await request.json().catch(() => null);
