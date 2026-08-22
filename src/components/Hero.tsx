@@ -13,7 +13,7 @@ const MARQUEE_ITEMS = [
 
 export default function Hero() {
   return (
-    <section className="relative overflow-hidden pt-36 pb-16 md:pt-48">
+    <section className="relative overflow-hidden pt-20 pb-16 md:pt-32">
       {/* Dynamic Ambient Glow Mesh */}
       <div
         aria-hidden
