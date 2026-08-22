@@ -9,7 +9,6 @@ import ThemeToggle from "./ThemeToggle";
 const links = [
   { href: "/#how-it-works", label: "How It Works" },
   { href: "/#features", label: "Features" },
-  { href: "/#tools", label: "Free Tools" },
   { href: "/pricing", label: "Pricing" },
   { href: "/#faq", label: "FAQ" },
 ];
@@ -36,7 +35,16 @@ export default function Navbar() {
           ))}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <a
+            href="/#tools"
+            className="group inline-flex shrink-0 items-center gap-1.5 rounded-full border border-cyan-400/50 bg-gradient-to-r from-accent-2/20 to-accent/20 px-2.5 py-2 text-xs font-bold text-cyan-700 shadow-[0_0_15px_rgba(34,211,238,0.2)] transition-all hover:scale-[1.04] hover:border-cyan-400 hover:shadow-[0_0_22px_rgba(34,211,238,0.35)] dark:text-cyan-300 sm:px-3.5"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 transition-transform group-hover:rotate-12">
+              <path d="M12 3v3M12 18v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M3 12h3M18 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
+            </svg>
+            <span className="hidden sm:inline">Free Tools</span>
+          </a>
           <ThemeToggle />
           <AuthStatus />
           <button

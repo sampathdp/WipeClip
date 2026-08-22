@@ -8,8 +8,8 @@ export default function manifest(): MetadataRoute.Manifest {
       "Remove watermarks, logos, timestamps and unwanted objects from video you own or have rights to edit.",
     start_url: "/",
     display: "standalone",
-    background_color: "#ffffff",
-    theme_color: "#ffffff",
+    background_color: "#05060a",
+    theme_color: "#05060a",
     icons: [
       {
         src: "/favicon.ico",
