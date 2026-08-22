@@ -4,8 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import RegionSelector from "./RegionSelector";
 import VideoCompareSlider from "./VideoCompareSlider";
+import SignInModal from "./SignInModal";
+import { createClient } from "@/lib/supabase/client";
 import {
-  AuthRequiredError,
   ContentBlockedError,
   InsufficientCreditsError,
   detectWatermark,
@@ -22,7 +23,7 @@ import {
 const WATERMARK_SUGGESTION_MIN_CONFIDENCE = 0.45;
 
 type Step = "idle" | "probing" | "select" | "processing" | "done" | "error" | "blocked";
-type BlockReason = "content" | "credits" | "auth";
+type BlockReason = "content" | "credits";
 type Mode = "remove" | "replace";
 
 const MAX_BYTES = 300 * 1024 * 1024;
@@ -57,6 +58,8 @@ export default function UploadDemo() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isPro, setIsPro] = useState(false);
   const [queue, setQueue] = useState<File[]>([]);
+  const [isSignedIn, setIsSignedIn] = useState(false);
+  const [showSignInModal, setShowSignInModal] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -74,6 +77,20 @@ export default function UploadDemo() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Processing itself needs no account (see /api/process's anonymous path)
+  // - only the download at the end is gated on being signed in (see the
+  // "done" step below), so this just tracks sign-in state to flip that gate.
+  // onAuthStateChange also fires when another tab/the SignInModal signs the
+  // visitor in, without this component needing to know how that happened.
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => setIsSignedIn(Boolean(data.user)));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsSignedIn(Boolean(session?.user));
+    });
+    return () => sub.subscription.unsubscribe();
   }, []);
 
   const reset = useCallback(() => {
@@ -186,12 +203,6 @@ export default function UploadDemo() {
       if (e instanceof InsufficientCreditsError) {
         setError(e.message);
         setBlockReason("credits");
-        setStep("blocked");
-        return;
-      }
-      if (e instanceof AuthRequiredError) {
-        setError(e.message);
-        setBlockReason("auth");
         setStep("blocked");
         return;
       }
@@ -318,14 +329,6 @@ export default function UploadDemo() {
                 </Link>
               </>
             )}
-            {blockReason === "auth" && (
-              <Link
-                href="/sign-in"
-                className="btn-primary rounded-full px-5 py-2.5 text-sm font-semibold"
-              >
-                Sign in
-              </Link>
-            )}
             <button
               onClick={reset}
               className="btn-secondary rounded-full px-5 py-2.5 text-sm font-semibold"
@@ -424,7 +427,9 @@ export default function UploadDemo() {
               <p className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Output resolution</p>
               <div className="grid grid-cols-3 gap-2.5">
                 {RESOLUTION_OPTIONS.map((opt) => {
-                  const disabled = !!videoInfo && videoInfo.height < opt.minHeight;
+                  const needsSignIn = !isSignedIn && opt.key !== "720p";
+                  const tooSmall = !!videoInfo && videoInfo.height < opt.minHeight;
+                  const disabled = needsSignIn || tooSmall;
                   const active = resolution === opt.key;
                   return (
                     <button
@@ -432,7 +437,13 @@ export default function UploadDemo() {
                       type="button"
                       disabled={disabled}
                       onClick={() => setResolution(opt.key)}
-                      title={disabled ? "Source video isn't high enough resolution for this option" : undefined}
+                      title={
+                        needsSignIn
+                          ? "Sign in to unlock higher resolutions"
+                          : tooSmall
+                            ? "Source video isn't high enough resolution for this option"
+                            : undefined
+                      }
                       className={`rounded-xl p-3 text-center transition-all border ${
                         active
                           ? "bg-cyan-950/40 border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.25)]"
@@ -443,12 +454,25 @@ export default function UploadDemo() {
                         {opt.label}
                       </span>
                       <span className="block text-[11px] text-muted mt-0.5 font-mono">
-                        {opt.credits} credit{opt.credits > 1 ? "s" : ""}
+                        {needsSignIn ? "sign in" : `${opt.credits} credit${opt.credits > 1 ? "s" : ""}`}
                       </span>
                     </button>
                   );
                 })}
               </div>
+              {!isSignedIn && (
+                <p className="mt-2.5 text-xs text-muted">
+                  Free preview at 720p, no account needed.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setShowSignInModal(true)}
+                    className="underline hover:text-foreground text-cyan-400"
+                  >
+                    Sign in
+                  </button>{" "}
+                  for 1080p/4K and to download.
+                </p>
+              )}
 
               {/* Consent check */}
               <label className="mt-6 flex items-start gap-3 text-xs sm:text-sm text-muted cursor-pointer">
@@ -502,16 +526,29 @@ export default function UploadDemo() {
                 </div>
               )}
               <div className="flex flex-col gap-3 sm:flex-row">
-                <a
-                  href={resultUrl}
-                  download={`unmarked-${file.name}`}
-                  className="flex-1 rounded-full bg-emerald-500 hover:bg-emerald-400 px-6 py-3.5 text-center text-sm font-bold text-black shadow-[0_0_25px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-2"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                  </svg>
-                  <span>Download Clean Video</span>
-                </a>
+                {isSignedIn ? (
+                  <a
+                    href={resultUrl}
+                    download={`unmarked-${file.name}`}
+                    className="flex-1 rounded-full bg-emerald-500 hover:bg-emerald-400 px-6 py-3.5 text-center text-sm font-bold text-black shadow-[0_0_25px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-2"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                    </svg>
+                    <span>Download Clean Video</span>
+                  </a>
+                ) : (
+                  <button
+                    onClick={() => setShowSignInModal(true)}
+                    className="flex-1 rounded-full bg-emerald-500 hover:bg-emerald-400 px-6 py-3.5 text-center text-sm font-bold text-black shadow-[0_0_25px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-2"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="4" y="10" width="16" height="10" rx="2" />
+                      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+                    </svg>
+                    <span>Sign In to Download</span>
+                  </button>
+                )}
                 {queue.length > 0 ? (
                   <button
                     onClick={processNextInQueue}
@@ -545,6 +582,8 @@ export default function UploadDemo() {
       {error && step !== "blocked" && (
         <p className="mt-4 text-center text-xs sm:text-sm font-medium text-rose-400">{error}</p>
       )}
+
+      <SignInModal open={showSignInModal} onClose={() => setShowSignInModal(false)} />
     </div>
   );
 }

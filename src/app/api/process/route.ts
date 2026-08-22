@@ -5,12 +5,21 @@ import { TOOLS_API_URL } from "@/lib/toolsApi";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { isProUser } from "@/lib/plan";
 
-/** Server-side gate in front of the FastAPI processing backend: checks
- * auth, spends credits atomically before forwarding the job, and refunds
- * if the backend rejects or fails the request. The browser never talks to
- * the FastAPI backend's /process endpoint directly (unlike /probe, which
+/** Server-side gate in front of the FastAPI processing backend. Signed-in
+ * callers spend credits atomically before forwarding the job, refunded if
+ * the backend rejects or fails the request. The browser never talks to the
+ * FastAPI backend's /process endpoint directly (unlike /probe, which
  * doesn't touch billing) - that's what makes the credit check
  * non-bypassable.
+ *
+ * Anonymous callers are allowed through too, deliberately: the product
+ * lets anyone upload/process/preview a result with no account, only
+ * gating the actual download behind sign-in (see UploadDemo.tsx's
+ * isSignedIn-gated download button + SignInModal). Since there's no
+ * account to charge or hold accountable, that path skips the credit
+ * ledger entirely and is instead bounded by a much tighter IP-based rate
+ * limit plus a hard 720p cap (both below) - a free preview, not an open
+ * compute spigot.
  */
 export async function POST(request: NextRequest) {
   if (!isSupabaseConfigured()) {
@@ -26,10 +35,63 @@ export async function POST(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return NextResponse.json(
-      { detail: { code: "auth_required", message: "Sign in to process a video." } },
-      { status: 401 }
-    );
+    // 3 free anonymous previews/24h/IP - no account to charge or hold
+    // accountable, so this has to be tight regardless of the resolution
+    // cap below. Namespaced separately from other IP-keyed limits
+    // (rateLimitKeyFor's own "ip:" prefix) so it can't collide with them.
+    if (!(await checkRateLimit(`anon-process:${rateLimitKeyFor(request)}`, 3, 24 * 60 * 60 * 1000))) {
+      return NextResponse.json(
+        {
+          detail: {
+            code: "rate_limited",
+            message: "Free preview limit reached for today. Sign in for more.",
+          },
+        },
+        { status: 429 }
+      );
+    }
+
+    const formData = await request.formData();
+    // Hard cap, ignoring whatever the client sent - defense in depth
+    // alongside the UI already disabling non-720p options when signed out.
+    formData.set("resolution", "720p");
+
+    let backendRes: Response;
+    try {
+      backendRes = await fetch(`${TOOLS_API_URL}/api/video/process`, {
+        method: "POST",
+        body: formData,
+        headers: process.env.INTERNAL_API_SECRET
+          ? { "X-Internal-Process-Secret": process.env.INTERNAL_API_SECRET }
+          : undefined,
+      });
+    } catch (e) {
+      return NextResponse.json(
+        {
+          detail: {
+            code: "backend_unreachable",
+            message: e instanceof Error ? e.message : "Could not reach the processing backend.",
+          },
+        },
+        { status: 502 }
+      );
+    }
+
+    if (!backendRes.ok) {
+      const body = await backendRes.text();
+      return new NextResponse(body, {
+        status: backendRes.status,
+        headers: { "Content-Type": backendRes.headers.get("Content-Type") ?? "application/json" },
+      });
+    }
+
+    return new NextResponse(backendRes.body, {
+      status: 200,
+      headers: {
+        "Content-Type": backendRes.headers.get("Content-Type") ?? "video/mp4",
+        "Content-Disposition": backendRes.headers.get("Content-Disposition") ?? "attachment",
+      },
+    });
   }
 
   // 30 processing requests/hour/user - the credit system already caps
