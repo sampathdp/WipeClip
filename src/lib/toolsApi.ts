@@ -17,9 +17,19 @@ export class ProRequiredError extends ApiError {}
 async function throwApiError(res: Response, fallback: string): Promise<never> {
   const data = await res.json().catch(() => null);
   const detail = data?.detail;
-  const message = typeof detail === "string" ? detail : detail?.message;
-  const code = typeof detail === "object" ? detail?.code : undefined;
-  const msg = message ?? fallback;
+  // FastAPI's own automatic request-validation errors (a malformed/missing
+  // form field - int fields getting a non-numeric string is the case that
+  // actually bit us) shape `detail` as an array of {loc, msg, type}, not
+  // the {code, message} object our own HTTPExceptions use. Without this
+  // branch that array silently fell through to `fallback` ("Processing
+  // failed. Try again.") with the real cause never surfacing anywhere.
+  const message = typeof detail === "string"
+    ? detail
+    : Array.isArray(detail)
+      ? detail.map((d) => (typeof d?.msg === "string" ? d.msg : JSON.stringify(d))).join("; ")
+      : detail?.message;
+  const code = typeof detail === "object" && !Array.isArray(detail) ? detail?.code : undefined;
+  const msg = message || fallback;
   if (code === "content_blocked") throw new ContentBlockedError(msg, code);
   if (code === "insufficient_credits") throw new InsufficientCreditsError(msg, code);
   if (code === "auth_required") throw new AuthRequiredError(msg, code);

@@ -34,6 +34,17 @@ export default function RegionSelector({
   const [box, setBox] = useState<Box | null>(null);
   const boxRef = useRef<Box | null>(null);
   const dragMode = useRef<DragMode | null>(null);
+  // The wrapper div has no explicit height - it's sized by the <img>'s
+  // rendered content, which needs its own async load/decode before it has
+  // real layout dimensions. previewUrl/naturalWidth/naturalHeight all
+  // become available in the same render (see UploadDemo's pickFile), so
+  // without this, the effect below can run while clientHeight is still 0,
+  // making scaleY = naturalHeight/0 = Infinity and the emitted region
+  // Infinity/NaN - which a FastAPI int field can't parse, surfacing as a
+  // 422 with no useful message. Derived (not reset via a separate effect)
+  // so a new previewUrl naturally makes this false with no extra render.
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const imgLoaded = loadedFor === previewUrl;
 
   useEffect(() => {
     boxRef.current = box;
@@ -42,7 +53,7 @@ export default function RegionSelector({
   const emit = useCallback(
     (b: Box) => {
       const el = wrapRef.current;
-      if (!el) return;
+      if (!el || el.clientWidth === 0 || el.clientHeight === 0) return;
       const scaleX = naturalWidth / el.clientWidth;
       const scaleY = naturalHeight / el.clientHeight;
       onChange({
@@ -58,9 +69,11 @@ export default function RegionSelector({
   // Prefill from the auto-detected candidate when there's a confident one;
   // otherwise fall back to the old sensible default (bottom-right corner,
   // ~20% width) - either way the user can still drag to relocate/resize.
+  // Guarded on imgLoaded (see above) and re-runs once it flips true, so
+  // this never computes off a zero-height wrapper.
   useEffect(() => {
     const el = wrapRef.current;
-    if (!el) return;
+    if (!el || !imgLoaded || el.clientWidth === 0 || el.clientHeight === 0) return;
     let b: Box;
     if (suggestion) {
       const scaleX = el.clientWidth / naturalWidth;
@@ -79,7 +92,7 @@ export default function RegionSelector({
     setBox(b);
     emit(b);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [naturalWidth, naturalHeight, suggestion]);
+  }, [naturalWidth, naturalHeight, suggestion, imgLoaded]);
 
   const pointFromEvent = (e: React.PointerEvent) => {
     const rect = wrapRef.current!.getBoundingClientRect();
@@ -155,6 +168,7 @@ export default function RegionSelector({
           alt="Video preview frame"
           className="block w-full"
           draggable={false}
+          onLoad={() => setLoadedFor(previewUrl)}
         />
         {box && (
           <div
