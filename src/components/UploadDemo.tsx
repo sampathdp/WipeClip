@@ -64,9 +64,33 @@ export default function UploadDemo() {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Batch upload (multi-file select/drop) is a Pro-plan feature; free/starter
-  // keep the single-file flow untouched below.
+  // Processing itself needs no account (see /api/process's anonymous path)
+  // - only the download at the end is gated on being signed in (see the
+  // "done" step below), so this tracks sign-in state to flip that gate.
+  // onAuthStateChange also fires when another tab/the SignInModal signs the
+  // visitor in, without this component needing to know how that happened.
   useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      setIsSignedIn(Boolean(data.user));
+      if (!data.user) setIsPro(false);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsSignedIn(Boolean(session?.user));
+      if (!session?.user) setIsPro(false);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  // Batch upload (multi-file select/drop) is a Pro-plan feature; free/starter
+  // keep the single-file flow untouched below. Only checked once signed in -
+  // /api/credits 401s for a signed-out caller, so calling it unconditionally
+  // on every page load (this component sits on the homepage) would fire a
+  // doomed request on every anonymous visit for no reason. isPro's "false"
+  // side is reset from the auth effect above (in its own callbacks, not
+  // here) - this effect only ever needs to move it to true.
+  useEffect(() => {
+    if (!isSignedIn) return;
     let cancelled = false;
     fetch("/api/credits")
       .then((res) => (res.ok ? res.json() : null))
@@ -77,21 +101,7 @@ export default function UploadDemo() {
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  // Processing itself needs no account (see /api/process's anonymous path)
-  // - only the download at the end is gated on being signed in (see the
-  // "done" step below), so this just tracks sign-in state to flip that gate.
-  // onAuthStateChange also fires when another tab/the SignInModal signs the
-  // visitor in, without this component needing to know how that happened.
-  useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => setIsSignedIn(Boolean(data.user)));
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsSignedIn(Boolean(session?.user));
-    });
-    return () => sub.subscription.unsubscribe();
-  }, []);
+  }, [isSignedIn]);
 
   const reset = useCallback(() => {
     if (resultUrl) URL.revokeObjectURL(resultUrl);

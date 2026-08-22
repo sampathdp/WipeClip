@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import RegionSelector from "./RegionSelector";
 import ImageCompareSlider from "./ImageCompareSlider";
+import { createClient } from "@/lib/supabase/client";
 import {
   ApiError,
   AuthRequiredError,
@@ -44,17 +45,28 @@ export default function ImageEditorDemo() {
   const [isDragOver, setIsDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // /api/credits 401s for a signed-out caller, so this checks sign-in
+  // state client-side first (no network round-trip, reads the local
+  // session) and skips the doomed request entirely when signed out -
+  // straight to "not-pro", which is the correct outcome either way.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/credits")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (cancelled) return;
-        setPlanState(data?.plan === "pro" ? "pro" : "not-pro");
-      })
-      .catch(() => {
-        if (!cancelled) setPlanState("not-pro");
-      });
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      if (cancelled) return;
+      if (!data.user) {
+        setPlanState("not-pro");
+        return;
+      }
+      fetch("/api/credits")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((creditsData) => {
+          if (!cancelled) setPlanState(creditsData?.plan === "pro" ? "pro" : "not-pro");
+        })
+        .catch(() => {
+          if (!cancelled) setPlanState("not-pro");
+        });
+    });
     return () => {
       cancelled = true;
     };
