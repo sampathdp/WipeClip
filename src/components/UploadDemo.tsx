@@ -6,6 +6,7 @@ import RegionSelector from "./RegionSelector";
 import VideoCompareSlider from "./VideoCompareSlider";
 import SignInModal from "./SignInModal";
 import { createClient } from "@/lib/supabase/client";
+import { clearPendingResult, loadPendingResult, savePendingResult } from "@/lib/resultCache";
 import {
   ContentBlockedError,
   InsufficientCreditsError,
@@ -103,6 +104,30 @@ export default function UploadDemo() {
     };
   }, [isSignedIn]);
 
+  // Restores an anonymous result that was saved to IndexedDB right before
+  // sign-in (see resultCache.ts + the save call in process() below) - the
+  // whole reason that exists is that most sign-in paths (magic link,
+  // Google OAuth, the Navbar's own "Sign in" link) do a real page
+  // navigation, which throws away this component's state and invalidates
+  // any blob: URL. Only fires when nothing else is going on (idle), so it
+  // can't clobber a file the visitor is actively working on in this tab.
+  useEffect(() => {
+    if (!isSignedIn || step !== "idle") return;
+    let cancelled = false;
+    loadPendingResult().then((pending) => {
+      if (cancelled || !pending) return;
+      setFile(new File([pending.originalBlob], pending.filename));
+      setOriginalUrl(URL.createObjectURL(pending.originalBlob));
+      setResultUrl(URL.createObjectURL(pending.resultBlob));
+      setStep("done");
+      clearPendingResult();
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSignedIn]);
+
   const reset = useCallback(() => {
     if (resultUrl) URL.revokeObjectURL(resultUrl);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -123,6 +148,7 @@ export default function UploadDemo() {
     setProgress(0);
     setResultUrl(null);
     setQueue([]);
+    void clearPendingResult();
   }, [resultUrl, previewUrl, originalUrl]);
 
   const pickFile = useCallback(async (picked: File | undefined) => {
@@ -202,6 +228,12 @@ export default function UploadDemo() {
       setResultUrl(URL.createObjectURL(blob));
       setStep("done");
       window.dispatchEvent(new Event("credits:refresh"));
+      // Anonymous result: save it so it survives whatever sign-in path the
+      // visitor takes at the download step (see resultCache.ts) - signed-in
+      // results don't need this, the download link already works immediately.
+      if (!isSignedIn) {
+        void savePendingResult({ filename: file.name, originalBlob: file, resultBlob: blob });
+      }
     } catch (e) {
       if (timerRef.current) clearInterval(timerRef.current);
       if (e instanceof ContentBlockedError) {
@@ -219,7 +251,7 @@ export default function UploadDemo() {
       setError(e instanceof Error ? e.message : "Processing failed. Try again.");
       setStep("error");
     }
-  }, [file, region, mode, resolution, logo]);
+  }, [file, region, mode, resolution, logo, isSignedIn]);
 
   return (
     <div
