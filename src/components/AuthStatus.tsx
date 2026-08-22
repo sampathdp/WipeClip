@@ -77,7 +77,7 @@ export default function AuthStatus() {
     <div className="flex items-center gap-3 text-sm">
       <Link
         href="/pricing"
-        className="hidden items-center gap-1.5 rounded-full bg-surface-2/90 border border-cyan-500/30 px-3.5 py-1.5 font-mono text-xs text-cyan-300 transition-all hover:border-cyan-400 hover:shadow-[0_0_12px_rgba(34,211,238,0.3)] sm:inline-flex"
+        className="hidden items-center gap-1.5 rounded-full bg-surface-2/90 border border-cyan-500/30 px-3.5 py-1.5 font-mono text-xs text-cyan-600 transition-all hover:border-cyan-400 hover:shadow-[0_0_12px_rgba(34,211,238,0.3)] sm:inline-flex"
       >
         <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
         {credits ?? "…"} credits

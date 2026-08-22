@@ -75,11 +75,11 @@ export default function PricingClient() {
         {/* Background glow meshes */}
         <div
           aria-hidden
-          className="animate-blob absolute top-20 left-1/4 h-[500px] w-[500px] rounded-full bg-accent/15 blur-[140px] pointer-events-none -z-10"
+          className="animate-blob absolute top-20 left-1/4 h-[500px] w-[500px] rounded-full bg-accent/5 blur-[140px] pointer-events-none -z-10 dark:bg-accent/15"
         />
         <div
           aria-hidden
-          className="animate-blob absolute top-40 right-1/4 h-[500px] w-[500px] rounded-full bg-accent-2/15 blur-[140px] [animation-delay:4s] pointer-events-none -z-10"
+          className="animate-blob absolute top-40 right-1/4 h-[500px] w-[500px] rounded-full bg-accent-2/5 blur-[140px] [animation-delay:4s] pointer-events-none -z-10 dark:bg-accent-2/15"
         />
 
         <div className="mx-auto max-w-3xl text-center">
@@ -105,19 +105,19 @@ export default function PricingClient() {
                 <span className="font-mono text-3xl font-extrabold text-foreground">$0</span>
                 <span className="text-xs text-muted"> / forever</span>
               </div>
-              <p className="mt-2 text-xs font-mono text-cyan-300">2 credits / day (auto-renew)</p>
+              <p className="mt-2 text-xs font-mono text-cyan-600">2 credits / day (auto-renew)</p>
               <p className="mt-3 text-xs text-muted">Perfect to test watermark removal on short clips.</p>
 
               <div className="mt-6 border-t border-border/60 pt-6">
                 <ul className="space-y-3 text-xs text-muted">
                   <li className="flex items-center gap-2">
-                    <span className="text-cyan-400 font-bold">✓</span> 720p HD resolution
+                    <span className="text-cyan-600 font-bold">✓</span> 720p HD resolution
                   </li>
                   <li className="flex items-center gap-2">
-                    <span className="text-cyan-400 font-bold">✓</span> No watermark on output
+                    <span className="text-cyan-600 font-bold">✓</span> No watermark on output
                   </li>
                   <li className="flex items-center gap-2">
-                    <span className="text-cyan-400 font-bold">✓</span> No credit card required
+                    <span className="text-cyan-600 font-bold">✓</span> No credit card required
                   </li>
                 </ul>
               </div>
@@ -158,7 +158,7 @@ export default function PricingClient() {
                     <span className="inline-block rounded-full bg-surface-3 border border-border px-3 py-1 text-xs font-semibold text-foreground">
                       {plan.label}
                     </span>
-                    <span className="text-[11px] font-mono text-cyan-400 font-bold">
+                    <span className="text-[11px] font-mono text-cyan-600 font-bold">
                       {plan.credits} credits
                     </span>
                   </div>
@@ -174,7 +174,7 @@ export default function PricingClient() {
                     <ul className="space-y-3 text-xs text-muted">
                       {card.features.map((f) => (
                         <li key={f} className="flex items-center gap-2">
-                          <span className="text-cyan-400 font-bold">✓</span>
+                          <span className="text-cyan-600 font-bold">✓</span>
                           <span className="text-foreground/90">{f}</span>
                         </li>
                       ))}
@@ -200,7 +200,7 @@ export default function PricingClient() {
           })}
         </div>
 
-        {error && <p className="mt-8 text-center text-sm font-medium text-rose-400">{error}</p>}
+        {error && <p className="mt-8 text-center text-sm font-medium text-rose-600">{error}</p>}
       </main>
       <Footer />
     </div>

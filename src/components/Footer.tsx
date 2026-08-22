@@ -24,6 +24,20 @@ export default function Footer() {
           </nav>
         </div>
         <div className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t border-border/60 pt-6 text-xs text-muted">
+          <span className="font-semibold text-foreground/80">Free tools:</span>
+          <Link href="/remove-background" className="transition-colors hover:text-foreground">
+            Background Remover
+          </Link>
+          <span className="text-border">&middot;</span>
+          <Link href="/extract-video-frame" className="transition-colors hover:text-foreground">
+            Video Frame Grabber
+          </Link>
+          <span className="text-border">&middot;</span>
+          <Link href="/sharpen-image" className="transition-colors hover:text-foreground">
+            Photo Sharpener
+          </Link>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted">
           <span className="font-semibold text-foreground/80">Remove a watermark from:</span>
           {WATERMARK_PLATFORMS.map((p, i) => (
             <span key={p.slug} className="flex items-center gap-2">

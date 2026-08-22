@@ -17,15 +17,15 @@ export default function Hero() {
       {/* Dynamic Ambient Glow Mesh */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -top-48 left-1/3 h-[650px] w-[950px] rounded-full bg-gradient-to-b from-accent/25 via-cyan-500/15 to-transparent blur-[140px] -z-10"
+        className="pointer-events-none absolute -top-48 left-1/3 h-[650px] w-[950px] rounded-full bg-gradient-to-b from-accent/6 via-cyan-500/4 to-transparent blur-[140px] -z-10 dark:from-accent/25 dark:via-cyan-500/15"
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute top-32 -left-32 h-[420px] w-[420px] rounded-full bg-accent/25 blur-[130px] -z-10"
+        className="pointer-events-none absolute top-32 -left-32 h-[420px] w-[420px] rounded-full bg-accent/6 blur-[130px] -z-10 dark:bg-accent/25"
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute top-72 -right-32 h-[480px] w-[480px] rounded-full bg-accent-2/25 blur-[140px] -z-10"
+        className="pointer-events-none absolute top-72 -right-32 h-[480px] w-[480px] rounded-full bg-accent-2/6 blur-[140px] -z-10 dark:bg-accent-2/25"
       />
 
       {/* Cyber Grid Accent Overlay */}
@@ -36,8 +36,8 @@ export default function Hero() {
           {/* Left: Hero Text — asymmetric 5/12 */}
           <div className="mx-auto max-w-xl text-center lg:col-span-5 lg:mx-0 lg:max-w-none lg:text-left">
             {/* Sticker-style AI Pill */}
-            <div className="mb-7 inline-flex -rotate-1 items-center gap-2 rounded-full border border-cyan-500/30 bg-surface-2/90 py-1.5 pl-2.5 pr-4 text-xs font-semibold text-cyan-200 shadow-[0_0_25px_rgba(34,211,238,0.25)] backdrop-blur-xl">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" className="shrink-0 text-cyan-300">
+            <div className="mb-7 inline-flex -rotate-1 items-center gap-2 rounded-full border border-cyan-500/30 bg-surface-2/90 py-1.5 pl-2.5 pr-4 text-xs font-semibold text-cyan-700 shadow-[0_0_25px_rgba(34,211,238,0.25)] backdrop-blur-xl">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" className="shrink-0 text-cyan-600">
                 <path
                   d="M12 2l1.8 5.6L19 9l-5.2 1.6L12 16l-1.8-5.4L5 9l5.2-1.4L12 2z"
                   fill="currentColor"
@@ -82,7 +82,7 @@ export default function Hero() {
                   key={label}
                   className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-surface-2/60 px-3 py-1 text-[11px] font-medium text-muted"
                 >
-                  <span className="text-cyan-400 font-bold">✓</span> {label}
+                  <span className="text-cyan-600 font-bold">✓</span> {label}
                 </span>
               ))}
             </div>
@@ -91,9 +91,9 @@ export default function Hero() {
           {/* Right: Video Showcase Stage — asymmetric 7/12 */}
           <div className="relative lg:col-span-7">
             {/* Halo glow */}
-            <div className="absolute -inset-6 rounded-[3rem] bg-gradient-to-r from-accent/30 via-cyan-400/20 to-accent/30 opacity-70 blur-3xl -z-20 animate-pulse-glow" />
+            <div className="absolute -inset-6 rounded-[3rem] bg-gradient-to-r from-accent/30 via-cyan-400/20 to-accent/30 opacity-20 blur-3xl -z-20 animate-pulse-glow dark:opacity-70" />
             {/* Stacked ghost cards for layered depth */}
-            <div className="absolute inset-0 -z-10 translate-x-3 translate-y-3 rotate-[-2deg] rounded-[2.5rem] bg-gradient-to-br from-accent/25 to-cyan-400/20 blur-sm" />
+            <div className="absolute inset-0 -z-10 translate-x-3 translate-y-3 rotate-[-2deg] rounded-[2.5rem] bg-gradient-to-br from-accent/10 to-cyan-400/8 blur-sm dark:from-accent/25 dark:to-cyan-400/20" />
             <div className="absolute inset-0 -z-10 -translate-x-2 translate-y-5 rotate-[2deg] rounded-[2.5rem] border border-cyan-500/10 bg-surface-2/40" />
 
             <BeforeAfterDemo />
@@ -121,7 +121,7 @@ export default function Hero() {
           {[...MARQUEE_ITEMS, ...MARQUEE_ITEMS].map((item, i) => (
             <span key={i} className="flex items-center gap-8">
               {item}
-              <span className="text-cyan-400">•</span>
+              <span className="text-cyan-600">•</span>
             </span>
           ))}
         </div>

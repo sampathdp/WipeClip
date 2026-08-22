@@ -6,7 +6,7 @@ import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { isProUser } from "@/lib/plan";
 
 export const metadata: Metadata = {
-  title: "Job History | WipeClip.co",
+  title: "Job History",
   robots: { index: false },
 };
 
@@ -65,7 +65,7 @@ export default async function HistoryPage() {
                       <p className="truncate text-sm font-semibold text-foreground">
                         {t.filename ?? (t.tool === "image" ? "Image job" : "Video job")}
                         {t.kind === "refund" && (
-                          <span className="ml-2 rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[10px] font-semibold text-amber-400 align-middle">
+                          <span className="ml-2 rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[10px] font-semibold text-amber-600 align-middle">
                             Refunded
                           </span>
                         )}
@@ -78,7 +78,7 @@ export default async function HistoryPage() {
                     </div>
                     <span
                       className={`shrink-0 font-mono text-sm font-bold ${
-                        t.amount < 0 ? "text-muted" : "text-emerald-400"
+                        t.amount < 0 ? "text-muted" : "text-emerald-600"
                       }`}
                     >
                       {t.amount > 0 ? "+" : ""}

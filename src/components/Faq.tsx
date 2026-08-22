@@ -68,7 +68,7 @@ export default function Faq() {
             >
               <summary className="flex cursor-pointer list-none items-center justify-between font-semibold text-base text-foreground">
                 <span>{f.q}</span>
-                <span className="ml-4 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-3 border border-border text-cyan-400 transition-transform duration-300 group-open:rotate-45 group-hover:scale-110">
+                <span className="ml-4 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-3 border border-border text-cyan-600 transition-transform duration-300 group-open:rotate-45 group-hover:scale-110">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <path d="M12 5v14M5 12h14" />
                   </svg>
@@ -81,15 +81,15 @@ export default function Faq() {
 
         <p className="mt-8 text-center text-xs text-muted">
           Full details available in our{" "}
-          <Link href="/terms" className="underline hover:text-cyan-400">
+          <Link href="/terms" className="underline hover:text-cyan-600">
             Terms of Service
           </Link>
           ,{" "}
-          <Link href="/privacy" className="underline hover:text-cyan-400">
+          <Link href="/privacy" className="underline hover:text-cyan-600">
             Privacy Policy
           </Link>
           , and{" "}
-          <Link href="/dmca" className="underline hover:text-cyan-400">
+          <Link href="/dmca" className="underline hover:text-cyan-600">
             Copyright Policy
           </Link>
           .

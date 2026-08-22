@@ -3,6 +3,7 @@ import Hero from "@/components/Hero";
 import UploadDemo from "@/components/UploadDemo";
 import HowItWorks from "@/components/HowItWorks";
 import Features from "@/components/Features";
+import FreeTools from "@/components/FreeTools";
 import Faq from "@/components/Faq";
 import CtaBanner from "@/components/CtaBanner";
 import Footer from "@/components/Footer";
@@ -18,6 +19,7 @@ export default function Home() {
         </section>
         <HowItWorks />
         <Features />
+        <FreeTools />
         <Faq />
         <CtaBanner />
       </main>

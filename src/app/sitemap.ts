@@ -23,6 +23,24 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "weekly",
       priority: 0.8,
     },
+    {
+      url: `${siteUrl}/remove-background`,
+      lastModified: "2026-08-22",
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
+    {
+      url: `${siteUrl}/extract-video-frame`,
+      lastModified: "2026-08-22",
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
+    {
+      url: `${siteUrl}/sharpen-image`,
+      lastModified: "2026-08-22",
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
     ...WATERMARK_PLATFORMS.map((p) => ({
       url: `${siteUrl}/${p.slug}`,
       lastModified: "2026-08-20",

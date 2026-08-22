@@ -139,7 +139,7 @@ export default function SignInModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="glass-card w-full max-w-sm rounded-[2rem] p-7 sm:p-8 border border-cyan-500/25 shadow-[0_20px_50px_rgba(0,0,0,0.8)] relative"
+        className="glass-card w-full max-w-sm rounded-[2rem] p-7 sm:p-8 border border-cyan-500/25 shadow-[0_20px_50px_rgba(15,23,42,0.10)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.8)] relative"
       >
         <button
           onClick={onClose}
@@ -159,10 +159,10 @@ export default function SignInModal({
         </p>
 
         {status === "sent" ? (
-          <div className="mt-6 rounded-2xl bg-cyan-950/40 border border-cyan-400/40 p-5 text-sm text-cyan-200">
+          <div className="mt-6 rounded-2xl bg-cyan-50 border border-cyan-400/40 p-5 text-sm text-cyan-700">
             <p className="font-medium">Check your email</p>
             <p className="mt-1 text-xs text-muted">
-              We sent a link to <strong className="text-cyan-300">{email}</strong>. Opening it
+              We sent a link to <strong className="text-cyan-600">{email}</strong>. Opening it
               signs you in here too.
             </p>
           </div>
@@ -172,7 +172,7 @@ export default function SignInModal({
               type="button"
               onClick={signInWithGoogle}
               disabled={googleLoading}
-              className="mt-6 flex w-full items-center justify-center gap-3 rounded-full border border-border-light bg-white py-3 text-sm font-semibold text-slate-800 transition-all hover:shadow-[0_0_20px_rgba(255,255,255,0.15)] disabled:opacity-50"
+              className="mt-6 flex w-full items-center justify-center gap-3 rounded-full border border-border-light bg-white py-3 text-sm font-semibold text-slate-800 transition-all hover:shadow-[0_0_20px_rgba(15,23,42,0.12)] dark:hover:shadow-[0_0_20px_rgba(255,255,255,0.15)] disabled:opacity-50"
             >
               <GoogleIcon />
               {googleLoading ? "Redirecting…" : "Continue with Google"}
@@ -223,7 +223,7 @@ export default function SignInModal({
                       : "Sign in"}
               </button>
 
-              {error && <p className="text-center text-xs font-medium text-rose-400">{error}</p>}
+              {error && <p className="text-center text-xs font-medium text-rose-600">{error}</p>}
 
               <div className="mt-1 flex flex-col items-center gap-1.5 text-xs text-muted">
                 {view === "password" ? (

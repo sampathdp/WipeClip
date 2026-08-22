@@ -62,11 +62,11 @@ export default function Features() {
   return (
     <section id="features" className="scroll-mt-28 py-24 relative overflow-hidden">
       {/* Background glow accent */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[300px] bg-accent/10 blur-[130px] pointer-events-none -z-10" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[300px] bg-accent/4 blur-[130px] pointer-events-none -z-10 dark:bg-accent/10" />
 
       <div className="mx-auto max-w-7xl px-6">
         <div className="mx-auto max-w-2xl text-center">
-          <div className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-cyan-950/40 border border-cyan-500/30 px-3.5 py-1 text-xs font-semibold text-cyan-300">
+          <div className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-cyan-50 border border-cyan-500/30 px-3.5 py-1 text-xs font-semibold text-cyan-600">
             Next-Gen Technology
           </div>
           <h2 className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
@@ -84,7 +84,7 @@ export default function Features() {
               className="glass-card-interactive rounded-[1.75rem] p-7 flex flex-col justify-between"
             >
               <div>
-                <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-tr from-accent/30 to-accent-2/30 border border-cyan-400/30 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
+                <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-tr from-accent/30 to-accent-2/30 border border-cyan-400/30 text-cyan-600 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
                   {f.icon}
                 </div>
                 <h3 className="font-display text-lg font-bold text-foreground tracking-tight">{f.title}</h3>

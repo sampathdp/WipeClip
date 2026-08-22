@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Same per-user request cap as /api/process, independent of credit balance.
-  if (!(await checkRateLimit(rateLimitKeyFor(request, user.id), 30, 60 * 60 * 1000))) {
+  if (!(await checkRateLimit(`${rateLimitKeyFor(request, user.id)}:image-watermark`, 30, 60 * 60 * 1000))) {
     return NextResponse.json(
       { detail: { code: "rate_limited", message: "Too many processing requests. Try again later." } },
       { status: 429 }

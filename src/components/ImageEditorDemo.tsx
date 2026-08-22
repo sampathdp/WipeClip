@@ -190,7 +190,7 @@ export default function ImageEditorDemo() {
   return (
     <div
       id="image-tool"
-      className="glass-card mx-auto max-w-3xl scroll-mt-28 rounded-[2rem] p-6 sm:p-10 border border-cyan-500/20 shadow-[0_20px_50px_rgba(0,0,0,0.7)]"
+      className="glass-card mx-auto max-w-3xl scroll-mt-28 rounded-[2rem] p-6 sm:p-10 border border-cyan-500/20 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.7)]"
     >
       <div className="flex items-center justify-between gap-4">
         <div>
@@ -218,7 +218,7 @@ export default function ImageEditorDemo() {
           onClick={() => inputRef.current?.click()}
           className={`mt-8 flex cursor-pointer flex-col items-center justify-center rounded-[1.75rem] border-2 border-dashed px-6 py-14 text-center transition-all ${
             isDragOver
-              ? "border-cyan-400 bg-cyan-950/20 scale-[1.01] shadow-[0_0_30px_rgba(34,211,238,0.25)]"
+              ? "border-cyan-400 bg-cyan-50 scale-[1.01] shadow-[0_0_30px_rgba(34,211,238,0.25)]"
               : "border-border hover:border-cyan-500/50 hover:bg-surface-2/40 hover:shadow-[0_0_20px_rgba(124,92,255,0.15)]"
           }`}
         >
@@ -229,7 +229,7 @@ export default function ImageEditorDemo() {
             className="hidden"
             onChange={(e) => pickFile(e.target.files?.[0])}
           />
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-accent/20 to-accent-2/20 border border-cyan-400/30 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-accent/20 to-accent-2/20 border border-cyan-400/30 text-cyan-600 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
               <path
                 d="M12 16V4m0 0L7 9m5-5l5 5M5 20h14"
@@ -256,7 +256,7 @@ export default function ImageEditorDemo() {
         <div className="mt-8 flex flex-col items-center gap-3 rounded-[1.75rem] bg-surface-2/80 border border-border p-8 text-center">
           <div
             className={`flex h-12 w-12 items-center justify-center rounded-2xl ${
-              blockReason === "content" ? "bg-rose-500/20 text-rose-400 border border-rose-500/30" : "bg-accent/20 text-accent-light border border-accent/30"
+              blockReason === "content" ? "bg-rose-500/20 text-rose-600 border border-rose-500/30" : "bg-accent/20 text-accent border border-accent/30"
             }`}
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
@@ -269,7 +269,7 @@ export default function ImageEditorDemo() {
               />
             </svg>
           </div>
-          <p className={`font-semibold text-base ${blockReason === "content" ? "text-rose-400" : "text-foreground"}`}>
+          <p className={`font-semibold text-base ${blockReason === "content" ? "text-rose-600" : "text-foreground"}`}>
             {error ?? "This image can't be processed here."}
           </p>
 
@@ -311,7 +311,7 @@ export default function ImageEditorDemo() {
               </p>
             </div>
             {step !== "processing" && (
-              <button onClick={reset} className="shrink-0 text-xs font-semibold text-muted transition-colors hover:text-cyan-400">
+              <button onClick={reset} className="shrink-0 text-xs font-semibold text-muted transition-colors hover:text-cyan-600">
                 Start over
               </button>
             )}
@@ -337,7 +337,7 @@ export default function ImageEditorDemo() {
                 <span>
                   I own this image, or have permission to edit it, and won&apos;t use WipeClip.co
                   to infringe copyright.{" "}
-                  <Link href="/terms" className="underline hover:text-foreground text-cyan-400">
+                  <Link href="/terms" className="underline hover:text-foreground text-cyan-600">
                     Terms of Service
                   </Link>
                 </span>
@@ -388,7 +388,7 @@ export default function ImageEditorDemo() {
           {step === "error" && (
             <button
               onClick={() => (region ? process() : pickFile(file))}
-              className="mt-6 w-full rounded-full bg-rose-500/20 border border-rose-500/40 px-5 py-3 text-sm font-semibold text-rose-400 hover:bg-rose-500/30 transition-all"
+              className="mt-6 w-full rounded-full bg-rose-500/20 border border-rose-500/40 px-5 py-3 text-sm font-semibold text-rose-600 hover:bg-rose-500/30 transition-all"
             >
               Retry
             </button>
@@ -397,7 +397,7 @@ export default function ImageEditorDemo() {
       )}
 
       {error && step !== "blocked" && (
-        <p className="mt-4 text-center text-xs sm:text-sm font-medium text-rose-400">{error}</p>
+        <p className="mt-4 text-center text-xs sm:text-sm font-medium text-rose-600">{error}</p>
       )}
     </div>
   );

@@ -18,7 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
-from app.pipeline import full_pipeline, io_utils, manual_inpaint
+from app.config import DEFAULT_SHARPEN_RADIUS
+from app.pipeline import full_pipeline, io_utils, manual_inpaint, sharpen as sharpen_pipeline
 from app.pipeline import video as video_pipeline
 
 
@@ -49,7 +50,15 @@ def image_remove_job(in_path: str, out_path: str, x: int, y: int, w: int, h: int
     Path(out_path).write_bytes(io_utils.encode_bgra_to_png(result, icc_profile))
 
 
-def image_auto_enhance_job(in_path: str, out_path: str) -> None:
+def image_auto_enhance_job(in_path: str, out_path: str, preview_max_megapixels: float | None) -> None:
     bgra, icc_profile = io_utils.decode_upload_to_bgra(Path(in_path).read_bytes())
+    if preview_max_megapixels is not None:
+        bgra = io_utils.downscale_to_max_megapixels(bgra, preview_max_megapixels)
     result = full_pipeline.auto_enhance(bgra)
+    Path(out_path).write_bytes(io_utils.encode_bgra_to_png(result, icc_profile))
+
+
+def image_sharpen_job(in_path: str, out_path: str, amount: float) -> None:
+    bgra, icc_profile = io_utils.decode_upload_to_bgra(Path(in_path).read_bytes())
+    result = sharpen_pipeline.sharpen(bgra, DEFAULT_SHARPEN_RADIUS, amount)
     Path(out_path).write_bytes(io_utils.encode_bgra_to_png(result, icc_profile))

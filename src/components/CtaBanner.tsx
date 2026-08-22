@@ -1,8 +1,10 @@
+import Link from "next/link";
+
 export default function CtaBanner() {
   return (
     <section className="py-20 relative">
       <div className="relative mx-auto max-w-5xl px-6">
-        <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-accent/20 via-surface-2 to-accent-2/15 p-8 sm:p-16 text-center border border-cyan-500/30 shadow-[0_20px_50px_rgba(0,0,0,0.8)] backdrop-blur-2xl">
+        <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-accent/20 via-surface-2 to-accent-2/15 p-8 sm:p-16 text-center border border-cyan-500/30 shadow-[0_20px_50px_rgba(15,23,42,0.10)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.8)] backdrop-blur-2xl">
           {/* Ambient Glows */}
           <div
             aria-hidden
@@ -31,6 +33,12 @@ export default function CtaBanner() {
                 </svg>
               </a>
             </div>
+            <p className="mt-5 text-xs text-muted">
+              Just need a clean cutout, not a watermark removed?{" "}
+              <Link href="/remove-background" className="font-semibold text-cyan-600 underline hover:text-cyan-700">
+                Try the free background remover
+              </Link>
+            </p>
           </div>
         </div>
       </div>

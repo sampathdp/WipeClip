@@ -189,3 +189,47 @@ export async function processImage(file: File, region: Region): Promise<Blob> {
 
   return res.blob();
 }
+
+/** Goes through /api/remove-background (credit-gated, no Pro requirement -
+ * see that route for why this differs from processImage above). Backend
+ * output is a transparent PNG (full_pipeline.auto_enhance), not a
+ * region-marked reconstruction, so unlike processImage this takes no
+ * Region - the whole point of this tool is zero-click background removal.
+ */
+export async function removeBackground(file: File): Promise<Blob> {
+  const body = new FormData();
+  body.append("file", file);
+
+  const res = await fetch("/api/remove-background", {
+    method: "POST",
+    body,
+  });
+
+  if (!res.ok) {
+    await throwApiError(res, "Processing failed. Try again.");
+  }
+
+  return res.blob();
+}
+
+export type SharpenStrength = "light" | "standard" | "strong";
+
+/** Goes through /api/sharpen-image - same free, non-Pro gate as
+ * removeBackground above.
+ */
+export async function sharpenImage(file: File, strength: SharpenStrength): Promise<Blob> {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("strength", strength);
+
+  const res = await fetch("/api/sharpen-image", {
+    method: "POST",
+    body,
+  });
+
+  if (!res.ok) {
+    await throwApiError(res, "Processing failed. Try again.");
+  }
+
+  return res.blob();
+}

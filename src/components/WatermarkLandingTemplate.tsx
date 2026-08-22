@@ -33,10 +33,10 @@ export default function WatermarkLandingTemplate({
         <section className="relative overflow-hidden pt-36 pb-16 md:pt-48">
           <div
             aria-hidden
-            className="pointer-events-none absolute -top-48 left-1/3 h-[650px] w-[950px] rounded-full bg-gradient-to-b from-accent/25 via-cyan-500/15 to-transparent blur-[140px] -z-10"
+            className="pointer-events-none absolute -top-48 left-1/3 h-[650px] w-[950px] rounded-full bg-gradient-to-b from-accent/6 via-cyan-500/4 to-transparent blur-[140px] -z-10 dark:from-accent/25 dark:via-cyan-500/15"
           />
           <div className="mx-auto max-w-3xl px-6 text-center">
-            <div className="mb-6 inline-flex items-center gap-1.5 rounded-full bg-surface-2/90 border border-cyan-500/30 px-3.5 py-1 text-xs font-semibold text-cyan-300">
+            <div className="mb-6 inline-flex items-center gap-1.5 rounded-full bg-surface-2/90 border border-cyan-500/30 px-3.5 py-1 text-xs font-semibold text-cyan-600">
               {content.heroEyebrow}
             </div>
             <h1 className="font-display text-4xl font-extrabold tracking-tight sm:text-5xl text-foreground text-balance">
@@ -93,7 +93,7 @@ export default function WatermarkLandingTemplate({
                 >
                   <summary className="flex cursor-pointer list-none items-center justify-between font-semibold text-base text-foreground">
                     <span>{f.q}</span>
-                    <span className="ml-4 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-3 border border-border text-cyan-400 transition-transform duration-300 group-open:rotate-45">
+                    <span className="ml-4 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-3 border border-border text-cyan-600 transition-transform duration-300 group-open:rotate-45">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                         <path d="M12 5v14M5 12h14" />
                       </svg>

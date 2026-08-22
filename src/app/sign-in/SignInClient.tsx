@@ -148,10 +148,10 @@ export default function SignInClient() {
         {/* Background glow mesh */}
         <div
           aria-hidden
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-80 w-80 rounded-full bg-accent/20 blur-[100px] pointer-events-none -z-10"
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-80 w-80 rounded-full bg-accent/6 blur-[100px] pointer-events-none -z-10 dark:bg-accent/20"
         />
 
-        <div className="glass-card rounded-[2.5rem] p-8 sm:p-10 border border-cyan-500/25 shadow-[0_20px_50px_rgba(0,0,0,0.8)] text-center">
+        <div className="glass-card rounded-[2.5rem] p-8 sm:p-10 border border-cyan-500/25 shadow-[0_20px_50px_rgba(15,23,42,0.10)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.8)] text-center">
           <div className="flex justify-center mb-6">
             <Logo size={48} showText={false} />
           </div>
@@ -169,11 +169,11 @@ export default function SignInClient() {
           </h1>
 
           {status === "sent" ? (
-            <div className="mt-8 rounded-2xl bg-cyan-950/40 border border-cyan-400/40 p-6 text-sm text-cyan-200 shadow-[0_0_25px_rgba(34,211,238,0.2)]">
+            <div className="mt-8 rounded-2xl bg-cyan-50 border border-cyan-400/40 p-6 text-sm text-cyan-700 shadow-[0_0_25px_rgba(34,211,238,0.2)]">
               <div className="mb-2 text-2xl">✓</div>
               <p className="font-medium">Check your email</p>
               <p className="mt-1 text-xs text-muted">
-                {sentCopy} <strong className="text-cyan-300">{email}</strong>.
+                {sentCopy} <strong className="text-cyan-600">{email}</strong>.
               </p>
             </div>
           ) : (
@@ -192,7 +192,7 @@ export default function SignInClient() {
                     type="button"
                     onClick={signInWithGoogle}
                     disabled={googleLoading}
-                    className="mt-7 flex w-full items-center justify-center gap-3 rounded-full border border-border-light bg-white py-3.5 text-sm font-semibold text-slate-800 transition-all hover:shadow-[0_0_20px_rgba(255,255,255,0.15)] disabled:opacity-50"
+                    className="mt-7 flex w-full items-center justify-center gap-3 rounded-full border border-border-light bg-white py-3.5 text-sm font-semibold text-slate-800 transition-all hover:shadow-[0_0_20px_rgba(15,23,42,0.12)] dark:hover:shadow-[0_0_20px_rgba(255,255,255,0.15)] disabled:opacity-50"
                   >
                     <GoogleIcon />
                     {googleLoading ? "Redirecting…" : "Continue with Google"}
@@ -235,7 +235,7 @@ export default function SignInClient() {
                         <button
                           type="button"
                           onClick={() => switchView("forgot")}
-                          className="text-xs font-medium text-cyan-400 hover:text-cyan-300"
+                          className="text-xs font-medium text-cyan-600 hover:text-cyan-700"
                         >
                           Forgot password?
                         </button>
@@ -271,7 +271,7 @@ export default function SignInClient() {
                           : "Sign In"}
                 </button>
 
-                {error && <p className="text-center text-xs font-medium text-rose-400 mt-1">{error}</p>}
+                {error && <p className="text-center text-xs font-medium text-rose-600 mt-1">{error}</p>}
               </form>
 
               <div className="mt-6 flex flex-col gap-2 text-xs text-muted">

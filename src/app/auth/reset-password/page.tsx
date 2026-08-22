@@ -35,10 +35,10 @@ export default function ResetPasswordPage() {
       <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 pt-36 pb-28 relative overflow-hidden">
         <div
           aria-hidden
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-80 w-80 rounded-full bg-accent/20 blur-[100px] pointer-events-none -z-10"
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-80 w-80 rounded-full bg-accent/6 blur-[100px] pointer-events-none -z-10 dark:bg-accent/20"
         />
 
-        <div className="glass-card rounded-[2.5rem] p-8 sm:p-10 border border-cyan-500/25 shadow-[0_20px_50px_rgba(0,0,0,0.8)] text-center">
+        <div className="glass-card rounded-[2.5rem] p-8 sm:p-10 border border-cyan-500/25 shadow-[0_20px_50px_rgba(15,23,42,0.10)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.8)] text-center">
           <div className="flex justify-center mb-6">
             <Logo size={48} showText={false} />
           </div>
@@ -48,10 +48,10 @@ export default function ResetPasswordPage() {
           </h1>
 
           {status === "done" ? (
-            <div className="mt-8 rounded-2xl bg-cyan-950/40 border border-cyan-400/40 p-6 text-sm text-cyan-200 shadow-[0_0_25px_rgba(34,211,238,0.2)]">
+            <div className="mt-8 rounded-2xl bg-cyan-50 border border-cyan-400/40 p-6 text-sm text-cyan-700 shadow-[0_0_25px_rgba(34,211,238,0.2)]">
               <div className="mb-2 text-2xl">✓</div>
               <p className="font-medium">Password updated</p>
-              <Link href="/" className="mt-3 inline-block text-xs font-semibold text-cyan-300 hover:text-cyan-200">
+              <Link href="/" className="mt-3 inline-block text-xs font-semibold text-cyan-600 hover:text-cyan-700">
                 Continue to WipeClip.co →
               </Link>
             </div>
@@ -82,7 +82,7 @@ export default function ResetPasswordPage() {
                 {status === "saving" ? "Saving…" : "Update Password"}
               </button>
 
-              {error && <p className="text-center text-xs font-medium text-rose-400 mt-1">{error}</p>}
+              {error && <p className="text-center text-xs font-medium text-rose-600 mt-1">{error}</p>}
             </form>
           )}
         </div>

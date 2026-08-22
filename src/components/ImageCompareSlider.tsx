@@ -2,12 +2,24 @@
 
 import { useCallback, useRef, useState } from "react";
 
+// Plain solid background reads as a rendering bug behind a transparent
+// PNG (e.g. the background-remover's output) - a checkerboard is the
+// universal "this is transparent" signal every image editor uses.
+const CHECKERBOARD_STYLE = {
+  backgroundImage:
+    "linear-gradient(45deg, #3a3a3a 25%, transparent 25%), linear-gradient(-45deg, #3a3a3a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #3a3a3a 75%), linear-gradient(-45deg, transparent 75%, #3a3a3a 75%)",
+  backgroundSize: "20px 20px",
+  backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
+};
+
 export default function ImageCompareSlider({
   beforeSrc,
   afterSrc,
+  transparentResult = false,
 }: {
   beforeSrc: string;
   afterSrc: string;
+  transparentResult?: boolean;
 }) {
   const [percent, setPercent] = useState(50);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -25,7 +37,8 @@ export default function ImageCompareSlider({
     <div>
       <div
         ref={containerRef}
-        className="glass-card group relative aspect-video w-full select-none overflow-hidden rounded-[1.75rem] bg-black border border-cyan-500/25 shadow-2xl cursor-ew-resize"
+        className="glass-card group relative aspect-video w-full select-none overflow-hidden rounded-[1.75rem] border border-cyan-500/25 shadow-2xl cursor-ew-resize"
+        style={transparentResult ? CHECKERBOARD_STYLE : { backgroundColor: "#000" }}
         onPointerDown={(e) => {
           dragging.current = true;
           (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -40,7 +53,7 @@ export default function ImageCompareSlider({
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={afterSrc} alt="Cleaned result" className="absolute inset-0 h-full w-full object-contain" draggable={false} />
-        <span className="absolute bottom-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full bg-surface-2/80 backdrop-blur-md px-3.5 py-1 text-xs font-semibold text-emerald-400 border border-emerald-500/30 shadow-lg">
+        <span className="absolute bottom-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full bg-surface-2/80 backdrop-blur-md px-3.5 py-1 text-xs font-semibold text-emerald-600 border border-emerald-500/30 shadow-lg">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
           Clean Result
         </span>
@@ -57,7 +70,7 @@ export default function ImageCompareSlider({
           className="absolute inset-y-0 z-10 w-0.5 bg-gradient-to-b from-cyan-400 via-white to-accent shadow-[0_0_12px_#22d3ee]"
           style={{ left: `${percent}%` }}
         >
-          <div className="absolute top-1/2 left-1/2 flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-surface-2 border-2 border-cyan-400 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.6)] group-hover:scale-110 transition-transform">
+          <div className="absolute top-1/2 left-1/2 flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-surface-2 border-2 border-cyan-400 text-cyan-600 shadow-[0_0_20px_rgba(34,211,238,0.6)] group-hover:scale-110 transition-transform">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
               <path
                 d="M8 5l-6 7 6 7M16 5l6 7-6 7"

@@ -36,6 +36,13 @@ DEFAULT_SHARPEN_RADIUS: float = 0.8
 DEFAULT_SHARPEN_AMOUNT: float = 0.8
 SHARPEN_THRESHOLD: int = 2
 
+# --- Standalone image-sharpen endpoint (api_image_sharpen in main.py) -------
+# Client picks a strength preset (light/standard/strong) mapped to one of
+# these server-side - the amount is never taken as a raw client-supplied
+# float, so a malicious value can't push selective_unsharp_mask into
+# visibly blown-out output.
+SHARPEN_AMOUNT_PRESETS: dict[str, float] = {"light": 0.4, "standard": DEFAULT_SHARPEN_AMOUNT, "strong": 1.4}
+
 # --- Manual spot-removal (paint-to-remove) inpainting ------------------------
 DEFAULT_INPAINT_RADIUS: int = 8
 MAX_INPAINT_MASK_RADIUS: int = 40  # hard cap so a runaway brush stroke can't
@@ -43,6 +50,14 @@ MAX_INPAINT_MASK_RADIUS: int = 40  # hard cap so a runaway brush stroke can't
 
 # --- ML background removal ----------------------------------------------------
 REMBG_MODEL_NAME: str = "isnet-general-use"  # good general-purpose quality/speed balance
+
+# --- Free-tier preview cap for /api/image/auto-enhance (api_image_auto_enhance) ---
+# Anonymous callers get downscaled to this before processing (matches
+# remove.bg's known free/anonymous preview cap - see api_image_auto_enhance's
+# `preview` flag in main.py for who actually gets capped). Downscaling
+# BEFORE the pipeline runs, not after, is also just cheaper: rembg's
+# segmentation cost scales with pixel count.
+BG_REMOVE_PREVIEW_MAX_MEGAPIXELS: float = 0.25
 
 # --- Watermark/artifact candidate detection (suggest-only, never auto-applies) ---
 # Tuned deliberately conservative: it is far better to miss a real artifact

@@ -49,10 +49,12 @@ from fastapi.responses import Response
 
 from app import jobs
 from app.config import (
+    BG_REMOVE_PREVIEW_MAX_MEGAPIXELS,
     MAX_VIDEO_DURATION_SECONDS,
     MAX_VIDEO_UPLOAD_BYTES,
     MIN_REGION_PX,
     RESOLUTION_HEIGHTS,
+    SHARPEN_AMOUNT_PRESETS,
 )
 from app.pipeline import detect_artifacts, io_utils, moderation
 from app.pipeline import video as video_pipeline
@@ -452,10 +454,66 @@ async def api_image_remove(
     return Response(content=result, media_type="image/png")
 
 
+@app.post("/api/image/sharpen")
+async def api_image_sharpen(
+    request: Request,
+    file: UploadFile = File(...),
+    strength: str = Form("standard"),  # "light" | "standard" | "strong"
+):
+    """Standalone selective-unsharp-mask pass (sharpen.sharpen), independent
+    of auto-enhance's full bg-removal/decontam pipeline - just clarity/detail
+    enhancement on the image as uploaded.
+    """
+    _assert_internal_caller(request)
+    if strength not in SHARPEN_AMOUNT_PRESETS:
+        raise HTTPException(
+            status_code=400, detail=f"strength must be one of {', '.join(SHARPEN_AMOUNT_PRESETS)}"
+        )
+
+    data = await file.read()
+    try:
+        bgra, _ = io_utils.decode_upload_to_bgra(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    _assert_image_safe(bgra)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        in_path = os.path.join(tmp, "input.png")
+        out_path = os.path.join(tmp, "output.png")
+        with open(in_path, "wb") as f:
+            f.write(data)
+
+        try:
+            await _run_pipeline_job(
+                jobs.image_sharpen_job, in_path, out_path, SHARPEN_AMOUNT_PRESETS[strength], timeout=60.0
+            )
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500, detail=f"Image processing failed: {type(exc).__name__}: {exc}"
+            ) from exc
+
+        with open(out_path, "rb") as f:
+            result = f.read()
+
+    return Response(content=result, media_type="image/png")
+
+
 @app.post("/api/image/auto-enhance")
-async def api_image_auto_enhance(request: Request, file: UploadFile = File(...)):
+async def api_image_auto_enhance(
+    request: Request,
+    file: UploadFile = File(...),
+    preview: bool = Form(False),
+):
     """Runs the full background-removal + halo-decontamination + alpha
     cleanup + sharpen pipeline (full_pipeline.auto_enhance) at its defaults.
+
+    `preview=true` downscales to BG_REMOVE_PREVIEW_MAX_MEGAPIXELS before
+    processing - the Next.js /api/remove-background route hard-sets this
+    for anonymous callers only (never trusts the client's own value, same
+    "server decides, client can't override" pattern api_video_process uses
+    for output resolution), matching remove.bg's free-tier resolution cap.
     """
     _assert_internal_caller(request)
 
@@ -473,8 +531,11 @@ async def api_image_auto_enhance(request: Request, file: UploadFile = File(...))
         with open(in_path, "wb") as f:
             f.write(data)
 
+        preview_max_megapixels = BG_REMOVE_PREVIEW_MAX_MEGAPIXELS if preview else None
         try:
-            await _run_pipeline_job(jobs.image_auto_enhance_job, in_path, out_path, timeout=60.0)
+            await _run_pipeline_job(
+                jobs.image_auto_enhance_job, in_path, out_path, preview_max_megapixels, timeout=60.0
+            )
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
             raise HTTPException(

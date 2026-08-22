@@ -11,7 +11,7 @@ export default function UnderConstructionPage() {
     <div className="flex min-h-screen flex-col items-center justify-center px-6 text-center relative overflow-hidden">
       <div
         aria-hidden
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-96 w-96 rounded-full bg-accent/20 blur-[120px] pointer-events-none -z-10"
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-96 w-96 rounded-full bg-accent/6 blur-[120px] pointer-events-none -z-10 dark:bg-accent/20"
       />
 
       <Logo size={56} textSize="text-2xl" />

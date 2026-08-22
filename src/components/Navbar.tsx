@@ -4,11 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import AuthStatus from "./AuthStatus";
 import Logo from "./Logo";
+import ThemeToggle from "./ThemeToggle";
 
 const links = [
   { href: "/#how-it-works", label: "How It Works" },
   { href: "/#features", label: "Features" },
-  { href: "/remove-image-watermark", label: "Image Tool" },
+  { href: "/#tools", label: "Free Tools" },
   { href: "/pricing", label: "Pricing" },
   { href: "/#faq", label: "FAQ" },
 ];
@@ -36,6 +37,7 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-3">
+          <ThemeToggle />
           <AuthStatus />
           <button
             type="button"

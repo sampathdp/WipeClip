@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
 
   // 10 checkout attempts/10min/user - generous for legit retries after a
   // declined card, tight enough to stop scripted checkout-creation abuse.
-  if (!(await checkRateLimit(rateLimitKeyFor(request, user.id), 10, 10 * 60 * 1000))) {
+  if (!(await checkRateLimit(`${rateLimitKeyFor(request, user.id)}:checkout`, 10, 10 * 60 * 1000))) {
     return NextResponse.json({ error: "Too many attempts. Try again in a few minutes." }, { status: 429 });
   }
 

@@ -44,6 +44,21 @@ def decode_upload_to_bgra(data: bytes) -> tuple[np.ndarray, Optional[bytes]]:
     return bgra, icc_profile
 
 
+def downscale_to_max_megapixels(bgra: np.ndarray, max_megapixels: float) -> np.ndarray:
+    """Downscales (never upscales) to at most max_megapixels total pixels,
+    preserving aspect ratio. No-op if already at or under the cap.
+    """
+    h, w = bgra.shape[:2]
+    max_pixels = max_megapixels * 1_000_000
+    if w * h <= max_pixels:
+        return bgra
+
+    scale = (max_pixels / (w * h)) ** 0.5
+    new_w = max(1, round(w * scale))
+    new_h = max(1, round(h * scale))
+    return cv2.resize(bgra, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+
 def decode_mask(data: bytes, target_shape: tuple[int, int]) -> np.ndarray:
     """Decode an uploaded mask image (any mode) into a single-channel uint8
     array matching target_shape (H, W), where >127 means "masked".

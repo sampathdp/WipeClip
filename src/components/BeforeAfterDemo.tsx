@@ -108,7 +108,7 @@ export default function BeforeAfterDemo() {
             onClick={() => setMode("slider")}
             className={`rounded-full px-2.5 py-1 transition-all ${
               mode === "slider"
-                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 shadow-[0_0_10px_rgba(34,211,238,0.3)]"
+                ? "bg-cyan-500/20 text-cyan-600 border border-cyan-400/40 shadow-[0_0_10px_rgba(34,211,238,0.3)]"
                 : "text-muted hover:text-foreground"
             }`}
           >
@@ -118,7 +118,7 @@ export default function BeforeAfterDemo() {
             onClick={() => setMode("scanner")}
             className={`rounded-full px-2.5 py-1 transition-all ${
               mode === "scanner"
-                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 shadow-[0_0_10px_rgba(34,211,238,0.3)]"
+                ? "bg-cyan-500/20 text-cyan-600 border border-cyan-400/40 shadow-[0_0_10px_rgba(34,211,238,0.3)]"
                 : "text-muted hover:text-foreground"
             }`}
           >
@@ -128,7 +128,7 @@ export default function BeforeAfterDemo() {
             onClick={() => setMode("reticle")}
             className={`rounded-full px-2.5 py-1 transition-all ${
               mode === "reticle"
-                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 shadow-[0_0_10px_rgba(34,211,238,0.3)]"
+                ? "bg-cyan-500/20 text-cyan-600 border border-cyan-400/40 shadow-[0_0_10px_rgba(34,211,238,0.3)]"
                 : "text-muted hover:text-foreground"
             }`}
           >
@@ -140,7 +140,7 @@ export default function BeforeAfterDemo() {
       {/* Main Holographic Video Deck */}
       <div
         ref={containerRef}
-        className="glass-card group relative aspect-video w-full select-none overflow-hidden rounded-[2rem] border border-cyan-500/30 shadow-[0_25px_70px_rgba(0,0,0,0.9)] cursor-ew-resize bg-black"
+        className="glass-card group relative aspect-video w-full select-none overflow-hidden rounded-[2rem] border border-cyan-500/30 shadow-[0_25px_70px_rgba(15,23,42,0.12)] dark:shadow-[0_25px_70px_rgba(0,0,0,0.9)] cursor-ew-resize bg-black"
         onPointerDown={(e) => {
           if (mode === "slider") {
             dragging.current = true;
@@ -198,7 +198,7 @@ export default function BeforeAfterDemo() {
           style={{ clipPath: `inset(0 0 0 ${effectivePercent}%)` }}
         >
           {/* Subtle watermark scanline overlay on watermarked side */}
-          <div className="absolute inset-0 bg-cyan-950/10 backdrop-contrast-[1.05]" />
+          <div className="absolute inset-0 bg-cyan-50/70 backdrop-contrast-[1.05]" />
 
           {/* Original State Badge (Right Side) */}
           <span className="absolute bottom-5 right-5 inline-flex items-center gap-1.5 rounded-full bg-black/75 backdrop-blur-md px-3.5 py-1.5 text-xs font-medium text-muted border border-border shadow-lg">
@@ -251,7 +251,7 @@ export default function BeforeAfterDemo() {
             className="absolute inset-y-0 z-30 w-0.5 bg-gradient-to-b from-cyan-400 via-white to-accent shadow-[0_0_15px_#22d3ee]"
             style={{ left: `${percent}%` }}
           >
-            <div className="absolute top-1/2 left-1/2 flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-surface-2/95 backdrop-blur-md border-2 border-cyan-400 text-cyan-300 shadow-[0_0_25px_rgba(34,211,238,0.7)] group-hover:scale-110 transition-transform">
+            <div className="absolute top-1/2 left-1/2 flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-surface-2/95 backdrop-blur-md border-2 border-cyan-400 text-cyan-600 shadow-[0_0_25px_rgba(34,211,238,0.7)] group-hover:scale-110 transition-transform">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                 <path
                   d="M8 5l-6 7 6 7M16 5l6 7-6 7"

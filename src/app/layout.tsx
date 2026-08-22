@@ -91,9 +91,11 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#05060a",
-  colorScheme: "dark",
+  themeColor: "#ffffff",
+  colorScheme: "light dark",
 };
+
+const themeInitScript = `(function(){try{var t=localStorage.getItem("theme");if(t==="dark"){document.documentElement.setAttribute("data-theme","dark");var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content","#05060a");}}catch(e){}})();`;
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -134,8 +136,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="en"
       className={`h-full antialiased ${inter.variable} ${jakarta.variable}`}
+      suppressHydrationWarning
     >
       <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
