@@ -237,7 +237,7 @@ export default function VideoFrameGrabberDemo() {
     try {
       const frames = await suggestCoverFrames(video, (done, total) => setSuggestProgress({ done, total }));
       if (frames.length === 0) {
-        setError("Couldn't find good cover frames in this video — try grabbing one manually instead.");
+        setError("Couldn't find good cover frames in this video. Try grabbing one manually instead.");
         return;
       }
       const withIds = frames.map((f) => ({
@@ -270,7 +270,7 @@ export default function VideoFrameGrabberDemo() {
             Try it now: <span className="text-gradient">Grab Video Frames</span>
           </h2>
           <p className="mt-1.5 text-sm sm:text-base text-muted">
-            Scrub to any moment, capture it as a PNG. 100% in your browser — nothing is uploaded.
+            Scrub to any moment, capture it as a PNG. 100% in your browser. Nothing is uploaded.
           </p>
         </div>
       </div>
@@ -380,7 +380,7 @@ export default function VideoFrameGrabberDemo() {
               </button>
             </div>
             <p className="mt-2 text-center text-xs text-muted">
-              Play, pause, or scrub the video above to the moment you want, then capture — or let us scan the clip
+              Play, pause, or scrub the video above to the moment you want, then capture, or let us scan the clip
               for a few sharp, well-lit frames that work well as a cover image.
             </p>
           </div>

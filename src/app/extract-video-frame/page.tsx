@@ -3,9 +3,9 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import VideoFrameGrabberDemo from "@/components/VideoFrameGrabberDemo";
 
-const title = "Extract a Frame From Video — Free Screenshot Tool";
+const title = "Extract a Frame From Video - Free Screenshot Tool";
 const description =
-  "Grab any frame from a video as a PNG screenshot or thumbnail. Runs entirely in your browser — no upload, no account, no limit on how many frames you capture.";
+  "Grab any frame from a video as a PNG screenshot or thumbnail. Runs entirely in your browser: no upload, no account, no limit on how many frames you capture.";
 
 export const metadata: Metadata = {
   title,
@@ -35,11 +35,11 @@ const faqs = [
   },
   {
     q: "Is there a limit on how many frames I can grab?",
-    a: "No. Capture as many frames from the same video as you want — each one's a fresh canvas export, at no cost to you or to us.",
+    a: "No. Capture as many frames from the same video as you want, each one's a fresh canvas export, at no cost to you or to us.",
   },
   {
     q: "What resolution is the exported frame?",
-    a: "The video's native resolution — the canvas is sized to the video's actual width and height before export, so you get a full-resolution PNG, not a scaled-down thumbnail.",
+    a: "The video's native resolution. The canvas is sized to the video's actual width and height before export, so you get a full-resolution PNG, not a scaled-down thumbnail.",
   },
   {
     q: "Why would I need WipeClip.co's paid tool instead?",
@@ -80,7 +80,7 @@ export default function Page() {
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
               Scrub to the moment you want and capture it as a full-resolution PNG. Runs entirely
-              in your browser — your video is never uploaded.
+              in your browser. Your video is never uploaded.
             </p>
           </div>
         </section>
@@ -94,7 +94,7 @@ export default function Page() {
         <section className="py-16">
           <div className="mx-auto max-w-3xl px-6">
             <h2 className="text-center font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-              Frame extraction — FAQ
+              Frame extraction: FAQ
             </h2>
             <div className="mt-10 space-y-4">
               {faqs.map((f) => (

@@ -3,7 +3,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import BackgroundRemoverDemo from "@/components/BackgroundRemoverDemo";
 
-const title = "Remove Background From Image — Free";
+const title = "Remove Background From Image - Free";
 const description =
   "Upload a photo and get a transparent-background PNG back in seconds. Free, no account required to preview. Powered by the same reconstruction engine behind WipeClip.co's watermark remover.";
 
@@ -31,7 +31,7 @@ export const metadata: Metadata = {
 const faqs = [
   {
     q: "Is this actually free?",
-    a: "Yes. Every visitor gets free preview passes with no account, and every signed-in account gets 2 free credits a day at no cost — that covers typical everyday use of this tool.",
+    a: "Yes. Every visitor gets free preview passes with no account, and every signed-in account gets 2 free credits a day at no cost, which covers typical everyday use of this tool.",
   },
   {
     q: "What file types come out?",
@@ -39,7 +39,7 @@ const faqs = [
   },
   {
     q: "How is this different from WipeClip.co's watermark remover?",
-    a: "Background removal cuts out the subject automatically — no marking required. The watermark remover reconstructs a small marked region (like a logo or badge) instead of removing the whole background. Both share the same image-processing engine underneath.",
+    a: "Background removal cuts out the subject automatically, no marking required. The watermark remover reconstructs a small marked region (like a logo or badge) instead of removing the whole background. Both share the same image-processing engine underneath.",
   },
   {
     q: "Will edges look rough on hair or fine detail?",
@@ -80,7 +80,7 @@ export default function Page() {
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
               Upload a photo, get a transparent PNG back. No region to mark, no account needed to
-              preview — just drop the subject onto whatever background you need next.
+              preview. Just drop the subject onto whatever background you need next.
             </p>
           </div>
         </section>
@@ -94,7 +94,7 @@ export default function Page() {
         <section className="py-16">
           <div className="mx-auto max-w-3xl px-6">
             <h2 className="text-center font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-              Background removal — FAQ
+              Background removal: FAQ
             </h2>
             <div className="mt-10 space-y-4">
               {faqs.map((f) => (

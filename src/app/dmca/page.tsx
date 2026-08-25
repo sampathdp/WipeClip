@@ -34,7 +34,7 @@ export default function DmcaPage() {
 
       <P>
         WipeClip.co is a self-serve editing tool: users upload their own media,
-        we process it, and we return the result — we do not host, index, or
+        we process it, and we return the result. We do not host, index, or
         make user content available to anyone else. Even so, we take
         copyright seriously and require every user to confirm they own or
         have permission to edit anything they upload (see our{" "}
@@ -55,7 +55,7 @@ export default function DmcaPage() {
         <li>a physical or electronic signature of the copyright owner or an authorized agent;</li>
         <li>identification of the copyrighted work claimed to have been infringed;</li>
         <li>identification of the material you claim is infringing, with enough detail for us to locate it;</li>
-        <li>your contact information — address, phone number, and email;</li>
+        <li>your contact information: address, phone number, and email;</li>
         <li>
           a statement that you have a good-faith belief the use is not
           authorized by the copyright owner, its agent, or the law; and

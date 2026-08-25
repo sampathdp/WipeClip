@@ -36,7 +36,7 @@ export default function TestResultCard({
       ) : (
         <div className="mt-6 rounded-2xl border border-dashed border-border bg-surface-2/40 p-6 text-center">
           <p className="text-sm text-muted leading-relaxed">
-            Pending verification — no test has been published for this case yet. It will appear here
+            Pending verification. No test has been published for this case yet. It will appear here
             once real before/after footage and measured results are available.
           </p>
         </div>

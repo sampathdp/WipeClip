@@ -21,7 +21,7 @@ const body = (
   <div className="space-y-6">
     <div className="glass-card rounded-[2rem] p-8 sm:p-10 border border-border/80">
       <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">
-        The mark moves — that&apos;s what makes it different
+        The mark moves: that&apos;s what makes it different
       </h2>
       <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
         TikTok&apos;s export burns in a spinning &ldquo;tiktok&rdquo; mark and the uploader&apos;s
@@ -37,14 +37,14 @@ const body = (
       <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
         <strong className="text-foreground">Cropping</strong> only works if the mark stays inside
         one fixed region for the whole clip. Since the badge drifts, a crop tight enough to remove it
-        early on misses it later — or has to cut a much bigger, permanent chunk out of every frame to
+        early on misses it later, or has to cut a much bigger, permanent chunk out of every frame to
         stay ahead of it, changing the video&apos;s dimensions in the process.
       </p>
       <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
         <strong className="text-foreground">A static blur box</strong> has the same problem: sized
         and positioned for frame one, it&apos;s misaligned by frame thirty. The badge ends up
         partially visible at the edge of the blur, or the box has to be enlarged well past the mark
-        itself to stay safe — hiding more of the actual video than necessary.
+        itself to stay safe, hiding more of the actual video than necessary.
       </p>
       <p className="mt-4 text-sm">
         <Link href="/#comparison" className="underline hover:text-foreground text-cyan-600">
@@ -75,7 +75,7 @@ const body = (
       <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
         Quick pans, shaky handheld shots, and rapid-cut trend edits give the tracker less stable
         footage to reference between frames. Results depend on how much clean detail is actually
-        visible around the mark at each moment — see{" "}
+        visible around the mark at each moment. See{" "}
         <Link href="/#limitations" className="underline hover:text-foreground text-cyan-600">
           limitations
         </Link>{" "}

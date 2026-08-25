@@ -21,7 +21,7 @@ export default function TestMethodology() {
       </h2>
       <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
         This is the process every test on this page follows once it&apos;s run and published. No
-        tests have been completed and verified yet — see{" "}
+        tests have been completed and verified yet. See{" "}
         <a href="#limitations" className="underline hover:text-foreground">
           limitations
         </a>{" "}

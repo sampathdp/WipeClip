@@ -8,7 +8,7 @@ const rows: { label: string; cells: Cell[] }[] = [
   {
     label: "Preserves frame dimensions",
     cells: [
-      { value: "No — cuts into the frame", negative: true },
+      { value: "No: cuts into the frame", negative: true },
       { value: "Yes", positive: true },
       { value: "Yes", positive: true },
       { value: "Yes", positive: true },
@@ -18,8 +18,8 @@ const rows: { label: string; cells: Cell[] }[] = [
     label: "Leaves a visible patch",
     cells: [
       { value: "No patch, but permanently loses that part of the frame", negative: true },
-      { value: "Yes — an obvious blurred box", negative: true },
-      { value: "Yes — a solid block", negative: true },
+      { value: "Yes: an obvious blurred box", negative: true },
+      { value: "Yes: a solid block", negative: true },
       { value: "Usually less visible, but not guaranteed" },
     ],
   },
@@ -27,9 +27,9 @@ const rows: { label: string; cells: Cell[] }[] = [
     label: "Works on a moving overlay",
     cells: [
       { value: "No", negative: true },
-      { value: "Poor — needs a fixed box", negative: true },
-      { value: "Poor — needs a fixed box", negative: true },
-      { value: "Yes — tracks the marked region", positive: true },
+      { value: "Poor: needs a fixed box", negative: true },
+      { value: "Poor: needs a fixed box", negative: true },
+      { value: "Yes: tracks the marked region", positive: true },
     ],
   },
   {
@@ -38,16 +38,16 @@ const rows: { label: string; cells: Cell[] }[] = [
       { value: "Low", positive: true },
       { value: "Low", positive: true },
       { value: "Low", positive: true },
-      { value: "Low — mark once", positive: true },
+      { value: "Low: mark once", positive: true },
     ],
   },
   {
     label: "Difficult, busy backgrounds",
     cells: [
-      { value: "Unaffected — the area is just removed" },
+      { value: "Unaffected: the area is just removed" },
       { value: "Unaffected, but still visibly blurred" },
       { value: "Unaffected, but still visibly blocked" },
-      { value: "Can struggle — depends on nearby detail to rebuild from", negative: true },
+      { value: "Can struggle: depends on nearby detail to rebuild from", negative: true },
     ],
   },
 ];
@@ -64,7 +64,7 @@ export default function RemovalMethodComparison() {
             How the four approaches compare
           </h2>
           <p className="mt-4 text-muted text-base leading-relaxed">
-            No single method wins on every measure — reconstruction trades a visible patch for
+            No single method wins on every measure. Reconstruction trades a visible patch for
             depending on how much surrounding detail there is to work with.
           </p>
         </div>

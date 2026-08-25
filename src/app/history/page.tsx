@@ -50,7 +50,7 @@ export default async function HistoryPage() {
           </h1>
           <p className="mt-3 text-sm sm:text-base text-muted">
             A usage/billing log of what you&apos;ve run and what it cost. This isn&apos;t a place to
-            re-download past outputs — files were never stored on our servers, only streamed to
+            re-download past outputs. Files were never stored on our servers, only streamed to
             your browser at process time.
           </p>
 

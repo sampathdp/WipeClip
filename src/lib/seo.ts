@@ -8,7 +8,7 @@ const OG_IMAGE = "/opengraph-image";
 /**
  * Builds a consistent title/description/canonical/OpenGraph/Twitter metadata
  * object for a public page. `path` must be root-relative (e.g. "/pricing")
- * and is resolved against the root layout's `metadataBase` (SITE_URL) — it
+ * and is resolved against the root layout's `metadataBase` (SITE_URL). It
  * must never be a vercel.app, preview, or localhost URL.
  */
 export function buildPageMetadata({

@@ -5,7 +5,7 @@ const limitations = [
   },
   {
     title: "Single test environment",
-    desc: "Once published, each test will reflect one hardware/software configuration and one operator — not a statistically representative sample across devices.",
+    desc: "Once published, each test will reflect one hardware/software configuration and one operator, not a statistically representative sample across devices.",
   },
   {
     title: "Not independently audited",

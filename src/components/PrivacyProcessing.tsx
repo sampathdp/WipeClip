@@ -2,7 +2,7 @@ import Link from "next/link";
 
 const points = [
   "Your video is sent to our processing backend only for the duration of your request.",
-  "It's held in a temporary location and deleted immediately once your result is returned — we don't keep a copy afterward.",
+  "It's held in a temporary location and deleted immediately once your result is returned. We don't keep a copy afterward.",
   "We don't use uploaded media to train any model.",
 ];
 

@@ -17,7 +17,7 @@ const tools = [
     href: "/extract-video-frame",
     badge: "Free",
     title: "Video Frame Grabber",
-    desc: "Scrub to any moment, capture it as a full-resolution PNG. 100% in your browser — nothing is uploaded.",
+    desc: "Scrub to any moment, capture it as a full-resolution PNG. 100% in your browser. Nothing is uploaded.",
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
@@ -41,7 +41,7 @@ const tools = [
     href: "/remove-image-watermark",
     badge: "Pro",
     title: "Image Watermark Remover",
-    desc: "Mark a watermark or logo region on any image once — same reconstruction engine as the video tool.",
+    desc: "Mark a watermark or logo region on any image once. Same reconstruction engine as the video tool.",
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -69,7 +69,7 @@ export default function FreeTools() {
             More than <span className="text-gradient">watermark removal</span>
           </h2>
           <p className="mt-4 text-muted text-base leading-relaxed">
-            Everything else you need for the same footage and photos — three of them free, no
+            Everything else you need for the same footage and photos, three of them free, no
             account required to try.
           </p>
         </div>

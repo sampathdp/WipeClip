@@ -198,9 +198,9 @@ export default function RegionSelector({
         <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
         {suggestion
           ? suggestion.label
-            ? `Detected a ${suggestion.label} watermark — drag to adjust, or resize with the corner handles.`
-            : "Auto-detected likely watermark region — drag to adjust, or resize with the corner handles."
-          : "No obvious watermark detected — click & drag on the frame to mark it, then resize with the corner handles."}
+            ? `Detected a ${suggestion.label} watermark. Drag to adjust, or resize with the corner handles.`
+            : "Auto-detected likely watermark region. Drag to adjust, or resize with the corner handles."
+          : "No obvious watermark detected. Click & drag on the frame to mark it, then resize with the corner handles."}
       </p>
     </div>
   );

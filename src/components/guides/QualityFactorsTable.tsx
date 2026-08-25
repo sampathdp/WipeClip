@@ -17,7 +17,7 @@ const factors: { term: string; meaning: string; effect: string }[] = [
   {
     term: "Codec",
     meaning: "The compression algorithm used to encode the video (e.g. H.264, H.265).",
-    effect: "Different codecs need different bitrates to reach the same visual quality — the codec name alone doesn't tell you the result.",
+    effect: "Different codecs need different bitrates to reach the same visual quality: the codec name alone doesn't tell you the result.",
   },
   {
     term: "Re-encoding",
@@ -27,17 +27,17 @@ const factors: { term: string; meaning: string; effect: string }[] = [
   {
     term: "Compression",
     meaning: "The general process of reducing file size by discarding some information.",
-    effect: "Heavier compression trades file size for visible quality — blockiness, softness, or banding in detailed or fast-moving areas.",
+    effect: "Heavier compression trades file size for visible quality: blockiness, softness, or banding in detailed or fast-moving areas.",
   },
   {
     term: "Reconstructed pixels",
     meaning: "The pixels WipeClip generates inside the marked region.",
-    effect: "An estimate based on surrounding footage, not a copy of the original pixels — the one part of the frame that isn't simply preserved from the source.",
+    effect: "An estimate based on surrounding footage, not a copy of the original pixels, the one part of the frame that isn't simply preserved from the source.",
   },
   {
     term: "Local artifacts",
     meaning: "Visible imperfections confined to a specific area of the frame, rather than the whole image.",
-    effect: "Where reconstruction quality actually shows up, if it's going to — confined to the marked region, not spread across the frame.",
+    effect: "Where reconstruction quality actually shows up, if it's going to, confined to the marked region, not spread across the frame.",
   },
 ];
 

@@ -12,7 +12,7 @@ import { buildPageMetadata, SITE_URL } from "@/lib/seo";
 
 const title = "How AI Video Inpainting Works";
 const description =
-  "A plain-language explanation of how video inpainting fills in a marked region using nearby pixels and nearby frames — and where the approach runs into trouble.";
+  "A plain-language explanation of how video inpainting fills in a marked region using nearby pixels and nearby frames, and where the approach runs into trouble.";
 const path = "/guides/how-ai-video-inpainting-works";
 const publishedDate = "2026-08-25";
 const updatedDate = "2026-08-25";
@@ -40,12 +40,12 @@ const steps = [
   {
     n: "01",
     title: "Marking the region",
-    desc: "You draw a box around the badge, logo, or timestamp on a single preview frame. That's the only manual step — everything past this point is automatic.",
+    desc: "You draw a box around the badge, logo, or timestamp on a single preview frame. That's the only manual step: everything past this point is automatic.",
   },
   {
     n: "02",
     title: "Filling it in from nearby pixels",
-    desc: "Within that same frame, the system looks at the pixels surrounding the marked box — their color, texture, and pattern — and uses them to build a plausible fill for the marked area. This is spatial reconstruction: working outward from what's directly around the gap.",
+    desc: "Within that same frame, the system looks at the pixels surrounding the marked box (their color, texture, and pattern) and uses them to build a plausible fill for the marked area. This is spatial reconstruction: working outward from what's directly around the gap.",
   },
   {
     n: "03",
@@ -87,7 +87,7 @@ export default function Page() {
 
         <section className="py-8">
           <DirectAnswer>
-            Video inpainting fills in a marked region by estimating what should be there — using the
+            Video inpainting fills in a marked region by estimating what should be there, using the
             pixels around it in the same frame, and, uniquely to video, the same spot as it appears in
             nearby frames where it isn&apos;t covered. It&apos;s reconstruction from available
             evidence, not a lookup of the original footage.
@@ -124,7 +124,7 @@ export default function Page() {
                 When there&apos;s nothing nearby to borrow from
               </h2>
               <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
-                Sometimes no nearby frame has a clean view of what&apos;s behind the mark — the camera
+                Sometimes no nearby frame has a clean view of what&apos;s behind the mark: the camera
                 never reveals that spot, or something else blocks it the whole time. This is called{" "}
                 <strong className="text-foreground">occlusion</strong>, and it&apos;s the scenario
                 with the least real information to work with. The system falls back to estimating from
@@ -142,7 +142,7 @@ export default function Page() {
                 Complex backgrounds cut both ways
               </h2>
               <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
-                A detailed, textured background can actually help the spatial step — there&apos;s more
+                A detailed, textured background can actually help the spatial step: there&apos;s more
                 surrounding pattern to sample from than a flat, empty one. What hurts is a background
                 that changes quickly or unpredictably between frames: fast motion or heavy camera shake
                 makes it harder to line frames up and find a reliable match, regardless of how detailed
@@ -161,7 +161,7 @@ export default function Page() {
               <li>A large marked area gives the spatial step less nearby detail to build a convincing fill from.</li>
               <li>Heavy camera shake or fast motion makes it harder to line frames up for the temporal step.</li>
               <li>Something else repeatedly crossing the marked region creates occlusion, described above.</li>
-              <li>An area with very little visual information behind it — plain, unchanging, or mostly out of frame — leaves little for either step to work with.</li>
+              <li>An area with very little visual information behind it (plain, unchanging, or mostly out of frame) leaves little for either step to work with.</li>
             </ul>
             <p className="mt-5 text-sm text-muted leading-relaxed">
               See WipeClip&apos;s own{" "}

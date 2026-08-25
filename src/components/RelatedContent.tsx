@@ -13,7 +13,7 @@ export default function RelatedContent() {
             Removing a watermark from a specific platform
           </h2>
           <p className="mt-4 text-muted text-base leading-relaxed">
-            Each platform&apos;s export behaves a little differently — these go into the specifics.
+            Each platform&apos;s export behaves a little differently. These go into the specifics.
           </p>
         </div>
 

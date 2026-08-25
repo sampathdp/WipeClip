@@ -24,7 +24,7 @@ const body = (
       </h2>
       <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
         When a Reel or Story is saved from Instagram, the app&apos;s own download pipeline burns the
-        Instagram logo and the poster&apos;s @handle directly into the video file — it&apos;s not an
+        Instagram logo and the poster&apos;s @handle directly into the video file. It&apos;s not an
         overlay you can switch off, it&apos;s part of every frame of the file you&apos;re left with.
       </p>
     </div>
@@ -35,7 +35,7 @@ const body = (
       </h2>
       <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
         This tool is built for your own Reels and Stories, or footage a client or collaborator has
-        explicitly authorized you to repurpose — not for stripping another creator&apos;s attribution
+        explicitly authorized you to repurpose, not for stripping another creator&apos;s attribution
         off content that isn&apos;t yours. If you&apos;re working with something you didn&apos;t post
         yourself, confirm you have permission first. See our{" "}
         <Link href="/terms" className="underline hover:text-foreground text-cyan-600">
@@ -51,7 +51,7 @@ const body = (
       </h2>
       <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
         If you still have the video file from before it went through Instagram&apos;s save/download
-        pipeline, use that instead — it&apos;s identical to the source, not a reconstruction (see{" "}
+        pipeline, use that instead. It&apos;s identical to the source, not a reconstruction (see{" "}
         <Link
           href="/guides/does-watermark-removal-reduce-video-quality"
           className="underline hover:text-foreground text-cyan-600"
@@ -67,7 +67,7 @@ const body = (
         Frame dimensions stay exactly as they were
       </h2>
       <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
-        Only the marked region is rebuilt — WipeClip doesn&apos;t crop or resize the video to hide the
+        Only the marked region is rebuilt. WipeClip doesn&apos;t crop or resize the video to hide the
         badge, so the original aspect ratio and resolution carry through unchanged.{" "}
         <Link href="/#comparison" className="underline hover:text-foreground text-cyan-600">
           Compare that to what cropping does

@@ -6,7 +6,7 @@ const rows: { label: string; cells: Cell[] }[] = [
   {
     label: "Frame dimensions",
     cells: [
-      { value: "Changed — cuts into the frame", negative: true },
+      { value: "Changed: cuts into the frame", negative: true },
       { value: "Preserved", positive: true },
       { value: "Preserved", positive: true },
       { value: "Preserved", positive: true },
@@ -36,32 +36,32 @@ const rows: { label: string; cells: Cell[] }[] = [
       { value: "Works if the region is expendable" },
       { value: "Works, patch stays visible" },
       { value: "Works, patch stays visible" },
-      { value: "Works well — a fixed, predictable region", positive: true },
+      { value: "Works well: a fixed, predictable region", positive: true },
     ],
   },
   {
     label: "Complex backgrounds",
     cells: [
-      { value: "Unaffected — the area is just removed" },
+      { value: "Unaffected: the area is just removed" },
       { value: "Unaffected, but still visibly blurred" },
       { value: "Unaffected, but still visibly blocked" },
-      { value: "Can struggle — depends on nearby detail", negative: true },
+      { value: "Can struggle: depends on nearby detail", negative: true },
     ],
   },
   {
     label: "Processing requirements",
     cells: [
-      { value: "Minimal — basic video editing", positive: true },
-      { value: "Minimal — basic video editing", positive: true },
-      { value: "Minimal — basic video editing", positive: true },
-      { value: "Higher — server-side reconstruction, takes measurable time", negative: true },
+      { value: "Minimal: basic video editing", positive: true },
+      { value: "Minimal: basic video editing", positive: true },
+      { value: "Minimal: basic video editing", positive: true },
+      { value: "Higher: server-side reconstruction, takes measurable time", negative: true },
     ],
   },
   {
     label: "Typical failure case",
     cells: [
-      { value: "Mark is large or moves — too much frame lost" },
-      { value: "Mark is large or moves — stays partly visible" },
+      { value: "Mark is large or moves: too much frame lost" },
+      { value: "Mark is large or moves: stays partly visible" },
       { value: "Same as blur, and more visually intrusive" },
       { value: "Too little surrounding detail to rebuild from" },
     ],

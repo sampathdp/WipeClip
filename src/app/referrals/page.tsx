@@ -68,7 +68,7 @@ export default async function ReferralsPage() {
             <span className="text-gradient">5 credits</span>
           </h1>
           <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
-            Share your link. When someone signs up through it, you both get 5 bonus credits — no
+            Share your link. When someone signs up through it, you both get 5 bonus credits, no
             limit on how many friends you refer.
           </p>
 
@@ -78,7 +78,7 @@ export default async function ReferralsPage() {
 
           {profile?.referred_by && (
             <p className="mt-6 text-xs text-muted">
-              You joined via someone else&apos;s referral link — thanks for signing up!
+              You joined via someone else&apos;s referral link. Thanks for signing up!
             </p>
           )}
         </div>

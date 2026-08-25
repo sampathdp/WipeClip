@@ -3,7 +3,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import PhotoSharpenerDemo from "@/components/PhotoSharpenerDemo";
 
-const title = "Sharpen a Blurry Photo — Free";
+const title = "Sharpen a Blurry Photo - Free";
 const description =
   "Restore crisp detail to a soft or slightly blurry photo in seconds. Free, no account required to preview. Pick light, standard, or strong strength.";
 
@@ -31,11 +31,11 @@ export const metadata: Metadata = {
 const faqs = [
   {
     q: "Will this fix a badly blurry or out-of-focus photo?",
-    a: "No — this restores local contrast and edge detail on a photo that's already reasonably sharp but looks a little soft (a common side effect of compression or resizing). It can't reconstruct detail that was never captured, so heavy motion blur or an out-of-focus shot won't come back sharp.",
+    a: "No. This restores local contrast and edge detail on a photo that's already reasonably sharp but looks a little soft (a common side effect of compression or resizing). It can't reconstruct detail that was never captured, so heavy motion blur or an out-of-focus shot won't come back sharp.",
   },
   {
     q: "Does this upscale the image resolution?",
-    a: "No — output is the same pixel dimensions as your upload. This adds clarity/detail contrast at the existing resolution, it doesn't add resolution.",
+    a: "No. Output is the same pixel dimensions as your upload. This adds clarity/detail contrast at the existing resolution, it doesn't add resolution.",
   },
   {
     q: "What's the difference between Light, Standard, and Strong?",
@@ -43,7 +43,7 @@ const faqs = [
   },
   {
     q: "Is this free?",
-    a: "Yes. Every visitor gets free preview passes with no account, and every signed-in account gets 2 free credits a day — that covers typical everyday use of this tool.",
+    a: "Yes. Every visitor gets free preview passes with no account, and every signed-in account gets 2 free credits a day, which covers typical everyday use of this tool.",
   },
 ];
 
@@ -79,7 +79,7 @@ export default function Page() {
               Sharpen a <span className="text-gradient">soft or blurry</span> photo
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
-              Upload a photo, pick a strength, get crisper detail back — no account needed to
+              Upload a photo, pick a strength, get crisper detail back, no account needed to
               preview.
             </p>
           </div>
@@ -94,7 +94,7 @@ export default function Page() {
         <section className="py-16">
           <div className="mx-auto max-w-3xl px-6">
             <h2 className="text-center font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-              Photo sharpening — FAQ
+              Photo sharpening: FAQ
             </h2>
             <div className="mt-10 space-y-4">
               {faqs.map((f) => (

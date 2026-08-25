@@ -24,11 +24,11 @@ const siteUrl = SITE_URL;
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "AI Video Watermark Remover — WipeClip.co",
+    default: "AI Video Watermark Remover | WipeClip.co",
     template: "%s | WipeClip.co",
   },
   description:
-    "WipeClip is an AI video watermark remover that reconstructs the pixels behind a logo, badge, or timestamp instead of blurring or cropping the frame. Mark the overlay once — no editing skills needed.",
+    "WipeClip is an AI video watermark remover that reconstructs the pixels behind a logo, badge, or timestamp instead of blurring or cropping the frame. Mark the overlay once. No editing skills needed.",
   keywords: [
     "video watermark remover",
     "AI video watermark remover",
@@ -49,24 +49,24 @@ export const metadata: Metadata = {
     type: "website",
     url: siteUrl,
     siteName: "WipeClip.co",
-    title: "AI Video Watermark Remover — WipeClip.co",
+    title: "AI Video Watermark Remover | WipeClip.co",
     description:
-      "Mark a logo, badge, or timestamp and WipeClip reconstructs the pixels underneath — no crop, no blur box.",
+      "Mark a logo, badge, or timestamp and WipeClip reconstructs the pixels underneath. No crop, no blur box.",
     locale: "en_US",
     images: [
       {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "WipeClip.co — video watermark & object remover",
+        alt: "WipeClip.co video watermark & object remover",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "AI Video Watermark Remover — WipeClip.co",
+    title: "AI Video Watermark Remover | WipeClip.co",
     description:
-      "Mark a logo, badge, or timestamp and WipeClip reconstructs the pixels underneath — no crop, no blur box.",
+      "Mark a logo, badge, or timestamp and WipeClip reconstructs the pixels underneath. No crop, no blur box.",
     images: ["/opengraph-image"],
   },
   robots: {

@@ -8,7 +8,7 @@ import { buildPageMetadata } from "@/lib/seo";
 
 const title = "Research";
 const description =
-  "WipeClip's published tests on AI video watermark removal — real before/after clips and measured results, published once verified.";
+  "WipeClip's published tests on AI video watermark removal: real before/after clips and measured results, published once verified.";
 
 export const metadata: Metadata = buildPageMetadata({
   title,
@@ -21,8 +21,8 @@ const articles = [
     href: "/research/video-watermark-removal-test",
     title: "We Tested AI Watermark Removal on Real Videos",
     description:
-      "Static and moving watermarks, semi-transparent overlays, complex backgrounds, and fast motion — methodology and results as they're verified.",
-    status: "In progress — awaiting verified test data",
+      "Static and moving watermarks, semi-transparent overlays, complex backgrounds, and fast motion. Methodology and results as they're verified.",
+    status: "In progress: awaiting verified test data",
   },
 ];
 
@@ -41,7 +41,7 @@ export default function ResearchIndexPage() {
               Evidence, not marketing claims
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
-              This is where WipeClip publishes real, checkable tests of its own watermark removal —
+              This is where WipeClip publishes real, checkable tests of its own watermark removal:
               actual before/after clips and measured numbers, not projected or estimated ones.
             </p>
           </div>

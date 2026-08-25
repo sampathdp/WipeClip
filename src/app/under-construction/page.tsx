@@ -21,7 +21,7 @@ export default function UnderConstructionPage() {
       </h1>
       <p className="mt-4 max-w-md text-sm sm:text-base text-muted">
         WipeClip.co is almost ready. We&apos;re wrapping up a few things behind
-        the scenes — check back soon.
+        the scenes. Check back soon.
       </p>
     </div>
   );

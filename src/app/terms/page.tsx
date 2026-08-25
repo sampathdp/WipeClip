@@ -44,8 +44,8 @@ export default function TermsPage() {
       <H2>1. What the Service does</H2>
       <P>
         WipeClip.co lets you mark a region of a video or image you provide and
-        removes or replaces it — for example a logo, watermark, timestamp, or
-        another unwanted object — using automated image/video processing. You
+        removes or replaces it (for example a logo, watermark, timestamp, or
+        another unwanted object) using automated image/video processing. You
         choose the region; the Service does not automatically detect or
         target any specific brand&apos;s mark.
       </P>
@@ -86,7 +86,7 @@ export default function TermsPage() {
       </ul>
       <P>
         WipeClip.co is a general-purpose retouching tool intended for lawful
-        personal and professional editing — cleaning up your own footage,
+        personal and professional editing: cleaning up your own footage,
         removing incidental artifacts, or retouching assets you have
         permission to modify. It is not intended, and must not be used, to
         help you republish someone else&apos;s copyrighted work as your own,
@@ -109,7 +109,7 @@ export default function TermsPage() {
       <P>
         We use automated screening to detect explicit content before
         processing and reject uploads it flags. This screening is a
-        heuristic safeguard, not a guarantee — we may still reject content in
+        heuristic safeguard, not a guarantee. We may still reject content in
         error or fail to catch content that violates these Terms, and we may
         suspend or terminate access for violations detected by other means.
       </P>

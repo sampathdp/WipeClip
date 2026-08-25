@@ -43,7 +43,7 @@ export default function WhatWipeClipDoes() {
         </div>
 
         <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-muted leading-relaxed">
-          Reconstruction is an estimate built from the footage around the marked region — not a
+          Reconstruction is an estimate built from the footage around the marked region, not a
           guaranteed pixel-perfect recovery of whatever was originally behind the overlay. See{" "}
           <a href="#limitations" className="underline hover:text-foreground">
             limitations

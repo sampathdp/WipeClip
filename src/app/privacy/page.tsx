@@ -51,7 +51,7 @@ export default function PrivacyPage() {
       <H2>2. Information collected automatically</H2>
       <P>
         Like most websites, our hosting and network infrastructure may log
-        standard technical data for security and reliability purposes — for
+        standard technical data for security and reliability purposes, for
         example IP address, browser type, and request timestamps. These logs
         are used only to operate and secure the Service and are retained for
         a limited period.

@@ -2,12 +2,12 @@ const cards = [
   {
     title: "Static overlay",
     tag: "Fixed position",
-    desc: "Stays in the same spot for the whole clip — a corner logo, a fixed timestamp, a persistent bug. WipeClip only has to track one consistent region across every frame.",
+    desc: "Stays in the same spot for the whole clip: a corner logo, a fixed timestamp, a persistent bug. WipeClip only has to track one consistent region across every frame.",
   },
   {
     title: "Moving overlay",
     tag: "Motion-tracked",
-    desc: "Drifts, resizes, or reappears in different spots — a rotating badge, an animated bug, a watermark that repositions itself. WipeClip's motion-aware tracking follows the marked region frame by frame instead of using one fixed box.",
+    desc: "Drifts, resizes, or reappears in different spots: a rotating badge, an animated bug, a watermark that repositions itself. WipeClip's motion-aware tracking follows the marked region frame by frame instead of using one fixed box.",
   },
 ];
 
@@ -39,7 +39,7 @@ export default function StaticVsMovingWatermarks() {
         </div>
 
         <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-muted leading-relaxed">
-          Moving overlays are generally harder to remove convincingly than static ones — especially
+          Moving overlays are generally harder to remove convincingly than static ones, especially
           when they cross busy or fast-changing parts of the frame.
         </p>
       </div>

@@ -16,7 +16,7 @@ import { RESEARCH_TESTS, TEST_CATEGORIES } from "@/lib/researchData";
 
 const title = "We Tested AI Watermark Removal on Real Videos";
 const description =
-  "WipeClip's ongoing test of its own AI watermark removal — static and moving overlays, semi-transparent marks, complex backgrounds, and fast motion. Real before/after data, published once verified.";
+  "WipeClip's ongoing test of its own AI watermark removal: static and moving overlays, semi-transparent marks, complex backgrounds, and fast motion. Real before/after data, published once verified.";
 const path = "/research/video-watermark-removal-test";
 
 export const metadata: Metadata = buildPageMetadata({
@@ -63,7 +63,7 @@ export default function VideoWatermarkRemovalTestPage() {
         <ResearchHero
           eyebrow="WipeClip Research"
           h1={title}
-          intro="An ongoing, in-house test of WipeClip's own AI watermark removal across six real-world overlay scenarios — published with real before/after clips as each one is verified."
+          intro="An ongoing, in-house test of WipeClip's own AI watermark removal across six real-world overlay scenarios, published with real before/after clips as each one is verified."
         />
 
         <section className="py-8">
@@ -80,7 +80,7 @@ export default function VideoWatermarkRemovalTestPage() {
               </h2>
               <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
                 Claims about AI video tools are easy to make and hard to check. This page is where
-                WipeClip publishes its own results against its own product — six overlay scenarios,
+                WipeClip publishes its own results against its own product: six overlay scenarios,
                 tested the same way every time, with the actual output clip attached to every number.
                 Last published: {new Date(publishedDate).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}.
               </p>
@@ -94,7 +94,7 @@ export default function VideoWatermarkRemovalTestPage() {
               Quick results
             </h2>
             <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
-              No numeric results are published yet — every test below is pending real, verified data.
+              No numeric results are published yet. Every test below is pending real, verified data.
               The full breakdown for each scenario is in the sections that follow.
             </p>
           </div>
@@ -148,7 +148,7 @@ export default function VideoWatermarkRemovalTestPage() {
               <a href="#methodology" className="underline hover:text-foreground">
                 methodology
               </a>
-              ). No processing times have been measured and published yet — they&apos;ll appear in
+              ). No processing times have been measured and published yet. They&apos;ll appear in
               the table above once available.
             </p>
           </div>
@@ -183,8 +183,8 @@ export default function VideoWatermarkRemovalTestPage() {
                 Where AI reconstruction works well
               </h2>
               <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
-                Based on how the reconstruction approach works — not on test results published here
-                yet — it&apos;s best suited to a mark that&apos;s small relative to the frame, in a
+                Based on how the reconstruction approach works (not on test results published here
+                yet), it&apos;s best suited to a mark that&apos;s small relative to the frame, in a
                 fixed or predictably-tracked position, with steady detail in the surrounding footage
                 to rebuild from.
               </p>
@@ -205,7 +205,7 @@ export default function VideoWatermarkRemovalTestPage() {
                 <Link href="/#limitations" className="underline hover:text-foreground text-cyan-600">
                   general product limitations
                 </Link>{" "}
-                for the full list — this page will confirm or update that picture once tests are
+                for the full list. This page will confirm or update that picture once tests are
                 published.
               </p>
             </div>
@@ -227,7 +227,7 @@ export default function VideoWatermarkRemovalTestPage() {
               <ul className="mt-4 space-y-3 text-sm sm:text-base leading-relaxed text-muted list-disc pl-5">
                 <li>Every test records the exact WipeClip build/version used, since results can change as the underlying model changes.</li>
                 <li>&ldquo;Visible artifacts&rdquo; is a written description of what&apos;s actually visible in the output, not a numeric score.</li>
-                <li>No test on this page is described as a &ldquo;pass&rdquo; or &ldquo;success&rdquo; against a threshold — the before/after clip and notes are the result.</li>
+                <li>No test on this page is described as a &ldquo;pass&rdquo; or &ldquo;success&rdquo; against a threshold: the before/after clip and notes are the result.</li>
               </ul>
             </div>
           </div>

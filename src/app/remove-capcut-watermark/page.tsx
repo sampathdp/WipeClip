@@ -6,7 +6,7 @@ import { buildPageMetadata } from "@/lib/seo";
 
 const content = getWatermarkPlatform("remove-capcut-watermark")!;
 
-const title = "Remove the CapCut Watermark — or Avoid It Entirely";
+const title = "Remove the CapCut Watermark, or Avoid It Entirely";
 const description =
   "Still have the CapCut project or the original clean clip? Re-exporting is often the better fix. If only the finished export is left, WipeClip can reconstruct the marked region.";
 
@@ -19,7 +19,7 @@ export const metadata: Metadata = buildPageMetadata({
 const decisionSteps = [
   {
     title: "Still have the CapCut project?",
-    desc: "Re-export it. A CapCut Pro export (or any export path that doesn't add the badge) gives you the actual render again — not an estimate of one.",
+    desc: "Re-export it. A CapCut Pro export (or any export path that doesn't add the badge) gives you the actual render again, not an estimate of one.",
   },
   {
     title: "Still have the original clip you imported?",
@@ -38,7 +38,7 @@ const body = (
         Before reconstructing anything, check for a cleaner source
       </h2>
       <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
-        Reconstruction is a fallback for when nothing cleaner is available — not the first move. Work
+        Reconstruction is a fallback for when nothing cleaner is available, not the first move. Work
         through these in order:
       </p>
 
@@ -67,11 +67,11 @@ const body = (
         Why re-exporting beats reconstruction, when it&apos;s available
       </h2>
       <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
-        A clean re-export or the original source file is exactly what was there — nothing is being
+        A clean re-export or the original source file is exactly what was there: nothing is being
         guessed. Reconstruction infers what&apos;s probably behind the mark from the surrounding
         frames, which works well in a lot of cases, but it&apos;s still an estimate, not a copy of
         pixels that were actually captured. If a real clean source exists, it beats reconstruction
-        every time — see{" "}
+        every time. See{" "}
         <Link
           href="/guides/does-watermark-removal-reduce-video-quality"
           className="underline hover:text-foreground text-cyan-600"
@@ -94,7 +94,7 @@ export default function Page() {
       content={content}
       h1={
         <>
-          Remove the CapCut watermark — <span className="text-gradient">or avoid it entirely</span>
+          Remove the CapCut watermark, <span className="text-gradient">or avoid it entirely</span>
         </>
       }
       body={body}

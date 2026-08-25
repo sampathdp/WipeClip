@@ -5,7 +5,7 @@ const situations = [
   { title: "Moving mark", desc: "An overlay that drifts, resizes, or changes position as the clip plays." },
   {
     title: "Timestamp on owned footage",
-    desc: "A date/time burn-in on footage you own or have rights to edit — security or dashcam video, for example.",
+    desc: "A date/time burn-in on footage you own or have rights to edit, security or dashcam video, for example.",
   },
 ];
 

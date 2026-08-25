@@ -14,7 +14,7 @@ export type EvidenceExample = {
 /**
  * Renders real before/after processing examples once they exist. Pass
  * `examples` (resolution/fps/processing time included per clip) as they
- * become available — until then this shows a neutral placeholder rather
+ * become available. Until then this shows a neutral placeholder rather
  * than fabricated numbers, per the no-fake-benchmarks rule this section is
  * bound by.
  */
@@ -56,7 +56,7 @@ export default function EvidenceSection({ examples }: { examples?: EvidenceExamp
         ) : (
           <div className="mt-14 glass-card mx-auto max-w-2xl rounded-[1.75rem] p-8 sm:p-10 text-center">
             <p className="text-sm sm:text-base text-muted leading-relaxed">
-              Real before/after clips — with resolution, framerate, and processing time for each —
+              Real before/after clips, with resolution, framerate, and processing time for each,
               will be published here as they become available.
             </p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-4">

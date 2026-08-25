@@ -3,7 +3,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import ImageEditorDemo from "@/components/ImageEditorDemo";
 
-const title = "Remove Image Watermark — Pro Tool";
+const title = "Remove Image Watermark - Pro Tool";
 const description =
   "Mark a watermark or logo region on any image once, and WipeClip.co reconstructs the pixels beneath it. A Pro-plan tool, same motion-free inpainting as the video tool.";
 
@@ -79,7 +79,7 @@ export default function Page() {
               Remove a <span className="text-gradient">watermark from an image</span>
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
-              Mark the badge or logo once and WipeClip.co reconstructs the pixels beneath it —
+              Mark the badge or logo once and WipeClip.co reconstructs the pixels beneath it,
               same reconstruction engine as the video tool, applied to a single frame.
             </p>
           </div>
@@ -94,7 +94,7 @@ export default function Page() {
         <section className="py-16">
           <div className="mx-auto max-w-3xl px-6">
             <h2 className="text-center font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-              Image watermark removal — FAQ
+              Image watermark removal: FAQ
             </h2>
             <div className="mt-10 space-y-4">
               {faqs.map((f) => (

@@ -9,7 +9,7 @@ export default function ResearchDisclaimer({ compact = false }: { compact?: bool
         No fabricated results
       </p>
       <p className="mt-1.5 text-sm text-muted leading-relaxed">
-        Every number and clip on this page comes from a test that was actually run and recorded —
+        Every number and clip on this page comes from a test that was actually run and recorded,
         never an estimate, an industry average, or a placeholder dressed up as a result. Where a test
         hasn&apos;t been run yet, this page says so instead of showing a number.
       </p>

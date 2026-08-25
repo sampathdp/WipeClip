@@ -63,13 +63,13 @@ export default function Page() {
               <span className="text-gradient">reduce video quality</span>?
             </>
           }
-          intro="Not automatically — but 'the resolution matches' and 'nothing was lost' aren't the same claim."
+          intro="Not automatically, but 'the resolution matches' and 'nothing was lost' aren't the same claim."
         />
 
         <section className="py-8">
           <DirectAnswer>
             Matching the source resolution and framerate means the frame size and motion smoothness
-            are preserved — it does not mean zero quality loss overall. Bitrate, codec choice, and
+            are preserved. It does not mean zero quality loss overall. Bitrate, codec choice, and
             re-encoding all affect visible quality independent of resolution, and the reconstructed
             watermark region is an estimate, not a copy of the original pixels. Both are worth
             understanding separately.
@@ -84,7 +84,7 @@ export default function Page() {
               </h2>
               <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
                 A 1920×1080 video encoded at a low bitrate can look noticeably worse than a 1280×720
-                video encoded well — blocky in fast motion, soft in detail, banded in gradients.
+                video encoded well: blocky in fast motion, soft in detail, banded in gradients.
                 Resolution describes how many pixels exist. It says nothing about how much
                 information each of those pixels actually carries, which is what bitrate, codec, and
                 compression settings control.
@@ -112,7 +112,7 @@ export default function Page() {
               </h2>
               <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
                 Preserving 1920×1080 (or whatever the source resolution is) means the frame wasn&apos;t
-                cropped or downscaled — that&apos;s a real, checkable claim. It doesn&apos;t cover two
+                cropped or downscaled. That&apos;s a real, checkable claim. It doesn&apos;t cover two
                 separate things: the bitrate and codec settings used when the result is re-encoded for
                 export, and the fact that the marked region itself is reconstructed rather than
                 untouched. Both can introduce visible differences that resolution alone won&apos;t show
@@ -129,7 +129,7 @@ export default function Page() {
             </h2>
             <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
               Rather than asserting numbers here, this section pulls directly from WipeClip&apos;s
-              published research data — it will show real input/output resolution, framerate, and
+              published research data: it will show real input/output resolution, framerate, and
               processing time for each test once available.
             </p>
             <div className="mt-6 space-y-6">

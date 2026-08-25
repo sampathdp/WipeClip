@@ -104,7 +104,7 @@ export default function WatermarkLandingTemplate({
         <section className="py-16">
           <div className="mx-auto max-w-3xl px-6">
             <h2 className="text-center font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-              {content.platform} watermark removal — FAQ
+              {content.platform} watermark removal: FAQ
             </h2>
             <div className="mt-10 space-y-4">
               {content.faqs.map((f) => (

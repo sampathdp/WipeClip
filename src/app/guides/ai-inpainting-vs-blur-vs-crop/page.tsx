@@ -12,7 +12,7 @@ import { buildPageMetadata, SITE_URL } from "@/lib/seo";
 
 const title = "AI Inpainting vs Blur vs Crop for Video Watermark Removal";
 const description =
-  "A criteria-by-criteria comparison of cropping, blurring, covering, and AI reconstruction for removing a video watermark — including where AI reconstruction is the wrong tool for the job.";
+  "A criteria-by-criteria comparison of cropping, blurring, covering, and AI reconstruction for removing a video watermark, including where AI reconstruction is the wrong tool for the job.";
 const path = "/guides/ai-inpainting-vs-blur-vs-crop";
 const publishedDate = "2026-08-25";
 const updatedDate = "2026-08-25";
@@ -69,7 +69,7 @@ export default function Page() {
             processing, but permanently damage the frame. AI reconstruction preserves the full frame
             and usually leaves a less visible result, but takes longer to run and can struggle when
             there isn&apos;t enough surrounding detail to rebuild from. Which one is right depends on
-            the overlay and the footage — see the comparison below.
+            the overlay and the footage. See the comparison below.
           </DirectAnswer>
         </section>
 
@@ -108,7 +108,7 @@ export default function Page() {
                 <p className="mt-1.5 text-sm text-muted leading-relaxed">
                   Estimates what should be behind the marked region using the pixels around it and
                   nearby frames, then rebuilds that area instead of hiding it. Keeps the frame intact
-                  and can follow a moving mark, but is an estimate — not a guaranteed recovery of the
+                  and can follow a moving mark, but is an estimate, not a guaranteed recovery of the
                   original pixels.
                 </p>
               </div>
@@ -137,22 +137,22 @@ export default function Page() {
                 <li>
                   <strong className="text-foreground">Crop</strong> is the right call when the mark
                   sits right at the very edge of the frame and losing that sliver of video doesn&apos;t
-                  matter — it&apos;s instant and needs no special tooling.
+                  matter, since it&apos;s instant and needs no special tooling.
                 </li>
                 <li>
                   <strong className="text-foreground">Blur or cover</strong> make sense when speed
-                  matters more than how it looks — a quick internal draft, for example — and a visible
+                  matters more than how it looks (a quick internal draft, for example) and a visible
                   patch is acceptable.
                 </li>
                 <li>
                   <strong className="text-foreground">AI reconstruction</strong> is the better choice
-                  when the frame needs to stay intact and the result needs to hold up visually — a
-                  client deliverable, a repost, footage you&apos;re reusing elsewhere — provided
+                  when the frame needs to stay intact and the result needs to hold up visually (a
+                  client deliverable, a repost, footage you&apos;re reusing elsewhere), provided
                   there&apos;s enough surrounding detail for it to work with.
                 </li>
                 <li>
                   For a large mark sitting over a mostly featureless or heavily obscured area, even AI
-                  reconstruction may not outperform a simple crop — there&apos;s honestly not much for
+                  reconstruction may not outperform a simple crop. There&apos;s honestly not much for
                   it to reconstruct from.
                 </li>
               </ul>
