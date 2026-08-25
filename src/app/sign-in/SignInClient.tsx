@@ -6,6 +6,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Logo from "@/components/Logo";
 import { createClient } from "@/lib/supabase/client";
+import { trackEvent } from "@/lib/analytics";
 
 type View = "password" | "magic" | "forgot";
 type PasswordAction = "signin" | "signup";
@@ -66,6 +67,7 @@ export default function SignInClient() {
     const supabase = createClient();
 
     if (passwordAction === "signup") {
+      trackEvent("signup_started", { method: "password" });
       const { data, error: err } = await supabase.auth.signUp({
         email,
         password,
@@ -77,6 +79,7 @@ export default function SignInClient() {
         return;
       }
       if (data.session) {
+        trackEvent("signup_completed", { method: "password" });
         router.push("/");
         return;
       }

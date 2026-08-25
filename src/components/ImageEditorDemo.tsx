@@ -5,6 +5,7 @@ import Link from "next/link";
 import RegionSelector from "./RegionSelector";
 import ImageCompareSlider from "./ImageCompareSlider";
 import { createClient } from "@/lib/supabase/client";
+import { trackEvent, useToolView } from "@/lib/analytics";
 import {
   ApiError,
   AuthRequiredError,
@@ -29,8 +30,10 @@ type BlockReason = "content" | "credits" | "auth" | "pro";
 type PlanState = "loading" | "pro" | "not-pro";
 
 const MAX_BYTES = 25 * 1024 * 1024;
+const TOOL = "image_watermark_remover";
 
 export default function ImageEditorDemo() {
+  useToolView(TOOL);
   const [planState, setPlanState] = useState<PlanState>("loading");
   const [file, setFile] = useState<File | null>(null);
   const [step, setStep] = useState<Step>("idle");
@@ -89,6 +92,7 @@ export default function ImageEditorDemo() {
 
   const pickFile = useCallback(async (picked: File | undefined) => {
     if (!picked) return;
+    trackEvent("file_selected", { tool: TOOL });
     if (!picked.type.startsWith("image/")) {
       setError("Please choose an image file.");
       return;
@@ -114,6 +118,7 @@ export default function ImageEditorDemo() {
       const top = candidates[0];
       setSuggestion(top && top.confidence >= ARTIFACT_SUGGESTION_MIN_CONFIDENCE ? top : null);
       setStep("select");
+      trackEvent("mask_started", { tool: TOOL });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not read that image.");
       setStep("error");
@@ -124,38 +129,46 @@ export default function ImageEditorDemo() {
     if (!file || !region) return;
     setStep("processing");
     setError(null);
+    trackEvent("mask_completed", { tool: TOOL });
+    trackEvent("processing_started", { tool: TOOL });
     try {
       const blob = await processImage(file, region);
       setResultUrl(URL.createObjectURL(blob));
       setStep("done");
+      trackEvent("processing_completed", { tool: TOOL });
       window.dispatchEvent(new Event("credits:refresh"));
     } catch (e) {
       if (e instanceof ContentBlockedError) {
         setError(e.message);
         setBlockReason("content");
         setStep("blocked");
+        trackEvent("processing_failed", { tool: TOOL, error_category: "content_policy" });
         return;
       }
       if (e instanceof InsufficientCreditsError) {
         setError(e.message);
         setBlockReason("credits");
         setStep("blocked");
+        trackEvent("processing_failed", { tool: TOOL, error_category: "insufficient_credits" });
         return;
       }
       if (e instanceof AuthRequiredError) {
         setError(e.message);
         setBlockReason("auth");
         setStep("blocked");
+        trackEvent("processing_failed", { tool: TOOL, error_category: "auth_required" });
         return;
       }
       if (e instanceof ProRequiredError) {
         setError(e.message);
         setBlockReason("pro");
         setStep("blocked");
+        trackEvent("processing_failed", { tool: TOOL, error_category: "pro_required" });
         return;
       }
       setError(e instanceof ApiError ? e.message : "Processing failed. Try again.");
       setStep("error");
+      trackEvent("processing_failed", { tool: TOOL, error_category: "processing_error" });
     }
   }, [file, region]);
 
@@ -204,24 +217,7 @@ export default function ImageEditorDemo() {
       </div>
 
       {step === "idle" && !file && (
-        <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setIsDragOver(true);
-          }}
-          onDragLeave={() => setIsDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setIsDragOver(false);
-            pickFile(e.dataTransfer.files?.[0]);
-          }}
-          onClick={() => inputRef.current?.click()}
-          className={`mt-8 flex cursor-pointer flex-col items-center justify-center rounded-[1.75rem] border-2 border-dashed px-6 py-14 text-center transition-all ${
-            isDragOver
-              ? "border-cyan-400 bg-cyan-50 scale-[1.01] shadow-[0_0_30px_rgba(34,211,238,0.25)]"
-              : "border-border hover:border-cyan-500/50 hover:bg-surface-2/40 hover:shadow-[0_0_20px_rgba(124,92,255,0.15)]"
-          }`}
-        >
+        <>
           <input
             ref={inputRef}
             type="file"
@@ -229,6 +225,28 @@ export default function ImageEditorDemo() {
             className="hidden"
             onChange={(e) => pickFile(e.target.files?.[0])}
           />
+          <button
+            type="button"
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragOver(true);
+            }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragOver(false);
+              pickFile(e.dataTransfer.files?.[0]);
+            }}
+            onClick={() => {
+              trackEvent("upload_clicked", { tool: TOOL });
+              inputRef.current?.click();
+            }}
+            className={`mt-8 flex w-full cursor-pointer flex-col items-center justify-center rounded-[1.75rem] border-2 border-dashed px-6 py-14 text-center transition-all ${
+              isDragOver
+                ? "border-cyan-400 bg-cyan-50 scale-[1.01] shadow-[0_0_30px_rgba(34,211,238,0.25)]"
+                : "border-border hover:border-cyan-500/50 hover:bg-surface-2/40 hover:shadow-[0_0_20px_rgba(124,92,255,0.15)]"
+            }`}
+          >
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-accent/20 to-accent-2/20 border border-cyan-400/30 text-cyan-600 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
               <path
@@ -242,7 +260,8 @@ export default function ImageEditorDemo() {
           </div>
           <p className="text-base font-semibold text-foreground">Drop your image here, or click to browse</p>
           <p className="mt-1 text-xs sm:text-sm text-muted">PNG, JPG, WebP &bull; Up to 25MB</p>
-        </div>
+          </button>
+        </>
       )}
 
       {step === "reading" && (
@@ -371,6 +390,7 @@ export default function ImageEditorDemo() {
                 <a
                   href={resultUrl}
                   download={`unmarked-${file.name.replace(/\.[^.]+$/, "")}.png`}
+                  onClick={() => trackEvent("download_clicked", { tool: TOOL })}
                   className="flex-1 rounded-full bg-emerald-500 hover:bg-emerald-400 px-6 py-3.5 text-center text-sm font-bold text-black shadow-[0_0_25px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-2"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">

@@ -15,12 +15,13 @@ export default function Logo({
 }: LogoProps) {
   return (
     <div className={`inline-flex items-center gap-2.5 font-bold tracking-tight select-none group ${className}`}>
-      {/* Dynamic Vector Icon Mark */}
+      {/* Dynamic Vector Icon Mark - decorative, the WipeClip.co text below carries the accessible name */}
       <svg
         width={size}
         height={size}
         viewBox="0 0 64 64"
         fill="none"
+        aria-hidden="true"
         xmlns="http://www.w3.org/2000/svg"
         className="transition-transform duration-300 group-hover:scale-105 drop-shadow-[0_0_12px_rgba(124,92,255,0.35)] shrink-0"
       >

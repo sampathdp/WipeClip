@@ -12,6 +12,9 @@ export default function Footer() {
             <span className="text-xs text-muted">&copy; {new Date().getFullYear()}</span>
           </div>
           <nav className="flex gap-6 text-sm text-muted">
+            <Link href="/research" className="transition-colors hover:text-foreground">
+              Research
+            </Link>
             <Link href="/privacy" className="transition-colors hover:text-foreground">
               Privacy
             </Link>
@@ -39,14 +42,17 @@ export default function Footer() {
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted">
           <span className="font-semibold text-foreground/80">Remove a watermark from:</span>
-          {WATERMARK_PLATFORMS.map((p, i) => (
+          {WATERMARK_PLATFORMS.map((p) => (
             <span key={p.slug} className="flex items-center gap-2">
               <Link href={`/${p.slug}`} className="transition-colors hover:text-foreground">
                 {p.platform}
               </Link>
-              {i < WATERMARK_PLATFORMS.length - 1 && <span className="text-border">&middot;</span>}
+              <span className="text-border">&middot;</span>
             </span>
           ))}
+          <Link href="/remove-image-watermark" className="transition-colors hover:text-foreground">
+            Still Images
+          </Link>
         </div>
         <p className="mt-4 text-xs text-muted">
           For content you own or have permission to edit only. Not affiliated

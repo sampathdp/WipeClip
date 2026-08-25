@@ -7,6 +7,7 @@ import VideoCompareSlider from "./VideoCompareSlider";
 import SignInModal from "./SignInModal";
 import { createClient } from "@/lib/supabase/client";
 import { clearPendingResult, loadPendingResult, savePendingResult } from "@/lib/resultCache";
+import { trackEvent, useToolView } from "@/lib/analytics";
 import {
   ContentBlockedError,
   InsufficientCreditsError,
@@ -28,6 +29,7 @@ type BlockReason = "content" | "credits";
 type Mode = "remove" | "replace";
 
 const MAX_BYTES = 300 * 1024 * 1024;
+const TOOL = "video_watermark_remover";
 
 const RESOLUTION_OPTIONS: { key: Resolution; label: string; minHeight: number; credits: number }[] = [
   { key: "720p", label: "720p HD", minHeight: 720, credits: 1 },
@@ -41,6 +43,7 @@ function formatBytes(bytes: number) {
 }
 
 export default function UploadDemo() {
+  useToolView(TOOL);
   const [file, setFile] = useState<File | null>(null);
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -175,6 +178,7 @@ export default function UploadDemo() {
       const top = candidates[0];
       setSuggestion(top && top.confidence >= WATERMARK_SUGGESTION_MIN_CONFIDENCE ? top : null);
       setStep("select");
+      trackEvent("mask_started", { tool: TOOL });
     } catch (e) {
       if (e instanceof ContentBlockedError) {
         setError(e.message);
@@ -195,6 +199,7 @@ export default function UploadDemo() {
   const pickFiles = useCallback(
     (list: FileList | null) => {
       if (!list || list.length === 0) return;
+      trackEvent("file_selected", { tool: TOOL });
       const files = Array.from(list);
       if (isPro && files.length > 1) {
         setQueue(files.slice(1));
@@ -216,6 +221,8 @@ export default function UploadDemo() {
     setStep("processing");
     setProgress(0);
     setError(null);
+    trackEvent("mask_completed", { tool: TOOL, mode });
+    trackEvent("processing_started", { tool: TOOL, mode, resolution });
 
     timerRef.current = setInterval(() => {
       setProgress((p) => (p < 90 ? p + Math.random() * 10 : p));
@@ -227,6 +234,7 @@ export default function UploadDemo() {
       setProgress(100);
       setResultUrl(URL.createObjectURL(blob));
       setStep("done");
+      trackEvent("processing_completed", { tool: TOOL, mode, resolution });
       window.dispatchEvent(new Event("credits:refresh"));
       // Anonymous result: save it so it survives whatever sign-in path the
       // visitor takes at the download step (see resultCache.ts) - signed-in
@@ -240,16 +248,19 @@ export default function UploadDemo() {
         setError(e.message);
         setBlockReason("content");
         setStep("blocked");
+        trackEvent("processing_failed", { tool: TOOL, error_category: "content_policy" });
         return;
       }
       if (e instanceof InsufficientCreditsError) {
         setError(e.message);
         setBlockReason("credits");
         setStep("blocked");
+        trackEvent("processing_failed", { tool: TOOL, error_category: "insufficient_credits" });
         return;
       }
       setError(e instanceof Error ? e.message : "Processing failed. Try again.");
       setStep("error");
+      trackEvent("processing_failed", { tool: TOOL, error_category: "processing_error" });
     }
   }, [file, region, mode, resolution, logo, isSignedIn]);
 
@@ -270,24 +281,7 @@ export default function UploadDemo() {
       </div>
 
       {step === "idle" && !file && (
-        <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setIsDragOver(true);
-          }}
-          onDragLeave={() => setIsDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setIsDragOver(false);
-            pickFiles(e.dataTransfer.files);
-          }}
-          onClick={() => inputRef.current?.click()}
-          className={`mt-8 flex cursor-pointer flex-col items-center justify-center rounded-[1.75rem] border-2 border-dashed px-6 py-14 text-center transition-all ${
-            isDragOver
-              ? "border-cyan-400 bg-cyan-50 scale-[1.01] shadow-[0_0_30px_rgba(34,211,238,0.25)]"
-              : "border-border hover:border-cyan-500/50 hover:bg-surface-2/40 hover:shadow-[0_0_20px_rgba(124,92,255,0.15)]"
-          }`}
-        >
+        <>
           <input
             ref={inputRef}
             type="file"
@@ -296,6 +290,28 @@ export default function UploadDemo() {
             className="hidden"
             onChange={(e) => pickFiles(e.target.files)}
           />
+          <button
+            type="button"
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragOver(true);
+            }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragOver(false);
+              pickFiles(e.dataTransfer.files);
+            }}
+            onClick={() => {
+              trackEvent("upload_clicked", { tool: TOOL });
+              inputRef.current?.click();
+            }}
+            className={`mt-8 flex w-full cursor-pointer flex-col items-center justify-center rounded-[1.75rem] border-2 border-dashed px-6 py-14 text-center transition-all ${
+              isDragOver
+                ? "border-cyan-400 bg-cyan-50 scale-[1.01] shadow-[0_0_30px_rgba(34,211,238,0.25)]"
+                : "border-border hover:border-cyan-500/50 hover:bg-surface-2/40 hover:shadow-[0_0_20px_rgba(124,92,255,0.15)]"
+            }`}
+          >
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-accent/20 to-accent-2/20 border border-cyan-400/30 text-cyan-600 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
               <path
@@ -313,7 +329,8 @@ export default function UploadDemo() {
           <p className="mt-1 text-xs sm:text-sm text-muted">
             MP4, MOV, WebM &bull; Up to 300MB{isPro ? " each &bull; batch upload enabled" : ""}
           </p>
-        </div>
+          </button>
+        </>
       )}
 
       {step === "probing" && (
@@ -572,6 +589,7 @@ export default function UploadDemo() {
                   <a
                     href={resultUrl}
                     download={`unmarked-${file.name}`}
+                    onClick={() => trackEvent("download_clicked", { tool: TOOL })}
                     className="flex-1 rounded-full bg-emerald-500 hover:bg-emerald-400 px-6 py-3.5 text-center text-sm font-bold text-black shadow-[0_0_25px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-2"
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">

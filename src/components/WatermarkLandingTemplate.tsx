@@ -7,8 +7,21 @@ import type { WatermarkPlatform } from "@/lib/watermarkPlatforms";
 
 export default function WatermarkLandingTemplate({
   content,
+  h1,
+  body,
+  extra,
 }: {
   content: WatermarkPlatform;
+  /** Overrides the default "Remove the {platform} watermark" H1 text. */
+  h1?: React.ReactNode;
+  /** Overrides the default behavior/why-remove block with platform-specific
+   * editorial content. Still rendered inside the template's narrow
+   * max-w-3xl column. */
+  body?: React.ReactNode;
+  /** Extra full-width section(s) rendered after `body`, before the
+   * "How it works" block - for content that needs its own width, like an
+   * evidence/comparison component. */
+  extra?: React.ReactNode;
 }) {
   const jsonLd = {
     "@context": "https://schema.org",
@@ -40,7 +53,11 @@ export default function WatermarkLandingTemplate({
               {content.heroEyebrow}
             </div>
             <h1 className="font-display text-4xl font-extrabold tracking-tight sm:text-5xl text-foreground text-balance">
-              Remove the <span className="text-gradient">{content.platform}</span> watermark
+              {h1 ?? (
+                <>
+                  Remove the <span className="text-gradient">{content.platform}</span> watermark
+                </>
+              )}
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
               {content.heroSubtitle}
@@ -61,22 +78,26 @@ export default function WatermarkLandingTemplate({
 
         <section className="py-16">
           <div className="mx-auto max-w-3xl px-6">
-            <div className="glass-card rounded-[2rem] p-8 sm:p-10 border border-border/80">
-              <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">
-                How the {content.platform} watermark behaves
-              </h2>
-              <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
-                {content.behavior}
-              </p>
-              <h2 className="mt-8 font-display text-2xl font-bold tracking-tight text-foreground">
-                Why people remove it
-              </h2>
-              <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
-                {content.whyRemove}
-              </p>
-            </div>
+            {body ?? (
+              <div className="glass-card rounded-[2rem] p-8 sm:p-10 border border-border/80">
+                <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">
+                  How the {content.platform} watermark behaves
+                </h2>
+                <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
+                  {content.behavior}
+                </p>
+                <h2 className="mt-8 font-display text-2xl font-bold tracking-tight text-foreground">
+                  Why people remove it
+                </h2>
+                <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
+                  {content.whyRemove}
+                </p>
+              </div>
+            )}
           </div>
         </section>
+
+        {extra}
 
         <HowItWorks />
 

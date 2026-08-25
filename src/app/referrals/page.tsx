@@ -4,13 +4,14 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import CopyReferralLink from "@/components/CopyReferralLink";
 import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { SITE_URL } from "@/lib/seo";
 
 export const metadata: Metadata = {
   title: "Refer a Friend",
   robots: { index: false },
 };
 
-const siteUrl = "https://wipeclip.co";
+const siteUrl = SITE_URL;
 
 export default async function ReferralsPage() {
   if (!isSupabaseConfigured()) redirect("/");

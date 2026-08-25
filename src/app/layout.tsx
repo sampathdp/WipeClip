@@ -3,6 +3,7 @@ import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import ReferralCapture from "@/components/ReferralCapture";
+import { SITE_URL } from "@/lib/seo";
 import "./globals.css";
 
 const inter = Inter({
@@ -18,22 +19,24 @@ const jakarta = Plus_Jakarta_Sans({
   display: "swap",
 });
 
-const siteUrl = "https://wipeclip.co";
+const siteUrl = SITE_URL;
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "WipeClip.co — Video Watermark & Object Remover",
+    default: "AI Video Watermark Remover — WipeClip.co",
     template: "%s | WipeClip.co",
   },
   description:
-    "WipeClip.co removes watermarks, logos, timestamps and unwanted objects from video you own or have rights to edit. Fast, private, no quality loss.",
+    "WipeClip is an AI video watermark remover that reconstructs the pixels behind a logo, badge, or timestamp instead of blurring or cropping the frame. Mark the overlay once — no editing skills needed.",
   keywords: [
-    "remove watermark from video",
     "video watermark remover",
+    "AI video watermark remover",
+    "remove watermark from video",
+    "video overlay remover",
+    "AI video inpainting",
     "remove logo from video",
     "video object remover",
-    "video inpainting tool",
     "wipeclip",
   ],
   authors: [{ name: "WipeClip.co" }],
@@ -46,9 +49,9 @@ export const metadata: Metadata = {
     type: "website",
     url: siteUrl,
     siteName: "WipeClip.co",
-    title: "WipeClip.co — Video Watermark & Object Remover",
+    title: "AI Video Watermark Remover — WipeClip.co",
     description:
-      "Remove watermarks, logos, timestamps and unwanted objects from video you own or have rights to edit. Fast, private, no quality loss.",
+      "Mark a logo, badge, or timestamp and WipeClip reconstructs the pixels underneath — no crop, no blur box.",
     locale: "en_US",
     images: [
       {
@@ -61,9 +64,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "WipeClip.co — Video Watermark & Object Remover",
+    title: "AI Video Watermark Remover — WipeClip.co",
     description:
-      "Remove watermarks, logos, timestamps and unwanted objects from video you own or have rights to edit.",
+      "Mark a logo, badge, or timestamp and WipeClip reconstructs the pixels underneath — no crop, no blur box.",
     images: ["/opengraph-image"],
   },
   robots: {

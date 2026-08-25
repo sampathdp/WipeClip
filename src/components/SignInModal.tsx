@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { trackEvent } from "@/lib/analytics";
 
 type View = "password" | "magic";
 type PasswordAction = "signin" | "signup";
@@ -55,6 +56,15 @@ export default function SignInModal({
   const [error, setError] = useState<string | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   const signInWithGoogle = async () => {
@@ -82,6 +92,7 @@ export default function SignInModal({
     const supabase = createClient();
 
     if (passwordAction === "signup") {
+      trackEvent("signup_started", { method: "password" });
       const { data, error: err } = await supabase.auth.signUp({
         email,
         password,
@@ -93,6 +104,7 @@ export default function SignInModal({
         return;
       }
       if (data.session) {
+        trackEvent("signup_completed", { method: "password" });
         setStatus("idle");
         onSignedIn?.();
         onClose();
@@ -139,6 +151,9 @@ export default function SignInModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="signin-modal-heading"
         className="glass-card w-full max-w-sm rounded-[2rem] p-7 sm:p-8 border border-cyan-500/25 shadow-[0_20px_50px_rgba(15,23,42,0.10)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.8)] relative"
       >
         <button
@@ -151,7 +166,7 @@ export default function SignInModal({
           </svg>
         </button>
 
-        <h2 className="font-display text-xl font-bold tracking-tight text-foreground pr-6">
+        <h2 id="signin-modal-heading" className="font-display text-xl font-bold tracking-tight text-foreground pr-6">
           Sign in to download
         </h2>
         <p className="mt-1.5 text-xs sm:text-sm text-muted">
@@ -188,25 +203,36 @@ export default function SignInModal({
               onSubmit={view === "magic" ? sendMagicLink : submitPassword}
               className="flex flex-col gap-3 text-left"
             >
+              <label htmlFor="signin-modal-email" className="sr-only">
+                Email address
+              </label>
               <input
+                id="signin-modal-email"
                 type="email"
                 required
+                autoFocus
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@example.com"
                 className="glass-input w-full rounded-xl px-4 py-3 text-sm"
               />
               {view === "password" && (
-                <input
-                  type="password"
-                  required
-                  minLength={6}
-                  autoComplete={passwordAction === "signup" ? "new-password" : "current-password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="glass-input w-full rounded-xl px-4 py-3 text-sm"
-                />
+                <>
+                  <label htmlFor="signin-modal-password" className="sr-only">
+                    Password
+                  </label>
+                  <input
+                    id="signin-modal-password"
+                    type="password"
+                    required
+                    minLength={6}
+                    autoComplete={passwordAction === "signup" ? "new-password" : "current-password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="glass-input w-full rounded-xl px-4 py-3 text-sm"
+                  />
+                </>
               )}
 
               <button

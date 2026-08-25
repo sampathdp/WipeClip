@@ -167,6 +167,7 @@ export default function RegionSelector({
           src={previewUrl}
           alt="Video preview frame"
           className="block w-full"
+          style={{ aspectRatio: `${naturalWidth} / ${naturalHeight}` }}
           draggable={false}
           onLoad={() => setLoadedFor(previewUrl)}
         />

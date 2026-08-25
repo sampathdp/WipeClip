@@ -8,7 +8,7 @@ import ThemeToggle from "./ThemeToggle";
 
 const links = [
   { href: "/#how-it-works", label: "How It Works" },
-  { href: "/#features", label: "Features" },
+  { href: "/#comparison", label: "Comparison" },
   { href: "/pricing", label: "Pricing" },
   { href: "/#faq", label: "FAQ" },
 ];
@@ -25,18 +25,18 @@ export default function Navbar() {
 
         <div className="hidden items-center gap-8 text-sm font-medium text-muted md:flex">
           {links.map((link) => (
-            <a
+            <Link
               key={link.href}
               href={link.href}
               className="transition-colors hover:text-foreground"
             >
               {link.label}
-            </a>
+            </Link>
           ))}
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
-          <a
+          <Link
             href="/#tools"
             className="group inline-flex shrink-0 items-center gap-1.5 rounded-full border border-cyan-400/50 bg-gradient-to-r from-accent-2/20 to-accent/20 px-2.5 py-2 text-xs font-bold text-cyan-700 shadow-[0_0_15px_rgba(34,211,238,0.2)] transition-all hover:scale-[1.04] hover:border-cyan-400 hover:shadow-[0_0_22px_rgba(34,211,238,0.35)] dark:text-cyan-300 sm:px-3.5"
           >
@@ -44,7 +44,7 @@ export default function Navbar() {
               <path d="M12 3v3M12 18v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M3 12h3M18 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
             </svg>
             <span className="hidden sm:inline">Free Tools</span>
-          </a>
+          </Link>
           <ThemeToggle />
           <AuthStatus />
           <button
@@ -65,14 +65,14 @@ export default function Navbar() {
         <div className="border-t border-border/60 bg-background/95 backdrop-blur-xl px-4 py-4 md:hidden">
           <div className="flex flex-col gap-1 text-sm font-medium text-muted">
             {links.map((link) => (
-              <a
+              <Link
                 key={link.href}
                 href={link.href}
                 onClick={() => setOpen(false)}
                 className="rounded-xl px-3 py-3 transition-colors hover:bg-surface-2/80 hover:text-foreground"
               >
                 {link.label}
-              </a>
+              </Link>
             ))}
           </div>
         </div>

@@ -5,6 +5,8 @@ import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { PLANS, type PlanKey } from "@/lib/credits";
+import { createClient } from "@/lib/supabase/client";
+import { landingPagePath, trackEvent } from "@/lib/analytics";
 
 const paygCards: { key: PlanKey; tagline: string; isPopular?: boolean; features: string[] }[] = [
   {
@@ -45,12 +47,39 @@ export default function PricingClient() {
   const [loading, setLoading] = useState<PlanKey | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+  const [isSignedIn, setIsSignedIn] = useState(false);
 
   useEffect(() => {
     if (checkoutUrl) window.location.href = checkoutUrl;
   }, [checkoutUrl]);
 
+  // Also drives the `logged_in` property on pricing_viewed/checkout_started
+  // below - a local session read, same pattern as the tool demo components.
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      const signedIn = Boolean(data.user);
+      setIsSignedIn(signedIn);
+      trackEvent("pricing_viewed", { logged_in: signedIn, source: landingPagePath() });
+    });
+  }, []);
+
+  // Lemon Squeezy bounces back here with ?success=1&plan=<key> after a
+  // completed hosted checkout (see redirect_url in /api/checkout). The
+  // webhook is still the source of truth for actually granting credits -
+  // this only marks the funnel's purchase step and never touches billing
+  // state. The query string is stripped right after so a refresh/bookmark
+  // of this URL can't re-fire it.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("success") === "1") {
+      trackEvent("purchase_completed", { plan: params.get("plan") ?? undefined });
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
+
   const buy = async (plan: PlanKey) => {
+    trackEvent("checkout_started", { plan, logged_in: isSignedIn });
     setLoading(plan);
     setError(null);
     try {
@@ -98,9 +127,9 @@ export default function PricingClient() {
           {/* Free Tier Card */}
           <div className="glass-card rounded-[2rem] p-7 flex flex-col justify-between border border-border/80 relative">
             <div>
-              <div className="inline-block rounded-full bg-surface-3 border border-border px-3 py-1 text-xs font-semibold text-muted">
+              <h2 className="inline-block rounded-full bg-surface-3 border border-border px-3 py-1 text-xs font-semibold text-muted">
                 Free Tier
-              </div>
+              </h2>
               <div className="mt-4">
                 <span className="font-mono text-3xl font-extrabold text-foreground">$0</span>
                 <span className="text-xs text-muted"> / forever</span>
@@ -155,9 +184,9 @@ export default function PricingClient() {
 
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="inline-block rounded-full bg-surface-3 border border-border px-3 py-1 text-xs font-semibold text-foreground">
+                    <h2 className="inline-block rounded-full bg-surface-3 border border-border px-3 py-1 text-xs font-semibold text-foreground">
                       {plan.label}
-                    </span>
+                    </h2>
                     <span className="text-[11px] font-mono text-cyan-600 font-bold">
                       {plan.credits} credits
                     </span>

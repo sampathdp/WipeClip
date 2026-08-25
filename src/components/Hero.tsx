@@ -48,18 +48,18 @@ export default function Hero() {
 
             {/* Core Headline — stacked, oversized, mixed weight */}
             <h1 className="font-display text-6xl tracking-tighter leading-[0.92] text-foreground sm:text-7xl lg:text-6xl xl:text-7xl">
-              <span className="block font-semibold text-foreground/90">Erase the</span>
+              <span className="block font-semibold text-foreground/90">AI Video </span>
               <span className="block italic font-extrabold text-gradient drop-shadow-[0_0_35px_rgba(124,92,255,0.35)]">
-                watermark.
+                Watermark{" "}
               </span>
-              <span className="block font-extrabold">Keep the footage.</span>
+              <span className="block font-extrabold">Remover</span>
             </h1>
 
             {/* Subtitle */}
             <p className="mx-auto mt-7 max-w-md text-base leading-relaxed text-muted sm:text-lg lg:mx-0 lg:border-l-2 lg:border-accent/40 lg:pl-5">
-              Mark any badge, timestamp or logo once WipeClip.co reconstructs
-              the pixels beneath every frame from surrounding motion. No blur
-              box, no crop, zero quality loss.
+              Mark the badge, logo, or timestamp once. WipeClip reconstructs the
+              pixels underneath from the surrounding frames — no crop, no blur
+              box, and the rest of the frame stays at full source resolution.
             </p>
 
             {/* Action CTAs */}

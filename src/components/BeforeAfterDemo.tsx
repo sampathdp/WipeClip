@@ -165,7 +165,7 @@ export default function BeforeAfterDemo() {
           loop
           autoPlay
           playsInline
-          preload="auto"
+          preload="metadata"
           onTimeUpdate={handleTimeUpdate}
         />
 

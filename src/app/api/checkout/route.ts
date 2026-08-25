@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
             },
           },
           product_options: {
-            redirect_url: `${siteUrl}/pricing?success=1`,
+            redirect_url: `${siteUrl}/pricing?success=1&plan=${plan}`,
           },
         },
         relationships: {

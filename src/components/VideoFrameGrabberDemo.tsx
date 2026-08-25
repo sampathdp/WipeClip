@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
+import { trackEvent, useToolView } from "@/lib/analytics";
 
 interface Capture {
   id: string;
@@ -10,6 +11,7 @@ interface Capture {
 }
 
 const MAX_BYTES = 500 * 1024 * 1024;
+const TOOL = "video_frame_grabber";
 const SUGGEST_SAMPLE_COUNT = 24;
 const SUGGEST_RESULT_COUNT = 5;
 const SEEK_TIMEOUT_MS = 1500;
@@ -146,6 +148,7 @@ async function suggestCoverFrames(
  * there's no per-use cost to gate, unlike every other tool on this site.
  */
 export default function VideoFrameGrabberDemo() {
+  useToolView(TOOL);
   const [file, setFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoSize, setVideoSize] = useState<{ width: number; height: number } | null>(null);
@@ -162,6 +165,7 @@ export default function VideoFrameGrabberDemo() {
 
   const pickFile = useCallback((picked: File | undefined) => {
     if (!picked) return;
+    trackEvent("file_selected", { tool: TOOL });
     if (!picked.type.startsWith("video/")) {
       setError("Please choose a video file.");
       return;
@@ -272,24 +276,7 @@ export default function VideoFrameGrabberDemo() {
       </div>
 
       {!file && (
-        <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setIsDragOver(true);
-          }}
-          onDragLeave={() => setIsDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setIsDragOver(false);
-            pickFile(e.dataTransfer.files?.[0]);
-          }}
-          onClick={() => inputRef.current?.click()}
-          className={`mt-8 flex cursor-pointer flex-col items-center justify-center rounded-[1.75rem] border-2 border-dashed px-6 py-14 text-center transition-all ${
-            isDragOver
-              ? "border-cyan-400 bg-cyan-50 scale-[1.01] shadow-[0_0_30px_rgba(34,211,238,0.25)]"
-              : "border-border hover:border-cyan-500/50 hover:bg-surface-2/40 hover:shadow-[0_0_20px_rgba(124,92,255,0.15)]"
-          }`}
-        >
+        <>
           <input
             ref={inputRef}
             type="file"
@@ -297,6 +284,28 @@ export default function VideoFrameGrabberDemo() {
             className="hidden"
             onChange={(e) => pickFile(e.target.files?.[0])}
           />
+          <button
+            type="button"
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragOver(true);
+            }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragOver(false);
+              pickFile(e.dataTransfer.files?.[0]);
+            }}
+            onClick={() => {
+              trackEvent("upload_clicked", { tool: TOOL });
+              inputRef.current?.click();
+            }}
+            className={`mt-8 flex w-full cursor-pointer flex-col items-center justify-center rounded-[1.75rem] border-2 border-dashed px-6 py-14 text-center transition-all ${
+              isDragOver
+                ? "border-cyan-400 bg-cyan-50 scale-[1.01] shadow-[0_0_30px_rgba(34,211,238,0.25)]"
+                : "border-border hover:border-cyan-500/50 hover:bg-surface-2/40 hover:shadow-[0_0_20px_rgba(124,92,255,0.15)]"
+            }`}
+          >
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-accent/20 to-accent-2/20 border border-cyan-400/30 text-cyan-600 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
               <path
@@ -310,7 +319,8 @@ export default function VideoFrameGrabberDemo() {
           </div>
           <p className="text-base font-semibold text-foreground">Drop your video here, or click to browse</p>
           <p className="mt-1 text-xs sm:text-sm text-muted">MP4, MOV, WebM &bull; Up to 500MB &bull; Never leaves your device</p>
-        </div>
+          </button>
+        </>
       )}
 
       {file && videoUrl && (
@@ -413,6 +423,7 @@ export default function VideoFrameGrabberDemo() {
                           <a
                             href={s.url}
                             download={`cover-${formatTime(s.time).replace(":", "m")}s.png`}
+                            onClick={() => trackEvent("download_clicked", { tool: TOOL, source: "suggestion" })}
                             className="text-[10px] font-semibold text-emerald-600 hover:text-emerald-700"
                           >
                             Download
@@ -448,6 +459,7 @@ export default function VideoFrameGrabberDemo() {
                         <a
                           href={c.url}
                           download={`frame-${formatTime(c.time).replace(":", "m")}s.png`}
+                          onClick={() => trackEvent("download_clicked", { tool: TOOL, source: "capture" })}
                           className="text-[10px] font-semibold text-emerald-600 hover:text-emerald-700"
                         >
                           Download
