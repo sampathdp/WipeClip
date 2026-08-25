@@ -33,7 +33,7 @@ export default function Hero() {
 
       <div className="relative mx-auto max-w-7xl px-6">
         <div className="grid gap-16 lg:grid-cols-12 lg:items-center lg:gap-8">
-          {/* Left: Hero Text — asymmetric 5/12 */}
+          {/* Left: Hero Text - asymmetric 5/12 */}
           <div className="mx-auto max-w-xl text-center lg:col-span-5 lg:mx-0 lg:max-w-none lg:text-left">
             {/* Sticker-style AI Pill */}
             <div className="mb-7 inline-flex -rotate-1 items-center gap-2 rounded-full border border-cyan-500/30 bg-surface-2/90 py-1.5 pl-2.5 pr-4 text-xs font-semibold text-cyan-700 shadow-[0_0_25px_rgba(34,211,238,0.25)] backdrop-blur-xl">
@@ -46,7 +46,7 @@ export default function Hero() {
               <span className="tracking-wide">AI Motion-Aware Inpainting</span>
             </div>
 
-            {/* Core Headline — stacked, oversized, mixed weight */}
+            {/* Core Headline - stacked, oversized, mixed weight */}
             <h1 className="font-display text-6xl tracking-tighter leading-[0.92] text-foreground sm:text-7xl lg:text-6xl xl:text-7xl">
               <span className="block font-semibold text-foreground/90">AI Video </span>
               <span className="block italic font-extrabold text-gradient drop-shadow-[0_0_35px_rgba(124,92,255,0.35)]">
@@ -58,7 +58,7 @@ export default function Hero() {
             {/* Subtitle */}
             <p className="mx-auto mt-7 max-w-md text-base leading-relaxed text-muted sm:text-lg lg:mx-0 lg:border-l-2 lg:border-accent/40 lg:pl-5">
               Mark the badge, logo, or timestamp once. WipeClip reconstructs the
-              pixels underneath from the surrounding frames — no crop, no blur
+              pixels underneath from the surrounding frames: no crop, no blur
               box, and the rest of the frame stays at full source resolution.
             </p>
 
@@ -88,7 +88,7 @@ export default function Hero() {
             </div>
           </div>
 
-          {/* Right: Video Showcase Stage — asymmetric 7/12 */}
+          {/* Right: Video Showcase Stage - asymmetric 7/12 */}
           <div className="relative lg:col-span-7">
             {/* Halo glow */}
             <div className="absolute -inset-6 rounded-[3rem] bg-gradient-to-r from-accent/30 via-cyan-400/20 to-accent/30 opacity-20 blur-3xl -z-20 animate-pulse-glow dark:opacity-70" />
@@ -115,7 +115,7 @@ export default function Hero() {
         </div>
       </div>
 
-      {/* Scrolling marquee strip — full bleed, edge to edge */}
+      {/* Scrolling marquee strip - full bleed, edge to edge */}
       <div className="mt-20 overflow-hidden border-y border-border/60 bg-surface-2/40 py-3">
         <div className="animate-marquee flex w-max items-center gap-8 font-mono text-[11px] font-medium tracking-widest text-muted">
           {[...MARQUEE_ITEMS, ...MARQUEE_ITEMS].map((item, i) => (

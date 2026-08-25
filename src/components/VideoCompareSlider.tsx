@@ -62,7 +62,7 @@ export default function VideoCompareSlider({
           dragging.current = false;
         }}
       >
-        {/* After (clean) — full frame, underneath */}
+        {/* After (clean) - full frame, underneath */}
         <video
           ref={afterRef}
           src={afterSrc}
@@ -78,7 +78,7 @@ export default function VideoCompareSlider({
           Clean Result
         </span>
 
-        {/* Before (original) — clipped on top */}
+        {/* Before (original) - clipped on top */}
         <div
           className="absolute inset-0 overflow-hidden"
           style={{ clipPath: `inset(0 ${100 - percent}% 0 0)` }}

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-export const SITE_URL = "https://wipeclip.co";
+export const SITE_URL = "https://www.wipeclip.co";
 export const SITE_NAME = "WipeClip.co";
 
 const OG_IMAGE = "/opengraph-image";
