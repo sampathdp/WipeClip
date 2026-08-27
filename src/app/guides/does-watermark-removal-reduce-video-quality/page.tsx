@@ -50,7 +50,6 @@ export default function Page() {
       <Breadcrumbs
         items={[
           { label: "Home", href: "/" },
-          { label: "Guides" },
           { label: "Does Watermark Removal Reduce Quality?" },
         ]}
       />

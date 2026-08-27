@@ -70,7 +70,6 @@ export default function Page() {
       <Breadcrumbs
         items={[
           { label: "Home", href: "/" },
-          { label: "Guides" },
           { label: "How AI Video Inpainting Works" },
         ]}
       />

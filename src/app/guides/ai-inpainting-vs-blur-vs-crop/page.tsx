@@ -47,7 +47,6 @@ export default function Page() {
       <Breadcrumbs
         items={[
           { label: "Home", href: "/" },
-          { label: "Guides" },
           { label: "AI Inpainting vs Blur vs Crop" },
         ]}
       />
