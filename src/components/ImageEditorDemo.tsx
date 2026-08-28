@@ -172,12 +172,26 @@ export default function ImageEditorDemo() {
     }
   }, [file, region]);
 
+  // Renders the real headline + a placeholder dropzone (same footprint as
+  // the interactive one below) instead of a bare spinner card - this text
+  // is already part of the server-rendered HTML since "loading" is the
+  // initial state, so it paints without waiting on the client-side plan
+  // check, and swapping to the real dropzone/upsell afterward causes no
+  // layout shift.
   if (planState === "loading") {
     return (
       <div className="glass-card mx-auto max-w-3xl rounded-[2rem] p-6 sm:p-10 border border-cyan-500/20">
-        <div className="flex items-center justify-center gap-3 py-14 text-muted">
+        <div>
+          <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl text-foreground">
+            Remove Image <span className="text-gradient">Watermark</span>
+          </h2>
+          <p className="mt-1.5 text-sm sm:text-base text-muted">
+            Upload an image, mark the watermark once, download the clean version.
+          </p>
+        </div>
+        <div className="mt-8 flex w-full flex-col items-center justify-center gap-3 rounded-[1.75rem] border-2 border-dashed border-border px-6 py-14 text-center opacity-60">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-cyan-500/20 border-t-cyan-400" />
-          <span className="text-sm font-medium">Checking your plan…</span>
+          <span className="text-sm font-medium text-muted">Checking your plan…</span>
         </div>
       </div>
     );

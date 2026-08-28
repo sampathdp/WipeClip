@@ -2,31 +2,17 @@ import type { Metadata } from "next";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import ImageEditorDemo from "@/components/ImageEditorDemo";
+import { buildPageMetadata } from "@/lib/seo";
 
 const title = "Remove Image Watermark - Pro Tool";
 const description =
   "Mark a watermark or logo region on any image once, and WipeClip.co reconstructs the pixels beneath it. A Pro-plan tool, same motion-free inpainting as the video tool.";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildPageMetadata({
   title,
   description,
-  alternates: { canonical: "/remove-image-watermark" },
-  openGraph: {
-    type: "website",
-    url: "https://wipeclip.co/remove-image-watermark",
-    siteName: "WipeClip.co",
-    title,
-    description,
-    locale: "en_US",
-    images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: title }],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title,
-    description,
-    images: ["/opengraph-image"],
-  },
-};
+  path: "/remove-image-watermark",
+});
 
 const faqs = [
   {

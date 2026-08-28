@@ -2,31 +2,17 @@ import type { Metadata } from "next";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import VideoFrameGrabberDemo from "@/components/VideoFrameGrabberDemo";
+import { buildPageMetadata } from "@/lib/seo";
 
 const title = "Extract a Frame From Video - Free Screenshot Tool";
 const description =
   "Grab any frame from a video as a PNG screenshot or thumbnail. Runs entirely in your browser: no upload, no account, no limit on how many frames you capture.";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildPageMetadata({
   title,
   description,
-  alternates: { canonical: "/extract-video-frame" },
-  openGraph: {
-    type: "website",
-    url: "https://wipeclip.co/extract-video-frame",
-    siteName: "WipeClip.co",
-    title,
-    description,
-    locale: "en_US",
-    images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: title }],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title,
-    description,
-    images: ["/opengraph-image"],
-  },
-};
+  path: "/extract-video-frame",
+});
 
 const faqs = [
   {

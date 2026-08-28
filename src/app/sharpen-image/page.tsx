@@ -2,31 +2,17 @@ import type { Metadata } from "next";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import PhotoSharpenerDemo from "@/components/PhotoSharpenerDemo";
+import { buildPageMetadata } from "@/lib/seo";
 
 const title = "Sharpen a Blurry Photo - Free";
 const description =
   "Restore crisp detail to a soft or slightly blurry photo in seconds. Free, no account required to preview. Pick light, standard, or strong strength.";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildPageMetadata({
   title,
   description,
-  alternates: { canonical: "/sharpen-image" },
-  openGraph: {
-    type: "website",
-    url: "https://wipeclip.co/sharpen-image",
-    siteName: "WipeClip.co",
-    title,
-    description,
-    locale: "en_US",
-    images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: title }],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title,
-    description,
-    images: ["/opengraph-image"],
-  },
-};
+  path: "/sharpen-image",
+});
 
 const faqs = [
   {

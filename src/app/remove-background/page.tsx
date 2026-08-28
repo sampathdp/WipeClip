@@ -2,31 +2,17 @@ import type { Metadata } from "next";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import BackgroundRemoverDemo from "@/components/BackgroundRemoverDemo";
+import { buildPageMetadata } from "@/lib/seo";
 
 const title = "Remove Background From Image - Free";
 const description =
   "Upload a photo and get a transparent-background PNG back in seconds. Free, no account required to preview. Powered by the same reconstruction engine behind WipeClip.co's watermark remover.";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildPageMetadata({
   title,
   description,
-  alternates: { canonical: "/remove-background" },
-  openGraph: {
-    type: "website",
-    url: "https://wipeclip.co/remove-background",
-    siteName: "WipeClip.co",
-    title,
-    description,
-    locale: "en_US",
-    images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: title }],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title,
-    description,
-    images: ["/opengraph-image"],
-  },
-};
+  path: "/remove-background",
+});
 
 const faqs = [
   {
