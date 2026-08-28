@@ -23,7 +23,21 @@ export async function proxy(request: NextRequest) {
   // BILLING_SETUP.md's setup steps are done) - the rest of the site has
   // nothing to do with auth, so a missing session-refresh capability
   // should mean "nobody is signed in," not a 500 on every page.
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+  // Anonymous visitors (no Supabase session cookie at all - the vast
+  // majority of traffic: search crawlers, first-time visitors, everyone
+  // hitting the free tools) have nothing for getUser() to refresh. Skip
+  // the network round-trip to Supabase's auth server entirely for them -
+  // it was running on every single request regardless of session state,
+  // adding a full extra hop to TTFB even for a fully static, cached page.
+  const hasSupabaseSession = request.cookies
+    .getAll()
+    .some((c) => c.name.startsWith("sb-") && c.name.includes("-auth-token"));
+
+  if (
+    !hasSupabaseSession ||
+    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ) {
     if (paramBypass && !cookieBypass) {
       response.cookies.set(GATE_COOKIE, secret!, { maxAge: 60 * 60 * 24 * 30, httpOnly: true });
     }
