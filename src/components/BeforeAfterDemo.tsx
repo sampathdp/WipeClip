@@ -18,9 +18,29 @@ export default function BeforeAfterDemo() {
   const [isMuted, setIsMuted] = useState(true);
   const [timecode, setTimecode] = useState("00:00:01:14");
 
+  const [inView, setInView] = useState(false);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const dragging = useRef(false);
+  const dragRect = useRef<DOMRect | null>(null);
+
+  // Defer video decode/network work until the deck actually scrolls into view.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Automated Laser Scanner Animation loop
   useEffect(() => {
@@ -39,9 +59,8 @@ export default function BeforeAfterDemo() {
   }, [mode]);
 
   const updateFromClientX = useCallback((clientX: number) => {
-    const el = containerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
+    const rect = dragRect.current;
+    if (!rect) return;
     const ratio = ((clientX - rect.left) / rect.width) * 100;
     setPercent(Math.min(100, Math.max(0, ratio)));
   }, []);
@@ -55,6 +74,7 @@ export default function BeforeAfterDemo() {
   };
 
   const togglePlay = () => {
+    setInView(true);
     const v = videoRef.current;
     if (!v) return;
     if (v.paused) {
@@ -74,10 +94,10 @@ export default function BeforeAfterDemo() {
 
   useEffect(() => {
     const v = videoRef.current;
-    if (v) {
+    if (v && inView) {
       v.play().catch(() => {});
     }
-  }, [activeSample]);
+  }, [activeSample, inView]);
 
   const effectivePercent = mode === "scanner" ? scanPercent : mode === "reticle" ? 100 : percent;
 
@@ -93,7 +113,7 @@ export default function BeforeAfterDemo() {
               onClick={() => setActiveSample(idx)}
               className={`rounded-full px-3 py-1 font-medium transition-all ${
                 activeSample === idx
-                  ? "bg-accent text-white shadow-[0_0_12px_rgba(124,92,255,0.5)]"
+                  ? "bg-[#6947e8] text-white shadow-[0_0_12px_rgba(124,92,255,0.5)]"
                   : "text-muted hover:text-foreground"
               }`}
             >
@@ -144,6 +164,7 @@ export default function BeforeAfterDemo() {
         onPointerDown={(e) => {
           if (mode === "slider") {
             dragging.current = true;
+            dragRect.current = containerRef.current?.getBoundingClientRect() ?? null;
             (e.target as HTMLElement).setPointerCapture(e.pointerId);
             updateFromClientX(e.clientX);
           }
@@ -153,21 +174,23 @@ export default function BeforeAfterDemo() {
         }}
         onPointerUp={() => {
           dragging.current = false;
+          dragRect.current = null;
         }}
       >
         {/* Continuous HD Video Stream (Always 100% visible on both sides) */}
         <video
           ref={videoRef}
-          key={SAMPLES[activeSample].src}
-          src={SAMPLES[activeSample].src}
+          key={SAMPLES[activeSample].id}
+          src={inView ? SAMPLES[activeSample].src : undefined}
           className="absolute inset-0 h-full w-full object-cover"
           muted={isMuted}
           loop
-          autoPlay
           playsInline
-          preload="metadata"
+          preload="none"
           onTimeUpdate={handleTimeUpdate}
-        />
+        >
+          <track kind="captions" label="No spoken audio" srcLang="en" src="/captions/silent.vtt" default />
+        </video>
 
         {/* Futuristic Cyber Corner Bracket HUD Accents */}
         <div className="pointer-events-none absolute top-3 left-3 z-30 h-4 w-4 border-t-2 border-l-2 border-cyan-400 opacity-70" />
