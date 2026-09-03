@@ -7,6 +7,7 @@ const VARIANT_ENV: Record<PlanKey, string | undefined> = {
   starter: process.env.LEMONSQUEEZY_VARIANT_STARTER,
   pro: process.env.LEMONSQUEEZY_VARIANT_PRO,
   payg: process.env.LEMONSQUEEZY_VARIANT_PAYG,
+  creator: process.env.LEMONSQUEEZY_VARIANT_CREATOR,
 };
 
 export async function POST(request: NextRequest) {

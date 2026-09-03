@@ -41,7 +41,20 @@ const paygCards: { key: PlanKey; tagline: string; isPopular?: boolean; features:
       "Ideal for occasional tasks",
     ],
   },
+  {
+    key: "creator",
+    tagline: "One-time purchase, built for a single upload session",
+    isPopular: false,
+    features: [
+      "15 credits balance",
+      "Non-expiring credits",
+      "Up to 1080p exports",
+      "Ideal for Reels, TikToks & Shorts",
+    ],
+  },
 ];
+
+const SUBSCRIPTION_PLANS: PlanKey[] = ["starter", "pro"];
 
 export default function PricingClient() {
   const [loading, setLoading] = useState<PlanKey | null>(null);
@@ -123,7 +136,7 @@ export default function PricingClient() {
           </p>
         </div>
 
-        <div className="mx-auto mt-16 grid max-w-6xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mx-auto mt-16 grid max-w-7xl gap-6 sm:grid-cols-2 lg:grid-cols-5">
           {/* Free Tier Card */}
           <div className="glass-card rounded-[2rem] p-7 flex flex-col justify-between border border-border/80 relative">
             <div>
@@ -194,7 +207,7 @@ export default function PricingClient() {
 
                   <div className="mt-4">
                     <span className="font-mono text-3xl font-extrabold text-foreground">{plan.priceLabel}</span>
-                    {card.key !== "payg" && <span className="text-xs text-muted"> / month</span>}
+                    {SUBSCRIPTION_PLANS.includes(card.key) && <span className="text-xs text-muted"> / month</span>}
                   </div>
 
                   <p className="mt-3 text-xs text-muted leading-relaxed">{card.tagline}</p>

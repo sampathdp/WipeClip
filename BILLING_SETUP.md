@@ -42,15 +42,17 @@ credentials and this app just calls `signInWithOAuth({ provider: "google" })`.
 ## 2. Lemon Squeezy
 
 1. Create a store if you don't have one.
-2. Products -> New product, one each for **Starter** ($9/mo, 60
-   credits/mo - use a subscription variant), **Pro** ($24/mo, 200
-   credits/mo - subscription), **Pay-as-you-go** ($6, 30 credits - one-time
-   variant). Numbers are the directional ones from the pricing-strategy
-   doc; change the price on the product itself, not in this codebase - the
-   credit amount granted comes from `PLANS` in `src/lib/credits.ts`, not
-   from Lemon Squeezy, so keep them in sync if you change either.
+2. Products -> New product, one each for **Starter** ($8.99/mo, 60
+   credits/mo - subscription variant), **Pro** ($23.99/mo, 200
+   credits/mo - subscription), **Pay-as-you-go** ($5.99, 30 credits -
+   one-time variant), **Creator** ($2.99, 15 credits - one-time variant,
+   sized for a single social-media upload session). Numbers are the
+   directional ones from the pricing-strategy doc; change the price on the
+   product itself, not in this codebase - the credit amount granted comes
+   from `PLANS` in `src/lib/credits.ts`, not from Lemon Squeezy, so keep
+   them in sync if you change either.
 3. Each product's variant page has its numeric ID in the URL - put those in
-   `LEMONSQUEEZY_VARIANT_STARTER` / `_PRO` / `_PAYG`.
+   `LEMONSQUEEZY_VARIANT_STARTER` / `_PRO` / `_PAYG` / `_CREATOR`.
 4. Settings -> General: your Store ID goes in `LEMONSQUEEZY_STORE_ID`.
 5. Settings -> API: create an API key for `LEMONSQUEEZY_API_KEY`.
 6. Settings -> Webhooks -> Add webhook: URL is
