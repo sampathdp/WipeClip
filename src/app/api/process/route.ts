@@ -17,9 +17,12 @@ import { isProUser } from "@/lib/plan";
 // per-job timeout (_run_pipeline_job) and by `maxDuration` below.
 const backendDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 
-// Allow the route itself to run long enough for the backend to finish, on
-// hosts that enforce a function duration cap (ignored by `next dev`).
-export const maxDuration = 800;
+// Give the route as long as the deploy platform allows for the backend to
+// finish (ignored by `next dev`). 60s is the ceiling every Vercel plan
+// accepts at build time; a Pro/Fluid deployment can raise this to 300 (or
+// up to 800 with Fluid compute). A value above the plan's limit fails the
+// build outright.
+export const maxDuration = 60;
 
 /** Server-side gate in front of the FastAPI processing backend. Signed-in
  * callers spend credits atomically before forwarding the job, refunded if
