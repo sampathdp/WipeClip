@@ -15,7 +15,7 @@ export const PLANS = {
   starter: { label: "Starter", priceLabel: "$8.99/mo", credits: 60 },
   pro: { label: "Pro", priceLabel: "$23.99/mo", credits: 200 },
   payg: { label: "Pay-as-you-go", priceLabel: "$5.99", credits: 30 },
-  creator: { label: "Creator", priceLabel: "$2.99", credits: 15 },
+  creator: { label: "Creator", priceLabel: "$1.99", credits: 15 },
 } as const;
 
 export type PlanKey = keyof typeof PLANS;

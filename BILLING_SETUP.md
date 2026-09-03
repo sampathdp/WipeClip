@@ -45,7 +45,7 @@ credentials and this app just calls `signInWithOAuth({ provider: "google" })`.
 2. Products -> New product, one each for **Starter** ($8.99/mo, 60
    credits/mo - subscription variant), **Pro** ($23.99/mo, 200
    credits/mo - subscription), **Pay-as-you-go** ($5.99, 30 credits -
-   one-time variant), **Creator** ($2.99, 15 credits - one-time variant,
+   one-time variant), **Creator** ($1.99, 15 credits - one-time variant,
    sized for a single social-media upload session). Numbers are the
    directional ones from the pricing-strategy doc; change the price on the
    product itself, not in this codebase - the credit amount granted comes

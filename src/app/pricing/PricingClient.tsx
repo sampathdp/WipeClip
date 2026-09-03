@@ -22,8 +22,8 @@ const paygCards: { key: PlanKey; tagline: string; isPopular?: boolean; features:
   },
   {
     key: "pro",
-    tagline: "For creators & power workflows",
-    isPopular: true,
+    tagline: "For power workflows & 4K exports",
+    isPopular: false,
     features: [
       "200 credits / month",
       "4K Ultra HD unlocked",
@@ -44,7 +44,7 @@ const paygCards: { key: PlanKey; tagline: string; isPopular?: boolean; features:
   {
     key: "creator",
     tagline: "One-time purchase, built for a single upload session",
-    isPopular: false,
+    isPopular: true,
     features: [
       "15 credits balance",
       "Non-expiring credits",
