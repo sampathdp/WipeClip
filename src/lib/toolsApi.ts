@@ -115,7 +115,8 @@ export async function processVideo(
   mode: "remove" | "replace",
   region: Region,
   resolution: Resolution,
-  logo?: File | null
+  logo?: File | null,
+  signal?: AbortSignal
 ): Promise<Blob> {
   const body = new FormData();
   body.append("file", file);
@@ -127,9 +128,14 @@ export async function processVideo(
   body.append("resolution", resolution);
   if (mode === "replace" && logo) body.append("logo", logo);
 
+  // The backend inpaints frame-by-frame and only responds once the whole
+  // clip is done - minutes for a long or high-resolution video - so this
+  // request has no natural timeout. `signal` lets the caller impose a hard
+  // ceiling (see UploadDemo) rather than spinning forever if it wedges.
   const res = await fetch("/api/process", {
     method: "POST",
     body,
+    signal,
   });
 
   if (!res.ok) {

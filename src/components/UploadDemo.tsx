@@ -58,6 +58,7 @@ export default function UploadDemo() {
   const [logo, setLogo] = useState<File | null>(null);
   const [consent, setConsent] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [elapsedMs, setElapsedMs] = useState(0);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isPro, setIsPro] = useState(false);
@@ -160,6 +161,7 @@ export default function UploadDemo() {
     setLogo(null);
     setConsent(false);
     setProgress(0);
+    setElapsedMs(0);
     setResultUrl(null);
     setQueue([]);
     void clearPendingResult();
@@ -231,16 +233,32 @@ export default function UploadDemo() {
     if (!file || !region) return;
     setStep("processing");
     setProgress(0);
+    setElapsedMs(0);
     setError(null);
     trackEvent("mask_completed", { tool: TOOL, mode });
     trackEvent("processing_started", { tool: TOOL, mode, resolution });
 
+    // Indeterminate: the backend processes the whole clip before it
+    // responds, so there's no real percentage to read. Ease asymptotically
+    // toward ~97% and keep inching so a multi-minute job (long clip / Pro
+    // quality) never looks frozen; the await below snaps it to 100. The
+    // elapsed clock is the honest signal the user actually watches.
+    const startedAt = Date.now();
     timerRef.current = setInterval(() => {
-      setProgress((p) => (p < 90 ? p + Math.random() * 10 : p));
-    }, 400);
+      setProgress((p) => (p < 97 ? p + Math.max(0.15, (97 - p) * 0.03) : p));
+      setElapsedMs(Date.now() - startedAt);
+    }, 600);
+
+    // Hard ceiling: the frame-by-frame backend can run for minutes, but if
+    // it wedges entirely the request would otherwise hang forever (no
+    // natural timeout now that the undici header timeout is lifted in
+    // /api/process). Well clear of the backend's own worst case.
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), 20 * 60 * 1000);
 
     try {
-      const blob = await processVideo(file, mode, region, resolution, logo);
+      const blob = await processVideo(file, mode, region, resolution, logo, controller.signal);
+      clearTimeout(abortTimer);
       if (timerRef.current) clearInterval(timerRef.current);
       setProgress(100);
       setResultUrl(URL.createObjectURL(blob));
@@ -254,7 +272,16 @@ export default function UploadDemo() {
         void savePendingResult({ filename: file.name, originalBlob: file, resultBlob: blob });
       }
     } catch (e) {
+      clearTimeout(abortTimer);
       if (timerRef.current) clearInterval(timerRef.current);
+      if (e instanceof DOMException && e.name === "AbortError") {
+        setError(
+          "Processing is taking too long — this clip may be too long or too high-resolution. Try a shorter clip or a lower output resolution."
+        );
+        setStep("error");
+        trackEvent("processing_failed", { tool: TOOL, error_category: "timeout" });
+        return;
+      }
       if (e instanceof ContentBlockedError) {
         setError(e.message);
         setBlockReason("content");
@@ -584,8 +611,17 @@ export default function UploadDemo() {
               </div>
               <div className="mt-3 flex items-center justify-between text-xs sm:text-sm text-muted">
                 <span>Inpainting frames using motion awareness…</span>
-                <span className="font-mono font-bold text-cyan-600">{Math.round(progress)}%</span>
+                <span className="font-mono font-bold text-cyan-600">
+                  {Math.floor(elapsedMs / 60000)}:
+                  {String(Math.floor((elapsedMs % 60000) / 1000)).padStart(2, "0")}
+                </span>
               </div>
+              {elapsedMs > 45000 && (
+                <p className="mt-2 text-xs text-muted">
+                  Still working — a longer or higher-resolution clip is reconstructed frame by frame
+                  and can take several minutes. Keep this tab open.
+                </p>
+              )}
             </div>
           )}
 

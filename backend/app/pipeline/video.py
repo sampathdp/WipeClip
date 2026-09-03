@@ -58,6 +58,7 @@ from app.config import (
     WATERMARK_FLOW_SEARCH_RADIUS_FRAMES,
     WATERMARK_FSR_CONTEXT_PAD_PX,
     WATERMARK_FSR_SCALE,
+    WATERMARK_INPAINT_FSR_MAX_REGION_PX,
     WATERMARK_PATCH_SHARPEN_AMOUNT,
     WATERMARK_PATCH_SHARPEN_KSIZE,
 )
@@ -397,6 +398,10 @@ def _fsr_inpaint_region(frame: np.ndarray, x: int, y: int, w: int, h: int) -> np
     upscaled back for the composite. Only the exact (x, y, w, h) pixels in
     the returned frame differ from the input - everything else, including
     the rest of the padded crop, is untouched.
+
+    FSR cost climbs steeply with region area; _inpaint_region() sends a box
+    past WATERMARK_INPAINT_FSR_MAX_REGION_PX to _telea_inpaint_region()
+    instead, so this only ever runs on watermark-sized regions.
     """
     fh, fw = frame.shape[:2]
     cx0 = max(0, x - WATERMARK_FSR_CONTEXT_PAD_PX)
@@ -423,6 +428,42 @@ def _fsr_inpaint_region(frame: np.ndarray, x: int, y: int, w: int, h: int) -> np
     return out
 
 
+def _telea_inpaint_region(frame: np.ndarray, x: int, y: int, w: int, h: int) -> np.ndarray:
+    """Diffusion (Telea) fill for the region, on the same padded crop as
+    _fsr_inpaint_region. Softer than FSR but near-instant - used only for
+    boxes too large for FSR to finish in reasonable time or to fill any
+    sharper (see _inpaint_region / WATERMARK_INPAINT_FSR_MAX_REGION_PX).
+    Same contract: only the (x, y, w, h) pixels of the returned frame differ.
+    """
+    fh, fw = frame.shape[:2]
+    cx0 = max(0, x - WATERMARK_FSR_CONTEXT_PAD_PX)
+    cy0 = max(0, y - WATERMARK_FSR_CONTEXT_PAD_PX)
+    cx1 = min(fw, x + w + WATERMARK_FSR_CONTEXT_PAD_PX)
+    cy1 = min(fh, y + h + WATERMARK_FSR_CONTEXT_PAD_PX)
+    crop = frame[cy0:cy1, cx0:cx1]
+
+    # cv2.inpaint's mask convention: non-zero means "reconstruct this".
+    mask = np.zeros(crop.shape[:2], np.uint8)
+    mask[y - cy0 : y - cy0 + h, x - cx0 : x - cx0 + w] = 255
+    reconstructed = cv2.inpaint(crop, mask, 3, cv2.INPAINT_TELEA)
+
+    out = frame.copy()
+    out[y : y + h, x : x + w] = reconstructed[y - cy0 : y - cy0 + h, x - cx0 : x - cx0 + w]
+    return out
+
+
+def _inpaint_region(frame: np.ndarray, x: int, y: int, w: int, h: int) -> np.ndarray:
+    """Reconstructs frame[y:y+h, x:x+w], picking the method by region size:
+    FSR (exemplar-based, sharp, cost climbs steeply with area) for a
+    watermark-sized box, Telea (diffusion, soft but near-instant) once the
+    box is larger than WATERMARK_INPAINT_FSR_MAX_REGION_PX - where FSR would
+    cost minutes per clip without looking any sharper.
+    """
+    if w * h > WATERMARK_INPAINT_FSR_MAX_REGION_PX:
+        return _telea_inpaint_region(frame, x, y, w, h)
+    return _fsr_inpaint_region(frame, x, y, w, h)
+
+
 def _flow_assisted_inpaint_region(
     center_frame: np.ndarray, neighbor_frames: list[np.ndarray], x: int, y: int, w: int, h: int
 ) -> np.ndarray:
@@ -430,7 +471,7 @@ def _flow_assisted_inpaint_region(
     `neighbor_frames` wherever dense optical flow shows the region's
     underlying content was visible there (camera pan/scroll moved it out
     from under the fixed watermark position at some nearby point in time),
-    falling back to _fsr_inpaint_region for whatever pixels no neighbor
+    falling back to _inpaint_region for whatever pixels no neighbor
     ever uncovers. See WATERMARK_FLOW_* in config.py for the full
     rationale and tuning knobs.
 
@@ -502,10 +543,11 @@ def _flow_assisted_inpaint_region(
     if not region_filled.all():
         # Leftover pixels no neighbor ever uncovered (static shot, or
         # motion too large for the padded search window) still need a
-        # fill - same exemplar-based reconstruction as quality="standard".
-        fsr_region = _fsr_inpaint_region(center_frame, x, y, w, h)[y : y + h, x : x + w]
+        # fill - same reconstruction as quality="standard" (FSR, or Telea
+        # for a very large box - see _inpaint_region).
+        fallback_region = _inpaint_region(center_frame, x, y, w, h)[y : y + h, x : x + w]
         recovered_region = recovered_region.copy()
-        recovered_region[~region_filled] = fsr_region[~region_filled]
+        recovered_region[~region_filled] = fallback_region[~region_filled]
 
     out = center_frame.copy()
     out[y : y + h, x : x + w] = recovered_region
@@ -514,10 +556,19 @@ def _flow_assisted_inpaint_region(
 
 def _inpaint_region_to_temp_video(input_path: str, x: int, y: int, w: int, h: int) -> str:
     """Decodes every frame, reconstructs the fixed region at (x, y, w, h)
-    with _fsr_inpaint_region(), and writes the result to a new silent temp
-    MP4 (no audio track - remove_logo() muxes the original's audio back in
-    on the final pass). Blocking/CPU-bound; callers should run this via
-    asyncio.to_thread, same reasoning as _run_ffmpeg's use of it.
+    with _inpaint_region(), and writes just that reconstructed w*h
+    patch - not the whole frame - to a new silent, lossless (FFV1) temp
+    video. remove_logo() composites the patch straight back onto the
+    untouched original on the final pass, so:
+      - nothing outside the box is ever decoded and re-encoded here (that
+        was softening the entire picture, not only the region), and
+      - the output's frame timing and duration come from the source
+        itself, not from OpenCV's frame-rate reading - which is unreliable
+        on variable-frame-rate phone/screen-recording clips and was making
+        some 10s clips come out roughly half length.
+
+    Blocking/CPU-bound; callers should run this via asyncio.to_thread, same
+    reasoning as _run_ffmpeg's use of it.
 
     Raises:
         ValueError: if the file can't be opened as a video (mirrors
@@ -529,18 +580,16 @@ def _inpaint_region_to_temp_video(input_path: str, x: int, y: int, w: int, h: in
         raise ValueError("Could not open this file as a video")
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
-    frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
+    fd, tmp_path = tempfile.mkstemp(suffix=".mkv")
     os.close(fd)
-    writer = cv2.VideoWriter(tmp_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (frame_w, frame_h))
+    writer = cv2.VideoWriter(tmp_path, cv2.VideoWriter_fourcc(*"FFV1"), fps, (w, h))
     try:
         while True:
             ok, frame = cap.read()
             if not ok:
                 break
-            writer.write(_fsr_inpaint_region(frame, x, y, w, h))
+            writer.write(_inpaint_region(frame, x, y, w, h)[y : y + h, x : x + w])
     finally:
         cap.release()
         writer.release()
@@ -549,7 +598,8 @@ def _inpaint_region_to_temp_video(input_path: str, x: int, y: int, w: int, h: in
 
 def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, h: int) -> str:
     """quality="pro" counterpart to _inpaint_region_to_temp_video(): same
-    contract (silent temp MP4 out), but reconstructs each frame with
+    contract (silent lossless w*h patch video out, composited back onto the
+    original by remove_logo), but reconstructs each frame with
     _flow_assisted_inpaint_region() instead of plain per-frame FSR.
 
     Streams through the video once, keeping a sliding buffer of at most
@@ -571,12 +621,10 @@ def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, 
         raise ValueError("Could not open this file as a video")
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
-    frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
+    fd, tmp_path = tempfile.mkstemp(suffix=".mkv")
     os.close(fd)
-    writer = cv2.VideoWriter(tmp_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (frame_w, frame_h))
+    writer = cv2.VideoWriter(tmp_path, cv2.VideoWriter_fourcc(*"FFV1"), fps, (w, h))
 
     window: list[np.ndarray] = []
     window_start = 0  # global frame index of window[0]
@@ -588,7 +636,10 @@ def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, 
         neighbors = sorted(
             (i for i in range(len(window)) if i != center_pos), key=lambda i: abs(i - center_pos)
         )
-        writer.write(_flow_assisted_inpaint_region(window[center_pos], [window[i] for i in neighbors], x, y, w, h))
+        patch = _flow_assisted_inpaint_region(
+            window[center_pos], [window[i] for i in neighbors], x, y, w, h
+        )
+        writer.write(patch[y : y + h, x : x + w])
 
     try:
         while True:
@@ -643,17 +694,19 @@ async def remove_logo(
     well-matching real content instead of diffusing a smooth gradient,
     which is what made ffmpeg's `delogo` and then plain Telea inpainting
     both still look soft on anything with real color texture). The
-    per-frame pass writes a silent intermediate video; a final ffmpeg pass
-    re-sharpens just the reconstructed patch (see WATERMARK_PATCH_SHARPEN_*
-    - cosmetic contrast restoration, same as before), muxes the original's
-    audio back in, and re-encodes to the standard output settings.
+    per-frame pass writes only the reconstructed region to a lossless
+    intermediate; a final ffmpeg pass sharpens that patch (see
+    WATERMARK_PATCH_SHARPEN_* - cosmetic contrast restoration) and
+    composites it straight onto the untouched original, taking the
+    original's audio and - crucially - its exact frame timing, so the
+    result is the same length as the source and every pixel outside the
+    box is bit-for-bit the original rather than a re-encode.
 
     `quality="pro"` swaps the per-frame FSR pass for
     _inpaint_region_to_temp_video_flow's optical-flow-assisted
     reconstruction (see WATERMARK_FLOW_* in config.py) - recovers real
     pixels where camera motion allows it, still falls back to plain FSR
-    per-pixel wherever it can't. `quality="standard"` (default) is
-    byte-for-byte the same path as before this parameter existed.
+    per-pixel wherever it can't.
 
     `output_height`, if given, downscales the result afterward (width kept
     proportional via `-2`), applied in that same final pass - the region
@@ -665,33 +718,37 @@ async def remove_logo(
     inpaint_fn = _inpaint_region_to_temp_video_flow if quality == "pro" else _inpaint_region_to_temp_video
     tmp_path = await asyncio.to_thread(inpaint_fn, input_path, x, y, w, h)
     try:
-        # Split the inpainted frame, crop just the patch back out, sharpen
-        # only that crop, and overlay it back at the same coordinates - so
-        # the sharpen pass never touches real (already-sharp) content
-        # outside the patch and can't ring/halo the surrounding image.
+        # tmp_path is the reconstructed region only (input 1). Sharpen it -
+        # so the unsharp pass never touches already-sharp real content and
+        # can't ring/halo it - then overlay it onto the original (input 0)
+        # at the marked coordinates. -noautorotate keeps the original in
+        # the storage orientation OpenCV used when the region was marked,
+        # so x/y still line up. eof_action=repeat: if OpenCV decoded fewer
+        # frames than the container reports, the last reconstructed patch
+        # holds for the tail rather than the video ending early.
         overlay_label = "outv" if output_height is None else "ov"
         filter_complex = (
-            f"[0:v]split=2[base][topatch];"
-            f"[topatch]crop={w}:{h}:{x}:{y},"
-            f"unsharp=luma_msize_x={WATERMARK_PATCH_SHARPEN_KSIZE}:luma_msize_y={WATERMARK_PATCH_SHARPEN_KSIZE}:"
+            f"[1:v]unsharp=luma_msize_x={WATERMARK_PATCH_SHARPEN_KSIZE}:"
+            f"luma_msize_y={WATERMARK_PATCH_SHARPEN_KSIZE}:"
             f"luma_amount={WATERMARK_PATCH_SHARPEN_AMOUNT}[patch];"
-            f"[base][patch]overlay=x={x}:y={y}[{overlay_label}]"
+            f"[0:v][patch]overlay=x={x}:y={y}:eof_action=repeat[{overlay_label}]"
         )
         if output_height is not None:
             filter_complex += f";[{overlay_label}]scale=-2:{output_height}[outv]"
         await _run_ffmpeg(
             [
                 "-y",
-                "-i",
-                tmp_path,
+                "-noautorotate",
                 "-i",
                 input_path,
+                "-i",
+                tmp_path,
                 "-filter_complex",
                 filter_complex,
                 "-map",
                 "[outv]",
                 "-map",
-                "1:a?",
+                "0:a?",
                 "-c:v",
                 "libx264",
                 "-preset",

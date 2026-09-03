@@ -1,9 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Agent } from "undici";
 import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RESOLUTION_CREDIT_COST } from "@/lib/credits";
 import { TOOLS_API_URL } from "@/lib/toolsApi";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { isProUser } from "@/lib/plan";
+
+// The FastAPI backend processes the video synchronously inside this
+// request: a long clip, a high output resolution, or the Pro optical-flow
+// quality tier can each keep the connection open well past undici's
+// default 300s headersTimeout. When that fired, this route caught the
+// aborted fetch and returned a bogus "backend_unreachable" 502 (and
+// refunded credits) while the job was actually still running fine. This
+// dispatcher lifts the header/body idle timeouts for the backend call
+// only; a genuinely stuck job is still bounded by the backend's own
+// per-job timeout (_run_pipeline_job) and by `maxDuration` below.
+const backendDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
+
+// Allow the route itself to run long enough for the backend to finish, on
+// hosts that enforce a function duration cap (ignored by `next dev`).
+export const maxDuration = 800;
 
 /** Server-side gate in front of the FastAPI processing backend. Signed-in
  * callers spend credits atomically before forwarding the job, refunded if
@@ -64,7 +80,8 @@ export async function POST(request: NextRequest) {
         headers: process.env.INTERNAL_API_SECRET
           ? { "X-Internal-Process-Secret": process.env.INTERNAL_API_SECRET }
           : undefined,
-      });
+        dispatcher: backendDispatcher,
+      } as RequestInit & { dispatcher: Agent });
     } catch (e) {
       return NextResponse.json(
         {
@@ -175,7 +192,8 @@ export async function POST(request: NextRequest) {
       headers: process.env.INTERNAL_API_SECRET
         ? { "X-Internal-Process-Secret": process.env.INTERNAL_API_SECRET }
         : undefined,
-    });
+      dispatcher: backendDispatcher,
+    } as RequestInit & { dispatcher: Agent });
   } catch (e) {
     await supabaseAdmin.rpc("refund_credits", { p_user_id: user.id, p_amount: cost, p_resolution: resolution });
     return NextResponse.json(

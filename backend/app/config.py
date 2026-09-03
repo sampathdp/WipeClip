@@ -127,18 +127,23 @@ MIN_REGION_PX: int = 4  # smallest allowed watermark-region edge length
 # left Telea soft. Cost: FSR is much slower per frame than Telea, so this
 # only runs it on a small padded crop around the region (all the context
 # it actually needs) rather than the full frame. Downscaling the crop's
-# working resolution for extra speed was tried and reverted: it
-# measurably reintroduced a bleed/smear artifact next to sharp nearby
-# content (e.g. text right at the region edge) that full resolution
-# doesn't have - exactly the case this change exists to fix, so trading
-# it away for speed defeats the point. At full resolution
-# (WATERMARK_FSR_SCALE = 1.0), measured ~6.5x realtime end-to-end (vs
-# Telea's ~1x) - real, and a clip anywhere near MAX_VIDEO_DURATION_SECONDS
-# will take tens of minutes, not seconds, in a synchronous request with
-# no job queue. Fine for typical short clips; if long clips need to stay
-# fast, lowering this is the lever, but expect the smear to come back
-# with it - reconsider MAX_VIDEO_DURATION_SECONDS or a background job
-# queue first.
+# working resolution for extra speed was tried and reverted: it measurably
+# reintroduced a bleed/smear artifact next to sharp nearby content (e.g.
+# text right at the region edge) that full resolution doesn't have -
+# exactly the case this change exists to fix, so trading it away for speed
+# defeats the point.
+#
+# FSR cost climbs steeply with region area, though, and its exemplar
+# search has little real content to draw on once the hole is large, so a
+# big marked box is both very slow AND not visibly sharper than plain
+# diffusion. _inpaint_region() therefore routes any box past
+# WATERMARK_INPAINT_FSR_MAX_REGION_PX to Telea (cv2.inpaint) instead -
+# seconds, not minutes, for the whole clip. Watermark-sized boxes (the
+# overwhelmingly common case) still get FSR at full resolution, unchanged.
+# At WATERMARK_FSR_SCALE = 1.0 the FSR path runs ~6.5x realtime end-to-end
+# for a normal box; a clip near MAX_VIDEO_DURATION_SECONDS is still tens of
+# minutes on the FSR path in a synchronous request with no job queue -
+# reconsider MAX_VIDEO_DURATION_SECONDS or a background job queue first.
 #
 # None of this - not delogo, not Telea, not FSR - can *recover* content
 # that's 100% covered by the watermark in every single frame; that
@@ -159,6 +164,16 @@ WATERMARK_FSR_SCALE: float = 1.0         # working resolution for the FSR
                                           # back a bleed/smear artifact
                                           # next to sharp nearby content -
                                           # see the block comment above)
+WATERMARK_INPAINT_FSR_MAX_REGION_PX: int = 130_000  # ~360x360. A marked
+                                          # box with more pixels than this
+                                          # is reconstructed with Telea
+                                          # (cv2.inpaint) instead of FSR:
+                                          # FSR on a hole that large is both
+                                          # very slow (minutes per clip) and
+                                          # no sharper in practice - too
+                                          # little real content around it to
+                                          # exemplar from. Watermark-sized
+                                          # boxes stay on the FSR path.
 
 # The reconstructed patch is then re-sharpened in the final ffmpeg pass -
 # still somewhat soft after any inpainting method - to restore local
