@@ -308,7 +308,20 @@ async def api_video_process(
                 status_code=400,
                 detail=f"Video too long ({info.duration:.0f}s); max supported is {MAX_VIDEO_DURATION_SECONDS:.0f}s",
             )
-        if x < 0 or y < 0 or x + w > info.width or y + h > info.height:
+        # The region is drawn in the browser against a scaled-up preview, so
+        # rounding on the way back to source pixels can push an edge-flush box
+        # a pixel past the frame - and ffmpeg's crop/overlay (and delogo
+        # before it) reject a region that isn't fully inside. Clamp into
+        # bounds rather than 400-ing: a box the user deliberately dragged to
+        # the very corner is a valid request. Only a region with no real
+        # overlap, or one that collapses below the minimum once clamped, is a
+        # genuine error.
+        x0 = max(0, min(x, info.width))
+        y0 = max(0, min(y, info.height))
+        x1 = max(0, min(x + w, info.width))
+        y1 = max(0, min(y + h, info.height))
+        x, y, w, h = x0, y0, x1 - x0, y1 - y0
+        if w < MIN_REGION_PX or h < MIN_REGION_PX:
             raise HTTPException(status_code=400, detail="Region is outside the video frame")
 
         _assert_video_safe(in_path)

@@ -56,12 +56,14 @@ export default function RegionSelector({
       if (!el || el.clientWidth === 0 || el.clientHeight === 0) return;
       const scaleX = naturalWidth / el.clientWidth;
       const scaleY = naturalHeight / el.clientHeight;
-      onChange({
-        x: Math.round(b.x * scaleX),
-        y: Math.round(b.y * scaleY),
-        w: Math.round(b.w * scaleX),
-        h: Math.round(b.h * scaleY),
-      });
+      // Round each edge and clamp into the frame - rounding x and w
+      // independently can sum to a pixel past naturalWidth for an
+      // edge-flush box, which the backend rejects as "outside the frame".
+      const x = Math.max(0, Math.min(Math.round(b.x * scaleX), naturalWidth));
+      const y = Math.max(0, Math.min(Math.round(b.y * scaleY), naturalHeight));
+      const x2 = Math.max(0, Math.min(Math.round((b.x + b.w) * scaleX), naturalWidth));
+      const y2 = Math.max(0, Math.min(Math.round((b.y + b.h) * scaleY), naturalHeight));
+      onChange({ x, y, w: x2 - x, h: y2 - y });
     },
     [naturalWidth, naturalHeight, onChange]
   );
@@ -110,9 +112,14 @@ export default function RegionSelector({
 
   return (
     <div>
+      {/* Centered + viewport-height-capped so a tall portrait clip doesn't
+          push the controls (and the Process button) far below the fold.
+          The wrapper shrink-wraps the <img> exactly, so pointer math and
+          the absolute-positioned box overlay stay aligned. */}
+      <div className="flex items-start justify-center">
       <div
         ref={wrapRef}
-        className="relative w-full touch-none select-none overflow-hidden rounded-xl border border-cyan-500/30 bg-black shadow-lg"
+        className="relative max-w-full touch-none select-none overflow-hidden rounded-xl border border-cyan-500/30 bg-black shadow-lg"
         onPointerDown={(e) => {
           const p = pointFromEvent(e);
           startDrag(e, { type: "draw", start: p });
@@ -166,7 +173,7 @@ export default function RegionSelector({
         <img
           src={previewUrl}
           alt="Video preview frame"
-          className="block w-full"
+          className="block h-auto w-auto max-h-[70dvh] max-w-full"
           style={{ aspectRatio: `${naturalWidth} / ${naturalHeight}` }}
           draggable={false}
           onLoad={() => setLoadedFor(previewUrl)}
@@ -193,6 +200,7 @@ export default function RegionSelector({
             ))}
           </div>
         )}
+      </div>
       </div>
       <p className="mt-2.5 text-xs text-muted flex items-center gap-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />

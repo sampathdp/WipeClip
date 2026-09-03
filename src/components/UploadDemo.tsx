@@ -67,6 +67,17 @@ export default function UploadDemo() {
   const inputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // The Process button sits at the bottom of a tall panel, so after
+  // clicking it the viewport is left scrolled past the progress bar /
+  // result that replace the controls. Pull the panel back into view on
+  // each of those transitions.
+  useEffect(() => {
+    if (step === "processing" || step === "done" || step === "blocked" || step === "error") {
+      panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [step]);
 
   // Processing itself needs no account (see /api/process's anonymous path)
   // - only the download at the end is gated on being signed in (see the
@@ -266,6 +277,7 @@ export default function UploadDemo() {
 
   return (
     <div
+      ref={panelRef}
       id="upload"
       className="glass-card mx-auto max-w-3xl scroll-mt-28 rounded-[2rem] p-6 sm:p-10 border border-cyan-500/20 shadow-[0_20px_50px_rgba(15,23,42,0.08)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.7)]"
     >
