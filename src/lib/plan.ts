@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-/** Single source of truth for "is this user on the $24 Pro plan" - reads
+/** Single source of truth for "is this user on the $23.99 Pro plan" - reads
  * the same `profiles.plan` column /api/credits already exposes. `plan` is
  * the only tier signal (see supabase/schema.sql): set to 'pro' by the
  * grant_paid_credits RPC on a Lemon Squeezy grant event, reset to 'free' on

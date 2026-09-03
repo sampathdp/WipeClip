@@ -12,9 +12,9 @@ export const FREE_DAILY_CREDITS = 2;
 export const IMAGE_CREDIT_COST = 1;
 
 export const PLANS = {
-  starter: { label: "Starter", priceLabel: "$9/mo", credits: 60 },
-  pro: { label: "Pro", priceLabel: "$24/mo", credits: 200 },
-  payg: { label: "Pay-as-you-go", priceLabel: "$6", credits: 30 },
+  starter: { label: "Starter", priceLabel: "$8.99/mo", credits: 60 },
+  pro: { label: "Pro", priceLabel: "$23.99/mo", credits: 200 },
+  payg: { label: "Pay-as-you-go", priceLabel: "$5.99", credits: 30 },
 } as const;
 
 export type PlanKey = keyof typeof PLANS;
