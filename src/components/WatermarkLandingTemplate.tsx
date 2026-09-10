@@ -12,7 +12,7 @@ export default function WatermarkLandingTemplate({
   extra,
 }: {
   content: WatermarkPlatform;
-  /** Overrides the default "Remove the {platform} watermark" H1 text. */
+  /** Overrides the default "Restore your {platform} footage" H1 text. */
   h1?: React.ReactNode;
   /** Overrides the default behavior/why-remove block with platform-specific
    * editorial content. Still rendered inside the template's narrow
@@ -55,7 +55,7 @@ export default function WatermarkLandingTemplate({
             <h1 className="font-display text-4xl font-extrabold tracking-tight sm:text-5xl text-foreground text-balance">
               {h1 ?? (
                 <>
-                  Remove the <span className="text-gradient">{content.platform}</span> watermark
+                  Restore your <span className="text-gradient">{content.platform}</span> footage
                 </>
               )}
             </h1>
@@ -67,7 +67,7 @@ export default function WatermarkLandingTemplate({
                 href="/#upload"
                 className="btn-primary rounded-full px-8 py-4 text-sm sm:text-base font-bold inline-flex items-center justify-center gap-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_0_35px_rgba(124,92,255,0.45)] transition-all hover:scale-[1.02]"
               >
-                <span>Remove watermark free</span>
+<span>Clean up a clip free</span>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>
@@ -81,13 +81,13 @@ export default function WatermarkLandingTemplate({
             {body ?? (
               <div className="glass-card rounded-[2rem] p-8 sm:p-10 border border-border/80">
                 <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">
-                  How the {content.platform} watermark behaves
+                  How the {content.platform} export badge behaves
                 </h2>
                 <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
                   {content.behavior}
                 </p>
                 <h2 className="mt-8 font-display text-2xl font-bold tracking-tight text-foreground">
-                  Why people remove it
+                  Why creators clean it up
                 </h2>
                 <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
                   {content.whyRemove}
@@ -104,7 +104,7 @@ export default function WatermarkLandingTemplate({
         <section className="py-16">
           <div className="mx-auto max-w-3xl px-6">
             <h2 className="text-center font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-              {content.platform} watermark removal: FAQ
+              {content.platform} footage cleanup: FAQ
             </h2>
             <div className="mt-10 space-y-4">
               {content.faqs.map((f) => (

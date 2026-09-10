@@ -8,6 +8,7 @@ const MARQUEE_ITEMS = [
   "NO CROP",
   "NO BLUR BOX",
   "MOTION-AWARE INPAINTING",
+  "YOUR FOOTAGE, YOUR RIGHTS",
   "~15s AVG RENDER",
 ];
 
@@ -50,16 +51,17 @@ export default function Hero() {
             <h1 className="font-display text-6xl tracking-tighter leading-[0.92] text-foreground sm:text-7xl lg:text-6xl xl:text-7xl">
               <span className="block font-semibold text-foreground/90">AI Video </span>
               <span className="block italic font-extrabold text-gradient drop-shadow-[0_0_35px_rgba(124,92,255,0.35)]">
-                Watermark{" "}
+                Cleanup{" "}
               </span>
-              <span className="block font-extrabold">Remover</span>
+              <span className="block font-extrabold">for Creators</span>
             </h1>
 
             {/* Subtitle */}
             <p className="mx-auto mt-7 max-w-md text-base leading-relaxed text-muted sm:text-lg lg:mx-0 lg:border-l-2 lg:border-accent/40 lg:pl-5">
-              Mark the badge, logo, or timestamp once. WipeClip reconstructs the
-              pixels underneath from the surrounding frames: no crop, no blur
-              box, and the rest of the frame stays at full source resolution.
+              Restore your footage. Mark a logo, badge, caption, or timestamp an
+              editor or platform baked in, once. WipeClip reconstructs the pixels
+              underneath from the surrounding frames: no crop, no blur box, and
+              the rest of the frame stays at full source resolution.
             </p>
 
             {/* Action CTAs */}
@@ -68,7 +70,7 @@ export default function Hero() {
                 href="#upload"
                 className="btn-primary rounded-full px-8 py-4 text-sm sm:text-base font-bold inline-flex items-center justify-center gap-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_0_35px_rgba(124,92,255,0.45)] transition-all hover:scale-[1.02]"
               >
-                <span>Remove watermark free</span>
+<span>Clean up a clip free</span>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>

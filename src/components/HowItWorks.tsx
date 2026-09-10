@@ -14,7 +14,7 @@ const steps = [
   {
     n: "03",
     title: "Export clean footage",
-    desc: "Download your unwatermarked video instantly at crisp original resolution with pristine audio.",
+    desc: "Download your restored video instantly at crisp original resolution with pristine audio.",
     tag: "Lossless Export",
   },
 ];
@@ -22,7 +22,7 @@ const steps = [
 const jsonLd = {
   "@context": "https://schema.org",
   "@type": "HowTo",
-  name: "How to remove a watermark from a video with WipeClip.co",
+  name: "How to clean up a video with WipeClip.co",
   step: steps.map((s) => ({
     "@type": "HowToStep",
     name: s.title,

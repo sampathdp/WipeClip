@@ -148,7 +148,7 @@ export default function PricingClient() {
                 <span className="text-xs text-muted"> / forever</span>
               </div>
               <p className="mt-2 text-xs font-mono text-cyan-600">2 credits / day (auto-renew)</p>
-              <p className="mt-3 text-xs text-muted">Perfect to test watermark removal on short clips.</p>
+              <p className="mt-3 text-xs text-muted">Perfect to test video cleanup on short clips.</p>
 
               <div className="mt-6 border-t border-border/60 pt-6">
                 <ul className="space-y-3 text-xs text-muted">

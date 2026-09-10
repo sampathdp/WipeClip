@@ -10,7 +10,7 @@ export default function RelatedContent() {
             Related Guides
           </div>
           <h2 className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-            Removing a watermark from a specific platform
+            Cleaning up footage from a specific platform
           </h2>
           <p className="mt-4 text-muted text-base leading-relaxed">
             Each platform&apos;s export behaves a little differently. These go into the specifics.

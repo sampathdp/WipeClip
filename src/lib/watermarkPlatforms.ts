@@ -14,19 +14,19 @@ export const WATERMARK_PLATFORMS: WatermarkPlatform[] = [
   {
     slug: "remove-tiktok-watermark",
     platform: "TikTok",
-    metaTitle: "Remove TikTok Watermark From Video - Free",
+    metaTitle: "Remove the TikTok Watermark From Your Own Videos - Free",
     metaDescription:
-      "Strip the rotating TikTok logo and @username stamp from any clip you exported. Motion-aware inpainting tracks the drifting badge frame by frame. No blur box, no crop.",
-    heroEyebrow: "TikTok Watermark Remover",
+      "Reconstruct the pixels behind the rotating TikTok logo and @username stamp on a clip you exported yourself. Motion-aware inpainting tracks the drifting badge frame by frame. No blur box, no crop. For footage you own or have rights to edit.",
+    heroEyebrow: "TikTok footage cleanup",
     heroSubtitle:
-      "TikTok exports carry a small rotating logo plus your @username, and it drifts to a different corner as the clip plays. WipeClip.co tracks that motion and reconstructs the pixels underneath, frame by frame.",
+      "TikTok exports carry a small rotating logo plus your @username, and it drifts to a different corner as the clip plays. For a clip you own, WipeClip.co tracks that motion and reconstructs the pixels underneath, frame by frame.",
     behavior:
       "When you download a clip from TikTok, the app burns in a spinning \"tiktok\" mark and the uploader's @username, usually anchored near a corner but nudged frame to frame so it never fully overlaps the subject. That movement is exactly why a static blur box or crop looks obviously edited: the badge keeps drifting out from under it. WipeClip.co's motion-aware inpainting follows the badge's path across frames instead of masking one fixed region.",
     whyRemove:
-      "Most people hit this when they want to repurpose their own TikTok footage (reposting an edit to another platform, cutting it into a longer video, or handing clean footage to a client) without TikTok's badge riding along in the corner of every frame.",
+      "The usual reason is repurposing your own TikTok footage: reposting an edit elsewhere, cutting it into a longer video, or handing a clean master to a client, without TikTok's badge riding along in the corner of every frame. WipeClip.co is for footage you own or are authorized to edit.",
     faqs: [
       {
-        q: "Is removing my own TikTok watermark against TikTok's rules?",
+        q: "Is cleaning up my own TikTok export against TikTok's rules?",
         a: "TikTok's terms govern how you use content on TikTok's own platform, not what you do with your own exported footage afterward. WipeClip.co is built for clips you own or have permission to edit. If you plan to repost the result back onto TikTok or another platform, check that platform's own terms of service, and see our Terms of Service.",
       },
       {
@@ -42,16 +42,16 @@ export const WATERMARK_PLATFORMS: WatermarkPlatform[] = [
   {
     slug: "remove-capcut-watermark",
     platform: "CapCut",
-    metaTitle: "Remove CapCut Watermark From Video - Free",
+    metaTitle: "Remove the CapCut Watermark From Your Own Export - Free",
     metaDescription:
-      "Clean up the \"Made with CapCut\" badge that free exports stamp in the corner. Upload, mark it once, download the clean version. No CapCut Pro subscription needed.",
-    heroEyebrow: "CapCut Watermark Remover",
+      "Reconstruct the background behind the \"Made with CapCut\" badge on a video you exported yourself. Upload, mark it once, download the clean version. No CapCut Pro subscription needed. For footage you own.",
+    heroEyebrow: "CapCut footage cleanup",
     heroSubtitle:
       "CapCut's free export stamps a \"Made with CapCut\" wordmark into the corner of every clip. Mark it once and WipeClip.co rebuilds the background underneath for the whole video.",
     behavior:
       "CapCut's free tier adds a small \"Made with CapCut\" wordmark, usually bottom-left or bottom-center, to every export. It's a static badge rather than a moving one, but it still sits on top of your footage in every single frame from start to finish. It's easy to miss until you're reviewing a finished export and notice it in the corner of a shot you meant to hand off clean.",
     whyRemove:
-      "Common case: you finished editing in CapCut, exported, and only afterward needed a clean master for a client, another platform, or a longer edit, without paying for CapCut Pro just to re-export one clip without the badge.",
+      "Common case: you finished editing your own project in CapCut, exported, and only afterward needed a clean master for a client, another platform, or a longer edit, without paying for CapCut Pro just to re-export one clip without the badge.",
     faqs: [
       {
         q: "Does this replace CapCut Pro?",
@@ -70,16 +70,16 @@ export const WATERMARK_PLATFORMS: WatermarkPlatform[] = [
   {
     slug: "remove-canva-watermark",
     platform: "Canva",
-    metaTitle: "Remove Canva Watermark From Video - Free",
+    metaTitle: "Remove the Canva Watermark From Your Own Video Export - Free",
     metaDescription:
-      "Take the Canva logo badge out of a free-tier video export without upgrading to Canva Pro. Mark the region once, WipeClip.co reconstructs the rest.",
-    heroEyebrow: "Canva Watermark Remover",
+      "Reconstruct the frame behind the Canva logo badge on a free-tier video you exported yourself, without upgrading to Canva Pro. Mark the region once, WipeClip.co rebuilds the rest. For footage you own.",
+    heroEyebrow: "Canva footage cleanup",
     heroSubtitle:
       "Canva's free video exports append a small Canva logo badge to a corner of the frame. Mark it once and WipeClip.co reconstructs the background underneath across every frame.",
     behavior:
-      "Free-tier Canva video exports append a small Canva logo badge, typically in a bottom corner, on top of the finished render. Because it's part of the exported file rather than an overlay you control in the editor, the only way to remove it after the fact (short of re-exporting from a paid plan) is to reconstruct the pixels it's covering.",
+      "Free-tier Canva video exports append a small Canva logo badge, typically in a bottom corner, on top of the finished render. Because it's part of the exported file rather than an overlay you control in the editor, the only way to clean it up after the fact (short of re-exporting from a paid plan) is to reconstruct the pixels it's covering.",
     whyRemove:
-      "Usually comes up when a video was already exported on the free plan (for a client deliverable, a social post, or reuse elsewhere) and going back to re-render from a Canva Pro seat isn't practical for a single clip.",
+      "Usually comes up when your own video was already exported on the free plan (for a client deliverable, a social post, or reuse elsewhere) and going back to re-render from a Canva Pro seat isn't practical for a single clip.",
     faqs: [
       {
         q: "Will this affect Canva's design elements or text inside the video?",
@@ -98,12 +98,12 @@ export const WATERMARK_PLATFORMS: WatermarkPlatform[] = [
   {
     slug: "remove-instagram-watermark",
     platform: "Instagram",
-    metaTitle: "Remove Instagram Watermark From Video - Free",
+    metaTitle: "Remove the Instagram Watermark From Your Own Reel - Free",
     metaDescription:
-      "Remove the Instagram logo and @username overlay baked into Reels or Stories you've saved. Mark the region once, WipeClip.co reconstructs the frame beneath it.",
-    heroEyebrow: "Instagram Watermark Remover",
+      "Reconstruct the frame behind the Instagram logo and @username overlay baked into a Reel or Story you posted and saved. Mark the region once, WipeClip.co rebuilds the pixels beneath it. For your own content only.",
+    heroEyebrow: "Instagram footage cleanup",
     heroSubtitle:
-      "Video saved from Instagram Reels or Stories carries the Instagram logo and your @handle burned into the frame. WipeClip.co reconstructs the pixels underneath so you can reuse the clip cleanly.",
+      "Video saved from your own Instagram Reels or Stories carries the Instagram logo and your @handle burned into the frame. WipeClip.co reconstructs the pixels underneath so you can reuse the clip cleanly.",
     behavior:
       "When you save a Reel or Story from Instagram (including your own), the app's own share/download pipeline burns the Instagram logo and the poster's @handle directly into the video file. It's not an overlay layer you can toggle off; it's baked into every frame of the exported file, in a fixed corner for the length of the clip.",
     whyRemove:
@@ -126,12 +126,12 @@ export const WATERMARK_PLATFORMS: WatermarkPlatform[] = [
   {
     slug: "remove-snapchat-watermark",
     platform: "Snapchat",
-    metaTitle: "Remove Snapchat Watermark From Video - Free",
+    metaTitle: "Remove the Snapchat Watermark From Your Own Snap - Free",
     metaDescription:
-      "Strip the Snapchat ghost logo and @username stamp from a saved Snap or Story. Motion-aware inpainting tracks the badge frame by frame. No blur box, no crop.",
-    heroEyebrow: "Snapchat Watermark Remover",
+      "Reconstruct the frame behind the Snapchat ghost logo and @username stamp on a Snap or Story you posted and saved. Motion-aware inpainting tracks the badge frame by frame. No blur box, no crop. For your own content only.",
+    heroEyebrow: "Snapchat footage cleanup",
     heroSubtitle:
-      "A saved Snap or Story carries the Snapchat ghost icon and your @username burned into the video. WipeClip.co reconstructs the pixels underneath so you can reuse the clip cleanly.",
+      "A saved Snap or Story of your own carries the Snapchat ghost icon and your @username burned into the video. WipeClip.co reconstructs the pixels underneath so you can reuse the clip cleanly.",
     behavior:
       "When you save a Snap or Story (including your own), Snapchat's save pipeline stamps the ghost logo and the poster's @username directly into the exported file, usually anchored near a corner for the length of the clip. It's not a toggleable overlay; it's baked into every frame of the file you're left with.",
     whyRemove:
@@ -154,12 +154,12 @@ export const WATERMARK_PLATFORMS: WatermarkPlatform[] = [
   {
     slug: "remove-facebook-watermark",
     platform: "Facebook",
-    metaTitle: "Remove Facebook Watermark From Video - Free",
+    metaTitle: "Remove the Facebook Watermark From Your Own Reel - Free",
     metaDescription:
-      "Remove the Facebook wordmark burned into a Reel or video you downloaded from your own account. Mark the region once, WipeClip.co reconstructs the rest.",
-    heroEyebrow: "Facebook Watermark Remover",
+      "Reconstruct the frame behind the Facebook wordmark burned into a Reel or video you downloaded from your own account. Mark the region once, WipeClip.co rebuilds the rest. For your own content only.",
+    heroEyebrow: "Facebook footage cleanup",
     heroSubtitle:
-      "Downloading a Facebook Reel or video stamps the Facebook wordmark and your page/profile name into the file. WipeClip.co reconstructs the pixels underneath across every frame.",
+      "Downloading your own Facebook Reel or video stamps the Facebook wordmark and your page/profile name into the file. WipeClip.co reconstructs the pixels underneath across every frame.",
     behavior:
       "Facebook's own download/save feature for Reels and videos (sharing the same underlying pipeline as Instagram Reels) burns a small Facebook wordmark and the poster's name into a corner of the exported file, for the full duration of the clip.",
     whyRemove:
@@ -182,16 +182,16 @@ export const WATERMARK_PLATFORMS: WatermarkPlatform[] = [
   {
     slug: "remove-kapwing-watermark",
     platform: "Kapwing",
-    metaTitle: "Remove Kapwing Watermark From Video - Free",
+    metaTitle: "Remove the Kapwing Watermark From Your Own Export - Free",
     metaDescription:
-      "Clean up the \"Made with Kapwing\" badge that free exports stamp in the corner. Upload, mark it once, download the clean version. No Kapwing Pro subscription needed.",
-    heroEyebrow: "Kapwing Watermark Remover",
+      "Reconstruct the background behind the \"Made with Kapwing\" badge on a video you exported yourself. Upload, mark it once, download the clean version. No Kapwing Pro subscription needed. For footage you own.",
+    heroEyebrow: "Kapwing footage cleanup",
     heroSubtitle:
       "Kapwing's free plan stamps a \"Made with Kapwing\" wordmark into the corner of every export. Mark it once and WipeClip.co rebuilds the background underneath for the whole video.",
     behavior:
       "Kapwing's free tier adds a small \"Made with Kapwing\" wordmark, usually bottom-left or bottom-right, to every export, a static badge that sits on top of your footage in every frame from start to finish.",
     whyRemove:
-      "Common case: you finished editing in Kapwing, exported, and only afterward needed a clean master for a client, another platform, or a longer edit, without paying for a Pro seat just to re-export one clip.",
+      "Common case: you finished editing your own project in Kapwing, exported, and only afterward needed a clean master for a client, another platform, or a longer edit, without paying for a Pro seat just to re-export one clip.",
     faqs: [
       {
         q: "Does this replace a Kapwing Pro subscription?",
@@ -210,16 +210,16 @@ export const WATERMARK_PLATFORMS: WatermarkPlatform[] = [
   {
     slug: "remove-inshot-watermark",
     platform: "InShot",
-    metaTitle: "Remove InShot Watermark From Video - Free",
+    metaTitle: "Remove the InShot Watermark From Your Own Export - Free",
     metaDescription:
-      "Take the InShot logo badge out of a free-tier video export without upgrading to InShot Pro. Mark the region once, WipeClip.co reconstructs the rest.",
-    heroEyebrow: "InShot Watermark Remover",
+      "Reconstruct the frame behind the InShot logo badge on a free-tier video you exported yourself, without upgrading to InShot Pro. Mark the region once, WipeClip.co rebuilds the rest. For footage you own.",
+    heroEyebrow: "InShot footage cleanup",
     heroSubtitle:
       "InShot's free exports stamp an InShot logo badge into a corner of the frame. Mark it once and WipeClip.co reconstructs the background underneath across every frame.",
     behavior:
       "Free-tier InShot exports append a small InShot logo badge, typically in a corner, on top of the finished render for the full length of the clip, part of the exported file itself, not a toggleable overlay.",
     whyRemove:
-      "Usually comes up when a video was already exported on the free plan (for a client deliverable, a social post, or reuse elsewhere) and re-exporting from a paid seat isn't practical for a single clip.",
+      "Usually comes up when your own video was already exported on the free plan (for a client deliverable, a social post, or reuse elsewhere) and re-exporting from a paid seat isn't practical for a single clip.",
     faqs: [
       {
         q: "Will this affect the rest of my edit?",

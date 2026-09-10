@@ -2,7 +2,7 @@ import Link from "next/link";
 
 const limitations = [
   {
-    title: "Watermark size",
+    title: "Overlay size",
     desc: "A small badge is easier to rebuild convincingly than a large logo covering a big share of the frame.",
   },
   {

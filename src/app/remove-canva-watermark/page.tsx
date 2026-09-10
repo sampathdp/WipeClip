@@ -6,7 +6,7 @@ import { buildPageMetadata } from "@/lib/seo";
 
 const content = getWatermarkPlatform("remove-canva-watermark")!;
 
-const title = "Remove a Canva Watermark From an Exported Video";
+const title = "Remove a Canva Watermark From Your Own Video Export";
 const description =
   "Canva's free-tier badge sits in a fixed spot on the exported file. If a clean re-export is available, use that first. Otherwise WipeClip can reconstruct the marked region.";
 
@@ -72,8 +72,8 @@ export default function Page() {
       content={content}
       h1={
         <>
-          Remove a Canva watermark from an{" "}
-          <span className="text-gradient">exported video</span>
+          Clean up a Canva watermark on your{" "}
+          <span className="text-gradient">own export</span>
         </>
       }
       body={body}

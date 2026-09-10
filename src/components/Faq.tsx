@@ -6,12 +6,12 @@ const faqs = [
     a: "No. WipeClip.co is for content you own or have explicit permission to edit, such as your own AI-generated video drafts, personal B-roll, or footage with client authorization. You confirm this before every job.",
   },
   {
-    q: "Does this actually remove the watermark, or just blur it?",
+    q: "Does this actually reconstruct the area, or just blur it?",
     a: "WipeClip.co blends the marked region in from surrounding pixels and temporal motion vectors rather than covering it with a static blur box or destructive crop.",
   },
   {
-    q: "Which watermarks or logos are supported?",
-    a: "Any badge, logo, timestamp, or unwanted object. Because you mark its position on the preview frame, it is not restricted to specific predefined shapes or brands.",
+    q: "Which overlays are supported?",
+    a: "Any badge, logo, caption, timestamp, or unwanted static object. Because you mark its position on the preview frame, it is not restricted to specific predefined shapes or brands.",
   },
   {
     q: "Will the output lose resolution or quality?",

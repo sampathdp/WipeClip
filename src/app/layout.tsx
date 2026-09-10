@@ -24,19 +24,20 @@ const siteUrl = SITE_URL;
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "AI Video Watermark Remover | WipeClip.co",
+    default: "AI Video Cleanup for Creators | WipeClip.co",
     template: "%s | WipeClip.co",
   },
   description:
-    "WipeClip is an AI video watermark remover that reconstructs the pixels behind a logo, badge, or timestamp instead of blurring or cropping the frame. Mark the overlay once. No editing skills needed.",
+    "WipeClip is an AI video cleanup tool for creators. Mark a logo, badge, caption, or timestamp on one frame and it reconstructs the pixels underneath across the whole clip — no cropping, no blur box. For footage you own or have the rights to edit.",
   keywords: [
-    "video watermark remover",
-    "AI video watermark remover",
-    "remove watermark from video",
-    "video overlay remover",
-    "AI video inpainting",
+    "AI video cleanup",
+    "AI footage restoration",
     "remove logo from video",
-    "video object remover",
+    "remove object from video",
+    "AI video inpainting",
+    "video overlay remover",
+    "restore original footage",
+    "video watermark remover",
     "wipeclip",
   ],
   authors: [{ name: "WipeClip.co" }],
@@ -49,24 +50,24 @@ export const metadata: Metadata = {
     type: "website",
     url: siteUrl,
     siteName: "WipeClip.co",
-    title: "AI Video Watermark Remover | WipeClip.co",
+    title: "AI Video Cleanup for Creators | WipeClip.co",
     description:
-      "Mark a logo, badge, or timestamp and WipeClip reconstructs the pixels underneath. No crop, no blur box.",
+      "Mark a logo, badge, caption, or timestamp and WipeClip reconstructs the pixels underneath across the whole clip. No crop, no blur box.",
     locale: "en_US",
     images: [
       {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "WipeClip.co video watermark & object remover",
+        alt: "WipeClip.co AI video cleanup and object removal",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "AI Video Watermark Remover | WipeClip.co",
+    title: "AI Video Cleanup for Creators | WipeClip.co",
     description:
-      "Mark a logo, badge, or timestamp and WipeClip reconstructs the pixels underneath. No crop, no blur box.",
+      "Mark a logo, badge, caption, or timestamp and WipeClip reconstructs the pixels underneath across the whole clip. No crop, no blur box.",
     images: ["/opengraph-image"],
   },
   robots: {
@@ -124,7 +125,7 @@ const jsonLd = {
       operatingSystem: "Web",
       url: siteUrl,
       description:
-        "Removes watermarks, logos, timestamps and unwanted objects from video you own or have rights to edit.",
+        "AI video cleanup for creators: reconstructs the pixels behind a logo, badge, caption, timestamp or unwanted object across a whole clip, for footage you own or have rights to edit.",
       offers: {
         "@type": "Offer",
         price: "0",

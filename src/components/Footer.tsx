@@ -41,7 +41,7 @@ export default function Footer() {
           </Link>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted">
-          <span className="font-semibold text-foreground/80">Remove a watermark from:</span>
+          <span className="font-semibold text-foreground/80">Clean up footage from:</span>
           {WATERMARK_PLATFORMS.map((p) => (
             <span key={p.slug} className="flex items-center gap-2">
               <Link href={`/${p.slug}`} className="transition-colors hover:text-foreground">

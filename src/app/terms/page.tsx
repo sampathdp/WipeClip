@@ -43,11 +43,13 @@ export default function TermsPage() {
 
       <H2>1. What the Service does</H2>
       <P>
-        WipeClip.co lets you mark a region of a video or image you provide and
-        removes or replaces it (for example a logo, watermark, timestamp, or
-        another unwanted object) using automated image/video processing. You
-        choose the region; the Service does not automatically detect or
-        target any specific brand&apos;s mark.
+        WipeClip.co is an AI video and image cleanup tool. You mark a region
+        of a file you provide and the Service reconstructs or replaces it
+        (for example a logo, watermark, caption, timestamp, or another
+        unwanted object) using automated image/video processing, so you can
+        restore a clean version of footage you own or are authorized to
+        edit. You choose the region; the Service does not automatically
+        detect or target any specific brand&apos;s mark.
       </P>
 
       <H2>2. Eligibility</H2>

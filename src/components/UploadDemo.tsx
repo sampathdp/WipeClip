@@ -311,10 +311,10 @@ export default function UploadDemo() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl text-foreground">
-            Try it now: <span className="text-gradient">Inpaint Video</span>
+            Try it now: <span className="text-gradient">Clean Up a Clip</span>
           </h2>
           <p className="mt-1.5 text-sm sm:text-base text-muted">
-            Upload a clip, mark the watermark once, download the clean version. Zero files stored.
+            Upload a clip you own, mark the overlay once, download the clean version. Zero files stored.
           </p>
         </div>
       </div>
@@ -486,7 +486,7 @@ export default function UploadDemo() {
                       : "text-muted hover:text-foreground"
                   }`}
                 >
-                  Remove Watermark
+                  Remove Overlay
                 </button>
                 <button
                   onClick={() => setMode("replace")}
@@ -596,7 +596,7 @@ export default function UploadDemo() {
                 disabled={!region || !consent || (mode === "replace" && !logo)}
                 className="btn-primary mt-6 w-full rounded-full py-3.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {mode === "remove" ? "Remove Watermark Now" : "Replace Watermark Now"}
+                {mode === "remove" ? "Clean Up Video Now" : "Replace Overlay Now"}
               </button>
             </div>
           )}

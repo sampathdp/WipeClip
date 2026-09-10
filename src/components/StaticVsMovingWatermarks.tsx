@@ -7,7 +7,7 @@ const cards = [
   {
     title: "Moving overlay",
     tag: "Motion-tracked",
-    desc: "Drifts, resizes, or reappears in different spots: a rotating badge, an animated bug, a watermark that repositions itself. WipeClip's motion-aware tracking follows the marked region frame by frame instead of using one fixed box.",
+    desc: "Drifts, resizes, or reappears in different spots: a rotating badge, an animated bug, an overlay that repositions itself. WipeClip's motion-aware tracking follows the marked region frame by frame instead of using one fixed box.",
   },
 ];
 
@@ -17,7 +17,7 @@ export default function StaticVsMovingWatermarks() {
       <div className="mx-auto max-w-5xl px-6">
         <div className="mx-auto max-w-2xl text-center">
           <div className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-surface-2/90 border border-border px-3.5 py-1 text-xs font-semibold text-muted">
-            Static vs Moving Watermarks
+            Static vs Moving Overlays
           </div>
           <h2 className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
             Not every overlay behaves the same way

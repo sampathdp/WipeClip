@@ -40,8 +40,8 @@ const tools = [
   {
     href: "/remove-image-watermark",
     badge: "Pro",
-    title: "Image Watermark Remover",
-    desc: "Mark a watermark or logo region on any image once. Same reconstruction engine as the video tool.",
+    title: "Image Watermark Cleanup",
+    desc: "Mark a logo, badge, or watermark region on an image you own, once. Same reconstruction engine as the video tool.",
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -66,7 +66,7 @@ export default function FreeTools() {
             The Full Toolkit
           </div>
           <h2 className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-            More than <span className="text-gradient">watermark removal</span>
+            More than <span className="text-gradient">video cleanup</span>
           </h2>
           <p className="mt-4 text-muted text-base leading-relaxed">
             Everything else you need for the same footage and photos, three of them free, no

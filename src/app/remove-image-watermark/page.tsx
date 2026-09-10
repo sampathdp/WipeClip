@@ -62,11 +62,12 @@ export default function Page() {
               Pro Tool
             </div>
             <h1 className="font-display text-4xl font-extrabold tracking-tight sm:text-5xl text-foreground text-balance">
-              Remove a <span className="text-gradient">watermark from an image</span>
+              Clean up a <span className="text-gradient">watermark on your own image</span>
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
               Mark the badge or logo once and WipeClip.co reconstructs the pixels beneath it,
-              same reconstruction engine as the video tool, applied to a single frame.
+              same reconstruction engine as the video tool, applied to a single frame. For images
+              you own or have the rights to edit.
             </p>
           </div>
         </section>
@@ -80,7 +81,7 @@ export default function Page() {
         <section className="py-16">
           <div className="mx-auto max-w-3xl px-6">
             <h2 className="text-center font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-              Image watermark removal: FAQ
+Image cleanup: FAQ
             </h2>
             <div className="mt-10 space-y-4">
               {faqs.map((f) => (

@@ -17,24 +17,24 @@ export default function CtaBanner() {
 
           <div className="relative z-10">
             <h2 className="font-display text-3xl font-extrabold tracking-tight sm:text-5xl text-foreground">
-              Restore your footage, <span className="text-gradient">watermark-free</span>
+              Restore your footage, <span className="text-gradient">overlay-free</span>
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-base sm:text-lg text-muted">
-              No registration needed to preview. Upload your clip and see the crystal-clear result in under 15 seconds.
+              No registration needed to preview. Upload a clip you own or have the rights to edit and see the crystal-clear result in under 15 seconds.
             </p>
             <div className="mt-8">
               <Link
                 href="/#upload"
                 className="btn-primary inline-flex items-center gap-2 rounded-full px-8 py-4 text-base font-bold shadow-[0_0_30px_rgba(124,92,255,0.5)]"
               >
-                <span>Remove Watermark Free</span>
+                <span>Clean Up a Clip Free</span>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>
               </Link>
             </div>
             <p className="mt-5 text-xs text-muted">
-              Just need a clean cutout, not a watermark removed?{" "}
+              Just need a clean cutout instead?{" "}
               <Link href="/remove-background" className="font-semibold text-cyan-600 underline hover:text-cyan-700">
                 Try the free background remover
               </Link>

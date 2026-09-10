@@ -7,9 +7,9 @@ import { buildPageMetadata } from "@/lib/seo";
 
 const content = getWatermarkPlatform("remove-tiktok-watermark")!;
 
-const title = "Remove a Moving TikTok Watermark From Video";
+const title = "Remove a Moving TikTok Watermark From Your Own Video";
 const description =
-  "TikTok's logo and @username drift to a new spot as the clip plays, so a static blur or crop misses it by the next frame. WipeClip tracks the mark and reconstructs what's underneath, frame by frame.";
+  "TikTok's logo and @username drift to a new spot as the clip plays, so a static blur or crop misses it by the next frame. On a clip you own, WipeClip tracks the mark and reconstructs what's underneath, frame by frame.";
 
 export const metadata: Metadata = buildPageMetadata({
   title,
@@ -91,7 +91,7 @@ export default function Page() {
       content={content}
       h1={
         <>
-          Remove a <span className="text-gradient">moving</span> TikTok watermark
+          Clean up a <span className="text-gradient">moving</span> TikTok watermark
         </>
       }
       body={body}
