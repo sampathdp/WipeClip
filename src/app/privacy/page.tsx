@@ -67,10 +67,11 @@ export default function PrivacyPage() {
       <H2>4. Payment information</H2>
       <P>
         Payments for WipeClip.co plans and credit packs are securely processed
-        by Lemon Squeezy, acting as our authorized Merchant of Record. We do
-        not collect, store, or process your credit card numbers or raw billing
-        details on our servers. All transactions are subject to Lemon
-        Squeezy&apos;s Privacy Policy and Security Standards.
+        by Payments.lk (a Payable company) on its hosted checkout. Card details
+        are entered only on that checkout - we do not collect, store, or
+        process your credit card numbers or raw billing details on our
+        servers. All transactions are subject to Payments.lk&apos;s Privacy
+        Policy and Security Standards.
       </P>
 
       <H2>5. Sharing</H2>

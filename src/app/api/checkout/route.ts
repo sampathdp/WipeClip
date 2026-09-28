@@ -1,14 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { PLANS, type PlanKey } from "@/lib/credits";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
-
-const VARIANT_ENV: Record<PlanKey, string | undefined> = {
-  starter: process.env.LEMONSQUEEZY_VARIANT_STARTER,
-  pro: process.env.LEMONSQUEEZY_VARIANT_PRO,
-  payg: process.env.LEMONSQUEEZY_VARIANT_PAYG,
-  creator: process.env.LEMONSQUEEZY_VARIANT_CREATOR,
-};
+import { createCheckout, getSecretKey, PaymentsLkError } from "@/lib/paymentsLk";
 
 export async function POST(request: NextRequest) {
   if (!isSupabaseConfigured()) {
@@ -36,70 +30,54 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unknown plan." }, { status: 400 });
   }
 
-  const variantId = VARIANT_ENV[plan];
-  const storeId = process.env.LEMONSQUEEZY_STORE_ID;
-  const apiKey = process.env.LEMONSQUEEZY_API_KEY;
-
-  if (!variantId || !storeId || !apiKey) {
+  if (!getSecretKey()) {
     return NextResponse.json(
-      {
-        error:
-          "Checkout isn't configured yet - set LEMONSQUEEZY_STORE_ID, LEMONSQUEEZY_API_KEY and LEMONSQUEEZY_VARIANT_* in the environment.",
-      },
+      { error: "Checkout isn't configured yet - set PAYMENTS_LK_SECRET_KEY in the environment." },
       { status: 501 }
     );
   }
 
+  const { amountCents, credits, label } = PLANS[plan];
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? request.nextUrl.origin;
+  const admin = createServiceClient();
 
-  // custom_data is echoed back verbatim in every webhook event for this
-  // checkout (meta.custom_data) - it's how the webhook handler knows which
-  // account to credit and by how much, without needing to look up the
-  // variant -> plan mapping again at grant time.
-  const res = await fetch("https://api.lemonsqueezy.com/v1/checkouts", {
-    method: "POST",
-    headers: {
-      Accept: "application/vnd.api+json",
-      "Content-Type": "application/vnd.api+json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      data: {
-        type: "checkouts",
-        attributes: {
-          checkout_data: {
-            email: user.email,
-            custom: {
-              user_id: user.id,
-              plan,
-              credits: String(PLANS[plan].credits),
-            },
-          },
-          product_options: {
-            redirect_url: `${siteUrl}/pricing?success=1&plan=${plan}`,
-          },
-        },
-        relationships: {
-          store: { data: { type: "stores", id: storeId } },
-          variant: { data: { type: "variants", id: variantId } },
-        },
+  // Payments.lk has no free-form metadata on a checkout, so the order is
+  // recorded here first and its id travels as the checkout's `reference`.
+  // The webhook reads the reference back to find which account to credit
+  // and how much - the plan, credits and price are fixed now, server side,
+  // never taken from anything the browser or the redirect sends.
+  const { data: order, error: orderError } = await admin
+    .from("payment_orders")
+    .insert({ user_id: user.id, plan, credits, amount_cents: amountCents })
+    .select("id")
+    .single();
+
+  if (orderError || !order) {
+    return NextResponse.json({ error: "Could not record the order." }, { status: 500 });
+  }
+
+  try {
+    const checkout = await createCheckout(
+      {
+        amountCents,
+        description: `WipeClip ${label} - ${credits} credits`,
+        reference: order.id,
+        customer: user.email ? { email: user.email } : undefined,
+        successUrl: `${siteUrl}/pricing?success=1&plan=${plan}`,
+        cancelUrl: `${siteUrl}/pricing?canceled=1`,
       },
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    return NextResponse.json(
-      { error: `Lemon Squeezy checkout creation failed: ${text.slice(0, 300)}` },
-      { status: 502 }
+      `order-${order.id}`
     );
-  }
 
-  const json = await res.json();
-  const url = json?.data?.attributes?.url;
-  if (!url) {
-    return NextResponse.json({ error: "Lemon Squeezy did not return a checkout URL." }, { status: 502 });
-  }
+    await admin.from("payment_orders").update({ checkout_id: checkout.id }).eq("id", order.id);
 
-  return NextResponse.json({ url });
+    return NextResponse.json({ url: checkout.url });
+  } catch (e) {
+    await admin.from("payment_orders").update({ status: "failed" }).eq("id", order.id);
+    const message =
+      e instanceof PaymentsLkError
+        ? `Payments.lk checkout creation failed: ${e.message}${e.traceId ? ` (trace ${e.traceId})` : ""}`
+        : "Payments.lk checkout creation failed.";
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
 }

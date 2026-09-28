@@ -9,6 +9,9 @@ create table if not exists profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   email text not null,
   plan text not null default 'free', -- 'free' | 'starter' | 'pro'
+  -- When a Starter/Pro 30-day pass runs out; the app reads an expired pass
+  -- as 'free' (src/lib/plan.ts). Null = no expiry.
+  plan_expires_at timestamptz,
   free_credits int not null default 2,
   free_credits_reset_on date not null default current_date,
   paid_credits int not null default 0,
@@ -29,6 +32,7 @@ create table if not exists profiles (
 -- an existing table).
 alter table profiles add column if not exists referral_code text unique;
 alter table profiles add column if not exists referred_by uuid references profiles (id);
+alter table profiles add column if not exists plan_expires_at timestamptz;
 
 create table if not exists credit_transactions (
   id bigserial primary key,
@@ -53,12 +57,31 @@ create index if not exists credit_transactions_user_id_idx on credit_transaction
 alter table credit_transactions add column if not exists tool text;
 alter table credit_transactions add column if not exists filename text;
 
--- Dedupes Lemon Squeezy webhook deliveries (LS retries on non-2xx, and the
--- same event can otherwise be replayed) so a purchase is never granted twice.
+-- Dedupes payment webhook deliveries (Payments.lk retries on non-2xx, and
+-- the same event can otherwise be replayed) so a purchase is never granted
+-- twice.
 create table if not exists processed_webhook_events (
   id text primary key,
   created_at timestamptz not null default now()
 );
+
+-- One row per checkout started from /api/checkout. Payments.lk checkouts
+-- carry no metadata, so this row's id is sent as the checkout's `reference`
+-- and the webhook reads it back to know who to credit, with what, and for
+-- how much - all fixed server side when the checkout was created.
+create table if not exists payment_orders (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references profiles (id) on delete cascade,
+  plan text not null,
+  credits int not null,
+  amount_cents int not null, -- whole cents of LKR
+  status text not null default 'open', -- 'open' | 'paid' | 'failed' | 'expired'
+  checkout_id text unique,
+  payment_id text,
+  created_at timestamptz not null default now(),
+  paid_at timestamptz
+);
+create index if not exists payment_orders_user_id_idx on payment_orders (user_id);
 
 -- New auth user -> profile row, so every signed-up account has a balance
 -- from the start without a separate onboarding step.
@@ -155,9 +178,13 @@ begin
 end;
 $$;
 
--- Grants purchased credits from a Lemon Squeezy webhook. Idempotent on
--- p_event_id: a replayed webhook for the same event is a silent no-op.
-create or replace function grant_paid_credits(p_user_id uuid, p_amount int, p_event_id text, p_plan text default null)
+-- Grants purchased credits from a Payments.lk webhook. Idempotent on
+-- p_event_id: a replayed webhook for the same payment is a silent no-op.
+-- p_plan_days, with p_plan, sets the tier for that many days from now (or
+-- from the current expiry, if the same tier is still running, so buying
+-- again early extends the pass rather than wasting the rest of it).
+drop function if exists grant_paid_credits(uuid, int, text, text);
+create or replace function grant_paid_credits(p_user_id uuid, p_amount int, p_event_id text, p_plan text default null, p_plan_days int default null)
 returns void
 language plpgsql
 security definer set search_path = public
@@ -172,6 +199,11 @@ begin
 
   update profiles
   set paid_credits = paid_credits + p_amount,
+      plan_expires_at = case
+        when p_plan is null or p_plan_days is null then plan_expires_at
+        when plan = p_plan and plan_expires_at > now() then plan_expires_at + make_interval(days => p_plan_days)
+        else now() + make_interval(days => p_plan_days)
+      end,
       plan = coalesce(p_plan, plan)
   where id = p_user_id;
 
@@ -276,6 +308,8 @@ $$;
 
 alter table profiles enable row level security;
 alter table credit_transactions enable row level security;
+-- No policies: only the service-role key (checkout route, webhook) touches it.
+alter table payment_orders enable row level security;
 
 create policy "read own profile" on profiles
   for select using (auth.uid() = id);
@@ -291,7 +325,7 @@ create policy "read own transactions" on credit_transactions
 -- Supabase exposes every public-schema function to anon/authenticated over
 -- its RPC endpoint. Without this block, any signed-in user could call
 -- refund_credits or grant_paid_credits directly with the browser's own
--- anon key and mint themselves unlimited credits, bypassing Lemon Squeezy
+-- anon key and mint themselves unlimited credits, bypassing Payments.lk
 -- entirely - these are SECURITY DEFINER, so they run with elevated
 -- privilege regardless of RLS on the tables they touch. All of the below
 -- are only ever called from server code (API routes / the webhook handler)
@@ -299,7 +333,7 @@ create policy "read own transactions" on credit_transactions
 revoke execute on function ensure_daily_reset(uuid) from public, anon, authenticated;
 revoke execute on function consume_credits(uuid, int, text) from public, anon, authenticated;
 revoke execute on function refund_credits(uuid, int, text) from public, anon, authenticated;
-revoke execute on function grant_paid_credits(uuid, int, text, text) from public, anon, authenticated;
+revoke execute on function grant_paid_credits(uuid, int, text, text, int) from public, anon, authenticated;
 revoke execute on function tag_last_transaction(uuid, text, text) from public, anon, authenticated;
 revoke execute on function ensure_referral_code(uuid) from public, anon, authenticated;
 revoke execute on function claim_referral(uuid, text) from public, anon, authenticated;
@@ -307,7 +341,7 @@ revoke execute on function claim_referral(uuid, text) from public, anon, authent
 grant execute on function ensure_daily_reset(uuid) to service_role;
 grant execute on function consume_credits(uuid, int, text) to service_role;
 grant execute on function refund_credits(uuid, int, text) to service_role;
-grant execute on function grant_paid_credits(uuid, int, text, text) to service_role;
+grant execute on function grant_paid_credits(uuid, int, text, text, int) to service_role;
 grant execute on function tag_last_transaction(uuid, text, text) to service_role;
 grant execute on function ensure_referral_code(uuid) to service_role;
 grant execute on function claim_referral(uuid, text) to service_role;

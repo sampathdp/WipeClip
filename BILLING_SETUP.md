@@ -1,4 +1,4 @@
-# Billing setup (Supabase + Lemon Squeezy)
+# Billing setup (Supabase + Payments.lk)
 
 Everything is wired in code with placeholder env vars. Nothing works until
 these are filled in with real values.
@@ -39,40 +39,55 @@ client, then a couple minutes wiring it into Supabase:
 No separate env vars needed in this app - Supabase holds the Google
 credentials and this app just calls `signInWithOAuth({ provider: "google" })`.
 
-## 2. Lemon Squeezy
+## 2. Payments.lk (sandbox first)
 
-1. Create a store if you don't have one.
-2. Products -> New product, one each for **Starter** ($8.99/mo, 60
-   credits/mo - subscription variant), **Pro** ($23.99/mo, 200
-   credits/mo - subscription), **Pay-as-you-go** ($5.99, 30 credits -
-   one-time variant), **Creator** ($1.99, 15 credits - one-time variant,
-   sized for a single social-media upload session). Numbers are the
-   directional ones from the pricing-strategy doc; change the price on the
-   product itself, not in this codebase - the credit amount granted comes
-   from `PLANS` in `src/lib/credits.ts`, not from Lemon Squeezy, so keep
-   them in sync if you change either.
-3. Each product's variant page has its numeric ID in the URL - put those in
-   `LEMONSQUEEZY_VARIANT_STARTER` / `_PRO` / `_PAYG` / `_CREATOR`.
-4. Settings -> General: your Store ID goes in `LEMONSQUEEZY_STORE_ID`.
-5. Settings -> API: create an API key for `LEMONSQUEEZY_API_KEY`.
-6. Settings -> Webhooks -> Add webhook: URL is
-   `https://<your-domain>/api/webhooks/lemonsqueezy`, events to send:
-   `order_created`, `subscription_payment_success`,
-   `subscription_cancelled`, `subscription_expired`. Copy the signing
-   secret into `LEMONSQUEEZY_WEBHOOK_SECRET`.
+Guide: https://payments.lk/developers/guide. Payments.lk is Payable's
+startup brand; it charges in Sri Lankan rupees only and uses a hosted
+checkout, so card details never touch this app.
 
-Webhooks need a public HTTPS URL, so this step only works once the app is
-deployed (or tunneled with something like `ngrok` for local testing).
+1. Apply at https://payments.lk/apply - the dashboard opens straight away
+   and sandbox keys work before approval.
+2. Dashboard -> Developers -> **Create sandbox secret key**. It starts
+   `sk_test_`. Put it in `PAYMENTS_LK_SECRET_KEY` (server-only).
+3. Dashboard -> Developers -> add a webhook endpoint:
+   `https://<your-domain>/api/webhooks/payments-lk`. Copy its signing
+   secret (`whsec_...`) into `PAYMENTS_LK_WEBHOOK_SECRET`. The handler acts
+   on `payment.succeeded`, `payment.failed` and `checkout.expired`.
+   Before you have a public URL, point sandbox events at the test inbox on
+   the Developers page, or tunnel localhost with `ngrok`.
+4. Re-run `supabase/schema.sql` - it adds the `payment_orders` table,
+   `profiles.plan_expires_at`, and the new `grant_paid_credits` signature.
+   Everything in it is safe to re-run.
+5. Test: sign in, open `/pricing`, buy any plan. On the sandbox checkout
+   use a test card from the Developers page - expiry **01/39 approves**,
+   **05/39 declines**. No money moves. The webhook should credit the
+   account and set `payment_orders.status = 'paid'`.
+6. Go live once approved: create a live key (`sk_live_`) and a live webhook
+   endpoint with its own secret, and swap both env vars. Nothing else
+   changes.
+
+Prices: the amount charged is `amountCents` (whole cents of LKR) in
+`PLANS` in `src/lib/credits.ts`; `priceLabel` is display only. The
+credits granted come from the same `PLANS` entry, recorded on the order
+row when checkout starts.
+
+Starter and Pro are **30-day passes**, not subscriptions: Payments.lk has
+no subscription object (automatic renewals would need saved cards, which
+require Payable's Advanced plan). Each purchase grants the credits and
+sets `plan` + `plan_expires_at`; `src/lib/plan.ts` reads an expired pass
+as `free`. Buying the same tier again early extends it by 30 days.
 
 ## How a purchase actually grants credits
 
-`/pricing` -> `POST /api/checkout` (creates a Lemon Squeezy checkout via
-their API, embedding `custom_data: { user_id, plan, credits }`) -> user
-pays on Lemon Squeezy's hosted page -> LS calls
-`POST /api/webhooks/lemonsqueezy` -> signature verified -> reads
-`meta.custom_data` straight back out (no separate variant/plan lookup
-needed) -> `grant_paid_credits` RPC, deduped by event id so a retried
-webhook can't double-grant.
+`/pricing` -> `POST /api/checkout` (inserts a `payment_orders` row with
+user, plan, credits and LKR amount, then creates a Payments.lk checkout
+with `reference` = that row's id and `Idempotency-Key: order-<id>`) ->
+user pays on the hosted checkout -> Payments.lk calls
+`POST /api/webhooks/payments-lk` -> `Payments-Signature` verified
+(HMAC-SHA256 of `<t>.<raw body>`, 5-minute tolerance) -> order looked up
+by `reference` -> `grant_paid_credits` RPC, deduped by payment id so a
+retried webhook can't double-grant. The browser's return to `successUrl`
+never grants anything.
 
 ## Closing the direct-call bypass
 

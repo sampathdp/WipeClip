@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import { PLANS, type PlanKey } from "@/lib/credits";
+import { formatLkr, PLANS, type PlanKey } from "@/lib/credits";
 import { createClient } from "@/lib/supabase/client";
 import { landingPagePath, trackEvent } from "@/lib/analytics";
 
@@ -17,7 +17,7 @@ const paygCards: { key: PlanKey; tagline: string; isPopular?: boolean; features:
       "60 credits / month",
       "Up to 1080p Full HD",
       "Priority processing queue",
-      "Cancel anytime",
+      "No auto-renewal - top up when you need",
     ],
   },
   {
@@ -77,8 +77,8 @@ export default function PricingClient() {
     });
   }, []);
 
-  // Lemon Squeezy bounces back here with ?success=1&plan=<key> after a
-  // completed hosted checkout (see redirect_url in /api/checkout). The
+  // Payments.lk bounces back here with ?success=1&plan=<key> after a
+  // completed hosted checkout (see successUrl in /api/checkout). The
   // webhook is still the source of truth for actually granting credits -
   // this only marks the funnel's purchase step and never touches billing
   // state. The query string is stripped right after so a refresh/bookmark
@@ -87,6 +87,8 @@ export default function PricingClient() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("success") === "1") {
       trackEvent("purchase_completed", { plan: params.get("plan") ?? undefined });
+      window.history.replaceState(null, "", window.location.pathname);
+    } else if (params.get("canceled") === "1") {
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, []);
@@ -207,7 +209,8 @@ export default function PricingClient() {
 
                   <div className="mt-4">
                     <span className="font-mono text-3xl font-extrabold text-foreground">{plan.priceLabel}</span>
-                    {SUBSCRIPTION_PLANS.includes(card.key) && <span className="text-xs text-muted"> / month</span>}
+                    {SUBSCRIPTION_PLANS.includes(card.key) && <span className="text-xs text-muted"> / 30 days</span>}
+                    <p className="mt-1 text-[11px] text-muted">Charged as {formatLkr(plan.amountCents)}</p>
                   </div>
 
                   <p className="mt-3 text-xs text-muted leading-relaxed">{card.tagline}</p>

@@ -129,21 +129,20 @@ export default function TermsPage() {
 
       <H2>6. Paid Plans, Credits & Refund Policy</H2>
       <P>
-        WipeClip.co provides both free credits and paid options (including
-        recurring monthly subscriptions and one-time Pay-As-You-Go credit
-        packs).
+        WipeClip.co provides both free credits and paid options (30-day
+        Starter and Pro passes, and one-time Pay-As-You-Go credit packs).
       </P>
       <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-muted">
         <li>
-          <strong>Billing &amp; Merchant of Record:</strong> Paid transactions are
-          processed by Lemon Squeezy (our authorized Merchant of Record and
-          payment reseller). When purchasing a plan, you agree to Lemon
-          Squeezy&apos;s customer terms and privacy policy.
+          <strong>Billing:</strong> Paid transactions are processed by
+          Payments.lk (a Payable company) and charged in Sri Lankan rupees
+          (LKR). When purchasing a plan, you agree to Payments.lk&apos;s
+          customer terms and privacy policy.
         </li>
         <li>
-          <strong>Subscriptions &amp; Renewal:</strong> Subscription plans automatically
-          renew at the end of each billing cycle (e.g., monthly) unless cancelled
-          prior to the renewal date via your account settings or customer portal.
+          <strong>Passes &amp; Renewal:</strong> Starter and Pro are 30-day passes
+          and do not renew automatically. Buying again before a pass ends
+          extends it by another 30 days. Purchased credits never expire.
         </li>
         <li>
           <strong>Credits:</strong> Credits are consumed upon successful video

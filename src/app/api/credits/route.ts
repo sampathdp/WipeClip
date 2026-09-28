@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { effectivePlan } from "@/lib/plan";
 
 export async function GET() {
   if (!isSupabaseConfigured()) {
@@ -28,7 +29,7 @@ export async function GET() {
 
   const { data: profile, error } = await supabase
     .from("profiles")
-    .select("plan, free_credits, paid_credits")
+    .select("plan, plan_expires_at, free_credits, paid_credits")
     .eq("id", user.id)
     .single();
 
@@ -38,7 +39,8 @@ export async function GET() {
 
   return NextResponse.json({
     email: user.email,
-    plan: profile.plan,
+    plan: effectivePlan(profile),
+    planExpiresAt: profile.plan_expires_at,
     freeCredits: profile.free_credits,
     paidCredits: profile.paid_credits,
     total: profile.free_credits + profile.paid_credits,
