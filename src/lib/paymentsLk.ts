@@ -74,7 +74,9 @@ export class PaymentsLkError extends Error {
 }
 
 export function getSecretKey(): string | undefined {
-  return process.env.PAYMENTS_LK_SECRET_KEY || undefined;
+  // Trimmed: a key pasted into Vercel with a trailing space or newline is
+  // rejected by Payments.lk as malformed_api_key.
+  return process.env.PAYMENTS_LK_SECRET_KEY?.trim() || undefined;
 }
 
 async function request<T>(path: string, init: { method: string; body?: unknown; idempotencyKey?: string }): Promise<T> {

@@ -74,9 +74,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ url: checkout.url });
   } catch (e) {
     await admin.from("payment_orders").update({ status: "failed" }).eq("id", order.id);
+    console.error("Payments.lk checkout creation failed", e);
     const message =
       e instanceof PaymentsLkError
-        ? `Payments.lk checkout creation failed: ${e.message}${e.traceId ? ` (trace ${e.traceId})` : ""}`
+        ? `Payments.lk checkout creation failed: ${e.message}${e.reason ? ` [${e.reason}]` : ""}${e.traceId ? ` (trace ${e.traceId})` : ""}`
         : "Payments.lk checkout creation failed.";
     return NextResponse.json({ error: message }, { status: 502 });
   }
