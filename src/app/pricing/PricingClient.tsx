@@ -103,8 +103,14 @@ export default function PricingClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Could not start checkout.");
+      // Parsed from text so an HTML error page (proxy or platform error, not
+      // this app's JSON) surfaces as a status code instead of a JSON parse error.
+      const text = await res.text();
+      let data: { url?: string; error?: string } | null = null;
+      try {
+        data = JSON.parse(text);
+      } catch {}
+      if (!res.ok || !data?.url) throw new Error(data?.error ?? `Could not start checkout (HTTP ${res.status}).`);
       setCheckoutUrl(data.url);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start checkout.");

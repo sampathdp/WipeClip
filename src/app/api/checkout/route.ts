@@ -79,6 +79,8 @@ export async function POST(request: NextRequest) {
       e instanceof PaymentsLkError
         ? `Payments.lk checkout creation failed: ${e.message}${e.reason ? ` [${e.reason}]` : ""}${e.traceId ? ` (trace ${e.traceId})` : ""}`
         : "Payments.lk checkout creation failed.";
-    return NextResponse.json({ error: message }, { status: 502 });
+    // 500, not 502: Cloudflare in front of the site swaps an origin 502 for
+    // its own HTML error page, which hides this message from the browser.
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
