@@ -117,12 +117,17 @@ export function retrieveCheckout(id: string): Promise<Checkout> {
 
 /**
  * Verifies the Payments-Signature header (`t=<unix seconds>,v1=<hex
- * HMAC-SHA256 of "<t>.<raw body>">`) and returns the parsed event, or null
- * if it isn't a genuine, fresh Payments.lk event. Must be given the raw
- * body exactly as received - re-serialised JSON won't match.
+ * HMAC-SHA256 of "<t>.<raw body>">`) and returns the parsed event, or why
+ * it isn't a genuine, fresh Payments.lk event. Must be given the raw body
+ * exactly as received - re-serialised JSON won't match.
  */
-export function constructWebhookEvent(rawBody: string, header: string | null, secret: string): PaymentsLkEvent | null {
-  if (!header || header.length > 1000) return null;
+export function constructWebhookEvent(
+  rawBody: string,
+  header: string | null,
+  secret: string
+): { event: PaymentsLkEvent } | { error: string } {
+  if (!header) return { error: "Payments-Signature header is missing." };
+  if (header.length > 1000) return { error: "Payments-Signature header is too long." };
 
   let timestamp: number | undefined;
   const candidates: string[] = [];
@@ -131,17 +136,25 @@ export function constructWebhookEvent(rawBody: string, header: string | null, se
     if (key === "t" && value && /^[0-9]{1,12}$/.test(value)) timestamp = Number(value);
     if (key === "v1" && value && /^[0-9a-f]{64}$/.test(value)) candidates.push(value);
   }
-  if (timestamp === undefined || candidates.length === 0) return null;
-  if (Math.abs(Math.floor(Date.now() / 1000) - timestamp) > WEBHOOK_TOLERANCE_SECONDS) return null;
+  if (timestamp === undefined || candidates.length === 0) {
+    return { error: "Payments-Signature header is not in the t=...,v1=... form." };
+  }
+  if (Math.abs(Math.floor(Date.now() / 1000) - timestamp) > WEBHOOK_TOLERANCE_SECONDS) {
+    return { error: "Webhook timestamp is outside the tolerance (clock skew or replay)." };
+  }
 
   const expected = createHmac("sha256", secret).update(`${timestamp}.${rawBody}`, "utf8").digest();
-  if (!candidates.some((c) => timingSafeEqual(expected, Buffer.from(c, "hex")))) return null;
+  if (!candidates.some((c) => timingSafeEqual(expected, Buffer.from(c, "hex")))) {
+    return { error: "No signature matches - PAYMENTS_LK_WEBHOOK_SECRET is not this endpoint's signing secret." };
+  }
 
   try {
     const event = JSON.parse(rawBody);
-    if (event?.object !== "event" || typeof event.id !== "string" || typeof event.type !== "string") return null;
-    return event as PaymentsLkEvent;
+    if (event?.object !== "event" || typeof event.id !== "string" || typeof event.type !== "string") {
+      return { error: "Body is not a Payments.lk event." };
+    }
+    return { event: event as PaymentsLkEvent };
   } catch {
-    return null;
+    return { error: "Body is not JSON." };
   }
 }

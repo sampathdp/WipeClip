@@ -10,7 +10,9 @@ const PLAN_DAYS = 30;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: NextRequest) {
-  const secret = process.env.PAYMENTS_LK_WEBHOOK_SECRET;
+  // Trimmed: a secret pasted into Vercel with a trailing space or newline
+  // would otherwise never match any signature.
+  const secret = process.env.PAYMENTS_LK_WEBHOOK_SECRET?.trim();
   if (!secret) {
     // Fails closed: without a configured secret we cannot verify the
     // request came from Payments.lk, so refuse rather than trust it.
@@ -18,10 +20,12 @@ export async function POST(request: NextRequest) {
   }
 
   const rawBody = await request.text();
-  const event = constructWebhookEvent(rawBody, request.headers.get("payments-signature"), secret);
-  if (!event) {
-    return NextResponse.json({ error: "Invalid signature." }, { status: 400 });
+  const verified = constructWebhookEvent(rawBody, request.headers.get("payments-signature"), secret);
+  if ("error" in verified) {
+    console.warn("Payments.lk webhook rejected:", verified.error);
+    return NextResponse.json({ error: verified.error }, { status: 400 });
   }
+  const { event } = verified;
 
   const supabase = createServiceClient();
 
