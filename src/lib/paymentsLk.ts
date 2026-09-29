@@ -97,7 +97,14 @@ async function request<T>(path: string, init: { method: string; body?: unknown; 
   const json = await res.json().catch(() => null);
   if (!res.ok) {
     throw new PaymentsLkError(
-      json?.message ?? `Payments.lk request failed with ${res.status}.`,
+      // VALIDATION_FAILED names each bad field in `fields` - fold them in so
+      // the message says which one, not just "not valid".
+      [
+        json?.message ?? `Payments.lk request failed with ${res.status}.`,
+        ...(Array.isArray(json?.fields)
+          ? json.fields.map((f: { path?: string; message?: string }) => `${f.path}: ${f.message}`)
+          : []),
+      ].join(" "),
       res.status,
       json?.code,
       json?.reason,

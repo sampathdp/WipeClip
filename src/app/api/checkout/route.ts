@@ -4,6 +4,17 @@ import { PLANS, type PlanKey } from "@/lib/credits";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { createCheckout, getSecretKey, PaymentsLkError } from "@/lib/paymentsLk";
 
+// Payments.lk requires customer.name (2 to 80 characters) whenever a
+// customer object is sent, and refuses the whole checkout otherwise. Send
+// the account's name and email when there is a usable name, so the page
+// comes prefilled; with none, leave customer out and the checkout asks.
+function checkoutCustomer(email: string | undefined, metadata: Record<string, unknown> | undefined) {
+  const raw = metadata?.full_name ?? metadata?.name;
+  const name = typeof raw === "string" ? raw.trim().slice(0, 80) : "";
+  if (!email || name.length < 2) return undefined;
+  return { name, email };
+}
+
 export async function POST(request: NextRequest) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ error: "Accounts aren't configured yet." }, { status: 501 });
@@ -62,7 +73,7 @@ export async function POST(request: NextRequest) {
         amountCents,
         description: `WipeClip ${label} - ${credits} credits`,
         reference: order.id,
-        customer: user.email ? { email: user.email } : undefined,
+        customer: checkoutCustomer(user.email, user.user_metadata),
         successUrl: `${siteUrl}/pricing?success=1&plan=${plan}`,
         cancelUrl: `${siteUrl}/pricing?canceled=1`,
       },
