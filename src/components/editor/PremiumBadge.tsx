@@ -6,7 +6,7 @@
 export default function PremiumBadge({ className = "absolute right-1 top-1" }: { className?: string }) {
   return (
     <span
-      title="Premium: included in Starter and Pro"
+      title="Premium: included in every paid plan"
       aria-label="Premium"
       className={`${className} inline-flex h-4 items-center rounded-full bg-amber-400 px-1 text-black shadow-sm`}
     >

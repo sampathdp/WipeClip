@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-const PLAN_LABEL: Record<string, string> = { free: "Free", starter: "Starter", pro: "Pro" };
+const PLAN_LABEL: Record<string, string> = { free: "Free", lite: "Lite", starter: "Starter", pro: "Pro" };
 
 function formatDate(iso: string | null | undefined) {
   if (!iso) return null;

@@ -10,9 +10,12 @@ import { FILTERS } from "./editor/look";
  * Shared by the editor UI, the pricing page and the export route, so the
  * three can never disagree about what a plan includes.
  */
-export type Tier = "free" | "starter" | "pro";
+export type Tier = "free" | "lite" | "starter" | "pro";
 
-export const TIER_LABELS: Record<Tier, string> = { free: "Free", starter: "Starter", pro: "Pro" };
+/** Lowest to highest. */
+export const TIERS: Tier[] = ["free", "lite", "starter", "pro"];
+
+export const TIER_LABELS: Record<Tier, string> = { free: "Free", lite: "Lite", starter: "Starter", pro: "Pro" };
 
 export interface TierLimits {
   /** Highest export resolution. */
@@ -27,6 +30,7 @@ export interface TierLimits {
 
 export const TIER_LIMITS: Record<Tier, TierLimits> = {
   free: { maxResolution: "720p", premiumEffects: false, exportBranding: true, dailyExports: 5 },
+  lite: { maxResolution: "720p", premiumEffects: true, exportBranding: false, dailyExports: 20 },
   starter: { maxResolution: "1080p", premiumEffects: true, exportBranding: false, dailyExports: 50 },
   pro: { maxResolution: "4k", premiumEffects: true, exportBranding: false, dailyExports: 200 },
 };
@@ -34,7 +38,7 @@ export const TIER_LIMITS: Record<Tier, TierLimits> = {
 const RESOLUTION_ORDER: Resolution[] = ["720p", "1080p", "4k"];
 
 export function toTier(plan: string | null | undefined): Tier {
-  return plan === "starter" || plan === "pro" ? plan : "free";
+  return TIERS.includes(plan as Tier) ? (plan as Tier) : "free";
 }
 
 export function canExportAt(tier: Tier, resolution: Resolution): boolean {

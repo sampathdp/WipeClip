@@ -5,7 +5,7 @@ import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { formatLkr, FREE_DAILY_CREDITS, PLANS, type PlanKey } from "@/lib/credits";
-import { TIER_LIMITS, toTier, type Tier } from "@/lib/entitlements";
+import { TIER_LIMITS, TIERS as TIER_ORDER, toTier, type Tier } from "@/lib/entitlements";
 import { createClient } from "@/lib/supabase/client";
 import { landingPagePath, trackEvent } from "@/lib/analytics";
 
@@ -29,16 +29,26 @@ const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[
     ],
   },
   {
+    tier: "lite",
+    tagline: "Premium editing at a small price.",
+    features: [
+      "Everything in Free",
+      "All premium transitions, filters and effects",
+      `Exports up to ${res(TIER_LIMITS.lite.maxResolution)}`,
+      "No WipeClip mark on exports",
+      `${TIER_LIMITS.lite.dailyExports} exports a day`,
+      "AI credits for cleanup, background removal and sharpening",
+    ],
+  },
+  {
     tier: "starter",
     tagline: "For creators publishing every week.",
     popular: true,
     features: [
-      "Everything in Free",
-      "All premium transitions, filters and effects",
+      "Everything in Lite",
       `Exports up to ${res(TIER_LIMITS.starter.maxResolution)} Full HD`,
-      "No WipeClip mark on exports",
       `${TIER_LIMITS.starter.dailyExports} exports a day`,
-      "AI credits for cleanup, background removal and sharpening",
+      "4x more AI credits than Lite",
     ],
   },
   {
@@ -57,6 +67,7 @@ const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[
 ];
 
 const SUBSCRIPTION_KEYS: Record<Exclude<Tier, "free">, Record<Billing, PlanKey>> = {
+  lite: { month: "lite", year: "lite_yearly" },
   starter: { month: "starter", year: "starter_yearly" },
   pro: { month: "pro", year: "pro_yearly" },
 };
@@ -64,26 +75,28 @@ const SUBSCRIPTION_KEYS: Record<Exclude<Tier, "free">, Record<Billing, PlanKey>>
 const CREDIT_PACKS: PlanKey[] = ["creator", "payg"];
 
 const COMPARISON: { label: string; values: Record<Tier, string | boolean> }[] = [
-  { label: "Trim, split, reorder, speed", values: { free: true, starter: true, pro: true } },
-  { label: "Text, stickers, images, audio tracks", values: { free: true, starter: true, pro: true } },
-  { label: "Canvas sizes for YouTube, Shorts, Reels", values: { free: true, starter: true, pro: true } },
-  { label: "Fade, Crossfade, Dip to Black transitions", values: { free: true, starter: true, pro: true } },
-  { label: "Slide, Zoom, Blur, Dip to White transitions", values: { free: false, starter: true, pro: true } },
-  { label: "Filters", values: { free: "4 basic", starter: "All 10", pro: "All 10" } },
-  { label: "Effects", values: { free: "3 basic", starter: "All 11", pro: "All 11" } },
+  { label: "Trim, split, reorder, speed", values: { free: true, lite: true, starter: true, pro: true } },
+  { label: "Text, stickers, images, audio tracks", values: { free: true, lite: true, starter: true, pro: true } },
+  { label: "Canvas sizes for YouTube, Shorts, Reels", values: { free: true, lite: true, starter: true, pro: true } },
+  { label: "Fade, Crossfade, Dip to Black transitions", values: { free: true, lite: true, starter: true, pro: true } },
+  { label: "Slide, Zoom, Blur, Dip to White transitions", values: { free: false, lite: true, starter: true, pro: true } },
+  { label: "Filters", values: { free: "4 basic", lite: "All 10", starter: "All 10", pro: "All 10" } },
+  { label: "Effects", values: { free: "3 basic", lite: "All 11", starter: "All 11", pro: "All 11" } },
   {
     label: "Max export resolution",
     values: {
       free: res(TIER_LIMITS.free.maxResolution),
+      lite: res(TIER_LIMITS.lite.maxResolution),
       starter: res(TIER_LIMITS.starter.maxResolution),
       pro: res(TIER_LIMITS.pro.maxResolution),
     },
   },
-  { label: "WipeClip mark on exports", values: { free: "Yes", starter: "No", pro: "No" } },
+  { label: "WipeClip mark on exports", values: { free: "Yes", lite: "No", starter: "No", pro: "No" } },
   {
     label: "Exports per day",
     values: {
       free: String(TIER_LIMITS.free.dailyExports),
+      lite: String(TIER_LIMITS.lite.dailyExports),
       starter: String(TIER_LIMITS.starter.dailyExports),
       pro: String(TIER_LIMITS.pro.dailyExports),
     },
@@ -92,6 +105,7 @@ const COMPARISON: { label: string; values: Record<Tier, string | boolean> }[] = 
     label: "AI credits",
     values: {
       free: `${FREE_DAILY_CREDITS} / day`,
+      lite: `${PLANS.lite.credits} / month`,
       starter: `${PLANS.starter.credits} / month`,
       pro: `${PLANS.pro.credits} / month`,
     },
@@ -190,8 +204,8 @@ export default function PricingClient() {
             Edit free. <span className="text-gradient">Upgrade when you grow.</span>
           </h1>
           <p className="mt-4 text-base sm:text-lg text-muted max-w-xl mx-auto">
-            The editor is free forever. Starter and Pro unlock premium transitions, filters and effects,
-            higher-resolution exports without the WipeClip mark, and more AI credits.
+            The editor is free forever. Paid plans start at $1.99 a month and unlock premium transitions,
+            filters and effects, exports without the WipeClip mark, higher resolutions and more AI credits.
           </p>
 
           <div className="mt-8 inline-flex rounded-full border border-border bg-surface-2/80 p-1 text-sm font-semibold" role="radiogroup" aria-label="Billing period">
@@ -211,7 +225,7 @@ export default function PricingClient() {
           </div>
         </div>
 
-        <div className="mx-auto mt-14 grid max-w-6xl gap-6 md:grid-cols-3">
+        <div className="mx-auto mt-14 grid max-w-7xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {TIERS.map((card) => {
             const key = card.tier === "free" ? null : SUBSCRIPTION_KEYS[card.tier][billing];
             const plan = key ? PLANS[key] : null;
@@ -296,11 +310,12 @@ export default function PricingClient() {
             Compare plans
           </h2>
           <div className="mt-8 overflow-x-auto rounded-2xl border border-border">
-            <table className="w-full min-w-[520px] text-left text-sm">
+            <table className="w-full min-w-[620px] text-left text-sm">
               <thead className="bg-surface-2/60 text-xs uppercase tracking-wider text-muted">
                 <tr>
                   <th className="px-4 py-3 font-semibold">Feature</th>
                   <th className="px-4 py-3 font-semibold">Free</th>
+                  <th className="px-4 py-3 font-semibold">Lite</th>
                   <th className="px-4 py-3 font-semibold">Starter</th>
                   <th className="px-4 py-3 font-semibold">Pro</th>
                 </tr>
@@ -309,7 +324,7 @@ export default function PricingClient() {
                 {COMPARISON.map((row, i) => (
                   <tr key={row.label} className={i % 2 ? "bg-surface-2/30" : ""}>
                     <td className="px-4 py-2.5 text-foreground/90">{row.label}</td>
-                    {(["free", "starter", "pro"] as const).map((t) => {
+                    {TIER_ORDER.map((t) => {
                       const v = row.values[t];
                       return (
                         <td key={t} className="px-4 py-2.5 text-muted">

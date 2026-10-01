@@ -213,7 +213,7 @@ export default function ExportDialog({
                   <li key={f}>{f}</li>
                 ))}
               </ul>
-              <p className="mt-2 text-muted">Upgrade to Starter or Pro to export them, or swap them for free ones.</p>
+              <p className="mt-2 text-muted">Any paid plan (from Lite, $1.99/month) exports them. Or swap them for free ones.</p>
             </div>
           )}
           {premium.length > 0 ? (

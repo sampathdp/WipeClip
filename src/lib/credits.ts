@@ -21,6 +21,24 @@ export const IMAGE_CREDIT_COST = 1;
 // customer renews themselves; a renewal before expiry stacks on the time
 // left. Credit packs only add AI credits and never change the tier.
 export const PLANS = {
+  lite: {
+    label: "Lite",
+    priceLabel: "$1.99",
+    amountCents: 60000,
+    credits: 15,
+    tier: "lite",
+    period: "month",
+    days: 30,
+  },
+  lite_yearly: {
+    label: "Lite",
+    priceLabel: "$17.99",
+    amountCents: 540000,
+    credits: 180,
+    tier: "lite",
+    period: "year",
+    days: 365,
+  },
   starter: {
     label: "Starter",
     priceLabel: "$8.99",

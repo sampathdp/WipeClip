@@ -3,6 +3,7 @@ import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/s
 import { PLANS, type PlanKey } from "@/lib/credits";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { effectivePlan } from "@/lib/plan";
+import { TIER_LABELS, TIERS, toTier } from "@/lib/entitlements";
 import { createCheckout, getSecretKey, PaymentsLkError } from "@/lib/paymentsLk";
 
 // Payments.lk requires customer.name (2 to 80 characters) whenever a
@@ -54,12 +55,14 @@ export async function POST(request: NextRequest) {
   const admin = createServiceClient();
 
   // grant_paid_credits switches the account to the purchased tier, so a
-  // Starter pass bought during an active Pro pass would cut Pro short.
-  if (tier === "starter") {
+  // lower pass bought during an active higher one would cut it short.
+  if (tier) {
     const { data: profile } = await admin.from("profiles").select("plan, plan_expires_at").eq("id", user.id).single();
-    if (profile && effectivePlan(profile) === "pro") {
+    const current = profile ? toTier(effectivePlan(profile)) : "free";
+    if (TIERS.indexOf(current) > TIERS.indexOf(tier)) {
+      const name = TIER_LABELS[current];
       return NextResponse.json(
-        { error: "You already have Pro, which includes everything in Starter. Renew Pro or buy a credit pack instead." },
+        { error: `You already have ${name}, which includes everything in ${TIER_LABELS[tier]}. Renew ${name} or buy a credit pack instead.` },
         { status: 409 }
       );
     }

@@ -282,7 +282,7 @@ export function TransitionPanel({
             <p className="mt-2 text-[11px] text-muted">
               Premium transition: free to try, exports with{" "}
               <a href="/pricing" target="_blank" rel="noopener" className="font-semibold text-accent underline">
-                Starter or Pro
+                any paid plan
               </a>
               .
             </p>

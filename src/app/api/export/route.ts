@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
     if (premium.length) {
       return errorResponse(
         "plan_required",
-        `This project uses premium features (${premium.join(", ")}). Upgrade to Starter or remove them to export.`,
+        `This project uses premium features (${premium.join(", ")}). Upgrade to any paid plan (from Lite) or remove them to export.`,
         403
       );
     }

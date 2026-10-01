@@ -54,7 +54,7 @@ export function PremiumNote() {
       <span>
         Premium items are free to try. Export them with{" "}
         <a href="/pricing" target="_blank" rel="noopener" className="font-semibold text-accent underline">
-          Starter or Pro
+          any paid plan
         </a>
         .
       </span>
