@@ -29,7 +29,7 @@ const faqs = [
   },
   {
     q: "Why would I need WipeClip.co's paid tool instead?",
-    a: "This tool answers a different question - grabbing a clean still frame. If the footage itself has a watermark or logo burned in that you need removed from the whole clip, that's WipeClip.co's core video watermark remover, free to try.",
+    a: "This tool answers a different question - grabbing a clean still frame. If your own footage has a timestamp, caption or object you need removed from the whole clip, that's WipeClip.co's AI cleanup tool, free to try.",
   },
 ];
 

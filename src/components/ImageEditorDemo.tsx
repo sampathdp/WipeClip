@@ -183,10 +183,10 @@ export default function ImageEditorDemo() {
       <div className="glass-card mx-auto max-w-3xl rounded-[2rem] p-6 sm:p-10 border border-cyan-500/20">
         <div>
           <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl text-foreground">
-            Remove Image <span className="text-gradient">Watermark</span>
+            AI Image <span className="text-gradient">Cleanup</span>
           </h2>
           <p className="mt-1.5 text-sm sm:text-base text-muted">
-            Upload an image, mark the watermark once, download the clean version.
+            Upload an image you own, mark what to remove once, download the clean version.
           </p>
         </div>
         <div className="mt-8 flex w-full flex-col items-center justify-center gap-3 rounded-[1.75rem] border-2 border-dashed border-border px-6 py-14 text-center opacity-60">
@@ -204,7 +204,7 @@ export default function ImageEditorDemo() {
           Image tool is a <span className="text-gradient">Pro</span> feature
         </h2>
         <p className="mx-auto mt-3 max-w-md text-sm sm:text-base text-muted">
-          Watermark/object removal for images, and unattended access to auto-enhance, is included
+          Object removal for images, and unattended access to auto-enhance, is included
           on the $23.99/mo Pro plan.
         </p>
         <Link href="/pricing" className="btn-primary mt-6 inline-flex rounded-full px-6 py-3 text-sm font-semibold">
@@ -222,10 +222,10 @@ export default function ImageEditorDemo() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl text-foreground">
-            Remove Image <span className="text-gradient">Watermark</span>
+            AI Image <span className="text-gradient">Cleanup</span>
           </h2>
           <p className="mt-1.5 text-sm sm:text-base text-muted">
-            Upload an image, mark the watermark once, download the clean version.
+            Upload an image you own, mark what to remove once, download the clean version.
           </p>
         </div>
       </div>
@@ -381,7 +381,7 @@ export default function ImageEditorDemo() {
                 disabled={!region || !consent}
                 className="btn-primary mt-6 w-full rounded-full py-3.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Remove Watermark Now
+                Clean Up Image
               </button>
             </div>
           )}

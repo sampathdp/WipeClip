@@ -206,7 +206,7 @@ export default function RegionSelector({
         <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
         {suggestion
           ? "Auto-detected likely overlay region. Drag to adjust, or resize with the corner handles."
-          : "No obvious watermark detected. Click & drag on the frame to mark it, then resize with the corner handles."}
+          : "Nothing detected automatically. Click & drag on the frame to mark it, then resize with the corner handles."}
       </p>
     </div>
   );

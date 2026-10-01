@@ -334,9 +334,9 @@ export default function BackgroundRemoverDemo() {
 
               <div className="mt-6 rounded-2xl border border-cyan-500/20 bg-cyan-50/70 p-4 text-center">
                 <p className="text-xs sm:text-sm text-muted">
-                  Also need to clean a watermark or logo off a photo or video?{" "}
+                  Also need to remove an object, timestamp or caption from your own photo or video?{" "}
                   <Link href="/" className="font-semibold text-cyan-600 underline hover:text-cyan-700">
-                    Try WipeClip.co&apos;s watermark remover free
+                    Try WipeClip.co&apos;s AI cleanup free
                   </Link>
                 </p>
               </div>

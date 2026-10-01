@@ -57,10 +57,10 @@ export default function LimitationsSection() {
         <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-muted leading-relaxed">
           Curious whether any of this shows up as reduced video quality? See{" "}
           <Link
-            href="/guides/does-watermark-removal-reduce-video-quality"
+            href="/guides/does-ai-cleanup-reduce-video-quality"
             className="underline hover:text-foreground"
           >
-            does watermark removal reduce video quality
+            does AI cleanup reduce video quality
           </Link>
           .
         </p>

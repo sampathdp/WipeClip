@@ -67,7 +67,7 @@ export default function EvidenceSection({ examples }: { examples?: EvidenceExamp
                 Try it on your own clip instead
               </Link>
               <Link
-                href="/research/video-watermark-removal-test"
+                href="/research/video-cleanup-test"
                 className="text-sm font-semibold text-cyan-600 underline hover:text-cyan-700"
               >
                 See the research methodology

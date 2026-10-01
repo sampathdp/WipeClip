@@ -10,9 +10,9 @@ import RelatedGuides from "@/components/guides/RelatedGuides";
 import FullMethodComparisonTable from "@/components/guides/FullMethodComparisonTable";
 import { buildPageMetadata, SITE_URL } from "@/lib/seo";
 
-const title = "AI Inpainting vs Blur vs Crop for Video Watermark Removal";
+const title = "AI Inpainting vs Blur vs Crop for Removing Overlays From Video";
 const description =
-  "A criteria-by-criteria comparison of cropping, blurring, covering, and AI reconstruction for removing a video watermark, including where AI reconstruction is the wrong tool for the job.";
+  "A criteria-by-criteria comparison of cropping, blurring, covering, and AI reconstruction for removing an unwanted overlay from your video, including where AI reconstruction is the wrong tool for the job.";
 const path = "/guides/ai-inpainting-vs-blur-vs-crop";
 const publishedDate = "2026-08-25";
 const updatedDate = "2026-08-25";
@@ -56,7 +56,7 @@ export default function Page() {
           h1={
             <>
               AI inpainting vs blur vs crop for{" "}
-              <span className="text-gradient">video watermark removal</span>
+              <span className="text-gradient">removing video overlays</span>
             </>
           }
           intro="Four ways to deal with an unwanted overlay on a video, and what each one actually costs you."
@@ -81,7 +81,7 @@ export default function Page() {
               <div className="rounded-2xl border border-border/70 bg-surface-2/50 p-5">
                 <h3 className="font-display text-sm font-bold text-foreground">Cropping</h3>
                 <p className="mt-1.5 text-sm text-muted leading-relaxed">
-                  Cuts the watermarked area out of the frame entirely, usually by trimming an edge or
+                  Cuts the marked area out of the frame entirely, usually by trimming an edge or
                   corner. Simple and instant, but changes the video&apos;s dimensions and permanently
                   removes whatever else was in that area.
                 </p>
@@ -167,13 +167,13 @@ export default function Page() {
               desc: "The mechanics behind the reconstruction method compared above.",
             },
             {
-              href: "/guides/does-watermark-removal-reduce-video-quality",
-              label: "Does Removing a Watermark Reduce Video Quality?",
+              href: "/guides/does-ai-cleanup-reduce-video-quality",
+              label: "Does AI Cleanup Reduce Video Quality?",
               desc: "Why matching the source resolution isn't the same as zero quality loss.",
             },
             {
-              href: "/research/video-watermark-removal-test",
-              label: "WipeClip Research: Watermark Removal Test",
+              href: "/research/video-cleanup-test",
+              label: "WipeClip Research: AI Video Cleanup Test",
               desc: "Real before/after tests across these scenarios, published as they're verified.",
             },
           ]}

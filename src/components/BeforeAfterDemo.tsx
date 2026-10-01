@@ -215,12 +215,12 @@ export default function BeforeAfterDemo() {
           AI Inpainted &bull; Clean Master
         </span>
 
-        {/* Watermarked Region & Overlay (Clipped to the right of the divider) */}
+        {/* Overlay side (Clipped to the right of the divider) */}
         <div
           className="pointer-events-none absolute inset-0 z-20 overflow-hidden"
           style={{ clipPath: `inset(0 0 0 ${effectivePercent}%)` }}
         >
-          {/* Subtle watermark scanline overlay on watermarked side */}
+          {/* Subtle scanline tint on the overlay side */}
           <div className="absolute inset-0 bg-cyan-50/70 backdrop-contrast-[1.05]" />
 
           {/* Original State Badge (Right Side) */}
@@ -228,15 +228,15 @@ export default function BeforeAfterDemo() {
             Original with overlay
           </span>
 
-          {/* Simulated Creator Watermark Badge */}
+          {/* Simulated burned-in camera timestamp */}
           <div className="absolute bottom-16 right-8 z-20 flex items-center gap-2.5 rounded-xl bg-black/85 backdrop-blur-md px-4 py-2 border border-white/20 shadow-2xl">
             <div className="h-2.5 w-2.5 rounded-full bg-cyan-400 animate-ping" />
             <div className="flex flex-col text-left">
               <span className="text-[11px] font-bold tracking-wider text-white uppercase leading-none font-mono">
-                @WATERMARK_PROTECTED
+                REC 00:14:32
               </span>
               <span className="text-[9px] font-mono text-zinc-400 mt-1 leading-none">
-                ENCODED OVERLAY &bull; 2026
+                CAM 01 &bull; 2026-03-14
               </span>
             </div>
           </div>

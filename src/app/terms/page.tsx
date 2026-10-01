@@ -45,7 +45,7 @@ export default function TermsPage() {
       <P>
         WipeClip.co is an AI video and image cleanup tool. You mark a region
         of a file you provide and the Service reconstructs or replaces it
-        (for example a logo, watermark, caption, timestamp, or another
+        (for example a timestamp, caption, logo, or another
         unwanted object) using automated image/video processing, so you can
         restore a clean version of footage you own or are authorized to
         edit. You choose the region; the Service does not automatically
@@ -160,10 +160,10 @@ export default function TermsPage() {
           credits it used are returned to your balance automatically.
         </li>
         <li>
-          <strong>Refund Policy:</strong> We offer a 14-day refund window for paid
-          purchases if you have not used more than 20% of your purchased credits
-          and have experienced unresolved technical difficulties with the Service.
-          To request a refund, contact us at{" "}
+          <strong>Refund Policy:</strong> You can request a full refund of any
+          plan or credit pack within 14 days of purchase, for any reason. After
+          14 days, refunds are at our discretion. A refunded plan ends and its
+          remaining credits are removed. To request a refund, contact us at{" "}
           <a href="mailto:support@wipeclip.co" className="underline hover:text-foreground">
             support@wipeclip.co
           </a>

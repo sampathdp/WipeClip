@@ -6,7 +6,7 @@ import { buildPageMetadata } from "@/lib/seo";
 
 const title = "Remove Background From Image - Free";
 const description =
-  "Upload a photo and get a transparent-background PNG back in seconds. Free, no account required to preview. Powered by the same reconstruction engine behind WipeClip.co's watermark remover.";
+  "Upload a photo and get a transparent-background PNG back in seconds. Free, no account required to preview. Powered by the same engine behind WipeClip.co's AI cleanup tools.";
 
 export const metadata: Metadata = buildPageMetadata({
   title,
@@ -24,8 +24,8 @@ const faqs = [
     a: "A PNG with a transparent alpha channel, so you can drop the subject straight onto a new background, a product page, or a slide.",
   },
   {
-    q: "How is this different from WipeClip.co's watermark remover?",
-    a: "Background removal cuts out the subject automatically, no marking required. The watermark remover reconstructs a small marked region (like a logo or badge) instead of removing the whole background. Both share the same image-processing engine underneath.",
+    q: "How is this different from WipeClip.co's AI cleanup tool?",
+    a: "Background removal cuts out the subject automatically, no marking required. The AI cleanup tool reconstructs a small marked region (like a timestamp or caption) instead of removing the whole background. Both share the same image-processing engine underneath.",
   },
   {
     q: "Will edges look rough on hair or fine detail?",

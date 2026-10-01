@@ -71,7 +71,7 @@ const faqs = [
     a: "WipeClip keeps your original aspect ratio (16:9, 9:16, 1:1 and others) and frame rate, never upscales, and encodes at a visually near-lossless quality setting. You choose the maximum resolution when you export.",
   },
   {
-    q: "Can I remove a watermark or logo from just part of my video?",
+    q: "Can I remove an object or caption from just part of my video?",
     a: "Yes. Select a clip on the timeline and use AI Cleanup. Only that clip is processed, and the cleaned result replaces it in your project. Undo brings the original back.",
   },
   {
