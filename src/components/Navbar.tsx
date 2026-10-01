@@ -9,7 +9,7 @@ import ThemeToggle from "./ThemeToggle";
 const links = [
   { href: "/editor", label: "Editor" },
   { href: "/#how-it-works", label: "How It Works" },
-  { href: "/#comparison", label: "Comparison" },
+  { href: "/about", label: "About" },
   { href: "/pricing", label: "Pricing" },
   { href: "/#faq", label: "FAQ" },
 ];

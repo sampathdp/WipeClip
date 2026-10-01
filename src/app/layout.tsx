@@ -104,7 +104,7 @@ export const viewport: Viewport = {
   colorScheme: "light dark",
 };
 
-const themeInitScript = `(function(){try{var t=localStorage.getItem("theme");if(t!=="light"){document.documentElement.setAttribute("data-theme","dark");}else{var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content","#ffffff");}}catch(e){}})();`;
+const themeInitScript = `(function(){document.documentElement.classList.add("js-reveal");try{var t=localStorage.getItem("theme");if(t!=="light"){document.documentElement.setAttribute("data-theme","dark");}else{var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content","#ffffff");}}catch(e){}})();`;
 
 const jsonLd = {
   "@context": "https://schema.org",

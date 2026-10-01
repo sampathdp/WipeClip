@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Reveal from "./Reveal";
 
 const tools = [
   {
@@ -88,11 +89,11 @@ export default function FreeTools() {
         </div>
 
         <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {tools.map((t) => (
+          {tools.map((t, i) => (
+            <Reveal key={t.href} delay={i * 80} className={t.badge === "New" ? "lg:col-span-2" : ""}>
             <Link
-              key={t.href}
               href={t.href}
-              className="glass-card-interactive group rounded-[1.75rem] p-7 flex flex-col justify-between"
+              className={`glass-card-interactive group rounded-[1.75rem] p-7 flex h-full flex-col justify-between ${t.badge === "New" ? "border-glow" : ""}`}
             >
               <div>
                 <div className="mb-5 flex items-center justify-between">
@@ -119,6 +120,7 @@ export default function FreeTools() {
                 </svg>
               </span>
             </Link>
+            </Reveal>
           ))}
         </div>
       </div>

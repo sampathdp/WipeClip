@@ -79,7 +79,7 @@ const body = (
           why an estimate isn&apos;t the same as zero quality loss
         </Link>
         , and{" "}
-        <Link href="/#comparison" className="underline hover:text-foreground text-cyan-600">
+        <Link href="/about#comparison" className="underline hover:text-foreground text-cyan-600">
           how it compares to crop, blur, and cover
         </Link>
         .

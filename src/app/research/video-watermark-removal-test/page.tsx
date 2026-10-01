@@ -202,7 +202,7 @@ export default function VideoWatermarkRemovalTestPage() {
                 A large mark over a highly detailed or fast-changing background, heavy camera shake,
                 and objects repeatedly crossing the marked region all give the model less to work
                 with. See WipeClip&apos;s{" "}
-                <Link href="/#limitations" className="underline hover:text-foreground text-cyan-600">
+                <Link href="/about#limitations" className="underline hover:text-foreground text-cyan-600">
                   general product limitations
                 </Link>{" "}
                 for the full list. This page will confirm or update that picture once tests are

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Reveal from "./Reveal";
 
 const faqs = [
   {
@@ -64,7 +65,7 @@ export default function Faq() {
           </h2>
         </div>
 
-        <div className="mt-12 space-y-4">
+        <Reveal className="mt-12 space-y-4">
           {faqs.map((f) => (
             <details
               key={f.q}
@@ -81,7 +82,7 @@ export default function Faq() {
               <p className="mt-4 text-sm text-muted leading-relaxed border-t border-border/50 pt-4">{f.a}</p>
             </details>
           ))}
-        </div>
+        </Reveal>
 
         <p className="mt-8 text-center text-xs text-muted">
           Full details available in our{" "}

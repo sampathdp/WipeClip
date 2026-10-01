@@ -69,7 +69,7 @@ const body = (
       <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
         Only the marked region is rebuilt. WipeClip doesn&apos;t crop or resize the video to hide the
         badge, so the original aspect ratio and resolution carry through unchanged.{" "}
-        <Link href="/#comparison" className="underline hover:text-foreground text-cyan-600">
+        <Link href="/about#comparison" className="underline hover:text-foreground text-cyan-600">
           Compare that to what cropping does
         </Link>
         .

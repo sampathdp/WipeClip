@@ -164,7 +164,7 @@ export default function Page() {
             </ul>
             <p className="mt-5 text-sm text-muted leading-relaxed">
               See WipeClip&apos;s own{" "}
-              <Link href="/#limitations" className="underline hover:text-foreground text-cyan-600">
+              <Link href="/about#limitations" className="underline hover:text-foreground text-cyan-600">
                 product limitations
               </Link>{" "}
               for how this applies in practice, and{" "}

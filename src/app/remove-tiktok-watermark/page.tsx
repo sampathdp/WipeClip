@@ -47,7 +47,7 @@ const body = (
         itself to stay safe, hiding more of the actual video than necessary.
       </p>
       <p className="mt-4 text-sm">
-        <Link href="/#comparison" className="underline hover:text-foreground text-cyan-600">
+        <Link href="/about#comparison" className="underline hover:text-foreground text-cyan-600">
           See how crop, blur, cover, and reconstruction compare
         </Link>
       </p>
@@ -61,7 +61,7 @@ const body = (
         You still only mark the badge once, on a single preview frame. From there, WipeClip tracks
         that region&apos;s motion across the clip and reconstructs it frame by frame, instead of
         applying one fixed mask to the whole video.{" "}
-        <Link href="/#static-vs-moving" className="underline hover:text-foreground text-cyan-600">
+        <Link href="/about#static-vs-moving" className="underline hover:text-foreground text-cyan-600">
           More on static vs. moving overlays
         </Link>
         .
@@ -76,7 +76,7 @@ const body = (
         Quick pans, shaky handheld shots, and rapid-cut trend edits give the tracker less stable
         footage to reference between frames. Results depend on how much clean detail is actually
         visible around the mark at each moment. See{" "}
-        <Link href="/#limitations" className="underline hover:text-foreground text-cyan-600">
+        <Link href="/about#limitations" className="underline hover:text-foreground text-cyan-600">
           limitations
         </Link>{" "}
         for the full picture.

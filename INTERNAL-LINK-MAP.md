@@ -97,6 +97,10 @@ Anchor text used for these is varied and descriptive throughout — e.g. "how it
 
 ---
 
+## Homepage slim-down + /about (2026-10-01)
+
+The long-form homepage sections moved to `/about` with their ids unchanged: `#what-it-does`, `#static-vs-moving`, `#comparison`, `#situations`, `#evidence`, `#limitations`, `#privacy`, `#related`. Every in-app link that pointed at `/#<one of those>` now points at `/about#<same id>`. The homepage keeps `#upload`, `#how-it-works` (HowTo schema), `#why`, `#editor`, `#related` (compact PlatformStrip), `#tools` and `#faq` (FAQPage schema). Navbar "Comparison" was replaced by "About". External backlinks to the old homepage anchors still land on the homepage, just not on the moved section.
+
 ## Editor (added 2026-10-01)
 
 `/editor` targets a different intent from the homepage ("online video editor", "trim/cut video online", "add transitions/stickers to video") rather than the homepage's cleanup intent, so it's a spoke, not a competing hub. Its indexable copy, FAQPage and WebApplication JSON-LD live in `src/components/editor/EditorLanding.tsx`, shown under the upload card until a video is loaded.

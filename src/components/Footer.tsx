@@ -15,6 +15,9 @@ export default function Footer() {
             <Link href="/editor" className="transition-colors hover:text-foreground">
               Video Editor
             </Link>
+            <Link href="/about" className="transition-colors hover:text-foreground">
+              About
+            </Link>
             <Link href="/research" className="transition-colors hover:text-foreground">
               Research
             </Link>

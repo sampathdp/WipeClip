@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Reveal from "./Reveal";
 
 const highlights = [
   "Trim the start and end",
@@ -21,7 +22,7 @@ export default function EditorPromo() {
   return (
     <section id="editor" className="scroll-mt-28 py-24 relative">
       <div className="mx-auto max-w-6xl px-6">
-        <div className="glass-card grid gap-10 rounded-[2rem] p-8 sm:p-12 lg:grid-cols-2 lg:items-center">
+        <Reveal className="glass-card grid gap-10 rounded-[2rem] p-8 sm:p-12 lg:grid-cols-2 lg:items-center">
           <div>
             <div className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-50 px-3.5 py-1 text-xs font-semibold text-cyan-600 dark:bg-cyan-500/10">
               New: Video Editor
@@ -81,7 +82,7 @@ export default function EditorPromo() {
               <div className="ml-[45%] h-full w-[22%] rounded-md border border-accent/50 bg-accent/25" />
             </div>
           </div>
-        </div>
+        </Reveal>
       </div>
     </section>
   );

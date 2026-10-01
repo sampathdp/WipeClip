@@ -2,21 +2,19 @@ import Navbar from "@/components/Navbar";
 import FreeToolsBanner from "@/components/FreeToolsBanner";
 import Hero from "@/components/Hero";
 import UploadDemo from "@/components/UploadDemo";
-import WhatWipeClipDoes from "@/components/WhatWipeClipDoes";
-import EditorPromo from "@/components/EditorPromo";
 import HowItWorks from "@/components/HowItWorks";
-import StaticVsMovingWatermarks from "@/components/StaticVsMovingWatermarks";
-import RemovalMethodComparison from "@/components/RemovalMethodComparison";
-import SupportedSituations from "@/components/SupportedSituations";
-import EvidenceSection from "@/components/EvidenceSection";
-import LimitationsSection from "@/components/LimitationsSection";
-import PrivacyProcessing from "@/components/PrivacyProcessing";
-import RelatedContent from "@/components/RelatedContent";
+import WhyWipeClip from "@/components/WhyWipeClip";
+import EditorPromo from "@/components/EditorPromo";
+import PlatformStrip from "@/components/PlatformStrip";
 import FreeTools from "@/components/FreeTools";
 import Faq from "@/components/Faq";
 import CtaBanner from "@/components/CtaBanner";
 import Footer from "@/components/Footer";
 
+// The long-form explainers (what it does, static vs moving overlays, method
+// comparison, use cases, evidence, limitations, privacy) live on /about,
+// linked from WhyWipeClip and the navbar, so the homepage stays focused on
+// the tool itself.
 export default function Home() {
   return (
     <div className="flex flex-1 flex-col">
@@ -27,16 +25,10 @@ export default function Home() {
         <section className="px-6">
           <UploadDemo />
         </section>
-        <WhatWipeClipDoes />
-        <EditorPromo />
         <HowItWorks includeSchema />
-        <StaticVsMovingWatermarks />
-        <RemovalMethodComparison />
-        <SupportedSituations />
-        <EvidenceSection />
-        <LimitationsSection />
-        <PrivacyProcessing />
-        <RelatedContent />
+        <WhyWipeClip />
+        <EditorPromo />
+        <PlatformStrip />
         <FreeTools />
         <Faq />
         <CtaBanner />

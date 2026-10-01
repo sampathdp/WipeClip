@@ -57,7 +57,7 @@ const body = (
         </Link>
         . Results still depend on what&apos;s actually behind the badge: a busy, fast-changing part
         of a Canva animation gives less to work with than a plain background does. See{" "}
-        <Link href="/#limitations" className="underline hover:text-foreground text-cyan-600">
+        <Link href="/about#limitations" className="underline hover:text-foreground text-cyan-600">
           limitations
         </Link>{" "}
         for what affects the outcome.
