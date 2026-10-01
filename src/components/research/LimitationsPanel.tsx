@@ -13,7 +13,7 @@ const limitations = [
   },
   {
     title: "Small sample size",
-    desc: "A handful of clips per category isn't comprehensive coverage of every watermark type, platform, or resolution combination.",
+    desc: "A handful of clips per category isn't comprehensive coverage of every overlay type, footage type, or resolution combination.",
   },
 ];
 

@@ -7,7 +7,7 @@ export default function TechnicalMetrics({ test }: { test: ResearchTest }) {
     { label: "FPS in/out", value: `${test.inputFPS}/${test.outputFPS}` },
     { label: "Clip length", value: test.clipDuration },
     { label: "Processing time", value: test.processingTime },
-    { label: "Watermark size", value: test.watermarkSize },
+    { label: "Overlay size", value: test.watermarkSize },
     { label: "Background", value: test.backgroundType },
     { label: "Camera movement", value: test.cameraMovement },
     { label: "Visible artifacts", value: test.visibleArtifacts },

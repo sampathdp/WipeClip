@@ -48,7 +48,7 @@ export default function Footer() {
             Photo Sharpener
           </Link>
           <span className="text-border">&middot;</span>
-          <Link href="/remove-image-watermark" className="transition-colors hover:text-foreground">
+          <Link href="/image-cleanup" className="transition-colors hover:text-foreground">
             Image Cleanup
           </Link>
         </div>

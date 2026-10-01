@@ -30,7 +30,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.9,
     },
     {
-      url: `${siteUrl}/remove-image-watermark`,
+      url: `${siteUrl}/image-cleanup`,
       lastModified: "2026-08-20",
       changeFrequency: "weekly",
       priority: 0.8,
@@ -60,7 +60,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     },
     {
-      url: `${siteUrl}/research/video-watermark-removal-test`,
+      url: `${siteUrl}/research/video-cleanup-test`,
       lastModified: "2026-08-25",
       changeFrequency: "weekly",
       priority: 0.6,
@@ -72,7 +72,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     },
     {
-      url: `${siteUrl}/guides/does-watermark-removal-reduce-video-quality`,
+      url: `${siteUrl}/guides/does-ai-cleanup-reduce-video-quality`,
       lastModified: "2026-08-25",
       changeFrequency: "monthly",
       priority: 0.6,

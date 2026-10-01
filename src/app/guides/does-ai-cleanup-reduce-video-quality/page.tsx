@@ -13,10 +13,10 @@ import BenchmarkTable from "@/components/research/BenchmarkTable";
 import { buildPageMetadata, SITE_URL } from "@/lib/seo";
 import { RESEARCH_TESTS } from "@/lib/researchData";
 
-const title = "Does Removing a Watermark Reduce Video Quality?";
+const title = "Does AI Cleanup Reduce Video Quality?";
 const description =
-  "Resolution isn't the same as visual quality. A clear look at how resolution, bitrate, codec, re-encoding, and reconstructed pixels actually affect a video after watermark removal.";
-const path = "/guides/does-watermark-removal-reduce-video-quality";
+  "Resolution isn't the same as visual quality. A clear look at how resolution, bitrate, codec, re-encoding, and reconstructed pixels actually affect a video after removing an overlay or object.";
+const path = "/guides/does-ai-cleanup-reduce-video-quality";
 const publishedDate = "2026-08-25";
 const updatedDate = "2026-08-25";
 
@@ -50,7 +50,7 @@ export default function Page() {
       <Breadcrumbs
         items={[
           { label: "Home", href: "/" },
-          { label: "Does Watermark Removal Reduce Quality?" },
+          { label: "Does AI Cleanup Reduce Quality?" },
         ]}
       />
       <main className="flex-1">
@@ -58,7 +58,7 @@ export default function Page() {
           eyebrow="Quality Explainer"
           h1={
             <>
-              Does removing a watermark{" "}
+              Does removing an overlay{" "}
               <span className="text-gradient">reduce video quality</span>?
             </>
           }
@@ -70,7 +70,7 @@ export default function Page() {
             Matching the source resolution and framerate means the frame size and motion smoothness
             are preserved. It does not mean zero quality loss overall. Bitrate, codec choice, and
             re-encoding all affect visible quality independent of resolution, and the reconstructed
-            watermark region is an estimate, not a copy of the original pixels. Both are worth
+            marked region is an estimate, not a copy of the original pixels. Both are worth
             understanding separately.
           </DirectAnswer>
         </section>
@@ -151,8 +151,8 @@ export default function Page() {
               desc: "How reconstruction compares to methods that avoid touching pixels at all.",
             },
             {
-              href: "/research/video-watermark-removal-test",
-              label: "WipeClip Research: Watermark Removal Test",
+              href: "/research/video-cleanup-test",
+              label: "WipeClip Research: AI Video Cleanup Test",
               desc: "Where the measurements referenced above will be published.",
             },
             {

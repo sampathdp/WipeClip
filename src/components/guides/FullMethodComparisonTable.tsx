@@ -73,7 +73,7 @@ export default function FullMethodComparisonTable() {
     <div className="overflow-x-auto rounded-[1.75rem] border border-border/80">
       <table className="w-full min-w-[720px] border-collapse text-left text-sm">
         <caption className="sr-only">
-          Comparison of crop, blur, cover, and AI reconstruction for video watermark removal
+          Comparison of crop, blur, cover, and AI reconstruction for removing video overlays
         </caption>
         <thead>
           <tr className="bg-surface-2/80">

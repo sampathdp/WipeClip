@@ -49,18 +49,18 @@ export type TestCategoryInfo = {
 export const TEST_CATEGORIES: TestCategoryInfo[] = [
   {
     key: "static-watermark",
-    label: "Static Watermark Test",
+    label: "Static Overlay Test",
     description: "A logo or badge that stays in one fixed position for the whole clip.",
   },
   {
     key: "moving-watermark",
-    label: "Moving Watermark Test",
+    label: "Moving Overlay Test",
     description: "An overlay that drifts, resizes, or repositions as the clip plays.",
   },
   {
     key: "semi-transparent-overlay",
     label: "Semi-Transparent Overlay",
-    description: "A watermark rendered at partial opacity rather than a solid mark.",
+    description: "An overlay rendered at partial opacity rather than a solid mark.",
   },
   {
     key: "complex-background",

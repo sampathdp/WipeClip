@@ -4,27 +4,27 @@ import Footer from "@/components/Footer";
 import ImageEditorDemo from "@/components/ImageEditorDemo";
 import { buildPageMetadata } from "@/lib/seo";
 
-const title = "Remove Image Watermark - Pro Tool";
+const title = "AI Image Cleanup - Pro Tool";
 const description =
   "Mark an unwanted region on an image you own once, and WipeClip.co reconstructs the pixels beneath it. A Pro-plan tool, same motion-free inpainting as the video tool.";
 
 export const metadata: Metadata = buildPageMetadata({
   title,
   description,
-  path: "/remove-image-watermark",
+  path: "/image-cleanup",
 });
 
 const faqs = [
   {
     q: "Why is this a Pro-only feature when the video tool has a free tier?",
-    a: "The video tool's free preview covers casual, occasional use. Image watermark/object removal shares the same reconstruction engine but is bundled into the Pro plan ($23.99/mo) alongside 4K video, unattended auto-enhance, and batch upload.",
+    a: "The video tool's free preview covers casual, occasional use. Image object removal shares the same reconstruction engine but is bundled into the Pro plan ($23.99/mo) alongside 4K video, unattended auto-enhance, and batch upload.",
   },
   {
     q: "How is this different from WipeClip.co's free background remover or sharpener?",
-    a: "Those tools run automatically with no region to mark - background removal cuts out the whole subject, and sharpening enhances the whole image. This tool reconstructs a specific region you mark yourself, the same way as the video watermark remover, just applied to one still image instead of every frame of a clip.",
+    a: "Those tools run automatically with no region to mark - background removal cuts out the whole subject, and sharpening enhances the whole image. This tool reconstructs a specific region you mark yourself, the same way as the video cleanup tool, just applied to one still image instead of every frame of a clip.",
   },
   {
-    q: "Can I remove a watermark from a still image the same way as from a video?",
+    q: "Can I clean up a still image the same way as a video?",
     a: "Yes - this uses the same motion-free inpainting reconstruction as the video tool's per-frame engine, just run once against a single frame instead of the whole clip.",
   },
   {
@@ -62,7 +62,7 @@ export default function Page() {
               Pro Tool
             </div>
             <h1 className="font-display text-4xl font-extrabold tracking-tight sm:text-5xl text-foreground text-balance">
-              Clean up a <span className="text-gradient">watermark on your own image</span>
+              Clean up <span className="text-gradient">your own images</span>
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
               Mark the badge or logo once and WipeClip.co reconstructs the pixels beneath it,

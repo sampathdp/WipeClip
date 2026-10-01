@@ -81,7 +81,7 @@ export default function Page() {
               How <span className="text-gradient">AI video inpainting</span> works
             </>
           }
-          intro="No jargon required: here's what actually happens between marking a watermark and getting a clean clip back."
+          intro="No jargon required: here's what actually happens between marking an overlay and getting a clean clip back."
         />
 
         <section className="py-8">
@@ -168,7 +168,7 @@ export default function Page() {
                 product limitations
               </Link>{" "}
               for how this applies in practice, and{" "}
-              <Link href="/research/video-watermark-removal-test" className="underline hover:text-foreground text-cyan-600">
+              <Link href="/research/video-cleanup-test" className="underline hover:text-foreground text-cyan-600">
                 WipeClip Research
               </Link>{" "}
               for real test results as they&apos;re published.
@@ -179,7 +179,7 @@ export default function Page() {
         <section className="py-8">
           <div className="mx-auto max-w-3xl px-6">
             <p className="text-xs text-muted leading-relaxed">
-              This explains the general approach behind reconstruction-based watermark removal. It
+              This explains the general approach behind reconstruction-based overlay removal. It
               describes the concepts involved, not the internals of any specific implementation.
             </p>
           </div>
@@ -193,13 +193,13 @@ export default function Page() {
               desc: "How this approach compares to methods that don't reconstruct pixels at all.",
             },
             {
-              href: "/guides/does-watermark-removal-reduce-video-quality",
-              label: "Does Removing a Watermark Reduce Video Quality?",
+              href: "/guides/does-ai-cleanup-reduce-video-quality",
+              label: "Does AI Cleanup Reduce Video Quality?",
               desc: "Why the reconstructed region is an estimate, and what else affects quality.",
             },
             {
-              href: "/research/video-watermark-removal-test",
-              label: "WipeClip Research: Watermark Removal Test",
+              href: "/research/video-cleanup-test",
+              label: "WipeClip Research: AI Video Cleanup Test",
               desc: "Real before/after tests across static, moving, and difficult overlay cases.",
             },
           ]}

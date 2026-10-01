@@ -14,10 +14,10 @@ import RelatedGuides from "@/components/guides/RelatedGuides";
 import { buildPageMetadata, SITE_URL } from "@/lib/seo";
 import { RESEARCH_TESTS, TEST_CATEGORIES } from "@/lib/researchData";
 
-const title = "We Tested AI Watermark Removal on Real Videos";
+const title = "We Tested AI Video Cleanup on Real Videos";
 const description =
-  "WipeClip's ongoing test of its own AI watermark removal: static and moving overlays, semi-transparent marks, complex backgrounds, and fast motion. Real before/after data, published once verified.";
-const path = "/research/video-watermark-removal-test";
+  "WipeClip's ongoing test of its own AI video cleanup: static and moving overlays, semi-transparent marks, complex backgrounds, and fast motion. Real before/after data, published once verified.";
+const path = "/research/video-cleanup-test";
 
 export const metadata: Metadata = buildPageMetadata({
   title,
@@ -44,7 +44,7 @@ const jsonLd = {
   image: `${SITE_URL}/opengraph-image`,
 };
 
-export default function VideoWatermarkRemovalTestPage() {
+export default function VideoCleanupTestPage() {
   return (
     <div className="flex flex-1 flex-col">
       <script
@@ -56,14 +56,14 @@ export default function VideoWatermarkRemovalTestPage() {
         items={[
           { label: "Home", href: "/" },
           { label: "Research", href: "/research" },
-          { label: "Video Watermark Removal Test" },
+          { label: "AI Video Cleanup Test" },
         ]}
       />
       <main className="flex-1">
         <ResearchHero
           eyebrow="WipeClip Research"
           h1={title}
-          intro="An ongoing, in-house test of WipeClip's own AI watermark removal across six real-world overlay scenarios, published with real before/after clips as each one is verified."
+          intro="An ongoing, in-house test of WipeClip's own AI video cleanup across six real-world overlay scenarios, published with real before/after clips as each one is verified."
         />
 
         <section className="py-8">
@@ -241,8 +241,8 @@ export default function VideoWatermarkRemovalTestPage() {
               desc: "How reconstruction compares to methods that don't touch pixels at all.",
             },
             {
-              href: "/guides/does-watermark-removal-reduce-video-quality",
-              label: "Does Removing a Watermark Reduce Video Quality?",
+              href: "/guides/does-ai-cleanup-reduce-video-quality",
+              label: "Does AI Cleanup Reduce Video Quality?",
               desc: "Where the resolution/framerate numbers from this page fit into the bigger quality picture.",
             },
             {

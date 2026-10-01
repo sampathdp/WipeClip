@@ -34,11 +34,20 @@ const RETIRED_PLATFORM_PAGES = [
 
 const nextConfig: NextConfig = {
   async redirects() {
-    return RETIRED_PLATFORM_PAGES.map((p) => ({
-      source: `/remove-${p}-watermark`,
-      destination: "/",
-      permanent: true,
-    }));
+    return [
+      ...RETIRED_PLATFORM_PAGES.map((p) => ({
+        source: `/remove-${p}-watermark`,
+        destination: "/",
+        permanent: true,
+      })),
+      { source: "/remove-image-watermark", destination: "/image-cleanup", permanent: true },
+      {
+        source: "/guides/does-watermark-removal-reduce-video-quality",
+        destination: "/guides/does-ai-cleanup-reduce-video-quality",
+        permanent: true,
+      },
+      { source: "/research/video-watermark-removal-test", destination: "/research/video-cleanup-test", permanent: true },
+    ];
   },
   async headers() {
     return [
