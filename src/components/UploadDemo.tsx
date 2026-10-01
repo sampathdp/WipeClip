@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { handOffToEditor } from "@/lib/editor/handoff";
 import RegionSelector from "./RegionSelector";
 import VideoCompareSlider from "./VideoCompareSlider";
 import SignInModal from "./SignInModal";
@@ -37,6 +39,36 @@ const RESOLUTION_OPTIONS: { key: Resolution; label: string; minHeight: number; c
   { key: "4k", label: "4K Ultra", minHeight: 2160, credits: 4 },
 ];
 
+// Editing tools offered alongside cleanup; each opens /editor (with the
+// current file, when one is already loaded here).
+const EDITOR_TOOLS: { label: string; icon: React.ReactNode }[] = [
+  { label: "Trim", icon: <path d="M6 3v12a3 3 0 0 0 3 3h12M18 21V9a3 3 0 0 0-3-3H3" /> },
+  {
+    label: "Split & cut",
+    icon: (
+      <>
+        <circle cx="6" cy="6" r="3" />
+        <circle cx="6" cy="18" r="3" />
+        <path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12" />
+      </>
+    ),
+  },
+  { label: "Reorder", icon: <path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3" /> },
+  {
+    label: "Transitions",
+    icon: (
+      <>
+        <rect x="2" y="6" width="9" height="12" rx="2" />
+        <rect x="13" y="6" width="9" height="12" rx="2" />
+      </>
+    ),
+  },
+  {
+    label: "Stickers",
+    icon: <path d="M15.5 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h7l8-8V6a3 3 0 0 0-3-3zM13 21v-5a3 3 0 0 1 3-3h5" />,
+  },
+];
+
 function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -44,6 +76,7 @@ function formatBytes(bytes: number) {
 
 export default function UploadDemo() {
   useToolView(TOOL);
+  const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -229,6 +262,11 @@ export default function UploadDemo() {
     pickFile(next);
   }, [queue, pickFile]);
 
+  const openEditor = useCallback(() => {
+    if (file) handOffToEditor(file);
+    router.push("/editor");
+  }, [file, router]);
+
   const process = useCallback(async () => {
     if (!file || !region) return;
     setStep("processing");
@@ -302,6 +340,47 @@ export default function UploadDemo() {
     }
   }, [file, region, mode, resolution, logo, isSignedIn]);
 
+  const editorTools = (heading: string) => (
+    <div className="mt-6 rounded-2xl border border-border bg-surface-2/50 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-foreground">{heading}</p>
+        <button
+          type="button"
+          onClick={openEditor}
+          className="text-xs font-semibold text-cyan-600 underline-offset-2 hover:underline"
+        >
+          {file ? "Open this video in the Editor →" : "Open the Editor →"}
+        </button>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {EDITOR_TOOLS.map((tool) => (
+          <button
+            key={tool.label}
+            type="button"
+            onClick={openEditor}
+            title={`${tool.label} in the Editor`}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-semibold text-foreground transition hover:border-cyan-500/50 hover:text-cyan-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              {tool.icon}
+            </svg>
+            {tool.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div
       ref={panelRef}
@@ -369,6 +448,7 @@ export default function UploadDemo() {
             MP4, MOV, WebM &bull; Up to 300MB{isPro ? " each &bull; batch upload enabled" : ""}
           </p>
           </button>
+          {editorTools("Or edit your video")}
         </>
       )}
 
@@ -468,6 +548,7 @@ export default function UploadDemo() {
 
           {step === "select" && previewUrl && videoInfo && (
             <div className="mt-5">
+              <div className="mb-5">{editorTools("Want to trim or edit this video instead?")}</div>
               <RegionSelector
                 previewUrl={previewUrl}
                 naturalWidth={videoInfo.width}

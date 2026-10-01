@@ -81,6 +81,13 @@ export async function proxy(request: NextRequest) {
   return response;
 }
 
+// /api/process and /api/export are excluded: they carry video uploads (up
+// to 300MB+), and running proxy on a request makes Next.js buffer its whole
+// body in memory, capped at 10MB (experimental.proxyClientMaxBodySize) -
+// anything bigger arrived truncated and failed to parse as FormData.
+// Neither route needs proxy: the under-construction gate already exempts
+// /api/*, and their own Supabase server client refreshes the session
+// cookie (route handlers can set cookies, unlike Server Components).
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|opengraph-image).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|opengraph-image|api/process$|api/export$).*)"],
 };

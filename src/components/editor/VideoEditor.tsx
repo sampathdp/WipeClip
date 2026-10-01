@@ -9,6 +9,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import { trackEvent, useToolView } from "@/lib/analytics";
 import { createClient } from "@/lib/supabase/client";
 import { createClock, useClockTime, type Clock } from "@/lib/editor/clock";
+import { takeHandedOffFile } from "@/lib/editor/handoff";
 import { useProjectHistory } from "@/lib/editor/history";
 import { generateThumbnails, loadVideoMeta, type ThumbnailStrip } from "@/lib/editor/media";
 import {
@@ -247,6 +248,16 @@ export default function VideoEditor() {
     },
     [startProject]
   );
+
+  // A file handed over from the homepage tool ("Edit this video") opens
+  // straight into a new project once recovery has been checked.
+  const handOffChecked = useRef(false);
+  useEffect(() => {
+    if (phase !== "import" || handOffChecked.current) return;
+    handOffChecked.current = true;
+    const file = takeHandedOffFile();
+    if (file) queueMicrotask(() => void importFile(file));
+  }, [phase, importFile]);
 
   const resumeProject = useCallback(() => {
     if (!resume) return;
