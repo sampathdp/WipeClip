@@ -1,3 +1,4 @@
+import Link from "next/link";
 import BeforeAfterDemo from "./BeforeAfterDemo";
 
 const MARQUEE_ITEMS = [
@@ -8,6 +9,8 @@ const MARQUEE_ITEMS = [
   "NO CROP",
   "NO BLUR BOX",
   "MOTION-AWARE INPAINTING",
+  "TRIM · CUT · TRANSITIONS",
+  "STICKERS",
   "YOUR FOOTAGE, YOUR RIGHTS",
   "~15s AVG RENDER",
 ];
@@ -75,6 +78,12 @@ export default function Hero() {
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>
               </a>
+              <Link
+                href="/editor"
+                className="btn-secondary rounded-full px-7 py-4 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2"
+              >
+                Open the video editor
+              </Link>
             </div>
 
             {/* Trust Highlights */}

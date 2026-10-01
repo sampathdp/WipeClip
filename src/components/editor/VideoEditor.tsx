@@ -67,7 +67,10 @@ const RATES = [0.5, 1, 1.5, 2];
 
 type Dialogs = { kind: "cleanup"; clipId: string; frameTime: number } | { kind: "export" } | null;
 
-export default function VideoEditor() {
+/** `children` is shown under the upload card until a video is loaded -
+ * /editor passes its server-rendered landing content (EditorLanding) here.
+ */
+export default function VideoEditor({ children }: { children?: React.ReactNode }) {
   useToolView(TOOL);
   const clock = useMemo(() => createClock(), []);
   const { project, canUndo, canRedo, apply, beginGesture, endGesture, undo, redo, reset } = useProjectHistory(EMPTY);
@@ -526,7 +529,7 @@ export default function VideoEditor() {
         <main className="flex flex-1 items-center justify-center p-4 sm:p-8">
           <div className="glass-card w-full max-w-2xl rounded-[2rem] p-6 sm:p-10">
             <h1 className="font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-              <span className="text-gradient">Video Editor</span>
+              Online <span className="text-gradient">Video Editor</span>
             </h1>
             <p className="mt-2 text-sm text-muted sm:text-base">
               Trim, cut, rearrange, add transitions and stickers, and clean up overlays with AI. Your original file is never changed.
@@ -628,6 +631,7 @@ export default function VideoEditor() {
             </p>
           </div>
         </main>
+        {children}
       </div>
     );
   }

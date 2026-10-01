@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     template: "%s | WipeClip.co",
   },
   description:
-    "WipeClip is an AI video cleanup tool for creators. Mark a logo, badge, caption, or timestamp on one frame and it reconstructs the pixels underneath across the whole clip — no cropping, no blur box. For footage you own or have the rights to edit.",
+    "WipeClip is an AI video cleanup tool for creators. Mark a logo, badge, caption, or timestamp on one frame and it reconstructs the pixels underneath across the whole clip — no cropping, no blur box. Plus a browser video editor to trim, cut, add transitions and stickers. For footage you own or have the rights to edit.",
   keywords: [
     "AI video cleanup",
     "AI footage restoration",
@@ -38,6 +38,11 @@ export const metadata: Metadata = {
     "video overlay remover",
     "restore original footage",
     "video watermark remover",
+    "online video editor",
+    "trim video online",
+    "cut video online",
+    "add transitions to video",
+    "add stickers to video",
     "wipeclip",
   ],
   authors: [{ name: "WipeClip.co" }],
@@ -125,7 +130,7 @@ const jsonLd = {
       operatingSystem: "Web",
       url: siteUrl,
       description:
-        "AI video cleanup for creators: reconstructs the pixels behind a logo, badge, caption, timestamp or unwanted object across a whole clip, for footage you own or have rights to edit.",
+        "AI video cleanup for creators: reconstructs the pixels behind a logo, badge, caption, timestamp or unwanted object across a whole clip, for footage you own or have rights to edit, plus a browser-based video editor for trimming, cutting, transitions and stickers.",
       offers: {
         "@type": "Offer",
         price: "0",

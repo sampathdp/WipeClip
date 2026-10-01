@@ -11,7 +11,10 @@ export default function Footer() {
             <Logo size={28} textSize="text-sm" />
             <span className="text-xs text-muted">&copy; {new Date().getFullYear()}</span>
           </div>
-          <nav className="flex gap-6 text-sm text-muted">
+          <nav className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted">
+            <Link href="/editor" className="transition-colors hover:text-foreground">
+              Video Editor
+            </Link>
             <Link href="/research" className="transition-colors hover:text-foreground">
               Research
             </Link>

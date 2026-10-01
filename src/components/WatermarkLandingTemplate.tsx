@@ -101,6 +101,25 @@ export default function WatermarkLandingTemplate({
 
         <HowItWorks />
 
+        <section className="pb-4">
+          <div className="mx-auto max-w-3xl px-6">
+            <div className="glass-card flex flex-col gap-4 rounded-[1.75rem] border border-border/80 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
+              <div>
+                <h2 className="font-display text-lg font-bold tracking-tight text-foreground">
+                  Need to trim or re-edit the clip too?
+                </h2>
+                <p className="mt-1.5 text-sm leading-relaxed text-muted">
+                  The WipeClip video editor cuts, rearranges and adds transitions and stickers to your{" "}
+                  {content.platform} footage, with AI cleanup on just the clips that need it.
+                </p>
+              </div>
+              <Link href="/editor" className="btn-secondary shrink-0 rounded-full px-5 py-2.5 text-center text-sm font-semibold">
+                Open the editor
+              </Link>
+            </div>
+          </div>
+        </section>
+
         <section className="py-16">
           <div className="mx-auto max-w-3xl px-6">
             <h2 className="text-center font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">

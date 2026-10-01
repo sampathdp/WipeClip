@@ -2,6 +2,19 @@ import Link from "next/link";
 
 const tools = [
   {
+    href: "/editor",
+    badge: "New",
+    title: "Online Video Editor",
+    desc: "Trim, split and cut out sections, reorder clips, add transitions and stickers, and AI-clean any clip. Right in your browser.",
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="6" cy="6" r="3" />
+        <circle cx="6" cy="18" r="3" />
+        <path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12" />
+      </svg>
+    ),
+  },
+  {
     href: "/remove-background",
     badge: "Free",
     title: "Background Remover",
@@ -69,12 +82,12 @@ export default function FreeTools() {
             More than <span className="text-gradient">video cleanup</span>
           </h2>
           <p className="mt-4 text-muted text-base leading-relaxed">
-            Everything else you need for the same footage and photos, three of them free, no
-            account required to try.
+            Everything else you need for the same footage and photos: a full video editor, plus
+            three free tools with no account required to try.
           </p>
         </div>
 
-        <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {tools.map((t) => (
             <Link
               key={t.href}

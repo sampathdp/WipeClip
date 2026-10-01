@@ -34,6 +34,7 @@ Sections on this page double as sub-anchors other pages link into directly: `#up
    ├─ /remove-background              (Footer, FreeTools)
    ├─ /extract-video-frame            (Footer, FreeTools)
    ├─ /sharpen-image                  (Footer, FreeTools)
+   ├─ /editor                         (Navbar, Hero CTA, EditorPromo #editor, FreeTools, UploadDemo, Faq, Footer)
    ├─ /pricing                        (Navbar)
    ├─ /research                       (Footer)
    ├─ /guides/ai-inpainting-vs-blur-vs-crop            (RemovalMethodComparison section)
@@ -93,6 +94,15 @@ Sections on this page double as sub-anchors other pages link into directly: `#up
 ```
 
 Anchor text used for these is varied and descriptive throughout — e.g. "how it compares to crop, blur, and cover", "why an estimate isn't the same as zero quality loss", "how that reconstruction actually works", "why that distinction matters", "see the research methodology" — never "click here" / "learn more" / "read this" (checked site-wide, zero matches).
+
+---
+
+## Editor (added 2026-10-01)
+
+`/editor` targets a different intent from the homepage ("online video editor", "trim/cut video online", "add transitions/stickers to video") rather than the homepage's cleanup intent, so it's a spoke, not a competing hub. Its indexable copy, FAQPage and WebApplication JSON-LD live in `src/components/editor/EditorLanding.tsx`, shown under the upload card until a video is loaded.
+
+- Inbound: Navbar, homepage Hero secondary CTA, `EditorPromo` section (`/#editor`), `FreeTools` card, `UploadDemo` editing-tools row, homepage FAQ, Footer, and every `/remove-*-watermark` page via `WatermarkLandingTemplate` ("Need to trim or re-edit the clip too?").
+- Outbound: `/#upload`, `/guides/how-ai-video-inpainting-works`, `/terms`, `/privacy`.
 
 ---
 

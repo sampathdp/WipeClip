@@ -2,6 +2,10 @@ import Link from "next/link";
 
 const faqs = [
   {
+    q: "Can I also trim, cut, or edit my video?",
+    a: "Yes. The WipeClip video editor (wipeclip.co/editor) lets you trim, split and remove sections, reorder clips, add transitions and stickers, and run AI cleanup on a single clip, then export at your original aspect ratio and frame rate.",
+  },
+  {
     q: "Can I use this on any video I find online?",
     a: "No. WipeClip.co is for content you own or have explicit permission to edit, such as your own AI-generated video drafts, personal B-roll, or footage with client authorization. You confirm this before every job.",
   },

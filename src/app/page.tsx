@@ -3,6 +3,7 @@ import FreeToolsBanner from "@/components/FreeToolsBanner";
 import Hero from "@/components/Hero";
 import UploadDemo from "@/components/UploadDemo";
 import WhatWipeClipDoes from "@/components/WhatWipeClipDoes";
+import EditorPromo from "@/components/EditorPromo";
 import HowItWorks from "@/components/HowItWorks";
 import StaticVsMovingWatermarks from "@/components/StaticVsMovingWatermarks";
 import RemovalMethodComparison from "@/components/RemovalMethodComparison";
@@ -27,6 +28,7 @@ export default function Home() {
           <UploadDemo />
         </section>
         <WhatWipeClipDoes />
+        <EditorPromo />
         <HowItWorks includeSchema />
         <StaticVsMovingWatermarks />
         <RemovalMethodComparison />
