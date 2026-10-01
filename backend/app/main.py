@@ -72,7 +72,7 @@ from app.config import (
     RESOLUTION_HEIGHTS,
     SHARPEN_AMOUNT_PRESETS,
 )
-from app.pipeline import detect_artifacts, io_utils, moderation
+from app.pipeline import io_utils, moderation
 from app.pipeline import editor as editor_pipeline
 from app.pipeline import video as video_pipeline
 from app.queue import get_queue
