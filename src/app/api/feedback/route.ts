@@ -1,6 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
+import { escapeHtml, sendEmail } from "@/lib/email";
+
+const KIND_LABEL = { bug: "Bug report", feature: "Feature request", feedback: "Feedback" } as const;
 
 const KINDS = ["bug", "feature", "feedback"] as const;
 type Kind = (typeof KINDS)[number];
@@ -61,17 +64,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "That email address doesn't look right." }, { status: 400 });
   }
 
+  const contactEmail = user?.email ?? (rawEmail || null);
+  const userAgent = request.headers.get("user-agent")?.slice(0, 500) ?? null;
+
   const admin = createServiceClient();
   const { data, error } = await admin
     .from("feedback")
     .insert({
       user_id: user?.id ?? null,
-      email: user?.email ?? (rawEmail || null),
+      email: contactEmail,
       kind,
       subject,
       message,
       page_url: pageUrl,
-      user_agent: request.headers.get("user-agent")?.slice(0, 500) ?? null,
+      user_agent: userAgent,
     })
     .select("id, kind, subject, message, status, admin_reply, created_at")
     .single();
@@ -80,5 +86,70 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Couldn't save your feedback. Please try again." }, { status: 500 });
   }
 
+  // Notify the team after responding, so a slow or failing email provider
+  // never delays or fails the user's submission - the row is already saved.
+  const notifyTo = process.env.FEEDBACK_NOTIFY_EMAIL;
+  if (notifyTo) {
+    after(() => notifyTeam(notifyTo, { id: data.id, kind, subject, message, contactEmail, signedIn: Boolean(user), pageUrl, userAgent }));
+  }
+
   return NextResponse.json({ ok: true, item: data });
+}
+
+async function notifyTeam(
+  to: string,
+  f: {
+    id: number;
+    kind: Kind;
+    subject: string;
+    message: string;
+    contactEmail: string | null;
+    signedIn: boolean;
+    pageUrl: string | null;
+    userAgent: string | null;
+  }
+) {
+  const from = f.contactEmail ? `${f.contactEmail}${f.signedIn ? " (signed in)" : ""}` : "Anonymous visitor";
+  const rows: [string, string][] = [
+    ["Type", KIND_LABEL[f.kind]],
+    ["From", from],
+    ["Page", f.pageUrl ?? "-"],
+    ["Browser", f.userAgent ?? "-"],
+    ["Feedback ID", `#${f.id}`],
+  ];
+
+  const text = [
+    ...rows.map(([k, v]) => `${k}: ${v}`),
+    "",
+    f.subject,
+    "",
+    f.message,
+    "",
+    f.contactEmail ? "Reply to this email to answer them directly." : "No contact email was left.",
+  ].join("\n");
+
+  const html = `
+    <div style="font-family:system-ui,sans-serif;font-size:14px;color:#0f172a;max-width:600px">
+      <h2 style="margin:0 0 4px">${escapeHtml(f.subject)}</h2>
+      <table style="border-collapse:collapse;margin:12px 0;font-size:13px">
+        ${rows
+          .map(
+            ([k, v]) =>
+              `<tr><td style="padding:2px 12px 2px 0;color:#64748b">${k}</td><td>${escapeHtml(v)}</td></tr>`
+          )
+          .join("")}
+      </table>
+      <div style="white-space:pre-wrap;border-left:3px solid #22d3ee;padding:8px 12px;background:#f8fafc">${escapeHtml(f.message)}</div>
+      <p style="color:#64748b;font-size:12px;margin-top:16px">
+        ${f.contactEmail ? "Reply to this email to answer them directly." : "No contact email was left."}
+      </p>
+    </div>`;
+
+  await sendEmail({
+    to,
+    subject: `[WipeClip ${KIND_LABEL[f.kind]}] ${f.subject}`,
+    text,
+    html,
+    replyTo: f.contactEmail ?? undefined,
+  });
 }

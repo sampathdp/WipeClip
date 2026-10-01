@@ -335,9 +335,11 @@ alter table credit_transactions enable row level security;
 alter table payment_orders enable row level security;
 alter table feedback enable row level security;
 
+drop policy if exists "read own profile" on profiles;
 create policy "read own profile" on profiles
   for select using (auth.uid() = id);
 
+drop policy if exists "read own transactions" on credit_transactions;
 create policy "read own transactions" on credit_transactions
   for select using (auth.uid() = user_id);
 
