@@ -6,7 +6,7 @@
  * re-saved as the user edits. Best-effort throughout: private browsing or a
  * full quota just means no recovery, never a broken editor.
  */
-import type { MediaSource, Project } from "./types";
+import { migrateProject, type MediaSource, type Project } from "./types";
 
 const DB_NAME = "wipeclip-editor";
 const PROJECT_STORE = "project";
@@ -100,7 +100,7 @@ export async function loadProject(): Promise<RestoredProject | null> {
         const file = new File([blob], name, { type });
         sources.push({ ...rest, file, url: URL.createObjectURL(file) });
       }
-      return { project: record.project, sources, savedAt: record.savedAt };
+      return { project: migrateProject(record.project), sources, savedAt: record.savedAt };
     });
   } catch {
     return null;

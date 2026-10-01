@@ -6,7 +6,7 @@ import { RESOLUTION_CREDIT_COST } from "@/lib/credits";
 import { trackEvent } from "@/lib/analytics";
 import { exportProject } from "@/lib/editor/exportProject";
 import { saveLastExport } from "@/lib/editor/projectStore";
-import { formatTime } from "@/lib/editor/timeline";
+import { canvasSize, formatTime } from "@/lib/editor/timeline";
 import type { MediaSource, Project } from "@/lib/editor/types";
 import { ContentBlockedError, InsufficientCreditsError, type Resolution } from "@/lib/toolsApi";
 import Dialog from "./Dialog";
@@ -47,7 +47,9 @@ export default function ExportDialog({
   onSignIn: () => void;
 }) {
   const original = sources[originalId];
-  const shortSide = Math.min(original.width, original.height);
+  // Output follows the canvas (its aspect at the original's short side).
+  const canvas = canvasSize(project.canvas.aspect, original.width, original.height);
+  const shortSide = Math.min(canvas.width, canvas.height);
   // A tier is only offered if it actually yields more pixels than the one below.
   const available = TIERS.filter((t, i) => i === 0 || shortSide > TIERS[i - 1].short);
   const [resolution, setResolution] = useState<Resolution>(isSignedIn ? available[available.length - 1].key : "720p");
@@ -127,15 +129,15 @@ export default function ExportDialog({
               <p className="font-semibold text-foreground">{project.clips.length}</p>
             </div>
             <div>
-              <p className="text-muted">Stickers</p>
-              <p className="font-semibold text-foreground">{project.stickers.length}</p>
+              <p className="text-muted">Layers</p>
+              <p className="font-semibold text-foreground">{project.overlays.length + project.audio.length + project.effects.length}</p>
             </div>
           </div>
           <div>
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Resolution</p>
             <div className="grid gap-2" role="radiogroup" aria-label="Export resolution">
               {available.map((t) => {
-                const size = outputSize(original.width, original.height, t.short);
+                const size = outputSize(canvas.width, canvas.height, t.short);
                 const locked = !isSignedIn && t.key !== "720p";
                 const cost = RESOLUTION_CREDIT_COST[t.key];
                 return (
@@ -164,7 +166,7 @@ export default function ExportDialog({
               })}
             </div>
             <p className="mt-2 text-xs text-muted">
-              Frame rate and aspect ratio match your original ({original.width}×{original.height}). Videos are never upscaled.
+              Frame rate matches your original; the aspect ratio follows your canvas. Videos are never upscaled.
             </p>
             {!isSignedIn && (
               <p className="mt-2 text-xs text-muted">

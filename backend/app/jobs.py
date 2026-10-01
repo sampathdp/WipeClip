@@ -50,13 +50,15 @@ def editor_export_job(plan_json: str, out_path: str) -> None:
     """
     raw = json.loads(plan_json)
     plan = editor_pipeline.ExportPlan(
-        width=raw["width"],
-        height=raw["height"],
-        fps=raw["fps"],
-        with_audio=raw["with_audio"],
+        **{k: raw[k] for k in ("width", "height", "fps", "with_audio", "fit", "background", "color", "color2", "background_image")},
         clips=[editor_pipeline.PlanClip(**c) for c in raw["clips"]],
-        stickers=[editor_pipeline.PlanSticker(**s) for s in raw["stickers"]],
+        overlays=[editor_pipeline.PlanOverlay(**o) for o in raw["overlays"]],
+        audio=[editor_pipeline.PlanAudio(**a) for a in raw["audio"]],
+        effects=[editor_pipeline.PlanEffect(**e) for e in raw["effects"]],
     )
+    # main.py already quantized durations (speed + frame snapping) before
+    # serializing; don't apply it twice.
+    plan._quantized = True  # type: ignore[attr-defined]
     asyncio.run(editor_pipeline.render_export(plan, out_path))
 
 

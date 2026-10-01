@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { STICKER_CATEGORIES, STICKERS, getStickerDef, stickerThumbSrc, type StickerCategory } from "@/lib/editor/stickers";
+import { STICKER_CATEGORIES, STICKERS, stickerThumbSrc, type StickerCategory } from "@/lib/editor/stickers";
 import {
   MIN_CLIP_SECONDS,
   TRANSITION_DURATIONS,
@@ -9,7 +9,7 @@ import {
   formatTime,
   type LaidOutClip,
 } from "@/lib/editor/timeline";
-import type { Clip, MediaSource, Sticker, StickerAnimIn, StickerAnimOut, TransitionType } from "@/lib/editor/types";
+import type { Clip, MediaSource, TransitionType } from "@/lib/editor/types";
 import { ChevronLeftIcon, ChevronRightIcon, SparkleIcon, SplitIcon, TrashIcon } from "./icons";
 
 export function PanelShell({ title, onClose, children }: { title: string; onClose?: () => void; children: ReactNode }) {
@@ -32,7 +32,7 @@ export function PanelShell({ title, onClose, children }: { title: string; onClos
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
       <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</span>
@@ -44,7 +44,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 /** Seconds field that commits on blur/Enter, so typing "1" on the way to
  * "12.5" doesn't apply (and record in undo) every keystroke.
  */
-function SecondsInput({ value, min, max, onCommit }: { value: number; min: number; max: number; onCommit: (v: number) => void }) {
+export function SecondsInput({ value, min, max, onCommit }: { value: number; min: number; max: number; onCommit: (v: number) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
   const commit = () => {
     if (draft === null) return;
@@ -110,6 +110,7 @@ export function ClipPanel({
   onMove,
   onAiCleanup,
   onClose,
+  extra,
 }: {
   laid: LaidOutClip;
   count: number;
@@ -122,6 +123,8 @@ export function ClipPanel({
   onMove: (dir: -1 | 1) => void;
   onAiCleanup: () => void;
   onClose: () => void;
+  /** Speed, volume, transform and look sections (see Panels.tsx). */
+  extra?: ReactNode;
 }) {
   const { clip, index } = laid;
   const canTrimHere = playheadSourceTime !== null;
@@ -181,6 +184,8 @@ export function ClipPanel({
             Move later <ChevronRightIcon width={14} height={14} />
           </ActionButton>
         </div>
+
+        {extra}
 
         <div className="rounded-xl border border-accent/25 bg-accent/5 p-3">
           <p className="text-xs font-semibold text-foreground">AI Cleanup</p>
@@ -297,115 +302,11 @@ function TransitionSwatch({ type }: { type: TransitionType | null }) {
   }
 }
 
-const ANIM_IN: { key: StickerAnimIn; label: string }[] = [
-  { key: "none", label: "None" },
-  { key: "fade", label: "Fade in" },
-  { key: "pop", label: "Pop" },
-  { key: "slide", label: "Slide in" },
-];
-const ANIM_OUT: { key: StickerAnimOut; label: string }[] = [
-  { key: "none", label: "None" },
-  { key: "fade", label: "Fade out" },
-  { key: "slide", label: "Slide out" },
-];
-
-export function StickerPanel({
-  sticker,
-  total,
-  onChange,
-  onDelete,
-  onClose,
-  onGestureStart,
-  onGestureEnd,
-}: {
-  sticker: Sticker;
-  total: number;
-  onChange: (patch: Partial<Sticker>) => void;
-  onDelete: () => void;
-  onClose: () => void;
-  onGestureStart: () => void;
-  onGestureEnd: () => void;
-}) {
-  // A slider drag is one undo step, like dragging the sticker itself.
-  const gestureProps = {
-    onPointerDown: onGestureStart,
-    onPointerUp: onGestureEnd,
-    onPointerCancel: onGestureEnd,
-    onLostPointerCapture: onGestureEnd,
-  };
-  const def = getStickerDef(sticker.stickerId);
-  const select =
-    "w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-2/40";
-  return (
-    <PanelShell title={`Sticker · ${def?.label ?? "Sticker"}`} onClose={onClose}>
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Appears at">
-            <SecondsInput value={sticker.start} min={0} max={sticker.end - 0.2} onCommit={(start) => onChange({ start })} />
-          </Field>
-          <Field label="Disappears at">
-            <SecondsInput value={sticker.end} min={sticker.start + 0.2} max={Math.max(total, sticker.start + 0.2)} onCommit={(end) => onChange({ end })} />
-          </Field>
-        </div>
-        <Field label={`Size · ${Math.round(sticker.width * 100)}% of width`}>
-          <input
-            type="range"
-            min={3}
-            max={100}
-            value={Math.round(sticker.width * 100)}
-            onChange={(e) => onChange({ width: Number(e.target.value) / 100 })}
-            className="w-full accent-[var(--accent)]"
-            {...gestureProps}
-          />
-        </Field>
-        <Field label={`Rotation · ${Math.round(sticker.rotation)}°`}>
-          <input
-            type="range"
-            min={-180}
-            max={180}
-            value={Math.round(sticker.rotation)}
-            onChange={(e) => onChange({ rotation: Number(e.target.value) })}
-            className="w-full accent-[var(--accent)]"
-            {...gestureProps}
-          />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Entrance">
-            <select className={select} value={sticker.animIn} onChange={(e) => onChange({ animIn: e.target.value as StickerAnimIn })}>
-              {ANIM_IN.map((a) => (
-                <option key={a.key} value={a.key}>
-                  {a.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Exit">
-            <select className={select} value={sticker.animOut} onChange={(e) => onChange({ animOut: e.target.value as StickerAnimOut })}>
-              {ANIM_OUT.map((a) => (
-                <option key={a.key} value={a.key}>
-                  {a.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
-        <div className="flex gap-2">
-          <ActionButton onClick={() => onChange({ x: 0.5, y: 0.5, rotation: 0 })}>Center &amp; straighten</ActionButton>
-          <ActionButton onClick={onDelete} tone="danger">
-            <TrashIcon width={14} height={14} /> Delete
-          </ActionButton>
-        </div>
-        <p className="text-[11px] text-muted">Drag the sticker on the video to move it; use the round handles to resize and rotate.</p>
-      </div>
-    </PanelShell>
-  );
-}
-
-export function StickerLibrary({ onAdd, onClose }: { onAdd: (stickerId: string) => void; onClose: () => void }) {
+export function StickerLibrary({ onAdd }: { onAdd: (stickerId: string) => void }) {
   const [category, setCategory] = useState<StickerCategory>("emoji");
   const items = STICKERS.filter((s) => s.category === category);
   return (
-    <PanelShell title="Stickers" onClose={onClose}>
+    <div>
       <div className="-mx-1 mb-3 flex gap-1 overflow-x-auto pb-1" role="tablist" aria-label="Sticker categories">
         {STICKER_CATEGORIES.map((c) => (
           <button
@@ -445,6 +346,6 @@ export function StickerLibrary({ onAdd, onClose }: { onAdd: (stickerId: string) 
         })}
       </div>
       <p className="mt-4 text-[11px] text-muted">Stickers are added at the playhead for 3 seconds. Adjust timing on the sticker track.</p>
-    </PanelShell>
+    </div>
   );
 }

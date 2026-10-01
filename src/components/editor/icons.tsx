@@ -131,3 +131,52 @@ export const UploadIcon = (p: P) => (
     <path d="M12 16V4m0 0L7 9m5-5 5 5M5 20h14" />
   </svg>
 );
+export const TextIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M4 7V5h16v2M9 19h6M12 5v14" />
+  </svg>
+);
+export const MusicIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M9 18V5l12-2v13" />
+    <circle cx="6" cy="18" r="3" />
+    <circle cx="18" cy="16" r="3" />
+  </svg>
+);
+export const FilterIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <circle cx="9" cy="9" r="6" />
+    <circle cx="15" cy="15" r="6" />
+  </svg>
+);
+export const AdjustIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" />
+    <circle cx="16" cy="6" r="2" />
+    <circle cx="10" cy="12" r="2" />
+    <circle cx="18" cy="18" r="2" />
+  </svg>
+);
+export const EffectIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5zM5 17l.8 2.2L8 20l-2.2.8L5 23l-.8-2.2L2 20l2.2-.8zM19 13l.8 2.2L22 16l-2.2.8L19 19l-.8-2.2L16 16l2.2-.8z" />
+  </svg>
+);
+export const CanvasIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <rect x="8" y="2" width="8" height="20" rx="1.5" />
+  </svg>
+);
+export const LayersIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="m12 2 10 5-10 5L2 7zM2 12l10 5 10-5M2 17l10 5 10-5" />
+  </svg>
+);
+export const ElementsIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="3" width="8" height="8" rx="2" />
+    <circle cx="17" cy="7" r="4" />
+    <path d="M7 21l4-7 4 7zM14 14h7v7h-7z" />
+  </svg>
+);

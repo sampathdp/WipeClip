@@ -1,0 +1,64 @@
+import { useEffect, useState } from "react";
+import { rasterizeSticker, type RasterSticker } from "./stickers";
+import { rasterizeText, textKey } from "./textRaster";
+import type { MediaSource, Overlay } from "./types";
+
+/** Every overlay is drawn from one PNG: a rasterized sticker, rasterized
+ * text, or a normalized uploaded image. The key identifies that PNG, so
+ * identical layers share it in the preview and are uploaded once on export.
+ */
+export function rasterKey(o: Overlay): string {
+  if (o.kind === "sticker") return `s:${o.stickerId}`;
+  if (o.kind === "image") return `i:${o.sourceId}`;
+  return `t:${textKey(o.text)}`;
+}
+
+export function loadRaster(o: Overlay, sources: Record<string, MediaSource>): Promise<RasterSticker> {
+  if (o.kind === "sticker") return rasterizeSticker(o.stickerId);
+  if (o.kind === "text") return rasterizeText(o.text);
+  const src = sources[o.sourceId];
+  if (!src) return Promise.reject(new Error("Missing image"));
+  return Promise.resolve({ blob: src.file, url: src.url, width: src.width, height: src.height });
+}
+
+/** Rasters for the given overlays, filled in as they become ready. Text is
+ * debounced slightly so typing doesn't render a PNG per keystroke. */
+export function useOverlayRasters(
+  overlays: Overlay[],
+  sources: Record<string, MediaSource>,
+  onError: (message: string) => void
+): { byKey: Record<string, RasterSticker>; byId: Record<string, RasterSticker> } {
+  const [rasters, setRasters] = useState<Record<string, RasterSticker>>({});
+  // Last raster each layer finished with - shown while an edited text
+  // layer re-renders, so it doesn't flicker out.
+  const [byId, setById] = useState<Record<string, RasterSticker>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      for (const o of overlays) {
+        const key = rasterKey(o);
+        const ready = rasters[key];
+        if (ready) {
+          if (byId[o.id] !== ready) setById((m) => ({ ...m, [o.id]: ready }));
+          continue;
+        }
+        loadRaster(o, sources)
+          .then((r) => {
+            if (cancelled) return;
+            setRasters((m) => (m[key] ? m : { ...m, [key]: r }));
+            setById((m) => ({ ...m, [o.id]: r }));
+          })
+          .catch(() => {
+            if (!cancelled) onError(o.kind === "text" ? "Text couldn't be rendered." : "A layer couldn't be loaded.");
+          });
+      }
+    }, 60);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [overlays, sources, rasters, byId, onError]);
+
+  return { byKey: rasters, byId };
+}

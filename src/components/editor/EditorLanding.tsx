@@ -25,8 +25,20 @@ const features = [
     desc: "Fade, crossfade, dip to black or white, slide, zoom and blur, from 0.2 to 2 seconds. They're rendered into the exported video, not just shown in the preview.",
   },
   {
-    title: "Stickers",
-    desc: "Emoji, reactions, arrows, shapes, social buttons and labels. Drag, resize and rotate them on the video, set when they appear, and add a fade, pop or slide.",
+    title: "Text, stickers and images",
+    desc: "Titles, captions and lower thirds with your own fonts, colors, outline and background, plus stickers and your own images. Drag, resize, rotate, layer and animate them.",
+  },
+  {
+    title: "Music and audio",
+    desc: "Add music or voice-over tracks, extract a clip's audio, then trim, move, fade and set the volume of each. Everything is mixed into the export without clipping.",
+  },
+  {
+    title: "Filters, adjustments and effects",
+    desc: "Cinematic, vintage, black & white and more, plus brightness, contrast, temperature and other sliders, and timed effects like VHS, glitch, shake and zoom.",
+  },
+  {
+    title: "Any aspect ratio",
+    desc: "Turn one video into 16:9, 9:16 for Shorts, TikTok and Reels, 1:1 or 4:5, with fit or fill and a color, gradient, blurred or image background.",
   },
   {
     title: "AI Cleanup on any clip",
@@ -79,14 +91,18 @@ const jsonLd = {
       operatingSystem: "Web",
       browserRequirements: "Requires a modern browser with HTML5 video support",
       description:
-        "Browser-based video editor: trim, split and cut out sections, reorder clips, add transitions and stickers, and remove overlays from a clip with AI cleanup.",
+        "Browser-based video editor: trim, split and reorder clips, add text, music, filters, effects, transitions, stickers and images, resize for any platform, and remove overlays from a clip with AI cleanup.",
       featureList: [
         "Trim video",
         "Split and cut video",
         "Remove sections from the middle of a video",
         "Reorder clips",
         "Transitions: fade, crossfade, dip to black, dip to white, slide, zoom, blur",
-        "Stickers with position, size, rotation, timing and animation",
+        "Text layers with fonts, colors, outline, background and animations",
+        "Stickers and image overlays with position, size, rotation, opacity, timing and layer order",
+        "Music and audio tracks with volume, fades and audio extraction",
+        "Filters, color adjustments and timed effects",
+        "Canvas presets for YouTube, Shorts, TikTok, Reels and Instagram",
         "AI cleanup of logos, captions and overlays on a selected clip",
         "Export MP4 at the original aspect ratio and frame rate",
       ],

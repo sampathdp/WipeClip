@@ -290,11 +290,14 @@ RESOLUTION_HEIGHTS: dict[str, int] = {"720p": 720, "1080p": 1080, "4k": 2160}
 EDITOR_MAX_TOTAL_UPLOAD_BYTES: int = 2 * MAX_VIDEO_UPLOAD_BYTES
 EDITOR_MAX_SOURCES: int = 16
 EDITOR_MAX_CLIPS: int = 200
-EDITOR_MAX_STICKERS: int = 40
+EDITOR_MAX_STICKERS: int = 60  # overlay layers: stickers + text + images
 EDITOR_MAX_STICKER_BYTES: int = 4 * 1024 * 1024
 EDITOR_MAX_STICKER_DIMENSION: int = 2048
 EDITOR_MAX_TRANSITION_SECONDS: float = 2.0
 EDITOR_MAX_FPS: float = 60.0
+EDITOR_MAX_AUDIO: int = 12  # audio clips (and uploaded audio files) per export
+EDITOR_MAX_AUDIO_BYTES: int = 50 * 1024 * 1024
+EDITOR_MAX_EFFECTS: int = 30
 
 # --- Content moderation (explicit-content screening) -------------------------
 # Local, self-hosted classifier only - flags likely nudity so the API can

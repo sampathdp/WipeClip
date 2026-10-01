@@ -165,7 +165,9 @@ export async function processVideo(
 export async function exportEditorProject(
   project: unknown,
   sources: File[],
-  stickers: Blob[],
+  overlays: Blob[],
+  audios: File[],
+  background: File | null,
   resolution: Resolution,
   signal?: AbortSignal
 ): Promise<Blob> {
@@ -173,7 +175,9 @@ export async function exportEditorProject(
   body.append("project", JSON.stringify(project));
   body.append("resolution", resolution);
   for (const source of sources) body.append("sources", source, source.name);
-  stickers.forEach((sticker, i) => body.append("stickers", sticker, `sticker-${i}.png`));
+  overlays.forEach((image, i) => body.append("overlays", image, `layer-${i}.png`));
+  for (const audio of audios) body.append("audios", audio, audio.name);
+  if (background) body.append("background", background, background.name);
 
   const res = await fetch("/api/export", { method: "POST", body, signal });
   if (!res.ok) {

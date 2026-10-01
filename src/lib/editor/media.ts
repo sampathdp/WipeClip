@@ -121,3 +121,51 @@ export async function generateThumbnails(
     }
   }).catch(() => {});
 }
+
+/** Duration of an audio (or video) file's audio, via an <audio> element.
+ * Rejects with "media_error" when the browser can't decode it. */
+export function loadAudioMeta(url: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const a = document.createElement("audio");
+    a.preload = "metadata";
+    const done = () => {
+      a.removeAttribute("src");
+      a.load();
+    };
+    a.onloadedmetadata = () => {
+      const d = a.duration;
+      done();
+      if (Number.isFinite(d) && d > 0) resolve(d);
+      else reject(new Error("media_error"));
+    };
+    a.onerror = () => {
+      done();
+      reject(new Error("media_error"));
+    };
+    a.src = url;
+  });
+}
+
+const MAX_IMAGE_SIDE = 2048;
+
+/** Decodes an uploaded PNG/JPEG/WebP and re-encodes it as a PNG no larger
+ * than 2048px on its long side - the size the export accepts - so preview
+ * and export use the exact same pixels. */
+export async function normalizeImage(file: File): Promise<{ file: File; width: number; height: number }> {
+  const bitmap = await createImageBitmap(file).catch(() => {
+    throw new Error("media_error");
+  });
+  const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("media_error"))), "image/png")
+  );
+  const name = file.name.replace(/\.[^.]+$/, "") + ".png";
+  return { file: new File([blob], name, { type: "image/png" }), width, height };
+}

@@ -1,0 +1,928 @@
+"use client";
+
+import { useRef, type ReactNode } from "react";
+import { FILTERS, FILTER_ORDER } from "@/lib/editor/look";
+import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
+import { TEXT_FONTS, TEXT_TEMPLATES } from "@/lib/editor/textRaster";
+import {
+  ANIM_IN_LABELS,
+  ANIM_OUT_LABELS,
+  CANVAS_PRESETS,
+  EFFECT_LABELS,
+  SPEEDS,
+  formatTime,
+} from "@/lib/editor/timeline";
+import {
+  NEUTRAL_ADJUST,
+  type Adjustments,
+  type AnimIn,
+  type AnimOut,
+  type AudioClip,
+  type Canvas,
+  type Clip,
+  type EffectClip,
+  type EffectType,
+  type Look,
+  type MediaSource,
+  type Overlay,
+  type TextStyle,
+} from "@/lib/editor/types";
+import GradeFilter from "./GradeFilter";
+import { ActionButton, Field, PanelShell, SecondsInput, StickerLibrary } from "./Inspector";
+import { TrashIcon } from "./icons";
+
+/** Brackets a continuous control (slider drag, color picker) as one undo step. */
+export interface Gesture {
+  onGestureStart: () => void;
+  onGestureEnd: () => void;
+}
+
+const inputCls =
+  "w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-2/40";
+
+function SectionTitle({ children }: { children: ReactNode }) {
+  return <p className="mb-2 mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted">{children}</p>;
+}
+
+export function SliderField({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  neutral,
+  format = (v) => String(Math.round(v)),
+  onChange,
+  gesture,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  neutral?: number;
+  format?: (v: number) => string;
+  onChange: (v: number) => void;
+  gesture: Gesture;
+}) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <span className="font-medium text-foreground">{label}</span>
+        <span className="flex items-center gap-2">
+          <span className="font-mono text-muted">{format(value)}</span>
+          {neutral !== undefined && value !== neutral && (
+            <button
+              type="button"
+              onClick={() => onChange(neutral)}
+              className="rounded px-1 text-[10px] font-semibold text-accent hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+              aria-label={`Reset ${label}`}
+            >
+              Reset
+            </button>
+          )}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-label={label}
+        onChange={(e) => onChange(Number(e.target.value))}
+        onPointerDown={gesture.onGestureStart}
+        onPointerUp={gesture.onGestureEnd}
+        onPointerCancel={gesture.onGestureEnd}
+        className="w-full accent-[var(--accent)]"
+      />
+    </div>
+  );
+}
+
+function ColorField({ label, value, onChange, gesture }: { label: string; value: string; onChange: (v: string) => void; gesture: Gesture }) {
+  return (
+    <label className="flex items-center justify-between gap-2 text-xs font-medium text-foreground">
+      {label}
+      <input
+        type="color"
+        value={value}
+        onFocus={gesture.onGestureStart}
+        onBlur={gesture.onGestureEnd}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 w-12 cursor-pointer rounded border border-border bg-surface"
+      />
+    </label>
+  );
+}
+
+function Chips<T extends string | number>({
+  options,
+  value,
+  onChange,
+  label,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+  label: string;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={label}>
+      {options.map((o) => (
+        <button
+          key={String(o.value)}
+          type="button"
+          role="radio"
+          aria-checked={o.value === value}
+          onClick={() => onChange(o.value)}
+          className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+            o.value === value ? "border-accent-2 bg-accent-2 text-black" : "border-border bg-surface text-foreground hover:border-accent/50"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// --- Clip: speed, volume, transform, look shortcut ------------------------
+
+export function ClipExtras({
+  clip,
+  source,
+  onChange,
+  onExtractAudio,
+  onOpenLook,
+  gesture,
+}: {
+  clip: Clip;
+  source: MediaSource;
+  onChange: (patch: Partial<Clip>) => void;
+  onExtractAudio: () => void;
+  onOpenLook: () => void;
+  gesture: Gesture;
+}) {
+  const t = clip.transform;
+  return (
+    <div className="space-y-4">
+      <div>
+        <SectionTitle>Speed</SectionTitle>
+        <Chips label="Speed" value={clip.speed} onChange={(speed) => onChange({ speed })} options={SPEEDS.map((s) => ({ value: s, label: `${s}×` }))} />
+      </div>
+      <SliderField
+        label="Volume"
+        value={Math.round(clip.volume * 100)}
+        min={0}
+        max={200}
+        neutral={100}
+        format={(v) => `${v}%`}
+        onChange={(v) => onChange({ volume: v / 100 })}
+        gesture={gesture}
+      />
+      {source.hasAudio && (
+        <ActionButton onClick={onExtractAudio} title="Move this clip's sound to its own audio track">
+          Extract audio
+        </ActionButton>
+      )}
+      <div>
+        <SectionTitle>Position &amp; size</SectionTitle>
+        <div className="space-y-3">
+          <SliderField label="X" value={Math.round(t.x * 100)} min={-50} max={150} neutral={50} format={(v) => `${v}%`} onChange={(v) => onChange({ transform: { ...t, x: v / 100 } })} gesture={gesture} />
+          <SliderField label="Y" value={Math.round(t.y * 100)} min={-50} max={150} neutral={50} format={(v) => `${v}%`} onChange={(v) => onChange({ transform: { ...t, y: v / 100 } })} gesture={gesture} />
+          <SliderField label="Scale" value={Math.round(t.scale * 100)} min={10} max={300} neutral={100} format={(v) => `${v}%`} onChange={(v) => onChange({ transform: { ...t, scale: v / 100 } })} gesture={gesture} />
+          <SliderField label="Rotation" value={Math.round(t.rotation)} min={-180} max={180} neutral={0} format={(v) => `${v}°`} onChange={(v) => onChange({ transform: { ...t, rotation: v } })} gesture={gesture} />
+        </div>
+      </div>
+      <ActionButton onClick={onOpenLook}>Filters &amp; adjustments…</ActionButton>
+    </div>
+  );
+}
+
+// --- Look: filters + adjustments --------------------------------------------
+
+const ADJUST_FIELDS: { key: keyof Adjustments; label: string; min: number; max: number; neutral: number }[] = [
+  { key: "brightness", label: "Brightness", min: -100, max: 100, neutral: 0 },
+  { key: "contrast", label: "Contrast", min: -100, max: 100, neutral: 0 },
+  { key: "saturation", label: "Saturation", min: -100, max: 100, neutral: 0 },
+  { key: "exposure", label: "Exposure", min: -100, max: 100, neutral: 0 },
+  { key: "temperature", label: "Temperature", min: -100, max: 100, neutral: 0 },
+  { key: "tint", label: "Tint", min: -100, max: 100, neutral: 0 },
+  { key: "highlights", label: "Highlights", min: -100, max: 100, neutral: 0 },
+  { key: "shadows", label: "Shadows", min: -100, max: 100, neutral: 0 },
+  { key: "sharpness", label: "Sharpness", min: 0, max: 100, neutral: 0 },
+  { key: "blur", label: "Blur", min: 0, max: 100, neutral: 0 },
+  { key: "opacity", label: "Opacity", min: 0, max: 100, neutral: 100 },
+];
+
+export function LookPanel({
+  mode,
+  look,
+  clipLabel,
+  thumb,
+  onChange,
+  onApplyAll,
+  onClose,
+  gesture,
+}: {
+  mode: "filters" | "adjust";
+  look: Look;
+  clipLabel: string;
+  thumb?: string;
+  onChange: (look: Look) => void;
+  onApplyAll: () => void;
+  onClose: () => void;
+  gesture: Gesture;
+}) {
+  return (
+    <PanelShell title={`${mode === "filters" ? "Filters" : "Adjust"} · ${clipLabel}`} onClose={onClose}>
+      {mode === "filters" ? (
+        <>
+          <svg width="0" height="0" className="absolute" aria-hidden>
+            <defs>
+              {FILTER_ORDER.map((f) => (
+                <GradeFilter key={f} id={`swatch-${f}`} look={{ filter: f, intensity: 100, adjust: NEUTRAL_ADJUST }} />
+              ))}
+            </defs>
+          </svg>
+          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Filter">
+            {FILTER_ORDER.map((f) => (
+              <button
+                key={f}
+                type="button"
+                role="radio"
+                aria-checked={look.filter === f}
+                onClick={() => onChange({ ...look, filter: f, intensity: look.filter === f ? look.intensity : 70 })}
+                className={`overflow-hidden rounded-xl border text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+                  look.filter === f ? "border-accent-2 ring-1 ring-accent-2" : "border-border hover:border-accent/50"
+                }`}
+              >
+                {thumb ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={thumb} alt="" className="aspect-video w-full object-cover" style={{ filter: `url(#swatch-${f})` }} />
+                ) : (
+                  <div className="aspect-video w-full bg-gradient-to-br from-accent to-accent-2" style={{ filter: `url(#swatch-${f})` }} />
+                )}
+                <span className="block px-1 py-1.5 text-foreground">{FILTERS[f].label}</span>
+              </button>
+            ))}
+          </div>
+          {look.filter !== "original" && (
+            <div className="mt-4">
+              <SliderField label="Intensity" value={look.intensity} min={0} max={100} neutral={100} format={(v) => `${v}%`} onChange={(intensity) => onChange({ ...look, intensity })} gesture={gesture} />
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="space-y-3.5">
+          {ADJUST_FIELDS.map((f) => (
+            <SliderField
+              key={f.key}
+              label={f.label}
+              value={look.adjust[f.key]}
+              min={f.min}
+              max={f.max}
+              neutral={f.neutral}
+              onChange={(v) => onChange({ ...look, adjust: { ...look.adjust, [f.key]: v } })}
+              gesture={gesture}
+            />
+          ))}
+          <ActionButton onClick={() => onChange({ ...look, adjust: NEUTRAL_ADJUST })}>Reset all</ActionButton>
+        </div>
+      )}
+      <div className="mt-5 border-t border-border pt-4">
+        <ActionButton onClick={onApplyAll}>Apply to all clips</ActionButton>
+        <p className="mt-2 text-[11px] text-muted">Changes apply to the selected clip (or the clip under the playhead).</p>
+      </div>
+    </PanelShell>
+  );
+}
+
+// --- Text: add + templates --------------------------------------------------
+
+export function TextAddPanel({ onAdd, onClose }: { onAdd: (style: Partial<TextStyle>, y: number) => void; onClose: () => void }) {
+  return (
+    <PanelShell title="Text" onClose={onClose}>
+      <button type="button" onClick={() => onAdd({}, 0.5)} className="btn-primary w-full rounded-xl py-2.5 text-sm font-semibold">
+        + Add text
+      </button>
+      <SectionTitle>
+        <span className="mt-4 block">Templates</span>
+      </SectionTitle>
+      <div className="grid grid-cols-2 gap-2">
+        {TEXT_TEMPLATES.map((t) => (
+          <button
+            key={t.label}
+            type="button"
+            onClick={() => onAdd(t.style, t.y)}
+            className="flex h-16 items-center justify-center rounded-xl border border-border bg-gradient-to-br from-slate-800 to-slate-950 px-2 text-center transition hover:border-accent-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+            title={`Add ${t.label}`}
+          >
+            <span
+              className="truncate"
+              style={{
+                fontFamily: TEXT_FONTS[t.style.font ?? "jakarta"]?.css,
+                fontWeight: t.style.weight ?? 900,
+                color: t.style.color ?? "#fff",
+                fontSize: 14,
+                background: t.style.backgroundOpacity ? t.style.background : undefined,
+                padding: t.style.backgroundOpacity ? "2px 6px" : undefined,
+                borderRadius: 4,
+                WebkitTextStroke: t.style.strokeWidth ? `1px ${t.style.strokeColor}` : undefined,
+              }}
+            >
+              {t.label}
+            </span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-4 text-[11px] text-muted">Text is added at the playhead for 3 seconds. Double-click text on the video to edit it.</p>
+    </PanelShell>
+  );
+}
+
+// --- Elements: stickers + uploaded images -----------------------------------
+
+export function ElementsPanel({
+  onAddSticker,
+  onUploadImage,
+  onClose,
+}: {
+  onAddSticker: (id: string) => void;
+  onUploadImage: (file: File) => void;
+  onClose: () => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <PanelShell title="Elements" onClose={onClose}>
+      <input
+        ref={input}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onUploadImage(f);
+          e.target.value = "";
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => input.current?.click()}
+        className="mb-4 w-full rounded-xl border-2 border-dashed border-border py-3 text-sm font-semibold text-foreground transition hover:border-accent-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+      >
+        Upload image (PNG, JPG, WebP)
+      </button>
+      <StickerLibrary onAdd={onAddSticker} />
+    </PanelShell>
+  );
+}
+
+// --- Overlay inspector (text / sticker / image) ------------------------------
+
+export function OverlayPanel({
+  overlay,
+  total,
+  onChange,
+  onDuplicate,
+  onDelete,
+  onRestack,
+  onClose,
+  gesture,
+  textAreaRef,
+}: {
+  overlay: Overlay;
+  total: number;
+  onChange: (patch: Partial<Overlay>) => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+  onRestack: (dir: 1 | -1) => void;
+  onClose: () => void;
+  gesture: Gesture;
+  textAreaRef?: React.RefObject<HTMLTextAreaElement | null>;
+}) {
+  const o = overlay;
+  const title = o.kind === "text" ? "Text" : o.kind === "image" ? "Image" : `Sticker · ${getStickerDef(o.stickerId)?.label ?? ""}`;
+  const setText = (patch: Partial<TextStyle>) => o.kind === "text" && onChange({ text: { ...o.text, ...patch } } as Partial<Overlay>);
+
+  return (
+    <PanelShell title={title} onClose={onClose}>
+      <div className="space-y-4">
+        {o.kind === "text" && (
+          <>
+            <textarea
+              ref={textAreaRef}
+              value={o.text.content}
+              rows={3}
+              onFocus={gesture.onGestureStart}
+              onBlur={gesture.onGestureEnd}
+              onChange={(e) => setText({ content: e.target.value })}
+              aria-label="Text content"
+              className={`${inputCls} resize-y`}
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Font">
+                <select className={inputCls} value={o.text.font} onChange={(e) => setText({ font: e.target.value })}>
+                  {Object.entries(TEXT_FONTS).map(([k, f]) => (
+                    <option key={k} value={k}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Weight">
+                <select className={inputCls} value={o.text.weight} onChange={(e) => setText({ weight: Number(e.target.value) as TextStyle["weight"] })}>
+                  <option value={400}>Regular</option>
+                  <option value={700}>Bold</option>
+                  <option value={900}>Black</option>
+                </select>
+              </Field>
+            </div>
+            <SliderField label="Size" value={Math.round(o.text.size * 1000) / 10} min={1.5} max={30} step={0.5} format={(v) => `${v}`} onChange={(v) => setText({ size: v / 100 })} gesture={gesture} />
+            <div className="flex flex-wrap items-center gap-2">
+              <Chips
+                label="Alignment"
+                value={o.text.align}
+                onChange={(align) => setText({ align })}
+                options={[
+                  { value: "left", label: "Left" },
+                  { value: "center", label: "Center" },
+                  { value: "right", label: "Right" },
+                ]}
+              />
+              <button
+                type="button"
+                aria-pressed={o.text.italic}
+                onClick={() => setText({ italic: !o.text.italic })}
+                className={`rounded-full border px-2.5 py-1 text-xs font-semibold italic ${o.text.italic ? "border-accent-2 bg-accent-2 text-black" : "border-border bg-surface text-foreground"}`}
+              >
+                Italic
+              </button>
+              <button
+                type="button"
+                aria-pressed={o.text.shadow}
+                onClick={() => setText({ shadow: !o.text.shadow })}
+                className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${o.text.shadow ? "border-accent-2 bg-accent-2 text-black" : "border-border bg-surface text-foreground"}`}
+              >
+                Shadow
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <ColorField label="Text" value={o.text.color} onChange={(color) => setText({ color })} gesture={gesture} />
+              <ColorField label="Outline" value={o.text.strokeColor} onChange={(strokeColor) => setText({ strokeColor })} gesture={gesture} />
+              <ColorField label="Background" value={o.text.background} onChange={(background) => setText({ background })} gesture={gesture} />
+            </div>
+            <SliderField label="Outline width" value={Math.round(o.text.strokeWidth * 100)} min={0} max={15} neutral={0} onChange={(v) => setText({ strokeWidth: v / 100 })} gesture={gesture} />
+            <SliderField label="Background opacity" value={Math.round(o.text.backgroundOpacity * 100)} min={0} max={100} neutral={0} format={(v) => `${v}%`} onChange={(v) => setText({ backgroundOpacity: v / 100 })} gesture={gesture} />
+            <SliderField label="Letter spacing" value={Math.round(o.text.letterSpacing * 100)} min={-10} max={50} neutral={0} onChange={(v) => setText({ letterSpacing: v / 100 })} gesture={gesture} />
+            <SliderField label="Line spacing" value={Math.round(o.text.lineHeight * 100)} min={80} max={250} neutral={115} format={(v) => `${(v / 100).toFixed(2)}`} onChange={(v) => setText({ lineHeight: v / 100 })} gesture={gesture} />
+          </>
+        )}
+
+        <div>
+          <SectionTitle>Timing</SectionTitle>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Appears at">
+              <SecondsInput value={o.start} min={0} max={o.end - 0.2} onCommit={(start) => onChange({ start })} />
+            </Field>
+            <Field label="Disappears at">
+              <SecondsInput value={o.end} min={o.start + 0.2} max={Math.max(total, o.start + 0.2)} onCommit={(end) => onChange({ end })} />
+            </Field>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <SectionTitle>Transform</SectionTitle>
+          <SliderField label="X" value={Math.round(o.x * 100)} min={-30} max={130} neutral={50} format={(v) => `${v}%`} onChange={(v) => onChange({ x: v / 100 })} gesture={gesture} />
+          <SliderField label="Y" value={Math.round(o.y * 100)} min={-30} max={130} neutral={50} format={(v) => `${v}%`} onChange={(v) => onChange({ y: v / 100 })} gesture={gesture} />
+          {o.kind !== "text" && (
+            <SliderField label="Size" value={Math.round(o.width * 100)} min={3} max={200} format={(v) => `${v}%`} onChange={(v) => onChange({ width: v / 100 })} gesture={gesture} />
+          )}
+          <SliderField label="Rotation" value={Math.round(o.rotation)} min={-180} max={180} neutral={0} format={(v) => `${v}°`} onChange={(v) => onChange({ rotation: v })} gesture={gesture} />
+          <SliderField label="Opacity" value={Math.round(o.opacity * 100)} min={0} max={100} neutral={100} format={(v) => `${v}%`} onChange={(v) => onChange({ opacity: v / 100 })} gesture={gesture} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Entrance">
+            <select className={inputCls} value={o.animIn} onChange={(e) => onChange({ animIn: e.target.value as AnimIn })}>
+              {(Object.keys(ANIM_IN_LABELS) as AnimIn[]).map((k) => (
+                <option key={k} value={k}>
+                  {ANIM_IN_LABELS[k]}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Exit">
+            <select className={inputCls} value={o.animOut} onChange={(e) => onChange({ animOut: e.target.value as AnimOut })}>
+              {(Object.keys(ANIM_OUT_LABELS) as AnimOut[]).map((k) => (
+                <option key={k} value={k}>
+                  {ANIM_OUT_LABELS[k]}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
+        <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+          <ActionButton onClick={() => onRestack(1)} title="Bring forward">
+            Forward
+          </ActionButton>
+          <ActionButton onClick={() => onRestack(-1)} title="Send backward">
+            Backward
+          </ActionButton>
+          <ActionButton onClick={() => onChange({ hidden: !o.hidden })}>{o.hidden ? "Show" : "Hide"}</ActionButton>
+          <ActionButton onClick={() => onChange({ locked: !o.locked })}>{o.locked ? "Unlock" : "Lock"}</ActionButton>
+          <ActionButton onClick={onDuplicate} title="Duplicate (Ctrl+D)">
+            Duplicate
+          </ActionButton>
+          <ActionButton onClick={onDelete} tone="danger">
+            <TrashIcon width={14} height={14} /> Delete
+          </ActionButton>
+        </div>
+      </div>
+    </PanelShell>
+  );
+}
+
+// --- Audio --------------------------------------------------------------------
+
+export function AudioAddPanel({
+  audio,
+  onUpload,
+  onSelect,
+  onClose,
+}: {
+  audio: AudioClip[];
+  onUpload: (file: File) => void;
+  onSelect: (id: string) => void;
+  onClose: () => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <PanelShell title="Audio" onClose={onClose}>
+      <input
+        ref={input}
+        type="file"
+        accept="audio/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onUpload(f);
+          e.target.value = "";
+        }}
+      />
+      <button type="button" onClick={() => input.current?.click()} className="btn-primary w-full rounded-xl py-2.5 text-sm font-semibold">
+        + Upload music or audio
+      </button>
+      <p className="mt-2 text-[11px] text-muted">MP3, WAV, M4A, AAC or OGG, up to 50MB. Added at the playhead.</p>
+      <SectionTitle>
+        <span className="mt-5 block">Tracks</span>
+      </SectionTitle>
+      {audio.length === 0 ? (
+        <p className="text-xs text-muted">No audio tracks yet. Upload music, or select a clip and use “Extract audio”.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {audio.map((a) => (
+            <li key={a.id}>
+              <button
+                type="button"
+                onClick={() => onSelect(a.id)}
+                className="flex w-full items-center justify-between rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs hover:border-accent/50"
+              >
+                <span className="truncate font-semibold text-foreground">♪ {a.label}</span>
+                <span className="font-mono text-muted">
+                  {formatTime(a.start, true)} · {formatTime(a.duration, true)}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </PanelShell>
+  );
+}
+
+export function AudioPanel({
+  clip,
+  sourceDuration,
+  total,
+  onChange,
+  onSplit,
+  onDuplicate,
+  onDelete,
+  onClose,
+  gesture,
+}: {
+  clip: AudioClip;
+  sourceDuration: number;
+  total: number;
+  onChange: (patch: Partial<AudioClip>) => void;
+  onSplit: () => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+  gesture: Gesture;
+}) {
+  const a = clip;
+  return (
+    <PanelShell title={`Audio · ${a.label}`} onClose={onClose}>
+      <div className="space-y-4">
+        <SliderField label="Volume" value={Math.round(a.volume * 100)} min={0} max={200} neutral={100} format={(v) => `${v}%`} onChange={(v) => onChange({ volume: v / 100 })} gesture={gesture} />
+        <SliderField label="Fade in" value={a.fadeIn} min={0} max={Math.min(5, a.duration / 2)} step={0.1} neutral={0} format={(v) => `${v.toFixed(1)}s`} onChange={(fadeIn) => onChange({ fadeIn })} gesture={gesture} />
+        <SliderField label="Fade out" value={a.fadeOut} min={0} max={Math.min(5, a.duration / 2)} step={0.1} neutral={0} format={(v) => `${v.toFixed(1)}s`} onChange={(fadeOut) => onChange({ fadeOut })} gesture={gesture} />
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Starts at">
+            <SecondsInput value={a.start} min={0} max={Math.max(0, total - 0.2)} onCommit={(start) => onChange({ start })} />
+          </Field>
+          <Field label="Length">
+            <SecondsInput value={a.duration} min={0.2} max={sourceDuration - a.offset} onCommit={(duration) => onChange({ duration })} />
+          </Field>
+          <Field label="From (in file)">
+            <SecondsInput
+              value={a.offset}
+              min={0}
+              max={Math.max(0, sourceDuration - 0.2)}
+              onCommit={(offset) => onChange({ offset, duration: Math.min(a.duration, sourceDuration - offset) })}
+            />
+          </Field>
+        </div>
+        <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+          <ActionButton onClick={() => onChange({ muted: !a.muted })}>{a.muted ? "Unmute" : "Mute"}</ActionButton>
+          <ActionButton onClick={onSplit} title="Split at the playhead (S)">
+            Split
+          </ActionButton>
+          <ActionButton onClick={onDuplicate}>Duplicate</ActionButton>
+          <ActionButton onClick={onDelete} tone="danger">
+            <TrashIcon width={14} height={14} /> Delete
+          </ActionButton>
+        </div>
+      </div>
+    </PanelShell>
+  );
+}
+
+// --- Effects -----------------------------------------------------------------
+
+const EFFECT_ICONS: Record<EffectType, string> = {
+  blur: "◌",
+  motionblur: "≋",
+  glitch: "▚",
+  vhs: "📼",
+  grain: "░",
+  noise: "▒",
+  pixelate: "▦",
+  rgbsplit: "◐",
+  flash: "✦",
+  shake: "〰",
+  zoom: "⤢",
+};
+
+export function EffectsAddPanel({ onAdd, onClose }: { onAdd: (type: EffectType) => void; onClose: () => void }) {
+  return (
+    <PanelShell title="Effects" onClose={onClose}>
+      <div className="grid grid-cols-3 gap-2">
+        {(Object.keys(EFFECT_LABELS) as EffectType[]).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => onAdd(t)}
+            title={`Add ${EFFECT_LABELS[t]}`}
+            className="flex flex-col items-center gap-1 rounded-xl border border-border bg-surface p-3 text-[11px] font-semibold text-foreground transition hover:border-accent-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+          >
+            <span className="text-xl leading-none" aria-hidden>
+              {EFFECT_ICONS[t]}
+            </span>
+            {EFFECT_LABELS[t]}
+          </button>
+        ))}
+      </div>
+      <p className="mt-4 text-[11px] text-muted">Effects are added at the playhead for 2 seconds and only apply during their time on the effects track.</p>
+    </PanelShell>
+  );
+}
+
+export { EFFECT_ICONS };
+
+export function EffectPanel({
+  effect,
+  total,
+  onChange,
+  onDuplicate,
+  onDelete,
+  onClose,
+  gesture,
+}: {
+  effect: EffectClip;
+  total: number;
+  onChange: (patch: Partial<EffectClip>) => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+  gesture: Gesture;
+}) {
+  const e = effect;
+  return (
+    <PanelShell title={`Effect · ${EFFECT_LABELS[e.type]}`} onClose={onClose}>
+      <div className="space-y-4">
+        <Field label="Effect">
+          <select className={inputCls} value={e.type} onChange={(ev) => onChange({ type: ev.target.value as EffectType })}>
+            {(Object.keys(EFFECT_LABELS) as EffectType[]).map((t) => (
+              <option key={t} value={t}>
+                {EFFECT_LABELS[t]}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <SliderField label="Intensity" value={e.intensity} min={0} max={100} neutral={50} format={(v) => `${v}%`} onChange={(intensity) => onChange({ intensity })} gesture={gesture} />
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Starts at">
+            <SecondsInput value={e.start} min={0} max={e.end - 0.1} onCommit={(start) => onChange({ start })} />
+          </Field>
+          <Field label="Ends at">
+            <SecondsInput value={e.end} min={e.start + 0.1} max={Math.max(total, e.start + 0.1)} onCommit={(end) => onChange({ end })} />
+          </Field>
+        </div>
+        <div className="flex gap-2 border-t border-border pt-4">
+          <ActionButton onClick={onDuplicate}>Duplicate</ActionButton>
+          <ActionButton onClick={onDelete} tone="danger">
+            <TrashIcon width={14} height={14} /> Delete
+          </ActionButton>
+        </div>
+      </div>
+    </PanelShell>
+  );
+}
+
+// --- Canvas --------------------------------------------------------------------
+
+export function CanvasPanel({
+  canvas,
+  onChange,
+  onUploadBackground,
+  onClose,
+  gesture,
+}: {
+  canvas: Canvas;
+  onChange: (c: Canvas) => void;
+  onUploadBackground: (file: File) => void;
+  onClose: () => void;
+  gesture: Gesture;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const bg = canvas.background;
+  return (
+    <PanelShell title="Canvas" onClose={onClose}>
+      <SectionTitle>Size</SectionTitle>
+      <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Canvas size">
+        {CANVAS_PRESETS.map((p) => (
+          <button
+            key={p.aspect}
+            type="button"
+            role="radio"
+            aria-checked={canvas.aspect === p.aspect}
+            onClick={() => onChange({ ...canvas, aspect: p.aspect })}
+            className={`rounded-xl border px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+              canvas.aspect === p.aspect ? "border-accent-2 bg-accent-2/10" : "border-border bg-surface hover:border-accent/50"
+            }`}
+          >
+            <span className="block text-sm font-semibold text-foreground">{p.label}</span>
+            <span className="block text-[11px] text-muted">{p.hint}</span>
+          </button>
+        ))}
+      </div>
+
+      <SectionTitle>
+        <span className="mt-5 block">Video in canvas</span>
+      </SectionTitle>
+      <Chips
+        label="Fit mode"
+        value={canvas.fit}
+        onChange={(fit) => onChange({ ...canvas, fit })}
+        options={[
+          { value: "fit", label: "Fit (show all)" },
+          { value: "fill", label: "Fill (crop edges)" },
+        ]}
+      />
+
+      <SectionTitle>
+        <span className="mt-5 block">Background</span>
+      </SectionTitle>
+      <Chips
+        label="Background"
+        value={bg.type}
+        onChange={(type) => {
+          if (type === "color") onChange({ ...canvas, background: { type, color: "color" in bg ? bg.color : "#000000" } });
+          if (type === "gradient") onChange({ ...canvas, background: { type, color: "#7c5cff", color2: "#22d3ee" } });
+          if (type === "blur") onChange({ ...canvas, background: { type } });
+          if (type === "image") input.current?.click();
+        }}
+        options={[
+          { value: "color", label: "Color" },
+          { value: "gradient", label: "Gradient" },
+          { value: "blur", label: "Blur" },
+          { value: "image", label: "Image" },
+        ]}
+      />
+      <input
+        ref={input}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onUploadBackground(f);
+          e.target.value = "";
+        }}
+      />
+      <div className="mt-3 space-y-2">
+        {bg.type === "color" && <ColorField label="Color" value={bg.color} onChange={(color) => onChange({ ...canvas, background: { type: "color", color } })} gesture={gesture} />}
+        {bg.type === "gradient" && (
+          <>
+            <ColorField label="Top" value={bg.color} onChange={(color) => onChange({ ...canvas, background: { ...bg, color } })} gesture={gesture} />
+            <ColorField label="Bottom" value={bg.color2} onChange={(color2) => onChange({ ...canvas, background: { ...bg, color2 } })} gesture={gesture} />
+          </>
+        )}
+        {bg.type === "image" && <ActionButton onClick={() => input.current?.click()}>Change image…</ActionButton>}
+      </div>
+      <p className="mt-4 text-[11px] text-muted">The background shows wherever the video doesn&apos;t cover the canvas.</p>
+    </PanelShell>
+  );
+}
+
+// --- Layers ---------------------------------------------------------------------
+
+export function LayersPanel({
+  overlays,
+  selectedId,
+  sources,
+  onSelect,
+  onChange,
+  onRestack,
+  onDelete,
+  onClose,
+}: {
+  overlays: Overlay[];
+  selectedId: string | null;
+  sources: Record<string, MediaSource>;
+  onSelect: (id: string) => void;
+  onChange: (id: string, patch: Partial<Overlay>) => void;
+  onRestack: (id: string, dir: 1 | -1) => void;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+}) {
+  const topFirst = [...overlays].reverse();
+  const btn = "rounded p-1 text-xs text-muted hover:bg-surface-3 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2";
+  return (
+    <PanelShell title="Layers" onClose={onClose}>
+      <p className="mb-3 text-[11px] text-muted">Top of the list is drawn on top. Video and background are always underneath.</p>
+      {topFirst.length === 0 && <p className="text-xs text-muted">No layers yet. Add text, stickers or images.</p>}
+      <ul className="space-y-1.5">
+        {topFirst.map((o, i) => {
+          const name =
+            o.kind === "text"
+              ? `“${o.text.content.split("\n")[0].slice(0, 24) || "Text"}”`
+              : o.kind === "sticker"
+                ? (getStickerDef(o.stickerId)?.label ?? "Sticker")
+                : (sources[o.sourceId]?.file.name ?? "Image");
+          const thumb = o.kind === "sticker" ? stickerThumbSrc(getStickerDef(o.stickerId)!) : o.kind === "image" ? sources[o.sourceId]?.url : null;
+          return (
+            <li
+              key={o.id}
+              className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${o.id === selectedId ? "border-accent-2 bg-accent-2/10" : "border-border bg-surface"}`}
+            >
+              <button type="button" onClick={() => onSelect(o.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded bg-surface-3 text-xs font-bold">
+                  {thumb ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={thumb} alt="" className="h-full w-full object-contain" />
+                  ) : o.kind === "sticker" ? (
+                    getStickerDef(o.stickerId)?.kind === "emoji" ? (getStickerDef(o.stickerId) as { char: string }).char : "★"
+                  ) : (
+                    "T"
+                  )}
+                </span>
+                <span className={`truncate text-xs font-semibold ${o.hidden ? "text-muted line-through" : "text-foreground"}`}>{name}</span>
+              </button>
+              <button type="button" className={btn} title="Bring forward" aria-label="Bring forward" disabled={i === 0} onClick={() => onRestack(o.id, 1)}>
+                ↑
+              </button>
+              <button type="button" className={btn} title="Send backward" aria-label="Send backward" disabled={i === topFirst.length - 1} onClick={() => onRestack(o.id, -1)}>
+                ↓
+              </button>
+              <button type="button" className={btn} title={o.hidden ? "Show" : "Hide"} aria-label={o.hidden ? "Show layer" : "Hide layer"} onClick={() => onChange(o.id, { hidden: !o.hidden })}>
+                {o.hidden ? "◌" : "◉"}
+              </button>
+              <button type="button" className={btn} title={o.locked ? "Unlock" : "Lock"} aria-label={o.locked ? "Unlock layer" : "Lock layer"} onClick={() => onChange(o.id, { locked: !o.locked })}>
+                {o.locked ? "🔒" : "🔓"}
+              </button>
+              <button type="button" className={btn} title="Delete" aria-label="Delete layer" onClick={() => onDelete(o.id)}>
+                <TrashIcon width={13} height={13} />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </PanelShell>
+  );
+}

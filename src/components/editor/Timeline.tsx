@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useClockTime, type Clock } from "@/lib/editor/clock";
 import type { ThumbnailStrip } from "@/lib/editor/media";
-import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
 import {
   MIN_CLIP_SECONDS,
   TRANSITION_LABELS,
@@ -11,7 +10,7 @@ import {
   formatTime,
   type Layout,
 } from "@/lib/editor/timeline";
-import type { Clip, MediaSource, Selection, Sticker } from "@/lib/editor/types";
+import type { Clip, MediaSource, Selection } from "@/lib/editor/types";
 import { ZoomInIcon, ZoomOutIcon } from "./icons";
 
 const PAD = 16; // px before t=0 so the first trim handle is reachable
@@ -22,28 +21,71 @@ const TICK_STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
 type Gesture =
   | { kind: "trim"; clipId: string; edge: "start" | "end"; x0: number; start: number; end: number; max: number }
   | { kind: "reorder"; index: number; x0: number; active: boolean }
-  | { kind: "sticker"; id: string; mode: "move" | "start" | "end"; x0: number; start: number; end: number }
+  | { kind: "item"; track: string; id: string; mode: ItemMode; x0: number; start: number; end: number }
   | { kind: "seek" };
+
+export type ItemMode = "move" | "start" | "end";
+
+export interface TrackItem {
+  id: string;
+  start: number;
+  end: number;
+  label: string;
+  thumb?: string | null;
+  glyph?: string;
+  hidden?: boolean;
+  locked?: boolean;
+  selected: boolean;
+  sel: Selection;
+}
+
+/** A layer track (text, elements, audio, effects) - same lanes, bars and
+ * drag/trim gestures for every kind of timed item. */
+export interface TimelineTrack {
+  key: string;
+  label: string;
+  tone: string; // bar color classes
+  empty: string;
+  items: TrackItem[];
+}
+
+/** Greedy lane packing so overlapping items stack instead of hiding each other. */
+function laneLayout(items: TrackItem[]) {
+  const sorted = [...items].sort((a, b) => a.start - b.start);
+  const laneEnds: number[] = [];
+  const lane: Record<string, number> = {};
+  for (const it of sorted) {
+    let i = laneEnds.findIndex((end) => end <= it.start + 1e-3);
+    if (i < 0) {
+      i = laneEnds.length;
+      laneEnds.push(0);
+    }
+    laneEnds[i] = it.end;
+    lane[it.id] = i;
+  }
+  return { lane, count: Math.max(1, laneEnds.length) };
+}
 
 interface Props {
   lay: Layout;
   sources: Record<string, MediaSource>;
   thumbnails: Record<string, ThumbnailStrip>;
-  stickers: Sticker[];
+  tracks: TimelineTrack[];
   selection: Selection;
   clock: Clock;
   playing: boolean;
   onSelect: (s: Selection) => void;
   onSeek: (t: number) => void;
   onClipChange: (clipId: string, patch: Partial<Clip>) => void;
-  onStickerChange: (id: string, patch: Partial<Sticker>) => void;
+  /** New [start, end] for a dragged/trimmed item; the editor maps it onto the item. */
+  onItemChange: (track: string, id: string, mode: ItemMode, start: number, end: number) => void;
   onMoveClip: (from: number, to: number) => void;
   onGestureStart: () => void;
   onGestureEnd: () => void;
 }
 
 export default function Timeline(props: Props) {
-  const { lay, sources, thumbnails, stickers, selection, clock, playing } = props;
+  const { lay, sources, thumbnails, selection, clock, playing } = props;
   const scroller = useRef<HTMLDivElement>(null);
   const [pps, setPps] = useState<number | null>(null); // pixels per second
   const [viewWidth, setViewWidth] = useState(800);
@@ -70,23 +112,6 @@ export default function Timeline(props: Props) {
 
   const zoom = (factor: number) => setPps((p) => Math.min(400, Math.max(fitPps, (p ?? fitPps) * factor)));
 
-  // Sticker lanes: greedy packing so overlapping stickers stack instead of hiding each other.
-  const lanes = useMemo(() => {
-    const sorted = [...stickers].sort((a, b) => a.start - b.start);
-    const laneEnds: number[] = [];
-    const lane: Record<string, number> = {};
-    for (const s of sorted) {
-      let i = laneEnds.findIndex((end) => end <= s.start + 1e-3);
-      if (i < 0) {
-        i = laneEnds.length;
-        laneEnds.push(0);
-      }
-      laneEnds[i] = s.end;
-      lane[s.id] = i;
-    }
-    return { lane, count: Math.max(1, laneEnds.length) };
-  }, [stickers]);
-
   const tickStep = TICK_STEPS.find((s) => s * scale >= 70) ?? 600;
   const ticks: number[] = [];
   for (let t = 0; t <= lay.total + 1e-6; t += tickStep) ticks.push(t);
@@ -95,7 +120,7 @@ export default function Timeline(props: Props) {
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     gesture.current = g;
-    if (g.kind === "trim" || g.kind === "sticker") props.onGestureStart();
+    if (g.kind === "trim" || g.kind === "item") props.onGestureStart();
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -140,20 +165,20 @@ export default function Timeline(props: Props) {
       setDrag({ index: g.index, dx, target, markerX: xOf(markerT) });
       return;
     }
-    if (g.kind === "sticker") {
+    if (g.kind === "item") {
       const dt = (e.clientX - g.x0) / scale;
       const len = g.end - g.start;
       if (g.mode === "move") {
         const start = Math.min(Math.max(0, g.start + dt), Math.max(0, lay.total - len));
-        props.onStickerChange(g.id, { start, end: start + len });
+        props.onItemChange(g.track, g.id, "move", start, start + len);
         setTrimLabel({ x: e.clientX, text: `${formatTime(start, true)} → ${formatTime(start + len, true)}` });
       } else if (g.mode === "start") {
         const start = Math.min(g.end - 0.2, Math.max(0, g.start + dt));
-        props.onStickerChange(g.id, { start });
+        props.onItemChange(g.track, g.id, "start", start, g.end);
         setTrimLabel({ x: e.clientX, text: `Starts ${formatTime(start, true)}` });
       } else {
         const end = Math.max(g.start + 0.2, Math.min(lay.total, g.end + dt));
-        props.onStickerChange(g.id, { end });
+        props.onItemChange(g.track, g.id, "end", g.start, end);
         setTrimLabel({ x: e.clientX, text: `Ends ${formatTime(end, true)}` });
       }
     }
@@ -164,7 +189,7 @@ export default function Timeline(props: Props) {
     gesture.current = null;
     setTrimLabel(null);
     if (!g) return;
-    if (g.kind === "trim" || g.kind === "sticker") props.onGestureEnd();
+    if (g.kind === "trim" || g.kind === "item") props.onGestureEnd();
     if (g.kind === "reorder") {
       if (g.active && drag) {
         if (drag.target !== g.index) props.onMoveClip(g.index, drag.target);
@@ -334,76 +359,85 @@ export default function Timeline(props: Props) {
             })}
           </div>
 
-          {/* Sticker track */}
-          <div
-            className="relative mt-2 border-t border-dashed border-border/70 pt-1"
-            style={{ height: lanes.count * LANE_H + 6 }}
-          >
-            {stickers.length === 0 && (
-              <span className="sticky left-2 top-2 inline-block px-2 pt-1 text-[11px] text-muted">
-                Stickers appear here
-              </span>
-            )}
-            {stickers.map((s) => {
-              const def = getStickerDef(s.stickerId);
-              const selected = selection?.kind === "sticker" && selection.id === s.id;
-              const thumb = def ? stickerThumbSrc(def) : null;
-              return (
-                <div
-                  key={s.id}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Sticker ${def?.label ?? ""}, ${formatTime(s.start, true)} to ${formatTime(s.end, true)}`}
-                  aria-pressed={selected}
-                  className={`absolute flex cursor-grab items-center gap-1 overflow-hidden rounded-md border px-1.5 text-[10px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
-                    selected ? "z-10 border-accent-2 bg-accent-2/30 text-foreground" : "border-accent/40 bg-accent/20 text-foreground hover:border-accent"
-                  }`}
-                  style={{
-                    left: xOf(s.start),
-                    width: Math.max(10, (s.end - s.start) * scale),
-                    top: 4 + lanes.lane[s.id] * LANE_H,
-                    height: LANE_H - 6,
-                  }}
-                  onPointerDown={(e) => {
-                    props.onSelect({ kind: "sticker", id: s.id });
-                    const now = clock.get();
-                    if (now < s.start || now >= s.end) props.onSeek(s.start);
-                    startGesture(e, { kind: "sticker", id: s.id, mode: "move", x0: e.clientX, start: s.start, end: s.end });
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      props.onSelect({ kind: "sticker", id: s.id });
-                    }
-                  }}
-                >
-                  {thumb ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={thumb} alt="" className="h-4 w-4 shrink-0 object-contain" draggable={false} />
-                  ) : (
-                    <span className="shrink-0">{def?.kind === "emoji" ? def.char : "★"}</span>
-                  )}
-                  <span className="truncate">{def?.label}</span>
-                  <span
-                    aria-hidden
-                    className="absolute inset-y-0 left-0 w-2 cursor-ew-resize hover:bg-accent-2/60"
-                    onPointerDown={(e) => {
-                      props.onSelect({ kind: "sticker", id: s.id });
-                      startGesture(e, { kind: "sticker", id: s.id, mode: "start", x0: e.clientX, start: s.start, end: s.end });
+          {/* Layer tracks: text, elements, audio, effects */}
+          {props.tracks.map((track) => {
+            const lanes = laneLayout(track.items);
+            return (
+              <div
+                key={track.key}
+                className="relative mt-2 border-t border-dashed border-border/70 pt-1"
+                style={{ height: lanes.count * LANE_H + 20 }}
+              >
+                <span className="pointer-events-none sticky left-1 z-20 inline-block px-1.5 text-[9px] font-bold uppercase leading-4 tracking-wider text-muted">
+                  {track.label}
+                </span>
+                {track.items.length === 0 && (
+                  <span className="pointer-events-none absolute left-20 top-6 inline-block px-2 text-[11px] text-muted/80">{track.empty}</span>
+                )}
+                {track.items.map((it) => (
+                  <div
+                    key={it.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`${track.label}: ${it.label}, ${formatTime(it.start, true)} to ${formatTime(it.end, true)}${it.locked ? ", locked" : ""}${it.hidden ? ", hidden" : ""}`}
+                    aria-pressed={it.selected}
+                    className={`absolute flex items-center gap-1 overflow-hidden rounded-md border px-1.5 text-[10px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+                      it.selected ? "z-10 border-accent-2 ring-1 ring-accent-2 text-foreground" : `${track.tone} text-foreground`
+                    } ${it.hidden ? "opacity-40" : ""} ${it.locked ? "cursor-not-allowed" : "cursor-grab"}`}
+                    style={{
+                      left: xOf(it.start),
+                      width: Math.max(10, (it.end - it.start) * scale),
+                      top: 18 + lanes.lane[it.id] * LANE_H,
+                      height: LANE_H - 6,
                     }}
-                  />
-                  <span
-                    aria-hidden
-                    className="absolute inset-y-0 right-0 w-2 cursor-ew-resize hover:bg-accent-2/60"
                     onPointerDown={(e) => {
-                      props.onSelect({ kind: "sticker", id: s.id });
-                      startGesture(e, { kind: "sticker", id: s.id, mode: "end", x0: e.clientX, start: s.start, end: s.end });
+                      props.onSelect(it.sel);
+                      const now = clock.get();
+                      if (now < it.start || now >= it.end) props.onSeek(it.start);
+                      if (it.locked) return;
+                      startGesture(e, { kind: "item", track: track.key, id: it.id, mode: "move", x0: e.clientX, start: it.start, end: it.end });
                     }}
-                  />
-                </div>
-              );
-            })}
-          </div>
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        props.onSelect(it.sel);
+                      }
+                    }}
+                  >
+                    {it.thumb ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={it.thumb} alt="" className="h-4 w-4 shrink-0 object-contain" draggable={false} />
+                    ) : (
+                      it.glyph && <span className="shrink-0">{it.glyph}</span>
+                    )}
+                    <span className="truncate">{it.label}</span>
+                    {it.locked && <span className="shrink-0" aria-hidden>🔒</span>}
+                    {!it.locked && (
+                      <>
+                        <span
+                          aria-hidden
+                          className="absolute inset-y-0 left-0 w-2 cursor-ew-resize hover:bg-accent-2/60"
+                          onPointerDown={(e) => {
+                            props.onSelect(it.sel);
+                            startGesture(e, { kind: "item", track: track.key, id: it.id, mode: "start", x0: e.clientX, start: it.start, end: it.end });
+                          }}
+                        />
+                        <span
+                          aria-hidden
+                          className="absolute inset-y-0 right-0 w-2 cursor-ew-resize hover:bg-accent-2/60"
+                          onPointerDown={(e) => {
+                            props.onSelect(it.sel);
+                            startGesture(e, { kind: "item", track: track.key, id: it.id, mode: "end", x0: e.clientX, start: it.start, end: it.end });
+                          }}
+                        />
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+
 
           <Playhead clock={clock} xOf={xOf} scroller={scroller} follow={playing} />
         </div>

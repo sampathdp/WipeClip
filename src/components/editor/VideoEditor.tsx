@@ -11,7 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { createClock, useClockTime, type Clock } from "@/lib/editor/clock";
 import { takeHandedOffFile } from "@/lib/editor/handoff";
 import { useProjectHistory } from "@/lib/editor/history";
-import { generateThumbnails, loadVideoMeta, type ThumbnailStrip } from "@/lib/editor/media";
+import { generateThumbnails, loadAudioMeta, loadVideoMeta, normalizeImage, type ThumbnailStrip } from "@/lib/editor/media";
 import {
   clearLastExport,
   clearProject,
@@ -21,8 +21,12 @@ import {
   saveSource,
   type RestoredProject,
 } from "@/lib/editor/projectStore";
-import { rasterizeSticker, type RasterSticker } from "@/lib/editor/stickers";
+import { useOverlayRasters } from "@/lib/editor/rasters";
+import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
+import { DEFAULT_TEXT } from "@/lib/editor/textRaster";
 import {
+  EFFECT_LABELS,
+  canvasSize as canvasSizeOf,
   clipVisualSpan,
   deleteClip,
   formatTime,
@@ -30,28 +34,67 @@ import {
   locate,
   moveClip,
   newId,
+  restackOverlay,
   splitAt,
+  splitAudioAt,
+  updateAudio,
   updateClip,
-  updateSticker,
+  updateEffect,
+  updateOverlay,
 } from "@/lib/editor/timeline";
-import type { Clip, MediaSource, Project, Selection, Sticker } from "@/lib/editor/types";
+import {
+  DEFAULT_CANVAS,
+  newClip,
+  type AudioClip,
+  type Clip,
+  type EffectClip,
+  type EffectType,
+  type Look,
+  type MediaSource,
+  type Overlay,
+  type Project,
+  type Selection,
+  type TextStyle,
+} from "@/lib/editor/types";
 import { ApiError, ContentBlockedError, probeVideo } from "@/lib/toolsApi";
 import AiCleanupDialog from "./AiCleanupDialog";
 import ExportDialog from "./ExportDialog";
-import { ActionButton, ClipPanel, PanelShell, StickerLibrary, StickerPanel, TransitionPanel } from "./Inspector";
-import PreviewPlayer from "./PreviewPlayer";
-import StickerLayer from "./StickerLayer";
-import Timeline from "./Timeline";
+import { ActionButton, ClipPanel, PanelShell, TransitionPanel } from "./Inspector";
+import OverlayLayer from "./OverlayLayer";
 import {
+  AudioAddPanel,
+  AudioPanel,
+  CanvasPanel,
+  ClipExtras,
+  EFFECT_ICONS,
+  EffectPanel,
+  EffectsAddPanel,
+  ElementsPanel,
+  LayersPanel,
+  LookPanel,
+  OverlayPanel,
+  TextAddPanel,
+  type Gesture,
+} from "./Panels";
+import PreviewPlayer from "./PreviewPlayer";
+import Timeline, { type ItemMode, type TimelineTrack } from "./Timeline";
+import {
+  AdjustIcon,
+  CanvasIcon,
+  EffectIcon,
+  ElementsIcon,
   ExportIcon,
+  FilterIcon,
   FullscreenIcon,
+  LayersIcon,
+  MusicIcon,
   MuteIcon,
   PauseIcon,
   PlayIcon,
   RedoIcon,
   SparkleIcon,
   SplitIcon,
-  StickerIcon,
+  TextIcon,
   TransitionIcon,
   TrashIcon,
   TrimIcon,
@@ -62,10 +105,14 @@ import {
 
 const TOOL = "video_editor";
 const MAX_BYTES = 300 * 1024 * 1024;
-const EMPTY: Project = { clips: [], stickers: [] };
+const MAX_AUDIO_BYTES = 50 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+const EMPTY: Project = { clips: [], overlays: [], audio: [], effects: [], canvas: DEFAULT_CANVAS };
 const RATES = [0.5, 1, 1.5, 2];
 
+type Tool = "text" | "elements" | "audio" | "effects" | "filters" | "adjust" | "canvas" | "layers";
 type Dialogs = { kind: "cleanup"; clipId: string; frameTime: number } | { kind: "export" } | null;
+type ClipboardItem = { kind: "overlay"; item: Overlay } | { kind: "audio"; item: AudioClip } | { kind: "effect"; item: EffectClip };
 
 /** `children` is shown under the upload card until a video is loaded -
  * /editor passes its server-rendered landing content (EditorLanding) here.
@@ -81,25 +128,31 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
   const [sources, setSources] = useState<Record<string, MediaSource>>({});
   const [originalId, setOriginalId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
-  const [showLibrary, setShowLibrary] = useState(false);
+  const [tool, setTool] = useState<Tool | null>(null);
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [thumbs, setThumbs] = useState<Record<string, ThumbnailStrip>>({});
-  const [stickerImages, setStickerImages] = useState<Record<string, RasterSticker>>({});
   const [dialog, setDialog] = useState<Dialogs>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
   const [pendingExport, setPendingExport] = useState<Blob | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const thumbJobs = useRef(new Map<string, AbortController>());
+  const clipboard = useRef<ClipboardItem | null>(null);
 
   const original = originalId ? sources[originalId] : undefined;
   const lay = useMemo(() => layout(project, original?.fps ?? 30), [project, original?.fps]);
+  const canvasSize = useMemo(
+    () => (original ? canvasSizeOf(project.canvas.aspect, original.width, original.height) : { width: 16, height: 9 }),
+    [project.canvas.aspect, original]
+  );
 
   const say = useCallback((message: string) => setToast(message), []);
   useEffect(() => {
@@ -107,6 +160,9 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     const t = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  const rasters = useOverlayRasters(project.overlays, sources, say);
+  const gesture: Gesture = useMemo(() => ({ onGestureStart: beginGesture, onGestureEnd: endGesture }), [beginGesture, endGesture]);
 
   // --- auth (download gating, resolution tiers) - same as UploadDemo ----
   useEffect(() => {
@@ -143,32 +199,22 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     };
   }, []);
 
-  // Autosave the (small) project JSON; sources are saved once when added.
+  // Autosave the (small) project JSON; source files are saved once when added.
   useEffect(() => {
     if (phase !== "edit" || project.clips.length === 0) return;
     const t = setTimeout(() => void saveProject(project, Object.values(sources)), 800);
     return () => clearTimeout(t);
   }, [project, sources, phase]);
 
-  // Thumbnails for every source, generated once each in the background.
+  // Thumbnails for every video source, generated once each in the background.
   useEffect(() => {
     for (const src of Object.values(sources)) {
-      if (thumbJobs.current.has(src.id)) continue;
+      if (src.kind === "audio" || src.kind === "image" || thumbJobs.current.has(src.id)) continue;
       const controller = new AbortController();
       thumbJobs.current.set(src.id, controller);
       void generateThumbnails(src.url, src.duration, (strip) => setThumbs((t) => ({ ...t, [src.id]: strip })), controller.signal);
     }
   }, [sources]);
-
-  // Rasterize each sticker type in use (shared by preview and export).
-  useEffect(() => {
-    for (const s of project.stickers) {
-      if (stickerImages[s.stickerId]) continue;
-      rasterizeSticker(s.stickerId)
-        .then((img) => setStickerImages((m) => (m[s.stickerId] ? m : { ...m, [s.stickerId]: img })))
-        .catch(() => say("A sticker couldn't be loaded. Try adding it again."));
-    }
-  }, [project.stickers, stickerImages, say]);
 
   // --- project lifecycle ---------------------------------------------------
   const startProject = useCallback(
@@ -183,7 +229,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
       clock.set(0);
       setPlaying(false);
       setSelection(null);
-      setShowLibrary(false);
+      setTool(null);
       setPhase("edit");
     },
     [reset, clock]
@@ -225,10 +271,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
         await clearLastExport();
         setPendingExport(null);
         setResume(null);
-        startProject([src], {
-          clips: [{ id: newId("clip"), sourceId: src.id, start: 0, end: meta.duration, transition: null }],
-          stickers: [],
-        });
+        startProject([src], { ...EMPTY, clips: [newClip(newId("clip"), src.id, 0, meta.duration)] });
         void saveSource(src);
       } catch (e) {
         URL.revokeObjectURL(url);
@@ -268,6 +311,11 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     setResume(null);
   }, [resume, startProject]);
 
+  const addSource = useCallback((src: MediaSource) => {
+    setSources((s) => ({ ...s, [src.id]: src }));
+    void saveSource(src);
+  }, []);
+
   // --- playback ------------------------------------------------------------
   const seek = useCallback((t: number) => clock.set(Math.min(Math.max(0, t), lay.total)), [clock, lay.total]);
   const togglePlay = useCallback(() => {
@@ -285,27 +333,79 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
   }, [lay, clock]);
 
   const selectedClip = selection?.kind === "clip" ? lay.clips.find((c) => c.clip.id === selection.id) : undefined;
-  const selectedSticker = selection?.kind === "sticker" ? project.stickers.find((s) => s.id === selection.id) : undefined;
+  const selectedOverlay = selection?.kind === "overlay" ? project.overlays.find((o) => o.id === selection.id) : undefined;
+  const selectedAudio = selection?.kind === "audio" ? project.audio.find((a) => a.id === selection.id) : undefined;
+  const selectedEffect = selection?.kind === "effect" ? project.effects.find((e) => e.id === selection.id) : undefined;
   const selectedTransition =
     selection?.kind === "transition" ? lay.clips.findIndex((c) => c.clip.id === selection.clipId) : -1;
 
+  const select = useCallback((s: Selection) => {
+    setTool(null);
+    setSelection(s);
+  }, []);
+
+  /** Start time for something new added "at the playhead". */
+  const placeAt = useCallback(
+    (length: number) => {
+      const start = Math.min(clock.get(), Math.max(0, lay.total - 0.5));
+      return { start, end: Math.min(lay.total, start + length) };
+    },
+    [clock, lay.total]
+  );
+
+  const baseOverlay = useCallback(
+    (length: number) => ({
+      id: newId("ovl"),
+      ...placeAt(length),
+      x: 0.5,
+      y: 0.5,
+      width: 0.25,
+      rotation: 0,
+      opacity: 1,
+      // No entrance by default: an animated entrance would make the layer
+      // invisible at the very frame the user just placed it on.
+      animIn: "none" as const,
+      animOut: "none" as const,
+      hidden: false,
+      locked: false,
+    }),
+    [placeAt]
+  );
+
+  const addOverlay = useCallback(
+    (o: Overlay) => {
+      apply((p) => ({ ...p, overlays: [...p.overlays, o] }));
+      setTool(null);
+      setSelection({ kind: "overlay", id: o.id });
+    },
+    [apply]
+  );
+
   // --- editing operations --------------------------------------------------
   const split = useCallback(() => {
+    if (selection?.kind === "audio") {
+      const next = splitAudioAt(project, selection.id, clock.get());
+      if (!next) say("Move the playhead inside the audio clip to split it.");
+      else apply(() => next);
+      return;
+    }
     const next = splitAt(project, lay, clock.get());
     if (!next) {
       say("Move the playhead inside a clip (not onto a transition or an edge) to split.");
       return;
     }
     apply(() => next);
-  }, [project, lay, clock, apply, say]);
+  }, [selection, project, lay, clock, apply, say]);
 
   const deleteSelection = useCallback(() => {
-    if (selection?.kind === "sticker") {
-      apply((p) => ({ ...p, stickers: p.stickers.filter((s) => s.id !== selection.id) }));
-      setSelection(null);
+    if (selection?.kind === "overlay") {
+      apply((p) => ({ ...p, overlays: p.overlays.filter((o) => o.id !== selection.id) }));
+    } else if (selection?.kind === "audio") {
+      apply((p) => ({ ...p, audio: p.audio.filter((a) => a.id !== selection.id) }));
+    } else if (selection?.kind === "effect") {
+      apply((p) => ({ ...p, effects: p.effects.filter((e) => e.id !== selection.id) }));
     } else if (selection?.kind === "transition") {
       apply((p) => updateClip(p, selection.clipId, { transition: null }));
-      setSelection(null);
     } else {
       const id = selection?.kind === "clip" ? selection.id : lay.clips[clipIndexAtPlayhead()]?.clip.id;
       if (!id) return;
@@ -315,10 +415,73 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
         return;
       }
       apply(() => next);
-      setSelection(null);
-      if (clock.get() > layout(next, lay.fps).total) clock.set(layout(next, lay.fps).total);
+      const total = layout(next, lay.fps).total;
+      if (clock.get() > total) clock.set(total);
     }
+    setSelection(null);
   }, [selection, project, lay, apply, say, clipIndexAtPlayhead, clock]);
+
+  /** Copy of the selected layer/audio/effect, optionally re-timed to start at `at`. */
+  const cloneOf = useCallback(
+    (c: ClipboardItem, at?: number): ClipboardItem => {
+      const shift = (start: number) => (at === undefined ? start : Math.min(at, Math.max(0, lay.total - 0.2)));
+      if (c.kind === "overlay") {
+        const len = c.item.end - c.item.start;
+        const start = shift(c.item.start);
+        return { kind: "overlay", item: { ...c.item, id: newId("ovl"), start, end: start + len, locked: false } };
+      }
+      if (c.kind === "audio") return { kind: "audio", item: { ...c.item, id: newId("aud"), start: shift(c.item.start) } };
+      const len = c.item.end - c.item.start;
+      const start = shift(c.item.start);
+      return { kind: "effect", item: { ...c.item, id: newId("fx"), start, end: start + len } };
+    },
+    [lay.total]
+  );
+
+  const insertClone = useCallback(
+    (c: ClipboardItem) => {
+      if (c.kind === "overlay") {
+        // Nudge a duplicate in place so it's visibly a second copy.
+        const item = { ...c.item, x: c.item.x + 0.03, y: c.item.y + 0.03 };
+        apply((p) => ({ ...p, overlays: [...p.overlays, item] }));
+        setSelection({ kind: "overlay", id: item.id });
+      } else if (c.kind === "audio") {
+        apply((p) => ({ ...p, audio: [...p.audio, c.item] }));
+        setSelection({ kind: "audio", id: c.item.id });
+      } else {
+        apply((p) => ({ ...p, effects: [...p.effects, c.item] }));
+        setSelection({ kind: "effect", id: c.item.id });
+      }
+      setTool(null);
+    },
+    [apply]
+  );
+
+  const currentItem = useCallback((): ClipboardItem | null => {
+    if (selectedOverlay) return { kind: "overlay", item: selectedOverlay };
+    if (selectedAudio) return { kind: "audio", item: selectedAudio };
+    if (selectedEffect) return { kind: "effect", item: selectedEffect };
+    return null;
+  }, [selectedOverlay, selectedAudio, selectedEffect]);
+
+  const duplicate = useCallback(() => {
+    const c = currentItem();
+    if (c) insertClone(cloneOf(c));
+  }, [currentItem, insertClone, cloneOf]);
+
+  const copy = useCallback(() => {
+    const c = currentItem();
+    if (!c) return false;
+    clipboard.current = c;
+    say("Copied. Press Ctrl+V to paste at the playhead.");
+    return true;
+  }, [currentItem, say]);
+
+  const paste = useCallback(() => {
+    if (!clipboard.current) return false;
+    insertClone(cloneOf(clipboard.current, clock.get()));
+    return true;
+  }, [insertClone, cloneOf, clock]);
 
   const moveSelected = useCallback(
     (dir: -1 | 1) => {
@@ -329,28 +492,183 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
   );
 
   const addSticker = useCallback(
-    (stickerId: string) => {
-      const total = lay.total;
-      const start = Math.min(clock.get(), Math.max(0, total - 0.5));
-      const sticker: Sticker = {
-        id: newId("stk"),
-        stickerId,
-        start,
-        end: Math.min(total, start + 3),
-        x: 0.5,
-        y: 0.5,
-        width: 0.22,
-        rotation: 0,
-        // No entrance by default: a Pop/Fade would make the sticker
-        // invisible at the very frame the user just placed it on.
-        animIn: "none",
-        animOut: "none",
-      };
-      apply((p) => ({ ...p, stickers: [...p.stickers, sticker] }));
-      setSelection({ kind: "sticker", id: sticker.id });
-      setShowLibrary(false);
+    (stickerId: string) => addOverlay({ ...baseOverlay(3), kind: "sticker", stickerId }),
+    [addOverlay, baseOverlay]
+  );
+
+  const addText = useCallback(
+    (style: Partial<TextStyle>, y: number) => {
+      const o: Overlay = { ...baseOverlay(3), y, kind: "text", text: { ...DEFAULT_TEXT, ...style } };
+      addOverlay(o);
+      // Put the cursor straight into the content box.
+      setTimeout(() => textAreaRef.current?.select(), 50);
     },
-    [lay.total, clock, apply]
+    [addOverlay, baseOverlay]
+  );
+
+  const importImage = useCallback(
+    async (file: File): Promise<MediaSource | null> => {
+      if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) {
+        say("Please choose a PNG, JPG or WebP image.");
+        return null;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        say("That image is over 15MB.");
+        return null;
+      }
+      setBusy("Adding image…");
+      try {
+        const norm = await normalizeImage(file);
+        const src: MediaSource = {
+          id: newId("img"),
+          kind: "image",
+          file: norm.file,
+          url: URL.createObjectURL(norm.file),
+          duration: 0,
+          width: norm.width,
+          height: norm.height,
+          fps: 0,
+          hasAudio: false,
+        };
+        addSource(src);
+        return src;
+      } catch {
+        say("That image couldn't be read. Try a different file.");
+        return null;
+      } finally {
+        setBusy(null);
+      }
+    },
+    [addSource, say]
+  );
+
+  const uploadImage = useCallback(
+    async (file: File) => {
+      const src = await importImage(file);
+      if (!src) return;
+      const aspect = canvasSize.width / canvasSize.height;
+      // Default to 40% of the canvas on the image's long side.
+      const width = src.width / src.height > aspect ? 0.4 : (0.4 * (src.width / src.height)) / aspect;
+      addOverlay({ ...baseOverlay(4), width, kind: "image", sourceId: src.id });
+    },
+    [importImage, addOverlay, baseOverlay, canvasSize]
+  );
+
+  const uploadBackground = useCallback(
+    async (file: File) => {
+      const src = await importImage(file);
+      if (src) apply((p) => ({ ...p, canvas: { ...p.canvas, background: { type: "image", sourceId: src.id } } }));
+    },
+    [importImage, apply]
+  );
+
+  const uploadAudio = useCallback(
+    async (file: File) => {
+      if (!file.type.startsWith("audio/")) {
+        say("Please choose an audio file (MP3, WAV, M4A, AAC or OGG).");
+        return;
+      }
+      if (file.size > MAX_AUDIO_BYTES) {
+        say("That audio file is over the 50MB limit.");
+        return;
+      }
+      setBusy("Adding audio…");
+      const url = URL.createObjectURL(file);
+      try {
+        const duration = await loadAudioMeta(url);
+        const src: MediaSource = { id: newId("snd"), kind: "audio", file, url, duration, width: 0, height: 0, fps: 0, hasAudio: true };
+        addSource(src);
+        const start = Math.min(clock.get(), Math.max(0, lay.total - 0.5));
+        const clip: AudioClip = {
+          id: newId("aud"),
+          sourceId: src.id,
+          label: file.name.replace(/\.[^.]+$/, ""),
+          start,
+          offset: 0,
+          duration: Math.min(duration, Math.max(0.5, lay.total - start)),
+          volume: 1,
+          fadeIn: 0,
+          fadeOut: 0,
+          muted: false,
+        };
+        apply((p) => ({ ...p, audio: [...p.audio, clip] }));
+        setTool(null);
+        setSelection({ kind: "audio", id: clip.id });
+      } catch {
+        URL.revokeObjectURL(url);
+        say("That audio file couldn't be read by your browser. Try an MP3 or WAV.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [addSource, apply, clock, lay.total, say]
+  );
+
+  const extractAudio = useCallback(
+    (clipId: string) => {
+      const laid = lay.clips.find((c) => c.clip.id === clipId);
+      if (!laid) return;
+      if (laid.clip.speed !== 1) {
+        say("Set the clip's speed to 1× before extracting its audio.");
+        return;
+      }
+      const clip: AudioClip = {
+        id: newId("aud"),
+        sourceId: laid.clip.sourceId,
+        label: `Audio from clip ${laid.index + 1}`,
+        start: laid.start,
+        offset: laid.clip.start,
+        duration: laid.duration,
+        volume: laid.clip.volume || 1,
+        fadeIn: 0,
+        fadeOut: 0,
+        muted: false,
+      };
+      // One step: the clip goes silent and its sound becomes a separate,
+      // independently editable track - same sound, nothing doubled.
+      apply((p) => ({ ...updateClip(p, clipId, { volume: 0 }), audio: [...p.audio, clip] }));
+      setSelection({ kind: "audio", id: clip.id });
+      say("Audio extracted to its own track.");
+    },
+    [lay, apply, say]
+  );
+
+  const addEffect = useCallback(
+    (type: EffectType) => {
+      const e: EffectClip = { id: newId("fx"), type, ...placeAt(2), intensity: 50 };
+      apply((p) => ({ ...p, effects: [...p.effects, e] }));
+      setTool(null);
+      setSelection({ kind: "effect", id: e.id });
+    },
+    [apply, placeAt]
+  );
+
+  const onItemChange = useCallback(
+    (track: string, id: string, mode: ItemMode, start: number, end: number) => {
+      if (track === "audio") {
+        apply(
+          (p) => {
+            const a = p.audio.find((x) => x.id === id);
+            if (!a) return p;
+            const srcDur = sourcesRef.current[a.sourceId]?.duration ?? a.offset + a.duration;
+            if (mode === "move") return updateAudio(p, id, { start });
+            if (mode === "start") {
+              // Trimming the front moves both where it starts and where it
+              // reads from, so the remaining sound stays in place.
+              const delta = Math.max(-a.offset, start - a.start);
+              return updateAudio(p, id, { start: a.start + delta, offset: a.offset + delta, duration: a.duration - delta });
+            }
+            return updateAudio(p, id, { duration: Math.min(end - a.start, srcDur - a.offset) });
+          },
+          false
+        );
+      } else if (track === "effects") {
+        apply((p) => updateEffect(p, id, { start, end }), false);
+      } else {
+        apply((p) => updateOverlay(p, id, { start, end }), false);
+      }
+    },
+    [apply]
   );
 
   const openTransition = useCallback(() => {
@@ -363,17 +681,26 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     for (let i = 0; i < lay.clips.length - 1; i++) {
       if (Math.abs(clipVisualSpan(lay, i).to - t) < Math.abs(clipVisualSpan(lay, best).to - t)) best = i;
     }
-    setShowLibrary(false);
-    setSelection({ kind: "transition", clipId: lay.clips[best].clip.id });
-  }, [lay, clock, say]);
+    select({ kind: "transition", clipId: lay.clips[best].clip.id });
+  }, [lay, clock, say, select]);
 
   const openTrim = useCallback(() => {
     const idx = selectedClip ? selectedClip.index : clipIndexAtPlayhead();
     if (idx < 0) return;
-    setShowLibrary(false);
-    setSelection({ kind: "clip", id: lay.clips[idx].clip.id });
+    select({ kind: "clip", id: lay.clips[idx].clip.id });
     say("Drag the clip's edges on the timeline, or use Trim start/end here.");
-  }, [selectedClip, clipIndexAtPlayhead, lay, say]);
+  }, [selectedClip, clipIndexAtPlayhead, lay, say, select]);
+
+  /** Filters/Adjust edit the selected clip, or the clip under the playhead. */
+  const openLook = useCallback(
+    (which: "filters" | "adjust") => {
+      const idx = selectedClip ? selectedClip.index : clipIndexAtPlayhead();
+      if (idx < 0) return;
+      setSelection({ kind: "clip", id: lay.clips[idx].clip.id });
+      setTool(which);
+    },
+    [selectedClip, clipIndexAtPlayhead, lay]
+  );
 
   const openCleanup = useCallback(() => {
     const idx = selectedClip ? selectedClip.index : clipIndexAtPlayhead();
@@ -383,19 +710,18 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     const loc = locate(lay, clock.get());
     const inside = loc && loc.primary.index === idx && !loc.incoming;
     const frameTime = inside ? loc.primary.sourceTime : laid.clip.start + (laid.clip.end - laid.clip.start) / 2;
-    setSelection({ kind: "clip", id: laid.clip.id });
+    select({ kind: "clip", id: laid.clip.id });
     setDialog({ kind: "cleanup", clipId: laid.clip.id, frameTime });
-  }, [selectedClip, clipIndexAtPlayhead, lay, clock]);
+  }, [selectedClip, clipIndexAtPlayhead, lay, clock, select]);
 
   const onCleaned = useCallback(
     (clipId: string, src: MediaSource) => {
-      setSources((s) => ({ ...s, [src.id]: src }));
-      void saveSource(src);
+      addSource(src);
       apply((p) => updateClip(p, clipId, { sourceId: src.id, start: 0, end: src.duration }));
       setDialog(null);
       say("Clip cleaned. Undo brings the original back.");
     },
-    [apply, say]
+    [apply, say, addSource]
   );
 
   const newProject = useCallback(async () => {
@@ -422,7 +748,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
         target &&
         (target.isContentEditable ||
           /^(TEXTAREA|SELECT)$/.test(target.tagName) ||
-          (target.tagName === "INPUT" && !/^(range|checkbox|radio)$/.test((target as HTMLInputElement).type)));
+          (target.tagName === "INPUT" && !/^(range|checkbox|radio|color)$/.test((target as HTMLInputElement).type)));
       if (typing) return;
       const onSlider = target?.tagName === "INPUT" && (target as HTMLInputElement).type === "range";
       if (onSlider && (e.key === "ArrowLeft" || e.key === "ArrowRight")) return;
@@ -435,6 +761,17 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
       } else if (mod && key === "y") {
         e.preventDefault();
         redo();
+      } else if (mod && key === "c") {
+        // Only take over copy when a layer is selected and no text is
+        // highlighted - normal page copy keeps working otherwise.
+        if (!window.getSelection()?.toString() && copy()) e.preventDefault();
+      } else if (mod && key === "v") {
+        if (paste()) e.preventDefault();
+      } else if (mod && key === "d") {
+        if (currentItem()) {
+          e.preventDefault();
+          duplicate();
+        }
       } else if (mod) {
         return;
       } else if (e.key === " " && target?.tagName !== "BUTTON") {
@@ -443,6 +780,9 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
       } else if (key === "s") {
         e.preventDefault();
         split();
+      } else if (key === "t") {
+        e.preventDefault();
+        addText({}, 0.5);
       } else if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         deleteSelection();
@@ -453,12 +793,12 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
         else seek(clock.get() + dir * (e.shiftKey ? 1 : 1 / lay.fps));
       } else if (e.key === "Escape") {
         setSelection(null);
-        setShowLibrary(false);
+        setTool(null);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase, dialog, showSignIn, undo, redo, togglePlay, split, deleteSelection, moveSelected, seek, clock, lay.fps]);
+  }, [phase, dialog, showSignIn, undo, redo, copy, paste, duplicate, currentItem, togglePlay, split, addText, deleteSelection, moveSelected, seek, clock, lay.fps]);
 
   const toggleFullscreen = () => {
     const el = stageRef.current;
@@ -532,7 +872,8 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
               Online <span className="text-gradient">Video Editor</span>
             </h1>
             <p className="mt-2 text-sm text-muted sm:text-base">
-              Trim, cut, rearrange, add transitions and stickers, and clean up overlays with AI. Your original file is never changed.
+              Trim, cut and rearrange clips, add text, music, filters, effects, transitions and stickers, and clean up overlays with AI. Your
+              original file is never changed.
             </p>
 
             {resume && phase === "import" && (
@@ -636,24 +977,85 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     );
   }
 
-  const aspect = { width: original.width, height: original.height };
-
+  // --- panel (right side / bottom sheet on mobile) -------------------------------
+  const lookClip = selectedClip?.clip;
   let panel: React.ReactNode;
-  if (showLibrary) {
-    panel = <StickerLibrary onAdd={addSticker} onClose={() => setShowLibrary(false)} />;
+  if ((tool === "filters" || tool === "adjust") && lookClip) {
+    panel = (
+      <LookPanel
+        mode={tool}
+        look={lookClip.look}
+        clipLabel={`Clip ${(selectedClip?.index ?? 0) + 1}`}
+        thumb={thumbs[lookClip.sourceId]?.urls[Math.floor((thumbs[lookClip.sourceId]?.urls.length ?? 1) / 2)]}
+        onChange={(look: Look) => apply((p) => updateClip(p, lookClip.id, { look }))}
+        onApplyAll={() => {
+          apply((p) => ({ ...p, clips: p.clips.map((c) => ({ ...c, look: lookClip.look })) }));
+          say("Applied to all clips.");
+        }}
+        onClose={() => setTool(null)}
+        gesture={gesture}
+      />
+    );
+  } else if (tool === "text") {
+    panel = <TextAddPanel onAdd={addText} onClose={() => setTool(null)} />;
+  } else if (tool === "elements") {
+    panel = <ElementsPanel onAddSticker={addSticker} onUploadImage={(f) => void uploadImage(f)} onClose={() => setTool(null)} />;
+  } else if (tool === "audio") {
+    panel = <AudioAddPanel audio={project.audio} onUpload={(f) => void uploadAudio(f)} onSelect={(id) => select({ kind: "audio", id })} onClose={() => setTool(null)} />;
+  } else if (tool === "effects") {
+    panel = <EffectsAddPanel onAdd={addEffect} onClose={() => setTool(null)} />;
+  } else if (tool === "canvas") {
+    panel = (
+      <CanvasPanel
+        canvas={project.canvas}
+        onChange={(canvas) => apply((p) => ({ ...p, canvas }))}
+        onUploadBackground={(f) => void uploadBackground(f)}
+        onClose={() => setTool(null)}
+        gesture={gesture}
+      />
+    );
+  } else if (tool === "layers") {
+    panel = (
+      <LayersPanel
+        overlays={project.overlays}
+        selectedId={selectedOverlay?.id ?? null}
+        sources={sources}
+        onSelect={(id) => {
+          setSelection({ kind: "overlay", id });
+          const o = project.overlays.find((x) => x.id === id);
+          if (o && (clock.get() < o.start || clock.get() >= o.end)) seek(o.start);
+        }}
+        onChange={(id, patch) => apply((p) => updateOverlay(p, id, patch))}
+        onRestack={(id, dir) => apply((p) => restackOverlay(p, id, dir))}
+        onDelete={(id) => apply((p) => ({ ...p, overlays: p.overlays.filter((o) => o.id !== id) }))}
+        onClose={() => setTool(null)}
+      />
+    );
   } else if (selectedClip && sources[selectedClip.clip.sourceId]) {
+    const src = sources[selectedClip.clip.sourceId];
+    const change = (patch: Partial<Clip>) => apply((p) => updateClip(p, selectedClip.clip.id, patch));
     panel = (
       <ClipPanelLive
         clock={clock}
         lay={lay}
         laidIndex={selectedClip.index}
-        source={sources[selectedClip.clip.sourceId]}
-        onChange={(patch) => apply((p) => updateClip(p, selectedClip.clip.id, patch))}
+        source={src}
+        onChange={change}
         onSplit={split}
         onDelete={deleteSelection}
         onMove={moveSelected}
         onAiCleanup={openCleanup}
         onClose={() => setSelection(null)}
+        extra={
+          <ClipExtras
+            clip={selectedClip.clip}
+            source={src}
+            onChange={change}
+            onExtractAudio={() => extractAudio(selectedClip.clip.id)}
+            onOpenLook={() => openLook("filters")}
+            gesture={gesture}
+          />
+        }
       />
     );
   } else if (selectedTransition >= 0 && selectedTransition < lay.clips.length - 1) {
@@ -666,16 +1068,44 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
         onClose={() => setSelection(null)}
       />
     );
-  } else if (selectedSticker) {
+  } else if (selectedOverlay) {
     panel = (
-      <StickerPanel
-        sticker={selectedSticker}
+      <OverlayPanel
+        overlay={selectedOverlay}
         total={lay.total}
-        onChange={(patch) => apply((p) => updateSticker(p, selectedSticker.id, patch))}
+        onChange={(patch) => apply((p) => updateOverlay(p, selectedOverlay.id, patch))}
+        onDuplicate={duplicate}
+        onDelete={deleteSelection}
+        onRestack={(dir) => apply((p) => restackOverlay(p, selectedOverlay.id, dir))}
+        onClose={() => setSelection(null)}
+        gesture={gesture}
+        textAreaRef={textAreaRef}
+      />
+    );
+  } else if (selectedAudio) {
+    panel = (
+      <AudioPanel
+        clip={selectedAudio}
+        sourceDuration={sources[selectedAudio.sourceId]?.duration ?? selectedAudio.offset + selectedAudio.duration}
+        total={lay.total}
+        onChange={(patch) => apply((p) => updateAudio(p, selectedAudio.id, patch))}
+        onSplit={split}
+        onDuplicate={duplicate}
         onDelete={deleteSelection}
         onClose={() => setSelection(null)}
-        onGestureStart={beginGesture}
-        onGestureEnd={endGesture}
+        gesture={gesture}
+      />
+    );
+  } else if (selectedEffect) {
+    panel = (
+      <EffectPanel
+        effect={selectedEffect}
+        total={lay.total}
+        onChange={(patch) => apply((p) => updateEffect(p, selectedEffect.id, patch))}
+        onDuplicate={duplicate}
+        onDelete={deleteSelection}
+        onClose={() => setSelection(null)}
+        gesture={gesture}
       />
     );
   } else {
@@ -684,42 +1114,132 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
         <dl className="grid grid-cols-2 gap-3 text-xs">
           <Stat label="Length" value={formatTime(lay.total, true)} />
           <Stat label="Clips" value={String(project.clips.length)} />
-          <Stat label="Size" value={`${original.width}×${original.height}`} />
-          <Stat label="Audio" value={original.hasAudio ? "Yes" : "None"} />
+          <Stat label="Canvas" value={project.canvas.aspect === "original" ? `${original.width}×${original.height}` : project.canvas.aspect} />
+          <Stat label="Layers" value={String(project.overlays.length + project.audio.length + project.effects.length)} />
         </dl>
         <div className="mt-5 space-y-2 text-xs text-muted">
           <p className="font-semibold text-foreground">Getting started</p>
-          <p>Click a clip on the timeline to trim, move, delete or AI-clean it.</p>
+          <p>Click a clip on the timeline to trim, move, speed up, grade, or AI-clean it.</p>
           <p>Press S (or Split) to cut at the playhead. Split twice and delete the middle to remove a section.</p>
-          <p>Drag clips to reorder them. Click the diamond between clips to add a transition.</p>
+          <p>Add text, music, stickers, images and effects from the toolbar. They appear on their own timeline tracks.</p>
         </div>
         <div className="mt-5 flex flex-wrap gap-2">
-          <ActionButton onClick={() => setShowLibrary(true)}>
-            <StickerIcon width={14} height={14} /> Add sticker
+          <ActionButton onClick={() => setTool("text")}>
+            <TextIcon width={14} height={14} /> Add text
+          </ActionButton>
+          <ActionButton onClick={() => setTool("audio")}>
+            <MusicIcon width={14} height={14} /> Add music
           </ActionButton>
           <ActionButton onClick={openCleanup} tone="accent">
             <SparkleIcon width={14} height={14} /> AI Cleanup
           </ActionButton>
         </div>
-        <p className="mt-6 text-[11px] text-muted">
-          Shortcuts: Space play/pause · S split · Delete remove · ←/→ frame step (Shift: 1s) · Alt+←/→ move clip · Ctrl+Z / Ctrl+Shift+Z undo/redo
+        <p className="mt-6 text-[11px] leading-relaxed text-muted">
+          Shortcuts: Space play/pause · S split · T text · Delete remove · Ctrl+C / Ctrl+V copy/paste · Ctrl+D duplicate · ←/→ frame step (Shift:
+          1s) · Alt+←/→ move clip · Ctrl+Z / Ctrl+Shift+Z undo/redo
         </p>
       </PanelShell>
     );
   }
 
+  // --- timeline tracks ------------------------------------------------------------
+  const sel = selection;
+  const isSel = (kind: string, id: string) => sel !== null && sel.kind === kind && "id" in sel && sel.id === id;
+  const tracks: TimelineTrack[] = [
+    {
+      key: "text",
+      label: "Text",
+      tone: "border-sky-500/40 bg-sky-500/20",
+      empty: "Press T to add text",
+      items: project.overlays
+        .filter((o) => o.kind === "text")
+        .map((o) => ({
+          id: o.id,
+          start: o.start,
+          end: o.end,
+          label: o.kind === "text" ? o.text.content.split("\n")[0] || "Text" : "",
+          glyph: "T",
+          hidden: o.hidden,
+          locked: o.locked,
+          selected: isSel("overlay", o.id),
+          sel: { kind: "overlay", id: o.id },
+        })),
+    },
+    {
+      key: "elements",
+      label: "Elements",
+      tone: "border-accent/40 bg-accent/20",
+      empty: "Stickers and images appear here",
+      items: project.overlays
+        .filter((o) => o.kind !== "text")
+        .map((o) => {
+          const def = o.kind === "sticker" ? getStickerDef(o.stickerId) : undefined;
+          return {
+            id: o.id,
+            start: o.start,
+            end: o.end,
+            label: o.kind === "sticker" ? (def?.label ?? "Sticker") : "Image",
+            thumb: o.kind === "image" ? sources[o.sourceId]?.url : def ? stickerThumbSrc(def) : null,
+            glyph: def?.kind === "emoji" ? def.char : "★",
+            hidden: o.hidden,
+            locked: o.locked,
+            selected: isSel("overlay", o.id),
+            sel: { kind: "overlay" as const, id: o.id },
+          };
+        }),
+    },
+    {
+      key: "audio",
+      label: "Audio",
+      tone: "border-emerald-500/40 bg-emerald-500/20",
+      empty: "Music and extracted audio appear here",
+      items: project.audio.map((a) => ({
+        id: a.id,
+        start: a.start,
+        end: a.start + a.duration,
+        label: `${a.muted ? "🔇 " : ""}${a.label}`,
+        glyph: "♪",
+        selected: isSel("audio", a.id),
+        sel: { kind: "audio" as const, id: a.id },
+      })),
+    },
+    {
+      key: "effects",
+      label: "Effects",
+      tone: "border-amber-500/40 bg-amber-500/20",
+      empty: "Timed effects appear here",
+      items: project.effects.map((e) => ({
+        id: e.id,
+        start: e.start,
+        end: e.end,
+        label: EFFECT_LABELS[e.type],
+        glyph: EFFECT_ICONS[e.type],
+        selected: isSel("effect", e.id),
+        sel: { kind: "effect" as const, id: e.id },
+      })),
+    },
+  ];
+
   const cleanupClip = dialog?.kind === "cleanup" ? project.clips.find((c) => c.id === dialog.clipId) : undefined;
+  const toolBtn = (t: Tool, label: string, icon: React.ReactNode, title: string) => (
+    <ToolButton label={title} onClick={() => (t === "filters" || t === "adjust" ? openLook(t) : setTool((cur) => (cur === t ? null : t)))} text={label} active={tool === t}>
+      {icon}
+    </ToolButton>
+  );
 
   return (
     <div className="flex min-h-dvh flex-col bg-background lg:h-dvh">
       {header}
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="h-[42dvh] min-h-[200px] p-3 lg:h-auto lg:flex-1">
+          <div className="h-[42dvh] min-h-[200px] p-3 lg:h-auto lg:min-h-0 lg:flex-1">
             <PreviewPlayer
               lay={lay}
               sources={sources}
-              aspect={aspect}
+              canvas={project.canvas}
+              canvasSize={canvasSize}
+              effects={project.effects}
+              audio={project.audio}
               clock={clock}
               playing={playing}
               onEnded={onEnded}
@@ -728,19 +1248,23 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
               muted={muted}
               stageRef={stageRef}
             >
-              <StickerLayer
+              <OverlayLayer
                 clock={clock}
-                aspect={aspect}
-                stickers={project.stickers}
-                images={stickerImages}
-                selectedId={selectedSticker?.id ?? null}
+                canvasSize={canvasSize}
+                overlays={project.overlays}
+                rasters={rasters}
+                selectedId={selectedOverlay?.id ?? null}
                 onSelect={(id) => {
-                  if (id) setShowLibrary(false);
-                  setSelection(id ? { kind: "sticker", id } : selection?.kind === "sticker" ? null : selection);
+                  if (id) select({ kind: "overlay", id });
+                  else if (selection?.kind === "overlay") setSelection(null);
                 }}
-                onChange={(id, patch) => apply((p) => updateSticker(p, id, patch))}
+                onChange={(id, patch) => apply((p) => updateOverlay(p, id, patch))}
                 onGestureStart={beginGesture}
                 onGestureEnd={endGesture}
+                onEditText={(id) => {
+                  select({ kind: "overlay", id });
+                  setTimeout(() => textAreaRef.current?.focus(), 30);
+                }}
               />
             </PreviewPlayer>
           </div>
@@ -760,7 +1284,11 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
             onFullscreen={toggleFullscreen}
           />
 
-          <div className="flex flex-wrap items-center gap-1 border-y border-border bg-surface/60 px-2 py-1.5 sm:gap-1.5 sm:px-3" role="toolbar" aria-label="Editing tools">
+          <div
+            className="flex items-center gap-1 overflow-x-auto border-y border-border bg-surface/60 px-2 py-1.5 sm:gap-1.5 sm:px-3"
+            role="toolbar"
+            aria-label="Editing tools"
+          >
             <ToolButton label="Split at playhead (S)" onClick={split} text="Split">
               <SplitIcon />
             </ToolButton>
@@ -770,41 +1298,37 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
             <ToolButton label="Delete selection (Delete)" onClick={deleteSelection} text="Delete">
               <TrashIcon />
             </ToolButton>
-            <span className="mx-1 h-6 w-px bg-border" aria-hidden />
-            <ToolButton label="AI Cleanup on the selected clip" onClick={openCleanup} text="AI Cleanup" accent>
-              <SparkleIcon />
-            </ToolButton>
+            <span className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden />
+            {toolBtn("text", "Text", <TextIcon />, "Add text (T)")}
+            {toolBtn("audio", "Audio", <MusicIcon />, "Music and audio")}
+            {toolBtn("elements", "Elements", <ElementsIcon />, "Stickers and images")}
+            {toolBtn("effects", "Effects", <EffectIcon />, "Timed effects")}
+            {toolBtn("filters", "Filters", <FilterIcon />, "Filters for the selected clip")}
+            {toolBtn("adjust", "Adjust", <AdjustIcon />, "Adjust color and light")}
             <ToolButton label="Transition between clips" onClick={openTransition} text="Transition">
               <TransitionIcon />
             </ToolButton>
-            <ToolButton
-              label="Add a sticker"
-              onClick={() => {
-                setShowLibrary((v) => !v);
-              }}
-              text="Sticker"
-              active={showLibrary}
-            >
-              <StickerIcon />
+            {toolBtn("canvas", "Canvas", <CanvasIcon />, "Canvas size and background")}
+            {toolBtn("layers", "Layers", <LayersIcon />, "Layer order, hide and lock")}
+            <span className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden />
+            <ToolButton label="AI Cleanup on the selected clip" onClick={openCleanup} text="AI Cleanup" accent>
+              <SparkleIcon />
             </ToolButton>
           </div>
 
-          <div className="p-2 sm:p-3">
+          <div className="max-h-[40dvh] overflow-y-auto p-2 sm:p-3 lg:max-h-[38dvh]">
             <Timeline
               lay={lay}
               sources={sources}
               thumbnails={thumbs}
-              stickers={project.stickers}
+              tracks={tracks}
               selection={selection}
               clock={clock}
               playing={playing}
-              onSelect={(s) => {
-                setShowLibrary(false);
-                setSelection(s);
-              }}
+              onSelect={select}
               onSeek={seek}
               onClipChange={(id, patch) => apply((p) => updateClip(p, id, patch))}
-              onStickerChange={(id, patch) => apply((p) => updateSticker(p, id, patch))}
+              onItemChange={onItemChange}
               onMoveClip={(from, to) => apply((p) => moveClip(p, from, to))}
               onGestureStart={beginGesture}
               onGestureEnd={endGesture}
@@ -812,18 +1336,19 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
           </div>
         </main>
 
-        <aside className="border-t border-border bg-surface/50 lg:w-80 lg:shrink-0 lg:border-l lg:border-t-0 xl:w-96" aria-label="Properties">
+        <aside className="border-t border-border bg-surface/50 lg:w-80 lg:shrink-0 lg:overflow-hidden lg:border-l lg:border-t-0 xl:w-96" aria-label="Properties">
           {panel}
         </aside>
       </div>
 
-      {toast && (
+      {(toast || busy) && (
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-4 left-1/2 z-[80] max-w-[90vw] -translate-x-1/2 rounded-full bg-foreground px-4 py-2 text-center text-xs font-medium text-background shadow-xl"
+          className="fixed bottom-4 left-1/2 z-[80] flex max-w-[90vw] -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-4 py-2 text-center text-xs font-medium text-background shadow-xl"
         >
-          {toast}
+          {busy && <span className="h-3 w-3 animate-spin rounded-full border-2 border-background/30 border-t-background" />}
+          {busy ?? toast}
         </div>
       )}
 
@@ -889,7 +1414,7 @@ function ToolButton({
       title={label}
       aria-label={text ? undefined : label}
       aria-pressed={active}
-      className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 disabled:cursor-not-allowed disabled:opacity-35 ${
+      className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 disabled:cursor-not-allowed disabled:opacity-35 ${
         active
           ? "bg-accent text-white"
           : accent
@@ -1014,6 +1539,7 @@ function ClipPanelLive({
   onMove,
   onAiCleanup,
   onClose,
+  extra,
 }: {
   clock: Clock;
   lay: ReturnType<typeof layout>;
@@ -1025,6 +1551,7 @@ function ClipPanelLive({
   onMove: (dir: -1 | 1) => void;
   onAiCleanup: () => void;
   onClose: () => void;
+  extra: React.ReactNode;
 }) {
   const t = useClockTime(clock);
   const loc = locate(lay, t);
@@ -1041,6 +1568,7 @@ function ClipPanelLive({
       onMove={onMove}
       onAiCleanup={onAiCleanup}
       onClose={onClose}
+      extra={extra}
     />
   );
 }

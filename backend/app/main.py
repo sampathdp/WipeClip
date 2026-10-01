@@ -55,7 +55,10 @@ from pydantic import BaseModel, Field, ValidationError
 from app import jobs
 from app.config import (
     BG_REMOVE_PREVIEW_MAX_MEGAPIXELS,
+    EDITOR_MAX_AUDIO,
+    EDITOR_MAX_AUDIO_BYTES,
     EDITOR_MAX_CLIPS,
+    EDITOR_MAX_EFFECTS,
     EDITOR_MAX_FPS,
     EDITOR_MAX_SOURCES,
     EDITOR_MAX_STICKER_BYTES,
@@ -438,9 +441,39 @@ async def api_video_process(
     return Response(content=result, media_type="video/mp4")
 
 
+_HEX_COLOR = r"^#[0-9a-fA-F]{6}$"
+
+
 class _EditorTransition(BaseModel):
     type: str
     duration: float = Field(ge=0, le=EDITOR_MAX_TRANSITION_SECONDS)
+
+
+class _EditorAdjust(BaseModel):
+    brightness: float = Field(0, ge=-100, le=100)
+    contrast: float = Field(0, ge=-100, le=100)
+    saturation: float = Field(0, ge=-100, le=100)
+    exposure: float = Field(0, ge=-100, le=100)
+    temperature: float = Field(0, ge=-100, le=100)
+    tint: float = Field(0, ge=-100, le=100)
+    highlights: float = Field(0, ge=-100, le=100)
+    shadows: float = Field(0, ge=-100, le=100)
+    sharpness: float = Field(0, ge=0, le=100)
+    blur: float = Field(0, ge=0, le=100)
+    opacity: float = Field(100, ge=0, le=100)
+
+
+class _EditorLook(BaseModel):
+    filter: str = "original"
+    intensity: float = Field(100, ge=0, le=100)
+    adjust: _EditorAdjust = Field(default_factory=_EditorAdjust)
+
+
+class _EditorTransform(BaseModel):
+    x: float = Field(0.5, ge=-1, le=2)
+    y: float = Field(0.5, ge=-1, le=2)
+    scale: float = Field(1, ge=0.1, le=4)
+    rotation: float = Field(0, ge=-360, le=360)
 
 
 class _EditorClip(BaseModel):
@@ -448,26 +481,68 @@ class _EditorClip(BaseModel):
     start: float = Field(ge=0)
     end: float = Field(gt=0)
     transition: Optional[_EditorTransition] = None
+    speed: float = Field(1, ge=0.5, le=2)
+    volume: float = Field(1, ge=0, le=2)
+    transform: _EditorTransform = Field(default_factory=_EditorTransform)
+    look: _EditorLook = Field(default_factory=_EditorLook)
 
 
-class _EditorSticker(BaseModel):
+class _EditorOverlay(BaseModel):
     image: int = Field(ge=0, lt=EDITOR_MAX_STICKERS)
     start: float = Field(ge=0)
     end: float = Field(gt=0)
     x: float = Field(ge=-0.5, le=1.5)
     y: float = Field(ge=-0.5, le=1.5)
-    width: float = Field(ge=0.01, le=2.0)
+    width: float = Field(ge=0.01, le=3.0)
     rotation: float = Field(ge=-360, le=360)
+    opacity: float = Field(1, ge=0, le=1)
     animIn: str = "none"
     animOut: str = "none"
 
 
+class _EditorAudio(BaseModel):
+    # Exactly one of: an uploaded audio file (index into `audios`), or a
+    # video source (index into `sources`) for "Extract audio".
+    audio: Optional[int] = Field(None, ge=0, lt=EDITOR_MAX_AUDIO)
+    video: Optional[int] = Field(None, ge=0, lt=EDITOR_MAX_SOURCES)
+    start: float = Field(ge=0)
+    offset: float = Field(0, ge=0)
+    duration: float = Field(gt=0)
+    volume: float = Field(1, ge=0, le=2)
+    fadeIn: float = Field(0, ge=0, le=10)
+    fadeOut: float = Field(0, ge=0, le=10)
+
+
+class _EditorEffect(BaseModel):
+    type: str
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    intensity: float = Field(50, ge=0, le=100)
+
+
+class _EditorBackground(BaseModel):
+    type: str = "color"  # color | gradient | blur | image
+    color: str = Field("#000000", pattern=_HEX_COLOR)
+    color2: str = Field("#000000", pattern=_HEX_COLOR)
+
+
+class _EditorCanvas(BaseModel):
+    aspect: str = "original"
+    fit: str = "fit"
+    background: _EditorBackground = Field(default_factory=_EditorBackground)
+
+
 class _EditorProject(BaseModel):
     clips: list[_EditorClip] = Field(min_length=1, max_length=EDITOR_MAX_CLIPS)
-    stickers: list[_EditorSticker] = Field(default_factory=list, max_length=EDITOR_MAX_STICKERS)
+    overlays: list[_EditorOverlay] = Field(default_factory=list, max_length=EDITOR_MAX_STICKERS)
+    audio: list[_EditorAudio] = Field(default_factory=list, max_length=EDITOR_MAX_AUDIO)
+    effects: list[_EditorEffect] = Field(default_factory=list, max_length=EDITOR_MAX_EFFECTS)
+    canvas: _EditorCanvas = Field(default_factory=_EditorCanvas)
 
 
 _VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
+_AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac", ".webm"}
+_CANVAS_ASPECTS = {"16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1.0, "4:5": 4 / 5, "4:3": 4 / 3}
 
 
 def _save_upload(upload: UploadFile, path: str, max_bytes: int) -> int:
@@ -487,27 +562,52 @@ def _save_upload(upload: UploadFile, path: str, max_bytes: int) -> int:
     return written
 
 
+def _load_image_upload(upload: UploadFile, tmp: str, name: str) -> tuple[str, int, int]:
+    """Decodes, size-checks, moderation-screens and re-encodes an image
+    upload (overlay or background) to a clean RGBA PNG; returns its path
+    and size."""
+    raw_path = os.path.join(tmp, f"{name}.upload")
+    _save_upload(upload, raw_path, EDITOR_MAX_STICKER_BYTES)
+    img = cv2.imdecode(np.fromfile(raw_path, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+    if img is None or img.ndim not in (2, 3):
+        raise HTTPException(status_code=400, detail="An image could not be read")
+    ih, iw = img.shape[:2]
+    if iw < 2 or ih < 2 or max(iw, ih) > EDITOR_MAX_STICKER_DIMENSION:
+        raise HTTPException(status_code=400, detail="An image has an unsupported size")
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
+    elif img.shape[2] == 3:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
+    _assert_image_safe(img)
+    clean_path = os.path.join(tmp, f"{name}.png")
+    if not cv2.imwrite(clean_path, img):
+        raise HTTPException(status_code=500, detail="Could not prepare an image")
+    return clean_path, iw, ih
+
+
 @app.post("/api/video/export")
 async def api_video_export(
     request: Request,
     project: str = Form(...),
     resolution: str = Form("720p"),
     sources: list[UploadFile] = File(...),
-    stickers: list[UploadFile] = File(default=[]),
+    overlays: list[UploadFile] = File(default=[]),
+    audios: list[UploadFile] = File(default=[]),
+    background: Optional[UploadFile] = File(None),
 ):
     """Renders a browser-editor project (see app/pipeline/editor.py) into
-    one MP4. `sources[0]` is the original upload and sets the output
-    canvas (display size, frame rate); further sources are AI-cleaned
-    segments. `project` is JSON: clips (source index + source-time range +
-    optional transition into the next clip) in timeline order, and stickers
-    (image index into `stickers` + timeline range + normalized transform).
+    one MP4. `sources[0]` is the original upload and sets the frame rate and
+    (with the canvas aspect) the output size; further sources are AI-cleaned
+    segments. `overlays` are the PNGs for stickers/text/images, `audios`
+    uploaded audio files, `background` an optional canvas background image.
+    `project` is the JSON timeline - see _EditorProject.
 
-    Nothing the client says about a file is trusted: every source is
-    re-probed and moderation-screened here, clip ranges are validated
-    against the probed durations, sticker images are decoded, size-checked,
-    screened, and re-encoded before use, and transition/animation names are
-    whitelisted. Credits are handled by the Next.js /api/export route in
-    front of this, exactly like /api/video/process.
+    Nothing the client says about a file is trusted: every video and audio
+    file is re-probed (videos are moderation-screened too), every image is
+    decoded, size-checked, screened and re-encoded, all ranges are validated
+    against probed durations, and every name (transition, filter, effect,
+    animation, canvas) is whitelisted. Credits are handled by the Next.js
+    /api/export route in front of this, exactly like /api/video/process.
     """
     _assert_internal_caller(request)
     if resolution not in RESOLUTION_HEIGHTS:
@@ -516,8 +616,8 @@ async def api_video_export(
         )
     if not sources or len(sources) > EDITOR_MAX_SOURCES:
         raise HTTPException(status_code=400, detail="Invalid number of source videos")
-    if len(stickers) > EDITOR_MAX_STICKERS:
-        raise HTTPException(status_code=400, detail="Too many stickers")
+    if len(overlays) > EDITOR_MAX_STICKERS or len(audios) > EDITOR_MAX_AUDIO:
+        raise HTTPException(status_code=400, detail="Too many layers")
 
     try:
         spec = _EditorProject.model_validate(json.loads(project))
@@ -529,11 +629,28 @@ async def api_video_export(
             raise HTTPException(status_code=400, detail="Clip refers to a missing source video")
         if c.transition and c.transition.type not in editor_pipeline.TRANSITIONS:
             raise HTTPException(status_code=400, detail="Unknown transition")
-    for s in spec.stickers:
-        if s.image >= len(stickers):
-            raise HTTPException(status_code=400, detail="Sticker refers to a missing image")
-        if s.animIn not in editor_pipeline.STICKER_ANIMS_IN or s.animOut not in editor_pipeline.STICKER_ANIMS_OUT:
-            raise HTTPException(status_code=400, detail="Unknown sticker animation")
+        if c.look.filter not in editor_pipeline.FILTER_IDS:
+            raise HTTPException(status_code=400, detail="Unknown filter")
+    for o in spec.overlays:
+        if o.image >= len(overlays):
+            raise HTTPException(status_code=400, detail="Layer refers to a missing image")
+        if o.animIn not in editor_pipeline.ANIMS_IN or o.animOut not in editor_pipeline.ANIMS_OUT:
+            raise HTTPException(status_code=400, detail="Unknown animation")
+    for a in spec.audio:
+        if (a.audio is None) == (a.video is None):
+            raise HTTPException(status_code=400, detail="Invalid audio clip")
+        if (a.audio is not None and a.audio >= len(audios)) or (a.video is not None and a.video >= len(sources)):
+            raise HTTPException(status_code=400, detail="Audio clip refers to a missing file")
+    for e in spec.effects:
+        if e.type not in editor_pipeline.EFFECTS:
+            raise HTTPException(status_code=400, detail="Unknown effect")
+    canvas = spec.canvas
+    if canvas.aspect != "original" and canvas.aspect not in _CANVAS_ASPECTS:
+        raise HTTPException(status_code=400, detail="Unknown canvas size")
+    if canvas.fit not in ("fit", "fill") or canvas.background.type not in ("color", "gradient", "blur", "image"):
+        raise HTTPException(status_code=400, detail="Invalid canvas settings")
+    if canvas.background.type == "image" and background is None:
+        raise HTTPException(status_code=400, detail="Background image missing")
 
     with tempfile.TemporaryDirectory() as tmp:
         total_bytes = 0
@@ -559,34 +676,37 @@ async def api_video_export(
             source_paths.append(path)
             source_infos.append(info)
 
-        sticker_images: list[tuple[str, int, int]] = []
-        for i, upload in enumerate(stickers):
-            raw_path = os.path.join(tmp, f"sticker{i}.upload")
-            _save_upload(upload, raw_path, EDITOR_MAX_STICKER_BYTES)
-            img = cv2.imdecode(np.fromfile(raw_path, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
-            if img is None or img.ndim not in (2, 3):
-                raise HTTPException(status_code=400, detail="A sticker image could not be read")
-            ih, iw = img.shape[:2]
-            if iw < 2 or ih < 2 or max(iw, ih) > EDITOR_MAX_STICKER_DIMENSION:
-                raise HTTPException(status_code=400, detail="A sticker image has an unsupported size")
-            if img.ndim == 2:
-                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
-            elif img.shape[2] == 3:
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
-            _assert_image_safe(img)
-            clean_path = os.path.join(tmp, f"sticker{i}.png")
-            if not cv2.imwrite(clean_path, img):
-                raise HTTPException(status_code=500, detail="Could not prepare a sticker image")
-            sticker_images.append((clean_path, iw, ih))
+        audio_paths: list[str] = []
+        audio_durations: list[float] = []
+        for i, upload in enumerate(audios):
+            suffix = Path(upload.filename or "").suffix.lower()
+            path = os.path.join(tmp, f"audio{i}{suffix if suffix in _AUDIO_SUFFIXES else '.bin'}")
+            total_bytes += _save_upload(upload, path, EDITOR_MAX_AUDIO_BYTES)
+            if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES:
+                raise HTTPException(status_code=400, detail="Project files are too large to export together")
+            try:
+                audio_durations.append(editor_pipeline.probe_audio(path))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="An audio file could not be read") from exc
+            audio_paths.append(path)
 
-        # Output canvas: the original's display size and frame rate, capped
-        # (never upscaled) so its short side fits the requested resolution,
-        # rounded down to even dimensions for yuv420p.
+        overlay_images = [_load_image_upload(u, tmp, f"overlay{i}") for i, u in enumerate(overlays)]
+        background_path = _load_image_upload(background, tmp, "background")[0] if background is not None else None
+
+        # Output canvas: the original's frame rate; its display size, or the
+        # chosen aspect ratio at the original's short side. The short side is
+        # then capped (never upscaled) at the requested resolution, and both
+        # sides rounded down to even numbers for yuv420p.
         base = source_infos[0]
         short_side = min(base.width, base.height)
-        scale = min(1.0, RESOLUTION_HEIGHTS[resolution] / short_side) if short_side > 0 else 1.0
-        out_w = max(2, int(base.width * scale) // 2 * 2)
-        out_h = max(2, int(base.height * scale) // 2 * 2)
+        if canvas.aspect == "original":
+            cw, ch = float(base.width), float(base.height)
+        else:
+            ar = _CANVAS_ASPECTS[canvas.aspect]
+            cw, ch = (short_side * ar, float(short_side)) if ar >= 1 else (float(short_side), short_side / ar)
+        scale = min(1.0, RESOLUTION_HEIGHTS[resolution] / min(cw, ch)) if short_side > 0 else 1.0
+        out_w = max(2, int(cw * scale) // 2 * 2)
+        out_h = max(2, int(ch * scale) // 2 * 2)
         fps = base.fps if 1 <= base.fps <= EDITOR_MAX_FPS else (EDITOR_MAX_FPS if base.fps > EDITOR_MAX_FPS else 30.0)
 
         plan_clips: list[editor_pipeline.PlanClip] = []
@@ -599,10 +719,21 @@ async def api_video_export(
                 editor_pipeline.PlanClip(
                     source_path=source_paths[c.source],
                     source_has_audio=info.has_audio,
+                    source_width=info.width,
+                    source_height=info.height,
                     start=c.start,
                     duration=end - c.start,
                     transition=c.transition.type if c.transition and c.transition.duration > 0 else None,
                     transition_duration=c.transition.duration if c.transition else 0.0,
+                    speed=c.speed,
+                    volume=c.volume,
+                    x=c.transform.x,
+                    y=c.transform.y,
+                    scale=c.transform.scale,
+                    rotation=c.transform.rotation,
+                    filter=c.look.filter,
+                    intensity=c.look.intensity,
+                    adjust=c.look.adjust.model_dump(),
                 )
             )
 
@@ -610,49 +741,69 @@ async def api_video_export(
             width=out_w,
             height=out_h,
             fps=round(fps, 3),
-            with_audio=any(source_infos[c.source].has_audio for c in spec.clips),
+            with_audio=False,
             clips=plan_clips,
+            fit=canvas.fit,
+            background=canvas.background.type,
+            color=canvas.background.color,
+            color2=canvas.background.color2,
+            background_image=background_path,
         )
         editor_pipeline.quantize_plan(plan)
         total = editor_pipeline.timeline_duration(plan)
         if total > MAX_VIDEO_DURATION_SECONDS:
             raise HTTPException(status_code=400, detail="The edited video is too long to export")
 
-        for s in spec.stickers:
-            start, end = s.start, min(s.end, total)
+        # Layers entirely past the end of the (possibly shortened) timeline
+        # are skipped; the rest are clamped to it.
+        for o in spec.overlays:
+            start, end = o.start, min(o.end, total)
             if end - start < 0.05:
-                continue  # entirely past the end of the (possibly shortened) timeline
-            path, iw, ih = sticker_images[s.image]
-            plan.stickers.append(
-                editor_pipeline.PlanSticker(
-                    image_path=path,
-                    image_width=iw,
-                    image_height=ih,
-                    start=start,
-                    end=end,
-                    x=s.x,
-                    y=s.y,
-                    width=s.width,
-                    rotation=s.rotation,
-                    anim_in=s.animIn,
-                    anim_out=s.animOut,
+                continue
+            path, iw, ih = overlay_images[o.image]
+            plan.overlays.append(
+                editor_pipeline.PlanOverlay(
+                    image_path=path, image_width=iw, image_height=ih, start=start, end=end,
+                    x=o.x, y=o.y, width=o.width, rotation=o.rotation, opacity=o.opacity,
+                    anim_in=o.animIn, anim_out=o.animOut,
                 )
             )
+        for e in spec.effects:
+            start, end = e.start, min(e.end, total)
+            if end - start >= 0.05:
+                plan.effects.append(editor_pipeline.PlanEffect(type=e.type, start=start, end=end, intensity=e.intensity))
+        for a in spec.audio:
+            if a.audio is not None:
+                path, src_duration = audio_paths[a.audio], audio_durations[a.audio]
+            else:
+                info = source_infos[a.video]  # type: ignore[index]
+                if not info.has_audio:
+                    continue
+                path, src_duration = source_paths[a.video], info.duration  # type: ignore[index]
+            duration = min(a.duration, src_duration - a.offset, total - a.start)
+            if duration < 0.05:
+                continue
+            plan.audio.append(
+                editor_pipeline.PlanAudio(
+                    path=path, start=a.start, offset=a.offset, duration=duration,
+                    volume=a.volume, fade_in=min(a.fadeIn, duration / 2), fade_out=min(a.fadeOut, duration / 2),
+                )
+            )
+        plan.with_audio = bool(plan.audio) or any(source_infos[c.source].has_audio for c in spec.clips)
 
         out_path = os.path.join(tmp, "export.mp4")
         plan_json = json.dumps(
             {
-                "width": plan.width,
-                "height": plan.height,
-                "fps": plan.fps,
-                "with_audio": plan.with_audio,
+                **{k: getattr(plan, k) for k in ("width", "height", "fps", "with_audio", "fit", "background", "color", "color2", "background_image")},
                 "clips": [vars(c) for c in plan.clips],
-                "stickers": [vars(s) for s in plan.stickers],
+                "overlays": [vars(o) for o in plan.overlays],
+                "audio": [vars(a) for a in plan.audio],
+                "effects": [vars(e) for e in plan.effects],
             }
         )
-        # Full re-encode of the timeline plus per-clip decode seeks; stickers
-        # and transitions add compositing work on top.
-        job_timeout = max(180.0, total * (6 + 0.5 * len(plan.stickers)))
+        # Full re-encode of the timeline plus per-clip decode seeks; layers,
+        # effects and grading add compositing work on top.
+        job_timeout = max(180.0, total * (8 + 0.5 * (len(plan.overlays) + len(plan.effects))))
         try:
             await _run_pipeline_job(jobs.editor_export_job, plan_json, out_path, timeout=job_timeout)
         except Exception as exc:  # noqa: BLE001
@@ -669,6 +820,7 @@ async def api_video_export(
             result = f.read()
 
     return Response(content=result, media_type="video/mp4")
+
 
 
 @app.post("/api/image/detect-artifacts")
