@@ -91,6 +91,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.8,
     })),
     {
+      url: `${siteUrl}/feedback`,
+      lastModified: "2026-10-01",
+      changeFrequency: "monthly",
+      priority: 0.4,
+    },
+    {
       url: `${siteUrl}/terms`,
       lastModified: "2026-08-19",
       changeFrequency: "yearly",

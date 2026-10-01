@@ -83,6 +83,29 @@ create table if not exists payment_orders (
 );
 create index if not exists payment_orders_user_id_idx on payment_orders (user_id);
 
+-- User-submitted bug reports, feature requests and general feedback from
+-- /feedback. Anyone can submit (user_id is null for signed-out visitors,
+-- who may leave a contact email instead); signed-in users can read back
+-- their own rows to see the status of what they reported. Inserts go
+-- through /api/feedback with the service-role key, never the client.
+-- status/admin_reply are updated by hand from the Supabase dashboard.
+create table if not exists feedback (
+  id bigserial primary key,
+  user_id uuid references profiles (id) on delete set null,
+  email text,
+  kind text not null, -- 'bug' | 'feature' | 'feedback'
+  subject text not null,
+  message text not null,
+  page_url text,
+  user_agent text,
+  status text not null default 'open', -- 'open' | 'in_progress' | 'resolved' | 'closed'
+  admin_reply text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists feedback_user_id_idx on feedback (user_id);
+create index if not exists feedback_status_idx on feedback (status, created_at desc);
+
 -- New auth user -> profile row, so every signed-up account has a balance
 -- from the start without a separate onboarding step.
 create or replace function handle_new_user()
@@ -310,11 +333,16 @@ alter table profiles enable row level security;
 alter table credit_transactions enable row level security;
 -- No policies: only the service-role key (checkout route, webhook) touches it.
 alter table payment_orders enable row level security;
+alter table feedback enable row level security;
 
 create policy "read own profile" on profiles
   for select using (auth.uid() = id);
 
 create policy "read own transactions" on credit_transactions
+  for select using (auth.uid() = user_id);
+
+drop policy if exists "read own feedback" on feedback;
+create policy "read own feedback" on feedback
   for select using (auth.uid() = user_id);
 
 -- No insert/update/delete policies for authenticated users on purpose:
