@@ -129,8 +129,13 @@ export default function TermsPage() {
 
       <H2>6. Paid Plans, Credits & Refund Policy</H2>
       <P>
-        WipeClip.co provides both free credits and paid options (30-day
-        Starter and Pro passes, and one-time Pay-As-You-Go credit packs).
+        WipeClip.co offers a free plan and paid plans (Lite, Starter and Pro,
+        each available monthly or yearly), plus one-time AI credit packs. What
+        each plan includes is listed on the{" "}
+        <Link href="/pricing" className="underline hover:text-foreground">
+          pricing page
+        </Link>
+        .
       </P>
       <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-muted">
         <li>
@@ -140,14 +145,19 @@ export default function TermsPage() {
           customer terms and privacy policy.
         </li>
         <li>
-          <strong>Passes &amp; Renewal:</strong> Starter and Pro are 30-day passes
-          and do not renew automatically. Buying again before a pass ends
-          extends it by another 30 days. Purchased credits never expire.
+          <strong>Plans &amp; Renewal:</strong> Paid plans are prepaid for 30
+          days (monthly) or 365 days (yearly) and do not renew automatically.
+          Buying the same plan again before it ends adds the new period to the
+          time left. When a plan ends, your account returns to the free plan;
+          your projects and purchased credits are kept.
         </li>
         <li>
-          <strong>Credits:</strong> Credits are consumed upon successful video
-          processing. If a processing job fails due to an internal server error,
-          the consumed credit is automatically refunded to your account balance.
+          <strong>Credits:</strong> AI credits are used by the AI tools (object
+          cleanup, background removal, sharpening); editing and exporting in
+          the video editor never use credits. Credits included with a plan are
+          added when you buy it; purchased credits never expire and have no
+          cash value. If an AI job fails due to an internal server error, the
+          credits it used are returned to your balance automatically.
         </li>
         <li>
           <strong>Refund Policy:</strong> We offer a 14-day refund window for paid
