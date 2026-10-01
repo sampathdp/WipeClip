@@ -83,8 +83,6 @@ export interface Region {
 
 export interface WatermarkCandidate extends Region {
   confidence: number;
-  label?: string | null; // matched reference logo's name (e.g. "tiktok"),
-                          // or null for an unidentified static-region match
 }
 
 /** Best-effort watermark region suggestion (temporal-static-region

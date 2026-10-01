@@ -62,7 +62,6 @@ from app.config import (
     WATERMARK_PATCH_SHARPEN_AMOUNT,
     WATERMARK_PATCH_SHARPEN_KSIZE,
 )
-from app.pipeline.logo_match import match_known_logos
 
 
 def get_ffmpeg_path() -> str:
@@ -182,16 +181,10 @@ class WatermarkCandidate:
                         # to the rest of the frame - not relative to other
                         # candidates, so it stays meaningful even when only
                         # one candidate comes back.
-    label: str | None = None  # matched reference logo's name (see
-                        # logo_match.py), or None for a plain
-                        # temporal-static-region candidate with no
-                        # identified brand.
 
 
 def _iou(a, b) -> float:
-    """Intersection-over-union of two x/y/w/h boxes (duck-typed - works for
-    both WatermarkCandidate and logo_match.LogoMatchCandidate).
-    """
+    """Intersection-over-union of two x/y/w/h boxes."""
     ax0, ay0, ax1, ay1 = a.x, a.y, a.x + a.w, a.y + a.h
     bx0, by0, bx1, by1 = b.x, b.y, b.x + b.w, b.y + b.h
     iw = max(0, min(ax1, bx1) - max(ax0, bx0))
@@ -244,11 +237,7 @@ def detect_watermark_candidates(path: str) -> tuple[list[WatermarkCandidate], in
     between a small low-variance region and a higher-variance rest (gated
     by WATERMARK_DETECT_MIN_MOTION on the frame's median motion) - no clear
     split means no *temporal* candidates, rather than a bogus full-frame
-    box the user could accidentally accept over real content. That gate
-    does NOT suppress logo template matching (see logo_match.py) below it,
-    which needs no motion at all and runs regardless - a mostly-static
-    clip (title card, screen recording) can still get a match if a known
-    logo is visible in the one frame checked. Letterbox/pillarbox bars are
+    box the user could accidentally accept over real content. Letterbox/pillarbox bars are
     excluded explicitly from the temporal side: they're just as
     pixel-static as a logo but span nearly the full width or height, which
     no actual corner/overlay logo does.
@@ -350,19 +339,7 @@ def detect_watermark_candidates(path: str) -> tuple[list[WatermarkCandidate], in
         scored.sort(key=lambda c: -c.confidence)
         temporal_candidates = scored[:WATERMARK_DETECT_MAX_CANDIDATES]
 
-    # A named-logo match (see logo_match.py) is strictly more informative
-    # than "this patch didn't move" - where the two overlap, the identified
-    # match replaces the unlabeled duplicate rather than sitting next to it.
-    # No-op (empty list) when no reference logo images are configured.
-    logo_candidates = match_known_logos(frames[0])
-    merged = list(temporal_candidates)
-    for logo in logo_candidates:
-        merged = [c for c in merged if _iou(c, logo) < 0.3]
-        merged.append(
-            WatermarkCandidate(x=logo.x, y=logo.y, w=logo.w, h=logo.h, confidence=logo.confidence, label=logo.label)
-        )
-    merged.sort(key=lambda c: -c.confidence)
-    return merged, w, h
+    return temporal_candidates, w, h
 
 
 async def _run_ffmpeg(args: list[str]) -> None:

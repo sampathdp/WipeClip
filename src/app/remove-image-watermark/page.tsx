@@ -6,7 +6,7 @@ import { buildPageMetadata } from "@/lib/seo";
 
 const title = "Remove Image Watermark - Pro Tool";
 const description =
-  "Mark a watermark or logo region on any image once, and WipeClip.co reconstructs the pixels beneath it. A Pro-plan tool, same motion-free inpainting as the video tool.";
+  "Mark an unwanted region on an image you own once, and WipeClip.co reconstructs the pixels beneath it. A Pro-plan tool, same motion-free inpainting as the video tool.";
 
 export const metadata: Metadata = buildPageMetadata({
   title,

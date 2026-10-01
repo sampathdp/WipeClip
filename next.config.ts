@@ -19,7 +19,27 @@ const securityHeaders = [
   },
 ];
 
+// Retired brand-specific landing pages; send old links and search results
+// to the homepage instead of a 404.
+const RETIRED_PLATFORM_PAGES = [
+  "tiktok",
+  "capcut",
+  "canva",
+  "instagram",
+  "snapchat",
+  "facebook",
+  "kapwing",
+  "inshot",
+];
+
 const nextConfig: NextConfig = {
+  async redirects() {
+    return RETIRED_PLATFORM_PAGES.map((p) => ({
+      source: `/remove-${p}-watermark`,
+      destination: "/",
+      permanent: true,
+    }));
+  },
   async headers() {
     return [
       {

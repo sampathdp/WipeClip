@@ -1,5 +1,4 @@
 import type { MetadataRoute } from "next";
-import { WATERMARK_PLATFORMS } from "@/lib/watermarkPlatforms";
 import { SITE_URL } from "@/lib/seo";
 
 const siteUrl = SITE_URL;
@@ -84,12 +83,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "monthly",
       priority: 0.6,
     },
-    ...WATERMARK_PLATFORMS.map((p) => ({
-      url: `${siteUrl}/${p.slug}`,
-      lastModified: "2026-08-20",
-      changeFrequency: "weekly" as const,
-      priority: 0.8,
-    })),
     {
       url: `${siteUrl}/feedback`,
       lastModified: "2026-10-01",

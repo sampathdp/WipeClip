@@ -170,8 +170,7 @@ export default function TermsPage() {
       </P>
       <P>
         All third-party product names, logos, and trademarks mentioned on the
-        website (e.g., TikTok, CapCut, Canva, Instagram, Snapchat, Facebook,
-        Kapwing, InShot) are the property of their respective owners. Their
+        website are the property of their respective owners. Their
         mention does not imply any affiliation, sponsorship, or endorsement.
       </P>
 

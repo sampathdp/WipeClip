@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { constructWebhookEvent } from "@/lib/paymentsLk";
-
-// Starter/Pro are sold as 30-day passes: Payments.lk has no subscription
-// object (renewals would need saved cards on Payable's Advanced plan), so
-// each purchase grants the credits and the tier for this many days.
-const PLAN_DAYS = 30;
+import { PLANS } from "@/lib/credits";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -52,15 +48,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Paid amount is below the order amount." }, { status: 422 });
     }
 
-    const isTier = order.plan === "starter" || order.plan === "pro";
+    // Subscriptions are sold as monthly or yearly passes: Payments.lk has no
+    // subscription object (renewals would need saved cards on Payable's
+    // Advanced plan), so each purchase grants the credits and the tier for
+    // the plan's days. The order's plan key was fixed server side at checkout.
+    const def = Object.hasOwn(PLANS, order.plan) ? PLANS[order.plan as keyof typeof PLANS] : null;
     // Keyed on the payment, not the event, so a payment delivered under two
     // event ids still grants once.
     const { error } = await supabase.rpc("grant_paid_credits", {
       p_user_id: order.user_id,
       p_amount: order.credits,
       p_event_id: `payments_lk:${payment.id}`,
-      p_plan: isTier ? order.plan : null,
-      p_plan_days: isTier ? PLAN_DAYS : null,
+      p_plan: def?.tier ?? null,
+      p_plan_days: def?.days ?? null,
     });
     if (error) {
       // Non-2xx makes Payments.lk retry; the grant is idempotent on the id.

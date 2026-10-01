@@ -1,6 +1,5 @@
 import Link from "next/link";
 import Logo from "./Logo";
-import { WATERMARK_PLATFORMS } from "@/lib/watermarkPlatforms";
 
 export default function Footer() {
   return (
@@ -48,19 +47,9 @@ export default function Footer() {
           <Link href="/sharpen-image" className="transition-colors hover:text-foreground">
             Photo Sharpener
           </Link>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted">
-          <span className="font-semibold text-foreground/80">Clean up footage from:</span>
-          {WATERMARK_PLATFORMS.map((p) => (
-            <span key={p.slug} className="flex items-center gap-2">
-              <Link href={`/${p.slug}`} className="transition-colors hover:text-foreground">
-                {p.platform}
-              </Link>
-              <span className="text-border">&middot;</span>
-            </span>
-          ))}
+          <span className="text-border">&middot;</span>
           <Link href="/remove-image-watermark" className="transition-colors hover:text-foreground">
-            Still Images
+            Image Cleanup
           </Link>
         </div>
         <p className="mt-4 text-xs text-muted">

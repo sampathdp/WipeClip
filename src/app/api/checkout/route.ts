@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { PLANS, type PlanKey } from "@/lib/credits";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
+import { effectivePlan } from "@/lib/plan";
 import { createCheckout, getSecretKey, PaymentsLkError } from "@/lib/paymentsLk";
 
 // Payments.lk requires customer.name (2 to 80 characters) whenever a
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => null);
   const plan = body?.plan as PlanKey | undefined;
-  if (!plan || !(plan in PLANS)) {
+  if (!plan || !Object.hasOwn(PLANS, plan)) {
     return NextResponse.json({ error: "Unknown plan." }, { status: 400 });
   }
 
@@ -48,9 +49,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { amountCents, credits, label } = PLANS[plan];
+  const { amountCents, credits, label, period, tier } = PLANS[plan];
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? request.nextUrl.origin;
   const admin = createServiceClient();
+
+  // grant_paid_credits switches the account to the purchased tier, so a
+  // Starter pass bought during an active Pro pass would cut Pro short.
+  if (tier === "starter") {
+    const { data: profile } = await admin.from("profiles").select("plan, plan_expires_at").eq("id", user.id).single();
+    if (profile && effectivePlan(profile) === "pro") {
+      return NextResponse.json(
+        { error: "You already have Pro, which includes everything in Starter. Renew Pro or buy a credit pack instead." },
+        { status: 409 }
+      );
+    }
+  }
 
   // Payments.lk has no free-form metadata on a checkout, so the order is
   // recorded here first and its id travels as the checkout's `reference`.
@@ -71,7 +84,9 @@ export async function POST(request: NextRequest) {
     const checkout = await createCheckout(
       {
         amountCents,
-        description: `WipeClip ${label} - ${credits} credits`,
+        description: period
+          ? `WipeClip ${label} (${period === "year" ? "yearly" : "monthly"}) - ${credits} AI credits`
+          : `WipeClip ${label} - ${credits} AI credits`,
         reference: order.id,
         customer: checkoutCustomer(user.email, user.user_metadata),
         successUrl: `${siteUrl}/pricing?success=1&plan=${plan}`,

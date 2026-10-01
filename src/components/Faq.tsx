@@ -8,7 +8,7 @@ const faqs = [
   },
   {
     q: "Can I use this on any video I find online?",
-    a: "No. WipeClip.co is for content you own or have explicit permission to edit, such as your own AI-generated video drafts, personal B-roll, or footage with client authorization. You confirm this before every job.",
+    a: "No. WipeClip.co is for content you own or have explicit permission to edit, such as your own recordings, personal B-roll, or footage with client authorization. You confirm this before every job.",
   },
   {
     q: "Does this actually reconstruct the area, or just blur it?",
@@ -16,7 +16,7 @@ const faqs = [
   },
   {
     q: "Which overlays are supported?",
-    a: "Any badge, logo, caption, timestamp, or unwanted static object. Because you mark its position on the preview frame, it is not restricted to specific predefined shapes or brands.",
+    a: "Timestamps, captions, your own logos and graphics, or unwanted objects in footage you own. You mark the region yourself on the preview frame.",
   },
   {
     q: "Will the output lose resolution or quality?",

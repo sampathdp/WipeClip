@@ -48,8 +48,8 @@ export function currentPath(): string | undefined {
 }
 
 /**
- * Same-origin referring path (e.g. "/remove-tiktok-watermark" for a visitor
- * who clicked through from that SEO landing page into the homepage tool).
+ * Same-origin referring path (e.g. "/guides/how-ai-video-inpainting-works" for
+ * a visitor who clicked through from that guide into the homepage tool).
  * Cross-origin referrers are dropped - only the path is ever read, and only
  * when it points back at this site. Never throws.
  */

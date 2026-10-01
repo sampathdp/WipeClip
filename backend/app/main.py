@@ -273,7 +273,7 @@ async def api_video_detect_watermark(file: UploadFile = File(...)):
         "width": width,
         "height": height,
         "candidates": [
-            {"x": c.x, "y": c.y, "w": c.w, "h": c.h, "confidence": c.confidence, "label": c.label}
+            {"x": c.x, "y": c.y, "w": c.w, "h": c.h, "confidence": c.confidence}
             for c in candidates
         ],
     }

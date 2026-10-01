@@ -242,25 +242,6 @@ WATERMARK_DETECT_MIN_SOLIDITY: float = 0.35
 WATERMARK_DETECT_MAX_CANDIDATES: int = 5
 WATERMARK_DETECT_BOX_PADDING_PX: int = 4
 
-# --- Known-platform logo template matching (suggest-only) -------------------
-# Complements WATERMARK_DETECT_* above (which finds *any* fixed overlay,
-# unidentified) with a match against a *specific* known logo shape - see
-# app/pipeline/logo_match.py. Ships empty: no logo images are bundled in
-# this repo (TikTok/CapCut/Instagram/Shutterstock/etc. marks are someone
-# else's trademarked assets, not something to reproduce here). Drop your
-# own reference PNGs into LOGO_REFERENCE_DIR and matching against them is
-# automatic; with none present this is a no-op.
-LOGO_REFERENCE_DIR: Path = Path(__file__).resolve().parent / "assets" / "watermark_logos"
-LOGO_MATCH_MIN_SCORE: float = 0.6      # correlation threshold - untuned
-                                        # against real logos since none ship
-                                        # here; revisit once you've dropped
-                                        # in real references and tested
-                                        # against real downloaded clips
-LOGO_MATCH_SCALE_MIN: float = 0.4      # smallest fraction of the reference
-                                        # image's native size to try
-LOGO_MATCH_SCALE_MAX: float = 1.6      # largest fraction to try
-LOGO_MATCH_SCALE_STEPS: int = 12       # scales sampled between min and max
-LOGO_MATCH_MAX_CANDIDATES: int = 5
 WATERMARK_DETECT_BAR_FLATNESS_THRESHOLD: float = 6.0  # a row/column this
                                               # spatially uniform (0-255
                                               # stddev), and part of an

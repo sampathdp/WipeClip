@@ -202,11 +202,6 @@ export default function Page() {
               label: "WipeClip Research: Watermark Removal Test",
               desc: "Real before/after tests across static, moving, and difficult overlay cases.",
             },
-            {
-              href: "/remove-tiktok-watermark",
-              label: "Remove a Moving TikTok Watermark",
-              desc: "A worked example of temporal tracking against a moving overlay.",
-            },
           ]}
         />
 

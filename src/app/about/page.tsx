@@ -10,7 +10,6 @@ import SupportedSituations from "@/components/SupportedSituations";
 import EvidenceSection from "@/components/EvidenceSection";
 import LimitationsSection from "@/components/LimitationsSection";
 import PrivacyProcessing from "@/components/PrivacyProcessing";
-import RelatedContent from "@/components/RelatedContent";
 import CtaBanner from "@/components/CtaBanner";
 import { buildPageMetadata } from "@/lib/seo";
 
@@ -168,11 +167,6 @@ export default function AboutPage() {
         <Reveal>
           <PrivacyProcessing />
         </Reveal>
-        <div className="bg-surface-2/40">
-          <Reveal>
-            <RelatedContent />
-          </Reveal>
-        </div>
 
         <CtaBanner />
       </main>

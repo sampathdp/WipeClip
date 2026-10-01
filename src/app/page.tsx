@@ -5,7 +5,6 @@ import UploadDemo from "@/components/UploadDemo";
 import HowItWorks from "@/components/HowItWorks";
 import WhyWipeClip from "@/components/WhyWipeClip";
 import EditorPromo from "@/components/EditorPromo";
-import PlatformStrip from "@/components/PlatformStrip";
 import FreeTools from "@/components/FreeTools";
 import Faq from "@/components/Faq";
 import CtaBanner from "@/components/CtaBanner";
@@ -28,7 +27,6 @@ export default function Home() {
         <HowItWorks includeSchema />
         <WhyWipeClip />
         <EditorPromo />
-        <PlatformStrip />
         <FreeTools />
         <Faq />
         <CtaBanner />
