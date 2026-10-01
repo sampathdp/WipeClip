@@ -14,11 +14,13 @@ video processing already worked before this module existed.
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import numpy as np
 
 from app.config import DEFAULT_SHARPEN_RADIUS
+from app.pipeline import editor as editor_pipeline
 from app.pipeline import full_pipeline, io_utils, manual_inpaint, sharpen as sharpen_pipeline
 from app.pipeline import video as video_pipeline
 
@@ -40,6 +42,22 @@ def replace_logo_job(
     output_height: int | None,
 ) -> None:
     asyncio.run(video_pipeline.replace_logo(in_path, out_path, logo_path, x, y, w, h, output_height))
+
+
+def editor_export_job(plan_json: str, out_path: str) -> None:
+    """`plan_json` is editor.ExportPlan serialized by main.py (a plain
+    string, so it crosses the RQ boundary cheaply like the other jobs' args).
+    """
+    raw = json.loads(plan_json)
+    plan = editor_pipeline.ExportPlan(
+        width=raw["width"],
+        height=raw["height"],
+        fps=raw["fps"],
+        with_audio=raw["with_audio"],
+        clips=[editor_pipeline.PlanClip(**c) for c in raw["clips"]],
+        stickers=[editor_pipeline.PlanSticker(**s) for s in raw["stickers"]],
+    )
+    asyncio.run(editor_pipeline.render_export(plan, out_path))
 
 
 def image_remove_job(in_path: str, out_path: str, x: int, y: int, w: int, h: int) -> None:

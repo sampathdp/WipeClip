@@ -36,6 +36,8 @@ Environment variables:
 from __future__ import annotations
 
 import asyncio
+import json
+import math
 import os
 import tempfile
 import time
@@ -43,13 +45,24 @@ import traceback
 from pathlib import Path
 from typing import Optional
 
+import cv2
+import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from pydantic import BaseModel, Field, ValidationError
 
 from app import jobs
 from app.config import (
     BG_REMOVE_PREVIEW_MAX_MEGAPIXELS,
+    EDITOR_MAX_CLIPS,
+    EDITOR_MAX_FPS,
+    EDITOR_MAX_SOURCES,
+    EDITOR_MAX_STICKER_BYTES,
+    EDITOR_MAX_STICKER_DIMENSION,
+    EDITOR_MAX_STICKERS,
+    EDITOR_MAX_TOTAL_UPLOAD_BYTES,
+    EDITOR_MAX_TRANSITION_SECONDS,
     MAX_VIDEO_DURATION_SECONDS,
     MAX_VIDEO_UPLOAD_BYTES,
     MIN_REGION_PX,
@@ -57,6 +70,7 @@ from app.config import (
     SHARPEN_AMOUNT_PRESETS,
 )
 from app.pipeline import detect_artifacts, io_utils, moderation
+from app.pipeline import editor as editor_pipeline
 from app.pipeline import video as video_pipeline
 from app.queue import get_queue
 
@@ -88,7 +102,7 @@ app.add_middleware(
     # explicitly exposed - browsers only allow the CORS-safelisted set by
     # default. The video probe endpoint returns metadata as custom headers
     # (X-Video-*) alongside the PNG body, so those need to be listed here.
-    expose_headers=["X-Video-Width", "X-Video-Height", "X-Video-Duration", "X-Video-Fps"],
+    expose_headers=["X-Video-Width", "X-Video-Height", "X-Video-Duration", "X-Video-Fps", "X-Video-Has-Audio"],
 )
 
 
@@ -208,6 +222,14 @@ async def api_video_probe(file: UploadFile = File(...)):
 
         _assert_video_safe(in_path)
 
+        # Only the editor reads this (to show "no audio" and to know whether
+        # a silent track needs synthesizing on export); best-effort so a
+        # parsing surprise never fails a probe that otherwise succeeded.
+        try:
+            has_audio = editor_pipeline.probe_media(in_path).has_audio
+        except Exception:  # noqa: BLE001
+            has_audio = True
+
     return Response(
         content=frame_png,
         media_type="image/png",
@@ -216,6 +238,7 @@ async def api_video_probe(file: UploadFile = File(...)):
             "X-Video-Height": str(info.height),
             "X-Video-Duration": str(info.duration),
             "X-Video-Fps": str(info.fps),
+            "X-Video-Has-Audio": "1" if has_audio else "0",
         },
     )
 
@@ -265,11 +288,20 @@ async def api_video_process(
     resolution: str = Form("720p"),  # "720p" | "1080p" | "4k"
     quality: str = Form("standard"),  # "standard" | "pro" - see remove_logo() in video.py
     logo: Optional[UploadFile] = File(None),
+    start: Optional[float] = Form(None),  # optional source-time range (seconds) -
+    end: Optional[float] = Form(None),  # see the docstring
 ):
     """Removes (delogo) or replaces (overlay) a user-marked rectangular
     region for the full video duration. The region is always user-supplied -
     see app/pipeline/video.py for why there's no automatic watermark
     detector.
+
+    `start`/`end`, when both given, restrict the job to that range of the
+    upload: it's cut out first (editor.cut_range) and only the cut is
+    processed and returned. The browser editor uses this to run AI cleanup
+    on one timeline segment. The cut is in display orientation, so the
+    region is then expected in display-oriented pixels too - which is what
+    the editor's frame grab gives it. Omitted, behavior is unchanged.
     """
     _assert_internal_caller(request)
     if mode not in ("remove", "replace"):
@@ -302,6 +334,24 @@ async def api_video_process(
             info, _ = video_pipeline.probe_video(in_path)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if (start is None) != (end is None):
+            raise HTTPException(status_code=400, detail="start and end must be given together")
+        if start is not None and end is not None:
+            source_duration = max(info.duration, editor_pipeline.probe_media(in_path).duration)
+            if not (math.isfinite(start) and math.isfinite(end)) or start < 0 or end - start < 0.1:
+                raise HTTPException(status_code=400, detail="Invalid time range")
+            if start >= source_duration:
+                raise HTTPException(status_code=400, detail="Time range is outside the video")
+            end = min(end, source_duration)
+            cut_path = os.path.join(tmp, "range.mp4")
+            try:
+                await editor_pipeline.cut_range(in_path, cut_path, start, end)
+                info, _ = video_pipeline.probe_video(cut_path)
+            except (RuntimeError, ValueError) as exc:
+                traceback.print_exc()
+                raise HTTPException(status_code=400, detail="Could not read that part of the video") from exc
+            in_path = cut_path
 
         if info.duration > MAX_VIDEO_DURATION_SECONDS:
             raise HTTPException(
@@ -380,6 +430,239 @@ async def api_video_process(
             traceback.print_exc()
             raise HTTPException(
                 status_code=500, detail=f"Video processing failed: {type(exc).__name__}: {exc}"
+            ) from exc
+
+        with open(out_path, "rb") as f:
+            result = f.read()
+
+    return Response(content=result, media_type="video/mp4")
+
+
+class _EditorTransition(BaseModel):
+    type: str
+    duration: float = Field(ge=0, le=EDITOR_MAX_TRANSITION_SECONDS)
+
+
+class _EditorClip(BaseModel):
+    source: int = Field(ge=0, lt=EDITOR_MAX_SOURCES)
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    transition: Optional[_EditorTransition] = None
+
+
+class _EditorSticker(BaseModel):
+    image: int = Field(ge=0, lt=EDITOR_MAX_STICKERS)
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    x: float = Field(ge=-0.5, le=1.5)
+    y: float = Field(ge=-0.5, le=1.5)
+    width: float = Field(ge=0.01, le=2.0)
+    rotation: float = Field(ge=-360, le=360)
+    animIn: str = "none"
+    animOut: str = "none"
+
+
+class _EditorProject(BaseModel):
+    clips: list[_EditorClip] = Field(min_length=1, max_length=EDITOR_MAX_CLIPS)
+    stickers: list[_EditorSticker] = Field(default_factory=list, max_length=EDITOR_MAX_STICKERS)
+
+
+_VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
+
+
+def _save_upload(upload: UploadFile, path: str, max_bytes: int) -> int:
+    """Streams an upload to `path` in chunks (never the whole file in
+    memory) and returns its size; raises 400 past `max_bytes`.
+    """
+    written = 0
+    upload.file.seek(0)
+    with open(path, "wb") as out:
+        while chunk := upload.file.read(1024 * 1024):
+            written += len(chunk)
+            if written > max_bytes:
+                raise HTTPException(
+                    status_code=400, detail=f"File too large (max {max_bytes // (1024 * 1024)}MB)"
+                )
+            out.write(chunk)
+    return written
+
+
+@app.post("/api/video/export")
+async def api_video_export(
+    request: Request,
+    project: str = Form(...),
+    resolution: str = Form("720p"),
+    sources: list[UploadFile] = File(...),
+    stickers: list[UploadFile] = File(default=[]),
+):
+    """Renders a browser-editor project (see app/pipeline/editor.py) into
+    one MP4. `sources[0]` is the original upload and sets the output
+    canvas (display size, frame rate); further sources are AI-cleaned
+    segments. `project` is JSON: clips (source index + source-time range +
+    optional transition into the next clip) in timeline order, and stickers
+    (image index into `stickers` + timeline range + normalized transform).
+
+    Nothing the client says about a file is trusted: every source is
+    re-probed and moderation-screened here, clip ranges are validated
+    against the probed durations, sticker images are decoded, size-checked,
+    screened, and re-encoded before use, and transition/animation names are
+    whitelisted. Credits are handled by the Next.js /api/export route in
+    front of this, exactly like /api/video/process.
+    """
+    _assert_internal_caller(request)
+    if resolution not in RESOLUTION_HEIGHTS:
+        raise HTTPException(
+            status_code=400, detail=f"resolution must be one of {', '.join(RESOLUTION_HEIGHTS)}"
+        )
+    if not sources or len(sources) > EDITOR_MAX_SOURCES:
+        raise HTTPException(status_code=400, detail="Invalid number of source videos")
+    if len(stickers) > EDITOR_MAX_STICKERS:
+        raise HTTPException(status_code=400, detail="Too many stickers")
+
+    try:
+        spec = _EditorProject.model_validate(json.loads(project))
+    except (json.JSONDecodeError, ValidationError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid project data") from exc
+
+    for c in spec.clips:
+        if c.source >= len(sources):
+            raise HTTPException(status_code=400, detail="Clip refers to a missing source video")
+        if c.transition and c.transition.type not in editor_pipeline.TRANSITIONS:
+            raise HTTPException(status_code=400, detail="Unknown transition")
+    for s in spec.stickers:
+        if s.image >= len(stickers):
+            raise HTTPException(status_code=400, detail="Sticker refers to a missing image")
+        if s.animIn not in editor_pipeline.STICKER_ANIMS_IN or s.animOut not in editor_pipeline.STICKER_ANIMS_OUT:
+            raise HTTPException(status_code=400, detail="Unknown sticker animation")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        total_bytes = 0
+        source_paths: list[str] = []
+        source_infos: list[editor_pipeline.MediaInfo] = []
+        for i, upload in enumerate(sources):
+            suffix = Path(upload.filename or "").suffix.lower()
+            path = os.path.join(tmp, f"source{i}{suffix if suffix in _VIDEO_SUFFIXES else '.mp4'}")
+            total_bytes += _save_upload(upload, path, MAX_VIDEO_UPLOAD_BYTES)
+            if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES:
+                raise HTTPException(status_code=400, detail="Project files are too large to export together")
+            try:
+                info = editor_pipeline.probe_media(path)
+                # OpenCV's read also proves frames actually decode (probe_media
+                # only parses container metadata) - catches truncated files.
+                cv_info, _ = video_pipeline.probe_video(path)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="One of the videos could not be read") from exc
+            info.duration = max(info.duration, cv_info.duration)
+            if info.duration > MAX_VIDEO_DURATION_SECONDS + 1:
+                raise HTTPException(status_code=400, detail="Video too long")
+            _assert_video_safe(path)
+            source_paths.append(path)
+            source_infos.append(info)
+
+        sticker_images: list[tuple[str, int, int]] = []
+        for i, upload in enumerate(stickers):
+            raw_path = os.path.join(tmp, f"sticker{i}.upload")
+            _save_upload(upload, raw_path, EDITOR_MAX_STICKER_BYTES)
+            img = cv2.imdecode(np.fromfile(raw_path, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+            if img is None or img.ndim not in (2, 3):
+                raise HTTPException(status_code=400, detail="A sticker image could not be read")
+            ih, iw = img.shape[:2]
+            if iw < 2 or ih < 2 or max(iw, ih) > EDITOR_MAX_STICKER_DIMENSION:
+                raise HTTPException(status_code=400, detail="A sticker image has an unsupported size")
+            if img.ndim == 2:
+                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
+            elif img.shape[2] == 3:
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
+            _assert_image_safe(img)
+            clean_path = os.path.join(tmp, f"sticker{i}.png")
+            if not cv2.imwrite(clean_path, img):
+                raise HTTPException(status_code=500, detail="Could not prepare a sticker image")
+            sticker_images.append((clean_path, iw, ih))
+
+        # Output canvas: the original's display size and frame rate, capped
+        # (never upscaled) so its short side fits the requested resolution,
+        # rounded down to even dimensions for yuv420p.
+        base = source_infos[0]
+        short_side = min(base.width, base.height)
+        scale = min(1.0, RESOLUTION_HEIGHTS[resolution] / short_side) if short_side > 0 else 1.0
+        out_w = max(2, int(base.width * scale) // 2 * 2)
+        out_h = max(2, int(base.height * scale) // 2 * 2)
+        fps = base.fps if 1 <= base.fps <= EDITOR_MAX_FPS else (EDITOR_MAX_FPS if base.fps > EDITOR_MAX_FPS else 30.0)
+
+        plan_clips: list[editor_pipeline.PlanClip] = []
+        for c in spec.clips:
+            info = source_infos[c.source]
+            end = min(c.end, info.duration)
+            if c.start >= end - 0.5 / fps:
+                raise HTTPException(status_code=400, detail="A clip's time range is outside its video")
+            plan_clips.append(
+                editor_pipeline.PlanClip(
+                    source_path=source_paths[c.source],
+                    source_has_audio=info.has_audio,
+                    start=c.start,
+                    duration=end - c.start,
+                    transition=c.transition.type if c.transition and c.transition.duration > 0 else None,
+                    transition_duration=c.transition.duration if c.transition else 0.0,
+                )
+            )
+
+        plan = editor_pipeline.ExportPlan(
+            width=out_w,
+            height=out_h,
+            fps=round(fps, 3),
+            with_audio=any(source_infos[c.source].has_audio for c in spec.clips),
+            clips=plan_clips,
+        )
+        editor_pipeline.quantize_plan(plan)
+        total = editor_pipeline.timeline_duration(plan)
+        if total > MAX_VIDEO_DURATION_SECONDS:
+            raise HTTPException(status_code=400, detail="The edited video is too long to export")
+
+        for s in spec.stickers:
+            start, end = s.start, min(s.end, total)
+            if end - start < 0.05:
+                continue  # entirely past the end of the (possibly shortened) timeline
+            path, iw, ih = sticker_images[s.image]
+            plan.stickers.append(
+                editor_pipeline.PlanSticker(
+                    image_path=path,
+                    image_width=iw,
+                    image_height=ih,
+                    start=start,
+                    end=end,
+                    x=s.x,
+                    y=s.y,
+                    width=s.width,
+                    rotation=s.rotation,
+                    anim_in=s.animIn,
+                    anim_out=s.animOut,
+                )
+            )
+
+        out_path = os.path.join(tmp, "export.mp4")
+        plan_json = json.dumps(
+            {
+                "width": plan.width,
+                "height": plan.height,
+                "fps": plan.fps,
+                "with_audio": plan.with_audio,
+                "clips": [vars(c) for c in plan.clips],
+                "stickers": [vars(s) for s in plan.stickers],
+            }
+        )
+        # Full re-encode of the timeline plus per-clip decode seeks; stickers
+        # and transitions add compositing work on top.
+        job_timeout = max(180.0, total * (6 + 0.5 * len(plan.stickers)))
+        try:
+            await _run_pipeline_job(jobs.editor_export_job, plan_json, out_path, timeout=job_timeout)
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": "export_failed",
+                    "message": "Export failed. Your original video is safe. Please try exporting again.",
+                },
             ) from exc
 
         with open(out_path, "rb") as f:

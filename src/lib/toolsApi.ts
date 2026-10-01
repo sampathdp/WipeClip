@@ -42,6 +42,9 @@ export interface VideoInfo {
   height: number;
   duration: number;
   fps: number;
+  // Only sent by backends new enough to have the editor; undefined means
+  // "unknown", which callers should treat as "has audio".
+  hasAudio?: boolean;
 }
 
 export async function probeVideo(
@@ -65,6 +68,8 @@ export async function probeVideo(
     duration: Number(res.headers.get("X-Video-Duration")),
     fps: Number(res.headers.get("X-Video-Fps")),
   };
+  const hasAudio = res.headers.get("X-Video-Has-Audio");
+  if (hasAudio !== null) info.hasAudio = hasAudio === "1";
   const blob = await res.blob();
   return { info, previewUrl: URL.createObjectURL(blob) };
 }
@@ -116,7 +121,8 @@ export async function processVideo(
   region: Region,
   resolution: Resolution,
   logo?: File | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  range?: { start: number; end: number }
 ): Promise<Blob> {
   const body = new FormData();
   body.append("file", file);
@@ -127,6 +133,11 @@ export async function processVideo(
   body.append("h", String(region.h));
   body.append("resolution", resolution);
   if (mode === "replace" && logo) body.append("logo", logo);
+  // Editor AI cleanup: process (and return) only this source-time range.
+  if (range) {
+    body.append("start", range.start.toFixed(3));
+    body.append("end", range.end.toFixed(3));
+  }
 
   // The backend inpaints frame-by-frame and only responds once the whole
   // clip is done - minutes for a long or high-resolution video - so this
@@ -142,6 +153,32 @@ export async function processVideo(
     await throwApiError(res, "Processing failed. Try again.");
   }
 
+  return res.blob();
+}
+
+/** Renders a browser-editor project through our own /api/export route
+ * (credit-gated like /api/process). `sources[0]` must be the original
+ * upload - it sets the output size and frame rate. See
+ * src/lib/editor/exportProject.ts for how the payload is assembled and
+ * backend/app/main.py's api_video_export for how it's validated.
+ */
+export async function exportEditorProject(
+  project: unknown,
+  sources: File[],
+  stickers: Blob[],
+  resolution: Resolution,
+  signal?: AbortSignal
+): Promise<Blob> {
+  const body = new FormData();
+  body.append("project", JSON.stringify(project));
+  body.append("resolution", resolution);
+  for (const source of sources) body.append("sources", source, source.name);
+  stickers.forEach((sticker, i) => body.append("stickers", sticker, `sticker-${i}.png`));
+
+  const res = await fetch("/api/export", { method: "POST", body, signal });
+  if (!res.ok) {
+    await throwApiError(res, "Export failed. Your original video is safe. Please try exporting again.");
+  }
   return res.blob();
 }
 

@@ -280,6 +280,22 @@ WATERMARK_DETECT_BAR_FLATNESS_THRESHOLD: float = 6.0  # a row/column this
 # api_video_process in app/main.py).
 RESOLUTION_HEIGHTS: dict[str, int] = {"720p": 720, "1080p": 1080, "4k": 2160}
 
+# --- Browser editor export (/api/video/export, app/pipeline/editor.py) -------
+# One export uploads the original plus any AI-cleaned segments the editor
+# holds, so the total cap is above the single-video cap; each individual
+# file still has to fit MAX_VIDEO_UPLOAD_BYTES. The timeline itself is
+# bounded by MAX_VIDEO_DURATION_SECONDS like any other video job. For the
+# editor, RESOLUTION_HEIGHTS caps the *short* side, so a 9:16 1080x1920 clip
+# counts as 1080p rather than being squeezed to 720 pixels tall.
+EDITOR_MAX_TOTAL_UPLOAD_BYTES: int = 2 * MAX_VIDEO_UPLOAD_BYTES
+EDITOR_MAX_SOURCES: int = 16
+EDITOR_MAX_CLIPS: int = 200
+EDITOR_MAX_STICKERS: int = 40
+EDITOR_MAX_STICKER_BYTES: int = 4 * 1024 * 1024
+EDITOR_MAX_STICKER_DIMENSION: int = 2048
+EDITOR_MAX_TRANSITION_SECONDS: float = 2.0
+EDITOR_MAX_FPS: float = 60.0
+
 # --- Content moderation (explicit-content screening) -------------------------
 # Local, self-hosted classifier only - flags likely nudity so the API can
 # refuse to process a clip. This is a heuristic classifier, not a legal

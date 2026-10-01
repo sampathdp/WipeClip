@@ -19,6 +19,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.9,
     },
     {
+      url: `${siteUrl}/editor`,
+      lastModified: "2026-09-30",
+      changeFrequency: "weekly",
+      priority: 0.9,
+    },
+    {
       url: `${siteUrl}/remove-image-watermark`,
       lastModified: "2026-08-20",
       changeFrequency: "weekly",

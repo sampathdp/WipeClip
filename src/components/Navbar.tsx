@@ -7,6 +7,7 @@ import Logo from "./Logo";
 import ThemeToggle from "./ThemeToggle";
 
 const links = [
+  { href: "/editor", label: "Editor" },
   { href: "/#how-it-works", label: "How It Works" },
   { href: "/#comparison", label: "Comparison" },
   { href: "/pricing", label: "Pricing" },

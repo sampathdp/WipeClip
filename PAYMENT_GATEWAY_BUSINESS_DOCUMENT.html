@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WipeClip - Business & System Specification Document (Payment Gateway Underwriting)</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    
+    :root {
+      --primary: #0284c7;
+      --primary-dark: #0369a1;
+      --text: #0f172a;
+      --text-muted: #475569;
+      --bg: #ffffff;
+      --card-bg: #f8fafc;
+      --border: #e2e8f0;
+      --accent-badge: #e0f2fe;
+      --accent-badge-text: #0369a1;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: var(--text);
+      background-color: var(--bg);
+      line-height: 1.6;
+      font-size: 14px;
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    .header-card {
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 24px;
+      margin-bottom: 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+    }
+
+    .brand-title {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #0f172a;
+    }
+
+    .brand-subtitle {
+      font-size: 15px;
+      color: var(--primary);
+      font-weight: 600;
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 700;
+      background-color: var(--accent-badge);
+      color: var(--accent-badge-text);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px 24px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 32px;
+    }
+
+    .meta-item {
+      font-size: 13px;
+    }
+
+    .meta-label {
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      margin-bottom: 2px;
+    }
+
+    .meta-value {
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    h2 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-top: 36px;
+      margin-bottom: 14px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #1e293b;
+      margin-top: 18px;
+      margin-bottom: 8px;
+    }
+
+    p {
+      color: #334155;
+      margin-bottom: 12px;
+    }
+
+    ul, ol {
+      margin-left: 20px;
+      margin-bottom: 16px;
+      color: #334155;
+    }
+
+    li {
+      margin-bottom: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 24px 0;
+      font-size: 13px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th, td {
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      background-color: #f1f5f9;
+      font-weight: 600;
+      color: #1e293b;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .callout {
+      background-color: #f0fdf4;
+      border-left: 4px solid #16a34a;
+      padding: 14px 16px;
+      border-radius: 4px;
+      margin: 18px 0;
+      font-size: 13px;
+      color: #166534;
+    }
+
+    .flow-diagram {
+      background: #f8fafc;
+      border: 1px dashed #cbd5e1;
+      border-radius: 8px;
+      padding: 18px;
+      font-family: monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #0f172a;
+      white-space: pre-wrap;
+      margin: 16px 0;
+    }
+
+    .footer {
+      margin-top: 48px;
+      padding-top: 24px;
+      border-top: 2px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    @media print {
+      body {
+        padding: 0;
+        font-size: 12px;
+      }
+      .container {
+        max-width: 100%;
+      }
+      h2 {
+        page-break-after: avoid;
+      }
+      table, .flow-diagram, .meta-grid {
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <div class="header-card">
+    <div>
+      <h1 class="brand-title">WipeClip (WipeClip.co)</h1>
+      <div class="brand-subtitle">Business Overview &amp; System Specification Document</div>
+    </div>
+    <div>
+      <span class="badge">Merchant Underwriting Profile</span>
+    </div>
+  </div>
+
+  <div class="meta-grid">
+    <div class="meta-item">
+      <div class="meta-label">Business / Brand Name</div>
+      <div class="meta-value">WipeClip (WipeClip.co)</div>
+    </div>
+    <div class="meta-item">
+      <div class="meta-label">Website URL</div>
+      <div class="meta-value"><a href="https://wipeclip.co" style="color:#0284c7; text-decoration:none;">https://wipeclip.co</a></div>
+    </div>
+    <div class="meta-item">
+      <div class="meta-label">Merchant Category &amp; MCC</div>
+      <div class="meta-value">SaaS / Media Processing &middot; MCC 7372</div>
+    </div>
+    <div class="meta-item">
+      <div class="meta-label">Fulfillment Mechanism</div>
+      <div class="meta-value">100% Instant Digital Delivery (Web SaaS)</div>
+    </div>
+    <div class="meta-item">
+      <div class="meta-label">Customer Support Email</div>
+      <div class="meta-value">support@wipeclip.co</div>
+    </div>
+    <div class="meta-item">
+      <div class="meta-label">Legal &amp; Compliance Email</div>
+      <div class="meta-value">legal@wipeclip.co / dmca@wipeclip.co</div>
+    </div>
+  </div>
+
+  <h2>1. Executive Summary &amp; Company Profile</h2>
+  <p>
+    <strong>WipeClip.co</strong> is a specialized, web-based digital media processing SaaS (Software as a Service) platform designed for content creators, videographers, editors, and digital agencies. The platform provides automated computer vision and inpainting tools that allow users to retouch, restore, and clean up digital video footage and still images that they own or are legally authorized to edit.
+  </p>
+  <p>Common professional use cases include:</p>
+  <ul>
+    <li>Restoring archival or legacy footage where original raw project files were lost.</li>
+    <li>Removing unwanted incidental timestamps, microphone logos, broadcast bugs, captions, and export badges from personal or client-authorized media.</li>
+    <li>Cleaning up artifacts from digital recordings and social reel drafts prior to multi-platform syndication.</li>
+  </ul>
+  <p>
+    The service is delivered 100% digitally through modern cloud infrastructure with zero physical shipping, providing immediate automated fulfillment upon payment.
+  </p>
+
+  <h2>2. Nature of the Business &amp; Core Purpose</h2>
+  <h3>2.1 The Problem It Solves</h3>
+  <p>
+    Creators and video editors frequently lose access to pristine project assets or face situations where an unwanted on-screen graphic (such as a timestamp from a recording device, an editing software export badge, or an incidental overlay) obscures their original content. Traditional manual removal methods (like cropping or adding an unsightly blur box) degrade composition and visual quality.
+  </p>
+
+  <h3>2.2 WipeClip's Solution</h3>
+  <p>
+    WipeClip provides an intuitive, non-destructive web tool where a user highlights an unwanted bounding region on a video frame. The platform's processing pipeline analyzes spatial and temporal pixel data from adjacent frames and reconstructs the underlying pixels using advanced image/video inpainting algorithms. The result is a clean, natural restoration without composition cropping or distortion.
+  </p>
+
+  <h3>2.3 Product Capabilities &amp; Tool Suite</h3>
+  <ul>
+    <li><strong>Video Watermark &amp; Overlay Inpainting:</strong> Automated pixel reconstruction across video frames.</li>
+    <li><strong>Still Image Cleanup:</strong> Rapid removal of unwanted marks and blemishes on static graphics.</li>
+    <li><strong>Complementary Creator Utilities:</strong> Background Remover, Video Frame Grabber, Photo Sharpener.</li>
+  </ul>
+
+  <h2>3. Target Audience &amp; User Personas</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>User Persona</th>
+        <th>Typical Use Case</th>
+        <th>Value Proposition</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Independent Creators &amp; Vloggers</strong></td>
+        <td>Cleaning up timestamps or export tags on their own video footage before syndication.</td>
+        <td>Saves hours of re-rendering or having to re-shoot original footage.</td>
+      </tr>
+      <tr>
+        <td><strong>Freelance Editors &amp; Agencies</strong></td>
+        <td>Restoring client-provided footage when the client lost original master assets.</td>
+        <td>Professional-grade retouching without visible blur artifacts.</td>
+      </tr>
+      <tr>
+        <td><strong>Social Media Managers</strong></td>
+        <td>Repurposing archived promotional clips and reels across brand channels.</td>
+        <td>Fast turnaround time for high-engagement short-form video.</td>
+      </tr>
+      <tr>
+        <td><strong>Digital Photographers</strong></td>
+        <td>Retouching static images and product photos to eliminate incidental distractions.</td>
+        <td>Single-click cleanup with no heavy desktop software required.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>4. Business &amp; Revenue Model</h2>
+  <p>
+    WipeClip operates on a <strong>Transparent Prepaid Pass &amp; Pay-As-You-Go (PAYG) Credit Model</strong>.
+  </p>
+
+  <div class="callout">
+    <strong>Chargeback Risk Mitigation Note:</strong> WipeClip intentionally utilizes <strong>fixed, pre-paid passes and one-time credit bundles rather than hidden recurring auto-renewals</strong>. This significantly eliminates consumer disputes, unexpected renewals, and unauthorized chargeback risks.
+  </div>
+
+  <h3>4.1 Plan Breakdown &amp; Pricing Structure</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Tier</th>
+        <th>Billing Mechanism</th>
+        <th>Price (Display / LKR Charged)</th>
+        <th>Credits</th>
+        <th>Feature Inclusions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Free Tier</strong></td>
+        <td>Free Trial</td>
+        <td>Free ($0)</td>
+        <td>2 daily credits</td>
+        <td>Up to 720p processing, testing features.</td>
+      </tr>
+      <tr>
+        <td><strong>Creator Pack</strong></td>
+        <td>One-time purchase</td>
+        <td><strong>$1.99</strong> (~Rs. 600 LKR)</td>
+        <td>15 credits</td>
+        <td>Up to 1080p exports; non-expiring credits; ideal for single sessions.</td>
+      </tr>
+      <tr>
+        <td><strong>Pay-As-You-Go</strong></td>
+        <td>One-time purchase</td>
+        <td><strong>$5.99</strong> (~Rs. 1,800 LKR)</td>
+        <td>30 credits</td>
+        <td>Up to 1080p exports; non-expiring credits; ideal for occasional editing.</td>
+      </tr>
+      <tr>
+        <td><strong>Starter Pass</strong></td>
+        <td>30-Day Prepaid Pass</td>
+        <td><strong>$8.99</strong> (~Rs. 2,700 LKR)</td>
+        <td>60 credits</td>
+        <td>Up to 1080p Full HD; priority queue; 30-day access (no auto-renewal).</td>
+      </tr>
+      <tr>
+        <td><strong>Pro Pass</strong></td>
+        <td>30-Day Prepaid Pass</td>
+        <td><strong>$23.99</strong> (~Rs. 7,200 LKR)</td>
+        <td>200 credits</td>
+        <td>4K Ultra HD exports unlocked; ultra-priority GPU lane; 30-day access.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>5. Order Fulfillment &amp; Service Delivery Flow</h2>
+  <p>Service fulfillment is <strong>fully automated, digital, and instantaneous</strong>:</p>
+
+  <div class="flow-diagram">
+[User Selects Plan on /pricing]
+               │
+               ▼
+[Initiates POST /api/checkout] ──> Inserts record in `payment_orders` with idempotent reference
+               │
+               ▼
+[Redirected to Hosted Payment Gateway Checkout] ──> Securely enters payment credentials
+               │
+               ▼
+[Payment Gateway Webhook: payment.succeeded] ──> Cryptographic HMAC-SHA256 Signature Verification
+               │
+               ▼
+[Atomic Database RPC `grant_paid_credits`] ──> Credits credited immediately & status set to 'paid'
+               │
+               ▼
+[User redirected back to WipeClip Dashboard with Active Credits Ready to Use (< 5 Seconds)]
+  </div>
+
+  <h2>6. Legal, Copyright &amp; Content Safety Compliance</h2>
+  <p>WipeClip maintains a strict legal posture to guarantee ethical usage and protect payment processors and platform integrity:</p>
+
+  <h3>6.1 Terms of Service &amp; Ownership Representation</h3>
+  <p>Under Section 3 of our Terms of Service, every user agrees to the following legally binding representations:</p>
+  <ul>
+    <li>The user must own the content or have explicit written permission from the copyright owner to edit the media.</li>
+    <li>The user will not use the service to infringe copyright, evade mandatory platform disclosures, or facilitate deception.</li>
+    <li>The platform strictly prohibits processing pirated movies, third-party intellectual property without authorization, or infringing content.</li>
+  </ul>
+
+  <h3>6.2 Active Content Moderation &amp; Abuse Prevention</h3>
+  <ul>
+    <li><strong>Automated Screening Pipeline:</strong> WipeClip integrates heuristic visual content moderation filters on sampled frames prior to video processing.</li>
+    <li><strong>Zero Tolerance:</strong> Explicit content, non-consensual imagery, hate speech, and unlawful material are blocked automatically with HTTP 422 hard rejection before media enters rendering queues.</li>
+  </ul>
+
+  <h3>6.3 DMCA &amp; Intellectual Property Takedown Protocol</h3>
+  <ul>
+    <li>Compliant with 17 U.S.C. § 512(c)(3) (DMCA notice &amp; takedown framework).</li>
+    <li>Dedicated Designated Agent: <code>dmca@wipeclip.co</code> / <code>legal@wipeclip.co</code>.</li>
+    <li>Repeat Infringer Policy: Prompt account suspension and permanent banning of any user flagged for repeat infringement.</li>
+    <li>Clear disclaimer of non-affiliation with third-party software brands (TikTok, CapCut, Canva, Instagram, etc.).</li>
+  </ul>
+
+  <h2>7. Data Privacy, Storage &amp; Security Architecture</h2>
+  <ul>
+    <li><strong>Ephemeral Media Storage:</strong> Uploaded media files are stored exclusively in temporary scratch storage for the duration of the processing job and <strong>deleted immediately upon rendering completion</strong>.</li>
+    <li><strong>Zero Model Training:</strong> Customer video and audio files are never used to train machine learning models.</li>
+    <li><strong>Cardholder Data Security:</strong> WipeClip never captures, stores, or processes cardholder PANs, CVVs, or cardholder credentials. All financial data entry is isolated within the PCI-DSS Level 1 compliant hosted checkout of the payment gateway.</li>
+    <li><strong>Transport Security:</strong> All traffic is encrypted in transit using TLS 1.3 / SSL.</li>
+  </ul>
+
+  <h2>8. Customer Support, Refund Policy &amp; Dispute Mitigation</h2>
+  <h3>8.1 Transparent Refund Policy</h3>
+  <ul>
+    <li><strong>14-Day Refund Window:</strong> Full monetary refund is provided for paid purchases if the customer has consumed less than 20% of the purchased credit allocation and experienced technical difficulties.</li>
+    <li><strong>Automatic System Credit Protection:</strong> If a processing job fails due to a server or timeout error, the system automatically detects the error and credits the consumed balance back to the user account in real time.</li>
+  </ul>
+
+  <h3>8.2 Customer Service &amp; Support SLAs</h3>
+  <ul>
+    <li><strong>Customer Support Channel:</strong> <code>support@wipeclip.co</code></li>
+    <li><strong>Response Time SLA:</strong> Inquiries and refund requests are acknowledged and addressed within <strong>24 to 48 business hours</strong>.</li>
+    <li><strong>Proactive Dispute Handling:</strong> Customers are encouraged to contact support for instant refunds before escalating to bank dispute channels.</li>
+  </ul>
+
+  <h2>9. Technical Stack &amp; Infrastructure Overview</h2>
+  <ul>
+    <li><strong>Frontend:</strong> Next.js 15 (React 19, TypeScript, Tailwind CSS), deployed on Vercel high-availability global edge CDN.</li>
+    <li><strong>Backend Pipeline:</strong> Python FastAPI, FFmpeg video processing framework, computer vision inpainting engines, hosted in isolated container environments.</li>
+    <li><strong>Database &amp; Auth:</strong> Supabase (Enterprise PostgreSQL) with Row-Level Security (RLS) policies and encrypted session authentication.</li>
+    <li><strong>Payment Integration:</strong> Direct server-to-server webhook ingestion with HMAC-SHA256 signature verification and replay attack mitigation (5-minute timestamp tolerance window).</li>
+  </ul>
+
+  <h2>10. Summary Statement for Merchant Underwriting</h2>
+  <p>
+    WipeClip operates as a lawful, professional-grade digital utility service with:
+  </p>
+  <ul>
+    <li>Clear utility value for digital video professionals and creators.</li>
+    <li>Immediate digital fulfillment with zero inventory risk.</li>
+    <li>Non-recurring, consent-driven billing structures minimizing chargeback exposure.</li>
+    <li>Strict copyright and content moderation policies with a dedicated DMCA response process.</li>
+    <li>Ephemeral data processing with zero retention of user files.</li>
+  </ul>
+
+  <div class="footer">
+    <div>&copy; 2026 WipeClip (WipeClip.co). All rights reserved.</div>
+    <div>Authorized for Payment Gateway Underwriting &amp; Compliance</div>
+  </div>
+
+</div>
+
+</body>
+</html>
