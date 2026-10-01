@@ -163,7 +163,11 @@ export default function TermsPage() {
           <strong>Refund Policy:</strong> You can request a full refund of any
           plan or credit pack within 14 days of purchase, for any reason. After
           14 days, refunds are at our discretion. A refunded plan ends and its
-          remaining credits are removed. To request a refund, contact us at{" "}
+          remaining credits are removed. See the full{" "}
+          <Link href="/refund-policy" className="underline hover:text-foreground">
+            Refund Policy
+          </Link>
+          . To request a refund, contact us at{" "}
           <a href="mailto:support@wipeclip.co" className="underline hover:text-foreground">
             support@wipeclip.co
           </a>

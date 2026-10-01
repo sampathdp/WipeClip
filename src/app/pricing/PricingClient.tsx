@@ -300,7 +300,11 @@ export default function PricingClient() {
         <p className="mx-auto mt-6 max-w-2xl text-center text-xs text-muted">
           Plans are prepaid for the period shown and don&apos;t renew automatically. Renewing early adds the time to
           your current plan. AI credits are used by the AI tools (object cleanup, background removal, sharpening);
-          editing and exporting never use credits.
+          editing and exporting never use credits. Full refund within 14 days, see our{" "}
+          <Link href="/refund-policy" className="underline hover:text-foreground">
+            refund policy
+          </Link>
+          .
         </p>
 
         {error && <p className="mt-6 text-center text-sm font-medium text-rose-600">{error}</p>}

@@ -29,6 +29,9 @@ export default function Footer() {
             <Link href="/terms" className="transition-colors hover:text-foreground">
               Terms
             </Link>
+            <Link href="/refund-policy" className="transition-colors hover:text-foreground">
+              Refund Policy
+            </Link>
             <Link href="/dmca" className="transition-colors hover:text-foreground">
               Copyright / DMCA
             </Link>
