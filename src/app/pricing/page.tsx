@@ -5,11 +5,11 @@ import { buildPageMetadata } from "@/lib/seo";
 export const metadata: Metadata = buildPageMetadata({
   title: "Pricing",
   description:
-    "Free 720p video cleanup with 2 credits a day. Upgrade to Starter, Pro or a one-time Pay-As-You-Go pack for 4K exports, batch processing and priority rendering.",
+    "WipeClip's video editor is free forever. Starter and Pro unlock premium transitions, filters and effects, 1080p or 4K exports without the WipeClip mark, and more AI credits. Monthly or yearly.",
   path: "/pricing",
   ogTitle: "WipeClip.co Pricing: Free & Paid Plans",
   ogDescription:
-    "Free 720p video cleanup with 2 credits a day. Upgrade for 4K exports, batch processing and priority rendering.",
+    "Free online video editor. Upgrade for premium effects, 4K exports without the WipeClip mark, and more AI credits.",
 });
 
 export default function PricingPage() {

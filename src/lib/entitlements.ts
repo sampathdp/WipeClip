@@ -57,7 +57,8 @@ export const isPremiumFilter = (f: FilterId) => !FREE_FILTERS.has(f);
 export const isPremiumEffect = (e: EffectType) => !FREE_EFFECTS.has(e);
 
 /** Minimal shape of a project (client model or export payload) needed to
- * find which premium features it uses. */
+ * find which premium features it uses. Read defensively: on the server it
+ * comes straight from the request body. */
 export interface PremiumCheckable {
   clips: { transition: { type: string } | null; look: { filter: string } }[];
   effects: { type: string }[];
@@ -71,16 +72,16 @@ export function premiumFeaturesUsed(project: PremiumCheckable): string[] {
   const used = new Set<string>();
   project.clips.forEach((c, i) => {
     // The last clip's transition never plays, so it doesn't count.
-    const t = c.transition?.type as TransitionType | undefined;
-    if (t && i < project.clips.length - 1 && t in TRANSITION_LABELS && isPremiumTransition(t)) {
+    const t = c?.transition?.type as TransitionType | undefined;
+    if (t && i < project.clips.length - 1 && Object.hasOwn(TRANSITION_LABELS, t) && isPremiumTransition(t)) {
       used.add(`${TRANSITION_LABELS[t].label} transition`);
     }
-    const f = c.look.filter as FilterId;
-    if (f in FILTERS && isPremiumFilter(f)) used.add(`${FILTERS[f].label} filter`);
+    const f = c?.look?.filter as FilterId | undefined;
+    if (f && Object.hasOwn(FILTERS, f) && isPremiumFilter(f)) used.add(`${FILTERS[f].label} filter`);
   });
   for (const e of project.effects) {
-    const t = e.type as EffectType;
-    if (t in EFFECT_LABELS && isPremiumEffect(t)) used.add(`${EFFECT_LABELS[t]} effect`);
+    const t = e?.type as EffectType | undefined;
+    if (t && Object.hasOwn(EFFECT_LABELS, t) && isPremiumEffect(t)) used.add(`${EFFECT_LABELS[t]} effect`);
   }
   return [...used];
 }

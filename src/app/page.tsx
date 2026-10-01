@@ -21,12 +21,12 @@ export default function Home() {
       <FreeToolsBanner />
       <main className="flex-1">
         <Hero />
+        <EditorPromo />
         <section className="px-6">
           <UploadDemo />
         </section>
         <HowItWorks includeSchema />
         <WhyWipeClip />
-        <EditorPromo />
         <FreeTools />
         <Faq />
         <CtaBanner />

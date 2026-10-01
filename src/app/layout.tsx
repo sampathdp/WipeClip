@@ -24,25 +24,22 @@ const siteUrl = SITE_URL;
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "AI Video Cleanup for Creators | WipeClip.co",
+    default: "Online Video Editor for Creators | WipeClip.co",
     template: "%s | WipeClip.co",
   },
   description:
-    "WipeClip is an AI video cleanup tool for creators. Mark a logo, badge, caption, or timestamp on one frame and it reconstructs the pixels underneath across the whole clip — no cropping, no blur box. Plus a browser video editor to trim, cut, add transitions and stickers. For footage you own or have the rights to edit.",
+    "WipeClip is an online video editor for creators. Trim, cut, add transitions, text, stickers, filters and music in your browser, then export for YouTube, Shorts and Reels. Built-in AI tools remove unwanted objects, timestamps and captions from footage you own.",
   keywords: [
-    "AI video cleanup",
-    "AI footage restoration",
-    "remove logo from video",
-    "remove object from video",
-    "AI video inpainting",
-    "video overlay remover",
-    "restore original footage",
-    "video watermark remover",
     "online video editor",
+    "free video editor",
     "trim video online",
     "cut video online",
     "add transitions to video",
+    "add text to video",
     "add stickers to video",
+    "video filters online",
+    "remove object from video",
+    "AI video cleanup",
     "wipeclip",
   ],
   authors: [{ name: "WipeClip.co" }],
@@ -55,24 +52,24 @@ export const metadata: Metadata = {
     type: "website",
     url: siteUrl,
     siteName: "WipeClip.co",
-    title: "AI Video Cleanup for Creators | WipeClip.co",
+    title: "Online Video Editor for Creators | WipeClip.co",
     description:
-      "Mark a logo, badge, caption, or timestamp and WipeClip reconstructs the pixels underneath across the whole clip. No crop, no blur box.",
+      "Trim, cut, add transitions, text, stickers and filters in your browser. Free forever, with AI tools to clean up your footage.",
     locale: "en_US",
     images: [
       {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "WipeClip.co AI video cleanup and object removal",
+        alt: "WipeClip.co online video editor",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "AI Video Cleanup for Creators | WipeClip.co",
+    title: "Online Video Editor for Creators | WipeClip.co",
     description:
-      "Mark a logo, badge, caption, or timestamp and WipeClip reconstructs the pixels underneath across the whole clip. No crop, no blur box.",
+      "Trim, cut, add transitions, text, stickers and filters in your browser. Free forever, with AI tools to clean up your footage.",
     images: ["/opengraph-image"],
   },
   robots: {

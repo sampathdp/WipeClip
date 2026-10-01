@@ -4,63 +4,107 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import { formatLkr, PLANS, type PlanKey } from "@/lib/credits";
+import { formatLkr, FREE_DAILY_CREDITS, PLANS, type PlanKey } from "@/lib/credits";
+import { TIER_LIMITS, toTier, type Tier } from "@/lib/entitlements";
 import { createClient } from "@/lib/supabase/client";
 import { landingPagePath, trackEvent } from "@/lib/analytics";
 
-const paygCards: { key: PlanKey; tagline: string; isPopular?: boolean; features: string[] }[] = [
+type Billing = "month" | "year";
+
+const res = (r: string) => (r === "4k" ? "4K" : r);
+
+/** Card copy per tier. Limits come from TIER_LIMITS so the page can't
+ * drift from what /api/export actually enforces. */
+const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[] }[] = [
   {
-    key: "starter",
-    tagline: "Monthly credits banked, never lost daily",
-    isPopular: false,
+    tier: "free",
+    tagline: "Everything you need to start editing.",
     features: [
-      "60 credits / month",
-      "Up to 1080p Full HD",
-      "Priority processing queue",
-      "No auto-renewal - top up when you need",
+      "Full video editor: trim, split, text, stickers, audio",
+      "Basic transitions, filters and effects",
+      `Exports up to ${res(TIER_LIMITS.free.maxResolution)}`,
+      "Small \"Made with WipeClip\" mark on exports",
+      `${TIER_LIMITS.free.dailyExports} exports a day`,
+      `${FREE_DAILY_CREDITS} AI credits a day`,
     ],
   },
   {
-    key: "pro",
-    tagline: "For power workflows & 4K exports",
-    isPopular: false,
+    tier: "starter",
+    tagline: "For creators publishing every week.",
+    popular: true,
     features: [
-      "200 credits / month",
-      "4K Ultra HD unlocked",
-      "Ultra-priority GPU lane",
+      "Everything in Free",
+      "All premium transitions, filters and effects",
+      `Exports up to ${res(TIER_LIMITS.starter.maxResolution)} Full HD`,
+      "No WipeClip mark on exports",
+      `${TIER_LIMITS.starter.dailyExports} exports a day`,
+      "AI credits for cleanup, background removal and sharpening",
     ],
   },
   {
-    key: "payg",
-    tagline: "One-time purchase, credits never expire",
-    isPopular: false,
+    tier: "pro",
+    tagline: "For professionals and agencies.",
     features: [
-      "30 credits balance",
-      "Non-expiring credits",
-      "Up to 1080p exports",
-      "Ideal for occasional tasks",
-    ],
-  },
-  {
-    key: "creator",
-    tagline: "One-time purchase, built for a single upload session",
-    isPopular: true,
-    features: [
-      "15 credits balance",
-      "Non-expiring credits",
-      "Up to 1080p exports",
-      "Ideal for Reels, TikToks & Shorts",
+      "Everything in Starter",
+      `Exports up to ${res(TIER_LIMITS.pro.maxResolution)} Ultra HD`,
+      `${TIER_LIMITS.pro.dailyExports} exports a day`,
+      "3x more AI credits than Starter",
+      "Image cleanup tool",
+      "Highest-quality AI cleanup (motion-tracked)",
+      "Usage and billing history",
     ],
   },
 ];
 
-const SUBSCRIPTION_PLANS: PlanKey[] = ["starter", "pro"];
+const SUBSCRIPTION_KEYS: Record<Exclude<Tier, "free">, Record<Billing, PlanKey>> = {
+  starter: { month: "starter", year: "starter_yearly" },
+  pro: { month: "pro", year: "pro_yearly" },
+};
+
+const CREDIT_PACKS: PlanKey[] = ["creator", "payg"];
+
+const COMPARISON: { label: string; values: Record<Tier, string | boolean> }[] = [
+  { label: "Trim, split, reorder, speed", values: { free: true, starter: true, pro: true } },
+  { label: "Text, stickers, images, audio tracks", values: { free: true, starter: true, pro: true } },
+  { label: "Canvas sizes for YouTube, Shorts, Reels", values: { free: true, starter: true, pro: true } },
+  { label: "Fade, Crossfade, Dip to Black transitions", values: { free: true, starter: true, pro: true } },
+  { label: "Slide, Zoom, Blur, Dip to White transitions", values: { free: false, starter: true, pro: true } },
+  { label: "Filters", values: { free: "4 basic", starter: "All 10", pro: "All 10" } },
+  { label: "Effects", values: { free: "3 basic", starter: "All 11", pro: "All 11" } },
+  {
+    label: "Max export resolution",
+    values: {
+      free: res(TIER_LIMITS.free.maxResolution),
+      starter: res(TIER_LIMITS.starter.maxResolution),
+      pro: res(TIER_LIMITS.pro.maxResolution),
+    },
+  },
+  { label: "WipeClip mark on exports", values: { free: "Yes", starter: "No", pro: "No" } },
+  {
+    label: "Exports per day",
+    values: {
+      free: String(TIER_LIMITS.free.dailyExports),
+      starter: String(TIER_LIMITS.starter.dailyExports),
+      pro: String(TIER_LIMITS.pro.dailyExports),
+    },
+  },
+  {
+    label: "AI credits",
+    values: {
+      free: `${FREE_DAILY_CREDITS} / day`,
+      starter: `${PLANS.starter.credits} / month`,
+      pro: `${PLANS.pro.credits} / month`,
+    },
+  },
+];
 
 export default function PricingClient() {
+  const [billing, setBilling] = useState<Billing>("month");
   const [loading, setLoading] = useState<PlanKey | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [isSignedIn, setIsSignedIn] = useState(false);
+  const [currentTier, setCurrentTier] = useState<Tier | null>(null);
 
   useEffect(() => {
     if (checkoutUrl) window.location.href = checkoutUrl;
@@ -74,6 +118,12 @@ export default function PricingClient() {
       const signedIn = Boolean(data.user);
       setIsSignedIn(signedIn);
       trackEvent("pricing_viewed", { logged_in: signedIn, source: landingPagePath() });
+      if (signedIn) {
+        fetch("/api/credits")
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => d && setCurrentTier(toTier(d.plan)))
+          .catch(() => {});
+      }
     });
   }, []);
 
@@ -134,70 +184,48 @@ export default function PricingClient() {
 
         <div className="mx-auto max-w-3xl text-center">
           <div className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-surface-2/90 border border-border px-3.5 py-1 text-xs font-semibold text-muted">
-            Transparent, Flexible Pricing
+            Simple plans for the video editor
           </div>
           <h1 className="font-display text-4xl font-extrabold tracking-tight sm:text-5xl text-foreground">
-            Choose your <span className="text-gradient">power plan</span>
+            Edit free. <span className="text-gradient">Upgrade when you grow.</span>
           </h1>
           <p className="mt-4 text-base sm:text-lg text-muted max-w-xl mx-auto">
-            Every free account gets 2 free credits daily at 720p. Upgrade for high-resolution 4K exports and instant monthly banking.
+            The editor is free forever. Starter and Pro unlock premium transitions, filters and effects,
+            higher-resolution exports without the WipeClip mark, and more AI credits.
           </p>
+
+          <div className="mt-8 inline-flex rounded-full border border-border bg-surface-2/80 p-1 text-sm font-semibold" role="radiogroup" aria-label="Billing period">
+            {(["month", "year"] as const).map((b) => (
+              <button
+                key={b}
+                type="button"
+                role="radio"
+                aria-checked={billing === b}
+                onClick={() => setBilling(b)}
+                className={`rounded-full px-5 py-2 transition ${billing === b ? "bg-foreground text-background" : "text-muted hover:text-foreground"}`}
+              >
+                {b === "month" ? "Monthly" : "Yearly"}
+                {b === "year" && <span className="ml-1.5 text-[11px] font-bold text-emerald-500">Save ~25%</span>}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="mx-auto mt-16 grid max-w-7xl gap-6 sm:grid-cols-2 lg:grid-cols-5">
-          {/* Free Tier Card */}
-          <div className="glass-card rounded-[2rem] p-7 flex flex-col justify-between border border-border/80 relative">
-            <div>
-              <h2 className="inline-block rounded-full bg-surface-3 border border-border px-3 py-1 text-xs font-semibold text-muted">
-                Free Tier
-              </h2>
-              <div className="mt-4">
-                <span className="font-mono text-3xl font-extrabold text-foreground">$0</span>
-                <span className="text-xs text-muted"> / forever</span>
-              </div>
-              <p className="mt-2 text-xs font-mono text-cyan-600">2 credits / day (auto-renew)</p>
-              <p className="mt-3 text-xs text-muted">Perfect to test video cleanup on short clips.</p>
-
-              <div className="mt-6 border-t border-border/60 pt-6">
-                <ul className="space-y-3 text-xs text-muted">
-                  <li className="flex items-center gap-2">
-                    <span className="text-cyan-600 font-bold">✓</span> 720p HD resolution
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <span className="text-cyan-600 font-bold">✓</span> No watermark on output
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <span className="text-cyan-600 font-bold">✓</span> No credit card required
-                  </li>
-                </ul>
-              </div>
-            </div>
-
-            <div className="mt-8">
-              <Link
-                href="/#upload"
-                className="btn-secondary block w-full rounded-full py-3 text-center text-xs font-semibold"
-              >
-                Use Free
-              </Link>
-            </div>
-          </div>
-
-          {/* Paid Tiers */}
-          {paygCards.map((card) => {
-            const plan = PLANS[card.key];
-            const isPopular = card.isPopular;
-
+        <div className="mx-auto mt-14 grid max-w-6xl gap-6 md:grid-cols-3">
+          {TIERS.map((card) => {
+            const key = card.tier === "free" ? null : SUBSCRIPTION_KEYS[card.tier][billing];
+            const plan = key ? PLANS[key] : null;
+            const isCurrent = currentTier === card.tier;
             return (
               <div
-                key={card.key}
-                className={`glass-card rounded-[2rem] p-7 flex flex-col justify-between relative transition-all ${
-                  isPopular
-                    ? "border-cyan-400 shadow-[0_0_35px_rgba(34,211,238,0.25)] scale-[1.03] bg-surface-2/90"
+                key={card.tier}
+                className={`glass-card rounded-[2rem] p-7 flex flex-col justify-between relative transition-all border ${
+                  card.popular
+                    ? "border-cyan-400 shadow-[0_0_35px_rgba(34,211,238,0.25)] bg-surface-2/90"
                     : "border-border/80 hover:border-cyan-500/40"
                 }`}
               >
-                {isPopular && (
+                {card.popular && (
                   <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-accent to-accent-2 px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg">
                     Most Popular
                   </div>
@@ -206,17 +234,19 @@ export default function PricingClient() {
                 <div>
                   <div className="flex items-center justify-between">
                     <h2 className="inline-block rounded-full bg-surface-3 border border-border px-3 py-1 text-xs font-semibold text-foreground">
-                      {plan.label}
+                      {plan ? plan.label : "Free"}
                     </h2>
-                    <span className="text-[11px] font-mono text-cyan-600 font-bold">
-                      {plan.credits} credits
-                    </span>
+                    {isCurrent && <span className="text-[11px] font-bold text-emerald-500">Current plan</span>}
                   </div>
 
                   <div className="mt-4">
-                    <span className="font-mono text-3xl font-extrabold text-foreground">{plan.priceLabel}</span>
-                    {SUBSCRIPTION_PLANS.includes(card.key) && <span className="text-xs text-muted"> / 30 days</span>}
-                    <p className="mt-1 text-[11px] text-muted">Charged as {formatLkr(plan.amountCents)}</p>
+                    <span className="font-mono text-3xl font-extrabold text-foreground">{plan ? plan.priceLabel : "$0"}</span>
+                    <span className="text-xs text-muted"> / {plan ? plan.period : "forever"}</span>
+                    {plan && (
+                      <p className="mt-1 text-[11px] text-muted">
+                        Charged as {formatLkr(plan.amountCents)} · {plan.credits} AI credits included
+                      </p>
+                    )}
                   </div>
 
                   <p className="mt-3 text-xs text-muted leading-relaxed">{card.tagline}</p>
@@ -224,7 +254,7 @@ export default function PricingClient() {
                   <div className="mt-6 border-t border-border/60 pt-6">
                     <ul className="space-y-3 text-xs text-muted">
                       {card.features.map((f) => (
-                        <li key={f} className="flex items-center gap-2">
+                        <li key={f} className="flex items-start gap-2">
                           <span className="text-cyan-600 font-bold">✓</span>
                           <span className="text-foreground/90">{f}</span>
                         </li>
@@ -234,24 +264,100 @@ export default function PricingClient() {
                 </div>
 
                 <div className="mt-8">
-                  <button
-                    onClick={() => buy(card.key)}
-                    disabled={loading !== null}
-                    className={`w-full rounded-full py-3 text-xs font-bold transition-all ${
-                      isPopular
-                        ? "btn-primary"
-                        : "btn-secondary"
-                    } disabled:opacity-50`}
-                  >
-                    {loading === card.key ? "Redirecting to Checkout…" : `Get ${plan.label}`}
-                  </button>
+                  {key && plan ? (
+                    <button
+                      onClick={() => buy(key)}
+                      disabled={loading !== null}
+                      className={`w-full rounded-full py-3 text-xs font-bold transition-all ${card.popular ? "btn-primary" : "btn-secondary"} disabled:opacity-50`}
+                    >
+                      {loading === key ? "Redirecting to Checkout…" : isCurrent ? `Renew ${plan.label}` : `Get ${plan.label}`}
+                    </button>
+                  ) : (
+                    <Link href="/editor" className="btn-secondary block w-full rounded-full py-3 text-center text-xs font-semibold">
+                      Start editing free
+                    </Link>
+                  )}
                 </div>
               </div>
             );
           })}
         </div>
 
-        {error && <p className="mt-8 text-center text-sm font-medium text-rose-600">{error}</p>}
+        <p className="mx-auto mt-6 max-w-2xl text-center text-xs text-muted">
+          Plans are prepaid for the period shown and don&apos;t renew automatically. Renewing early adds the time to
+          your current plan. AI credits are used by the AI tools (object cleanup, background removal, sharpening);
+          editing and exporting never use credits.
+        </p>
+
+        {error && <p className="mt-6 text-center text-sm font-medium text-rose-600">{error}</p>}
+
+        <section className="mx-auto mt-20 max-w-4xl" aria-labelledby="compare-heading">
+          <h2 id="compare-heading" className="text-center font-display text-2xl font-extrabold tracking-tight text-foreground">
+            Compare plans
+          </h2>
+          <div className="mt-8 overflow-x-auto rounded-2xl border border-border">
+            <table className="w-full min-w-[520px] text-left text-sm">
+              <thead className="bg-surface-2/60 text-xs uppercase tracking-wider text-muted">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">Feature</th>
+                  <th className="px-4 py-3 font-semibold">Free</th>
+                  <th className="px-4 py-3 font-semibold">Starter</th>
+                  <th className="px-4 py-3 font-semibold">Pro</th>
+                </tr>
+              </thead>
+              <tbody>
+                {COMPARISON.map((row, i) => (
+                  <tr key={row.label} className={i % 2 ? "bg-surface-2/30" : ""}>
+                    <td className="px-4 py-2.5 text-foreground/90">{row.label}</td>
+                    {(["free", "starter", "pro"] as const).map((t) => {
+                      const v = row.values[t];
+                      return (
+                        <td key={t} className="px-4 py-2.5 text-muted">
+                          {v === true ? (
+                            <span className="font-bold text-cyan-600" aria-label="Included">✓</span>
+                          ) : v === false ? (
+                            <span aria-label="Not included">-</span>
+                          ) : (
+                            v
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="mx-auto mt-20 max-w-3xl" aria-labelledby="packs-heading">
+          <h2 id="packs-heading" className="text-center font-display text-2xl font-extrabold tracking-tight text-foreground">
+            Need more AI credits?
+          </h2>
+          <p className="mt-2 text-center text-sm text-muted">One-time packs on any plan. Credits never expire.</p>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2">
+            {CREDIT_PACKS.map((key) => {
+              const pack = PLANS[key];
+              return (
+                <div key={key} className="glass-card flex items-center justify-between gap-4 rounded-2xl border border-border/80 p-5">
+                  <div>
+                    <p className="text-sm font-bold text-foreground">{pack.label}</p>
+                    <p className="mt-0.5 text-xs text-muted">
+                      {pack.credits} AI credits · {pack.priceLabel} ({formatLkr(pack.amountCents)})
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => buy(key)}
+                    disabled={loading !== null}
+                    className="btn-secondary shrink-0 rounded-full px-4 py-2 text-xs font-bold disabled:opacity-50"
+                  >
+                    {loading === key ? "Redirecting…" : "Buy"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
       </main>
       <Footer />
     </div>

@@ -57,6 +57,7 @@ import {
   type TextStyle,
 } from "@/lib/editor/types";
 import { ApiError, ContentBlockedError, probeVideo } from "@/lib/toolsApi";
+import { TIER_LIMITS, toTier, type Tier } from "@/lib/entitlements";
 import AiCleanupDialog from "./AiCleanupDialog";
 import ExportDialog from "./ExportDialog";
 import { ActionButton, ClipPanel, PanelShell, TransitionPanel } from "./Inspector";
@@ -138,6 +139,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [isSignedIn, setIsSignedIn] = useState(false);
+  const [signedInTier, setSignedInTier] = useState<Tier>("free");
   const [showSignIn, setShowSignIn] = useState(false);
   const [pendingExport, setPendingExport] = useState<Blob | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -171,6 +173,28 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => setIsSignedIn(Boolean(session?.user)));
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  // Plan tier drives the premium badges and the export dialog's limits;
+  // /api/export enforces the same rules server side.
+  useEffect(() => {
+    if (!isSignedIn) return;
+    let cancelled = false;
+    const load = () =>
+      fetch("/api/credits")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!cancelled && d) setSignedInTier(toTier(d.plan));
+        })
+        .catch(() => {});
+    void load();
+    window.addEventListener("credits:refresh", load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("credits:refresh", load);
+    };
+  }, [isSignedIn]);
+  const tier: Tier = isSignedIn ? signedInTier : "free";
+  const premiumLocked = !TIER_LIMITS[tier].premiumEffects;
 
   // --- recovery -----------------------------------------------------------
   useEffect(() => {
@@ -994,6 +1018,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
         }}
         onClose={() => setTool(null)}
         gesture={gesture}
+        premiumLocked={premiumLocked}
       />
     );
   } else if (tool === "text") {
@@ -1003,7 +1028,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
   } else if (tool === "audio") {
     panel = <AudioAddPanel audio={project.audio} onUpload={(f) => void uploadAudio(f)} onSelect={(id) => select({ kind: "audio", id })} onClose={() => setTool(null)} />;
   } else if (tool === "effects") {
-    panel = <EffectsAddPanel onAdd={addEffect} onClose={() => setTool(null)} />;
+    panel = <EffectsAddPanel onAdd={addEffect} onClose={() => setTool(null)} premiumLocked={premiumLocked} />;
   } else if (tool === "canvas") {
     panel = (
       <CanvasPanel
@@ -1066,6 +1091,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
         next={lay.clips[selectedTransition + 1]}
         onChange={(transition) => apply((p) => updateClip(p, laid.clip.id, { transition }))}
         onClose={() => setSelection(null)}
+        premiumLocked={premiumLocked}
       />
     );
   } else if (selectedOverlay) {
@@ -1106,6 +1132,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
         onDelete={deleteSelection}
         onClose={() => setSelection(null)}
         gesture={gesture}
+        premiumLocked={premiumLocked}
       />
     );
   } else {
@@ -1370,6 +1397,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
           originalId={originalId}
           total={lay.total}
           isSignedIn={isSignedIn}
+          tier={tier}
           initialResult={pendingExport}
           onClose={() => setDialog(null)}
           onSignIn={() => setShowSignIn(true)}

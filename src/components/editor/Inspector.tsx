@@ -10,7 +10,9 @@ import {
   type LaidOutClip,
 } from "@/lib/editor/timeline";
 import type { Clip, MediaSource, TransitionType } from "@/lib/editor/types";
+import { isPremiumTransition } from "@/lib/entitlements";
 import { ChevronLeftIcon, ChevronRightIcon, SparkleIcon, SplitIcon, TrashIcon } from "./icons";
+import PremiumBadge from "./PremiumBadge";
 
 export function PanelShell({ title, onClose, children }: { title: string; onClose?: () => void; children: ReactNode }) {
   return (
@@ -214,11 +216,14 @@ export function TransitionPanel({
   next,
   onChange,
   onClose,
+  premiumLocked = false,
 }: {
   laid: LaidOutClip;
   next: LaidOutClip;
   onChange: (t: Clip["transition"]) => void;
   onClose: () => void;
+  /** Mark premium transitions (the user's plan doesn't include them). */
+  premiumLocked?: boolean;
 }) {
   const current = laid.clip.transition;
   const maxDuration = Math.min(laid.duration, next.duration) / 2;
@@ -235,12 +240,13 @@ export function TransitionPanel({
               aria-checked={active}
               title={type ? TRANSITION_LABELS[type].hint : "Straight cut, no transition"}
               onClick={() => onChange(type ? { type, duration: current?.duration ?? 0.5 } : null)}
-              className={`flex flex-col items-center gap-1.5 rounded-xl border p-2 text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+              className={`relative flex flex-col items-center gap-1.5 rounded-xl border p-2 text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
                 active ? "border-accent-2 bg-accent-2/10 text-foreground" : "border-border bg-surface text-muted hover:border-accent/50 hover:text-foreground"
               }`}
             >
               <TransitionSwatch type={type} />
               {type ? TRANSITION_LABELS[type].label : "Cut"}
+              {premiumLocked && type && isPremiumTransition(type) && <PremiumBadge />}
             </button>
           );
         })}
@@ -272,6 +278,15 @@ export function TransitionPanel({
             </p>
           )}
           <p className="mt-3 text-xs text-muted">{TRANSITION_LABELS[current.type].hint}. The two clips overlap by the transition&apos;s length.</p>
+          {premiumLocked && isPremiumTransition(current.type) && (
+            <p className="mt-2 text-[11px] text-muted">
+              Premium transition: free to try, exports with{" "}
+              <a href="/pricing" target="_blank" rel="noopener" className="font-semibold text-accent underline">
+                Starter or Pro
+              </a>
+              .
+            </p>
+          )}
         </div>
       )}
     </PanelShell>

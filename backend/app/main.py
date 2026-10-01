@@ -585,11 +585,33 @@ def _load_image_upload(upload: UploadFile, tmp: str, name: str) -> tuple[str, in
     return clean_path, iw, ih
 
 
+def _branding_overlay(tmp: str) -> tuple[str, int, int]:
+    """The free-tier "Made with WipeClip" mark: white text on a translucent
+    dark pill, as an RGBA PNG; returns its path and size."""
+    text = "Made with WipeClip"
+    font, scale, thickness = cv2.FONT_HERSHEY_DUPLEX, 1.4, 2
+    (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
+    pad_x, pad_y = 28, 18
+    w, h = tw + 2 * pad_x, th + baseline + 2 * pad_y
+    img = np.zeros((h, w, 4), dtype=np.uint8)
+    r = h // 2
+    pill = (20, 20, 20, 150)
+    cv2.rectangle(img, (r, 0), (w - r, h), pill, -1)
+    cv2.circle(img, (r, r), r, pill, -1, cv2.LINE_AA)
+    cv2.circle(img, (w - r - 1, r), r, pill, -1, cv2.LINE_AA)
+    cv2.putText(img, text, (pad_x, pad_y + th), font, scale, (255, 255, 255, 235), thickness, cv2.LINE_AA)
+    path = os.path.join(tmp, "branding.png")
+    if not cv2.imwrite(path, img):
+        raise HTTPException(status_code=500, detail="Could not prepare the export")
+    return path, w, h
+
+
 @app.post("/api/video/export")
 async def api_video_export(
     request: Request,
     project: str = Form(...),
     resolution: str = Form("720p"),
+    branding: str = Form("0"),
     sources: list[UploadFile] = File(...),
     overlays: list[UploadFile] = File(default=[]),
     audios: list[UploadFile] = File(default=[]),
@@ -606,8 +628,9 @@ async def api_video_export(
     file is re-probed (videos are moderation-screened too), every image is
     decoded, size-checked, screened and re-encoded, all ranges are validated
     against probed durations, and every name (transition, filter, effect,
-    animation, canvas) is whitelisted. Credits are handled by the Next.js
-    /api/export route in front of this, exactly like /api/video/process.
+    animation, canvas) is whitelisted. Plan limits are enforced by the
+    Next.js /api/export route in front of this, which also decides
+    `branding` ("1" stamps the free-tier mark over the whole video).
     """
     _assert_internal_caller(request)
     if resolution not in RESOLUTION_HEIGHTS:
@@ -766,6 +789,19 @@ async def api_video_export(
                     image_path=path, image_width=iw, image_height=ih, start=start, end=end,
                     x=o.x, y=o.y, width=o.width, rotation=o.rotation, opacity=o.opacity,
                     anim_in=o.animIn, anim_out=o.animOut,
+                )
+            )
+        if branding == "1":
+            # Drawn last, so it sits above every user layer.
+            path, iw, ih = _branding_overlay(tmp)
+            mark_h = 0.045 * out_h
+            width = iw * (mark_h / ih) / out_w
+            margin = 0.02 * min(out_w, out_h)
+            plan.overlays.append(
+                editor_pipeline.PlanOverlay(
+                    image_path=path, image_width=iw, image_height=ih, start=0.0, end=total,
+                    x=1 - width / 2 - margin / out_w, y=1 - (mark_h / 2 + margin) / out_h,
+                    width=width, rotation=0.0, opacity=1.0,
                 )
             )
         for e in spec.effects:

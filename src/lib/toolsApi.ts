@@ -13,6 +13,8 @@ export class ContentBlockedError extends ApiError {}
 export class InsufficientCreditsError extends ApiError {}
 export class AuthRequiredError extends ApiError {}
 export class ProRequiredError extends ApiError {}
+/** The export needs a higher plan (resolution or premium features). */
+export class PlanRequiredError extends ApiError {}
 
 async function throwApiError(res: Response, fallback: string): Promise<never> {
   const data = await res.json().catch(() => null);
@@ -34,6 +36,7 @@ async function throwApiError(res: Response, fallback: string): Promise<never> {
   if (code === "insufficient_credits") throw new InsufficientCreditsError(msg, code);
   if (code === "auth_required") throw new AuthRequiredError(msg, code);
   if (code === "pro_required") throw new ProRequiredError(msg, code);
+  if (code === "plan_required") throw new PlanRequiredError(msg, code);
   throw new ApiError(msg, code);
 }
 

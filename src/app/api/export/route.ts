@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Agent } from "undici";
-import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { RESOLUTION_CREDIT_COST } from "@/lib/credits";
-import { TOOLS_API_URL } from "@/lib/toolsApi";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { TOOLS_API_URL, type Resolution } from "@/lib/toolsApi";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
+import { effectivePlan } from "@/lib/plan";
+import {
+  canExportAt,
+  premiumFeaturesUsed,
+  TIER_LABELS,
+  TIER_LIMITS,
+  tierForResolution,
+  toTier,
+  type PremiumCheckable,
+  type Tier,
+} from "@/lib/entitlements";
 
 // Same long-running backend call as /api/process - see the comment there.
 const backendDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
@@ -40,12 +50,16 @@ function relay(backendRes: Response) {
   });
 }
 
-/** Credit gate in front of the backend's editor export
- * (/api/video/export), mirroring /api/process exactly: signed-in callers
- * spend credits for the chosen resolution (refunded if the render fails),
- * anonymous callers get a tightly rate-limited 720p render with no credit
- * ledger - the editor, like the cleanup tool, only gates the download
- * itself behind sign-in.
+const RESOLUTIONS: ReadonlySet<string> = new Set<Resolution>(["720p", "1080p", "4k"]);
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Plan gate in front of the backend's editor export (/api/video/export).
+ * Exports don't spend credits - the subscription tier decides what's
+ * allowed (see src/lib/entitlements.ts): the highest resolution, whether
+ * premium transitions/filters/effects may be rendered, the daily export
+ * count, and whether the backend stamps the free-tier "Made with WipeClip"
+ * mark. Anonymous callers are treated as the free tier with a tighter
+ * daily limit; the editor only gates the download itself behind sign-in.
  */
 export async function POST(request: NextRequest) {
   if (!isSupabaseConfigured()) {
@@ -57,61 +71,64 @@ export async function POST(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
-    if (!(await checkRateLimit(`anon-export:${rateLimitKeyFor(request)}`, 3, 24 * 60 * 60 * 1000))) {
-      return errorResponse("rate_limited", "Free export limit reached for today. Sign in for more.", 429);
+  let tier: Tier = "free";
+  if (user) {
+    if (!(await checkRateLimit(`${rateLimitKeyFor(request, user.id)}:export`, 30, 60 * 60 * 1000))) {
+      return errorResponse("rate_limited", "Too many exports. Try again later.", 429);
     }
-    const formData = await request.formData();
-    formData.set("resolution", "720p");
-    const backendRes = await forwardToBackend(formData);
-    if (!backendRes) {
-      return errorResponse("backend_unreachable", "Couldn't reach the export service. Please try again.", 502);
-    }
-    return relay(backendRes);
+    const { data: profile } = await supabase.from("profiles").select("plan, plan_expires_at").eq("id", user.id).single();
+    tier = profile ? toTier(effectivePlan(profile)) : "free";
   }
-
-  if (!(await checkRateLimit(`${rateLimitKeyFor(request, user.id)}:export`, 30, 60 * 60 * 1000))) {
-    return errorResponse("rate_limited", "Too many exports. Try again later.", 429);
-  }
+  const limits = TIER_LIMITS[tier];
 
   const formData = await request.formData();
-  const resolution = String(formData.get("resolution") ?? "720p");
-  const cost = RESOLUTION_CREDIT_COST[resolution as keyof typeof RESOLUTION_CREDIT_COST];
-  if (!cost) {
+  const resolution = user ? String(formData.get("resolution") ?? "720p") : "720p";
+  if (!RESOLUTIONS.has(resolution)) {
     return errorResponse("bad_resolution", "Unknown resolution.", 400);
   }
-
-  const supabaseAdmin = createServiceClient();
-  const { data: consumed, error: consumeErr } = await supabaseAdmin.rpc("consume_credits", {
-    p_user_id: user.id,
-    p_amount: cost,
-    p_resolution: resolution,
-  });
-  if (consumeErr) {
-    console.error("[export] consume_credits failed", consumeErr);
-    return errorResponse("server_error", "Something went wrong. Please try again.", 500);
+  if (!canExportAt(tier, resolution as Resolution)) {
+    const needed = TIER_LABELS[tierForResolution(resolution as Resolution)];
+    return errorResponse("plan_required", `${resolution === "4k" ? "4K" : resolution} export needs the ${needed} plan.`, 403);
   }
-  if (!consumed) {
+
+  let project: PremiumCheckable;
+  try {
+    project = JSON.parse(String(formData.get("project") ?? ""));
+    if (!Array.isArray(project.clips) || !Array.isArray(project.effects ?? [])) throw new Error();
+    project.effects ??= [];
+  } catch {
+    return errorResponse("bad_project", "Invalid project data.", 400);
+  }
+  if (!limits.premiumEffects) {
+    const premium = premiumFeaturesUsed(project);
+    if (premium.length) {
+      return errorResponse(
+        "plan_required",
+        `This project uses premium features (${premium.join(", ")}). Upgrade to Starter or remove them to export.`,
+        403
+      );
+    }
+  }
+
+  // Counted only once the export is otherwise allowed, so a refused
+  // attempt doesn't use up one of the day's exports.
+  const dayKey = user ? `${rateLimitKeyFor(request, user.id)}:export-day` : `anon-export:${rateLimitKeyFor(request)}`;
+  if (!(await checkRateLimit(dayKey, user ? limits.dailyExports : 3, DAY_MS))) {
     return errorResponse(
-      "insufficient_credits",
-      `Not enough credits for ${resolution} (${cost} credit${cost > 1 ? "s" : ""}). Free credits renew daily, or buy more.`,
-      402
+      "rate_limited",
+      user ? "Daily export limit reached for your plan. Upgrade for more exports." : "Free export limit reached for today. Sign in for more.",
+      429
     );
   }
 
-  const firstSource = formData.get("sources");
-  void supabaseAdmin.rpc("tag_last_transaction", {
-    p_user_id: user.id,
-    p_tool: "editor",
-    p_filename: firstSource instanceof File ? firstSource.name : null,
-  });
+  formData.set("resolution", resolution);
+  // Always set server side: the backend trusts this field, so a client
+  // value must never reach it.
+  formData.set("branding", limits.exportBranding ? "1" : "0");
 
   const backendRes = await forwardToBackend(formData);
-  if (!backendRes || !backendRes.ok) {
-    await supabaseAdmin.rpc("refund_credits", { p_user_id: user.id, p_amount: cost, p_resolution: resolution });
-    if (!backendRes) {
-      return errorResponse("backend_unreachable", "Couldn't reach the export service. Please try again.", 502);
-    }
+  if (!backendRes) {
+    return errorResponse("backend_unreachable", "Couldn't reach the export service. Please try again.", 502);
   }
   return relay(backendRes);
 }

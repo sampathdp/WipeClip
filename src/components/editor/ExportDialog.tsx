@@ -2,15 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { RESOLUTION_CREDIT_COST } from "@/lib/credits";
+import { canExportAt, premiumFeaturesUsed, TIER_LABELS, TIER_LIMITS, tierForResolution, type Tier } from "@/lib/entitlements";
 import { trackEvent } from "@/lib/analytics";
 import { exportProject } from "@/lib/editor/exportProject";
 import { saveLastExport } from "@/lib/editor/projectStore";
 import { canvasSize, formatTime } from "@/lib/editor/timeline";
 import type { MediaSource, Project } from "@/lib/editor/types";
-import { ContentBlockedError, InsufficientCreditsError, type Resolution } from "@/lib/toolsApi";
+import { ContentBlockedError, PlanRequiredError, type Resolution } from "@/lib/toolsApi";
 import Dialog from "./Dialog";
 import { ExportIcon } from "./icons";
+import PremiumBadge from "./PremiumBadge";
 
 const TOOL = "video_editor";
 const TIERS: { key: Resolution; short: number }[] = [
@@ -33,6 +34,7 @@ export default function ExportDialog({
   originalId,
   total,
   isSignedIn,
+  tier,
   initialResult,
   onClose,
   onSignIn,
@@ -42,6 +44,7 @@ export default function ExportDialog({
   originalId: string;
   total: number;
   isSignedIn: boolean;
+  tier: Tier;
   initialResult: Blob | null;
   onClose: () => void;
   onSignIn: () => void;
@@ -52,9 +55,14 @@ export default function ExportDialog({
   const shortSide = Math.min(canvas.width, canvas.height);
   // A tier is only offered if it actually yields more pixels than the one below.
   const available = TIERS.filter((t, i) => i === 0 || shortSide > TIERS[i - 1].short);
-  const [resolution, setResolution] = useState<Resolution>(isSignedIn ? available[available.length - 1].key : "720p");
+  const allowed = (r: Resolution) => (isSignedIn ? canExportAt(tier, r) : r === "720p");
+  const [resolution, setResolution] = useState<Resolution>(
+    () => [...available].reverse().find((t) => allowed(t.key))?.key ?? "720p"
+  );
+  const limits = TIER_LIMITS[tier];
+  const premium = limits.premiumEffects ? [] : premiumFeaturesUsed(project);
   const [state, setState] = useState<"setup" | "rendering" | "done" | "error">(initialResult ? "done" : "setup");
-  const [error, setError] = useState<{ message: string; credits?: boolean } | null>(null);
+  const [error, setError] = useState<{ message: string; upgrade?: boolean } | null>(null);
   const [result, setResult] = useState<{ blob: Blob; url: string } | null>(() =>
     initialResult ? { blob: initialResult, url: URL.createObjectURL(initialResult) } : null
   );
@@ -82,7 +90,6 @@ export default function ExportDialog({
       setResult({ blob, url: URL.createObjectURL(blob) });
       setState("done");
       trackEvent("processing_completed", { tool: TOOL, resolution });
-      window.dispatchEvent(new Event("credits:refresh"));
       // Survives a sign-in redirect, so an anonymous export isn't lost
       // (and re-rendered) just to download it.
       if (!isSignedIn) void saveLastExport(blob);
@@ -90,8 +97,8 @@ export default function ExportDialog({
       console.error("[editor] export failed", e);
       if (controller.signal.aborted) {
         setError({ message: "Export took too long. Try a shorter video or a lower resolution. Your project is safe." });
-      } else if (e instanceof InsufficientCreditsError) {
-        setError({ message: e.message, credits: true });
+      } else if (e instanceof PlanRequiredError) {
+        setError({ message: e.message, upgrade: true });
       } else if (e instanceof ContentBlockedError) {
         setError({ message: e.message });
       } else if (e instanceof TypeError) {
@@ -100,7 +107,7 @@ export default function ExportDialog({
         const msg = e instanceof Error ? e.message : "";
         setError({
           message:
-            /limit|sign in|too long|too large/i.test(msg) && msg.length < 160
+            /limit|sign in|too long|too large|upgrade/i.test(msg) && msg.length < 160
               ? msg
               : "Export failed. Your original video is safe. Please try exporting again.",
         });
@@ -138,8 +145,8 @@ export default function ExportDialog({
             <div className="grid gap-2" role="radiogroup" aria-label="Export resolution">
               {available.map((t) => {
                 const size = outputSize(canvas.width, canvas.height, t.short);
-                const locked = !isSignedIn && t.key !== "720p";
-                const cost = RESOLUTION_CREDIT_COST[t.key];
+                const locked = !allowed(t.key);
+                const lockLabel = !isSignedIn ? "sign in" : `${TIER_LABELS[tierForResolution(t.key)]} plan`;
                 return (
                   <button
                     key={t.key}
@@ -159,7 +166,7 @@ export default function ExportDialog({
                       </span>
                     </span>
                     <span className="text-xs text-muted">
-                      {locked ? "sign in" : isSignedIn ? `${cost} credit${cost > 1 ? "s" : ""}` : "free preview"}
+                      {locked ? lockLabel : isSignedIn ? "included" : "free preview"}
                     </span>
                   </button>
                 );
@@ -168,6 +175,15 @@ export default function ExportDialog({
             <p className="mt-2 text-xs text-muted">
               Frame rate matches your original; the aspect ratio follows your canvas. Videos are never upscaled.
             </p>
+            {isSignedIn && limits.maxResolution !== "4k" && (
+              <p className="mt-2 text-xs text-muted">
+                Your {TIER_LABELS[tier]} plan exports up to {limits.maxResolution}.{" "}
+                <Link href="/pricing" className="font-semibold text-accent underline">
+                  Upgrade
+                </Link>{" "}
+                for {tier === "free" ? "1080p or 4K" : "4K"}.
+              </p>
+            )}
             {!isSignedIn && (
               <p className="mt-2 text-xs text-muted">
                 Export a free 720p preview without an account.{" "}
@@ -178,9 +194,37 @@ export default function ExportDialog({
               </p>
             )}
           </div>
-          <button type="button" onClick={start} className="btn-primary flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold">
-            <ExportIcon width={16} height={16} /> Export
-          </button>
+          {limits.exportBranding && premium.length === 0 && (
+            <p className="text-xs text-muted">
+              Free exports include a small &quot;Made with WipeClip&quot; mark in the corner.{" "}
+              <Link href="/pricing" className="font-semibold text-accent underline">
+                Upgrade
+              </Link>{" "}
+              to remove it.
+            </p>
+          )}
+          {premium.length > 0 && (
+            <div className="rounded-xl border border-amber-400/50 bg-amber-400/10 p-3 text-xs">
+              <p className="flex items-center gap-1.5 font-semibold text-foreground">
+                <PremiumBadge className="shrink-0" /> This project uses premium features
+              </p>
+              <ul className="mt-2 list-disc space-y-0.5 pl-5 text-muted">
+                {premium.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+              </ul>
+              <p className="mt-2 text-muted">Upgrade to Starter or Pro to export them, or swap them for free ones.</p>
+            </div>
+          )}
+          {premium.length > 0 ? (
+            <Link href="/pricing" className="btn-primary flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold">
+              See plans
+            </Link>
+          ) : (
+            <button type="button" onClick={start} className="btn-primary flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold">
+              <ExportIcon width={16} height={16} /> Export
+            </button>
+          )}
         </div>
       )}
 
@@ -230,9 +274,9 @@ export default function ExportDialog({
             {error.message}
           </p>
           <div className="flex justify-center gap-2">
-            {error.credits ? (
+            {error.upgrade ? (
               <Link href="/pricing" className="btn-primary rounded-full px-5 py-2.5 text-sm font-semibold">
-                Get credits
+                See plans
               </Link>
             ) : (
               <button type="button" onClick={start} className="btn-primary rounded-full px-5 py-2.5 text-sm font-semibold">

@@ -27,7 +27,9 @@ import {
   type Overlay,
   type TextStyle,
 } from "@/lib/editor/types";
+import { isPremiumEffect, isPremiumFilter } from "@/lib/entitlements";
 import GradeFilter from "./GradeFilter";
+import PremiumBadge from "./PremiumBadge";
 import { ActionButton, Field, PanelShell, SecondsInput, StickerLibrary } from "./Inspector";
 import { TrashIcon } from "./icons";
 
@@ -42,6 +44,22 @@ const inputCls =
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return <p className="mb-2 mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted">{children}</p>;
+}
+
+/** One-line explainer under a premium item the user's plan doesn't include. */
+export function PremiumNote() {
+  return (
+    <p className="mt-3 flex items-center gap-1.5 text-[11px] text-muted">
+      <PremiumBadge className="shrink-0" />
+      <span>
+        Premium items are free to try. Export them with{" "}
+        <a href="/pricing" target="_blank" rel="noopener" className="font-semibold text-accent underline">
+          Starter or Pro
+        </a>
+        .
+      </span>
+    </p>
+  );
 }
 
 export function SliderField({
@@ -225,6 +243,7 @@ export function LookPanel({
   onApplyAll,
   onClose,
   gesture,
+  premiumLocked = false,
 }: {
   mode: "filters" | "adjust";
   look: Look;
@@ -234,6 +253,8 @@ export function LookPanel({
   onApplyAll: () => void;
   onClose: () => void;
   gesture: Gesture;
+  /** Mark premium filters (the user's plan doesn't include them). */
+  premiumLocked?: boolean;
 }) {
   return (
     <PanelShell title={`${mode === "filters" ? "Filters" : "Adjust"} · ${clipLabel}`} onClose={onClose}>
@@ -254,7 +275,7 @@ export function LookPanel({
                 role="radio"
                 aria-checked={look.filter === f}
                 onClick={() => onChange({ ...look, filter: f, intensity: look.filter === f ? look.intensity : 70 })}
-                className={`overflow-hidden rounded-xl border text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+                className={`relative overflow-hidden rounded-xl border text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
                   look.filter === f ? "border-accent-2 ring-1 ring-accent-2" : "border-border hover:border-accent/50"
                 }`}
               >
@@ -265,9 +286,11 @@ export function LookPanel({
                   <div className="aspect-video w-full bg-gradient-to-br from-accent to-accent-2" style={{ filter: `url(#swatch-${f})` }} />
                 )}
                 <span className="block px-1 py-1.5 text-foreground">{FILTERS[f].label}</span>
+                {premiumLocked && isPremiumFilter(f) && <PremiumBadge />}
               </button>
             ))}
           </div>
+          {premiumLocked && isPremiumFilter(look.filter) && <PremiumNote />}
           {look.filter !== "original" && (
             <div className="mt-4">
               <SliderField label="Intensity" value={look.intensity} min={0} max={100} neutral={100} format={(v) => `${v}%`} onChange={(intensity) => onChange({ ...look, intensity })} gesture={gesture} />
@@ -678,7 +701,15 @@ const EFFECT_ICONS: Record<EffectType, string> = {
   zoom: "⤢",
 };
 
-export function EffectsAddPanel({ onAdd, onClose }: { onAdd: (type: EffectType) => void; onClose: () => void }) {
+export function EffectsAddPanel({
+  onAdd,
+  onClose,
+  premiumLocked = false,
+}: {
+  onAdd: (type: EffectType) => void;
+  onClose: () => void;
+  premiumLocked?: boolean;
+}) {
   return (
     <PanelShell title="Effects" onClose={onClose}>
       <div className="grid grid-cols-3 gap-2">
@@ -688,15 +719,17 @@ export function EffectsAddPanel({ onAdd, onClose }: { onAdd: (type: EffectType) 
             type="button"
             onClick={() => onAdd(t)}
             title={`Add ${EFFECT_LABELS[t]}`}
-            className="flex flex-col items-center gap-1 rounded-xl border border-border bg-surface p-3 text-[11px] font-semibold text-foreground transition hover:border-accent-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+            className="relative flex flex-col items-center gap-1 rounded-xl border border-border bg-surface p-3 text-[11px] font-semibold text-foreground transition hover:border-accent-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
           >
             <span className="text-xl leading-none" aria-hidden>
               {EFFECT_ICONS[t]}
             </span>
             {EFFECT_LABELS[t]}
+            {premiumLocked && isPremiumEffect(t) && <PremiumBadge />}
           </button>
         ))}
       </div>
+      {premiumLocked && <PremiumNote />}
       <p className="mt-4 text-[11px] text-muted">Effects are added at the playhead for 2 seconds and only apply during their time on the effects track.</p>
     </PanelShell>
   );
@@ -712,6 +745,7 @@ export function EffectPanel({
   onDelete,
   onClose,
   gesture,
+  premiumLocked = false,
 }: {
   effect: EffectClip;
   total: number;
@@ -720,6 +754,7 @@ export function EffectPanel({
   onDelete: () => void;
   onClose: () => void;
   gesture: Gesture;
+  premiumLocked?: boolean;
 }) {
   const e = effect;
   return (
@@ -730,10 +765,12 @@ export function EffectPanel({
             {(Object.keys(EFFECT_LABELS) as EffectType[]).map((t) => (
               <option key={t} value={t}>
                 {EFFECT_LABELS[t]}
+                {premiumLocked && isPremiumEffect(t) ? " (Premium)" : ""}
               </option>
             ))}
           </select>
         </Field>
+        {premiumLocked && isPremiumEffect(e.type) && <PremiumNote />}
         <SliderField label="Intensity" value={e.intensity} min={0} max={100} neutral={50} format={(v) => `${v}%`} onChange={(intensity) => onChange({ intensity })} gesture={gesture} />
         <div className="grid grid-cols-2 gap-3">
           <Field label="Starts at">
