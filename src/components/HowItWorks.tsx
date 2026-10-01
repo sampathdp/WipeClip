@@ -4,13 +4,13 @@ const steps = [
   {
     n: "01",
     title: "Upload your video",
-    desc: "Drop in any video clip you own or have permission to edit. Supports MP4, MOV, and WebM up to 300MB.",
+    desc: "Drop in a clip you shot yourself. Supports MP4, MOV, and WebM up to 300MB.",
     tag: "Drag & Drop",
   },
   {
     n: "02",
-    title: "Mark the overlay area",
-    desc: "Select the badge or logo region once on the preview frame. Our AI tracks and reconstructs all frames.",
+    title: "Mark the unwanted object",
+    desc: "Box the passer-by, cable or smudge once on the preview frame. Our AI tracks and reconstructs all frames.",
     tag: "1-Click Select",
   },
   {
@@ -24,7 +24,7 @@ const steps = [
 const jsonLd = {
   "@context": "https://schema.org",
   "@type": "HowTo",
-  name: "How to clean up a video with WipeClip.co",
+  name: "How to remove an unwanted object from a video with WipeClip.co",
   step: steps.map((s) => ({
     "@type": "HowToStep",
     name: s.title,
@@ -58,7 +58,7 @@ export default function HowItWorks({ includeSchema = false }: { includeSchema?: 
             Zero editing skills required
           </h2>
           <p className="mt-4 text-muted text-base leading-relaxed">
-            Upload, mark the overlay once, download. WipeClip.co handles the frame-by-frame reconstruction.
+            Upload, mark the object once, download. WipeClip.co handles the frame-by-frame reconstruction.
           </p>
         </Reveal>
 

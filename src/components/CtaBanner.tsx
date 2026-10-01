@@ -17,17 +17,17 @@ export default function CtaBanner() {
 
           <div className="relative z-10">
             <h2 className="font-display text-3xl font-extrabold tracking-tight sm:text-5xl text-foreground">
-              Restore your footage, <span className="text-gradient">overlay-free</span>
+              Clean shots, <span className="text-gradient">distraction-free</span>
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-base sm:text-lg text-muted">
-              No registration needed to preview. Upload a clip you own or have the rights to edit and see the crystal-clear result in under 15 seconds.
+              No registration needed to preview. Upload a clip you shot and see the crystal-clear result in under 15 seconds.
             </p>
             <div className="mt-8">
               <Link
                 href="/#upload"
                 className="btn-primary inline-flex items-center gap-2 rounded-full px-8 py-4 text-base font-bold shadow-[0_0_30px_rgba(124,92,255,0.5)]"
               >
-                <span>Clean Up a Clip Free</span>
+                <span>Remove an Object Free</span>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>

@@ -22,8 +22,8 @@ const tiles = [
     icon: <path d="M12 3l8 4v5c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V7z" />,
   },
   {
-    title: "Static or moving overlays",
-    desc: "Corner logos, captions, timestamps, and badges that drift or reposition across the clip.",
+    title: "Static or moving objects",
+    desc: "A passer-by, a stray cable, a boom mic or a lens smudge, whether it stays put or moves across the clip.",
     span: "lg:col-span-2",
     icon: <path d="M5 12h14M12 5l7 7-7 7" />,
   },

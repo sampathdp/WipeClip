@@ -5,8 +5,30 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type DemoMode = "slider" | "scanner" | "reticle";
 
 const SAMPLES = [
-  { id: "sintel", label: "Cinematic Demo", src: "/demo-sintel.mp4", tag: "1080p • 60 FPS" },
-  { id: "nature", label: "Nature Macro", src: "/demo-video.mp4", tag: "4K • Lossless" },
+  {
+    id: "sintel",
+    label: "Cinematic Demo",
+    src: "/demo-sintel.mp4",
+    tag: "1080p • 60 FPS",
+    credit: (
+      <>
+        Sintel &copy; copyright Blender Foundation |{" "}
+        <a href="https://durian.blender.org" target="_blank" rel="noopener noreferrer" className="underline">
+          durian.blender.org
+        </a>{" "}
+        | Licensed under{" "}
+        <a
+          href="https://creativecommons.org/licenses/by/3.0/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline"
+        >
+          CC BY 3.0
+        </a>
+      </>
+    ),
+  },
+  { id: "nature", label: "Nature Macro", src: "/demo-video.mp4", tag: "4K • Lossless", credit: null },
 ];
 
 export default function BeforeAfterDemo() {
@@ -225,20 +247,14 @@ export default function BeforeAfterDemo() {
 
           {/* Original State Badge (Right Side) */}
           <span className="absolute bottom-5 right-5 inline-flex items-center gap-1.5 rounded-full bg-black/75 backdrop-blur-md px-3.5 py-1.5 text-xs font-medium text-muted border border-border shadow-lg">
-            Original with overlay
+            Original with lens smudge
           </span>
 
-          {/* Simulated burned-in camera timestamp */}
-          <div className="absolute bottom-16 right-8 z-20 flex items-center gap-2.5 rounded-xl bg-black/85 backdrop-blur-md px-4 py-2 border border-white/20 shadow-2xl">
-            <div className="h-2.5 w-2.5 rounded-full bg-cyan-400 animate-ping" />
-            <div className="flex flex-col text-left">
-              <span className="text-[11px] font-bold tracking-wider text-white uppercase leading-none font-mono">
-                REC 00:14:32
-              </span>
-              <span className="text-[9px] font-mono text-zinc-400 mt-1 leading-none">
-                CAM 01 &bull; 2026-03-14
-              </span>
-            </div>
+          {/* Simulated lens smudge / dust spot */}
+          <div className="absolute bottom-16 right-10 z-20 h-14 w-52">
+            <div className="absolute inset-0 rounded-full bg-zinc-200/45 blur-lg" />
+            <div className="absolute left-6 top-3 h-6 w-16 rounded-full bg-zinc-700/35 blur-md" />
+            <div className="absolute right-8 bottom-2 h-5 w-10 rounded-full bg-zinc-600/30 blur-md" />
           </div>
 
           {/* AI Neural Target Lock Reticle (When Mode is Reticle) */}
@@ -329,6 +345,9 @@ export default function BeforeAfterDemo() {
           </button>
         </div>
       </div>
+      {SAMPLES[activeSample].credit && (
+        <p className="mt-2 text-center text-[10px] text-muted">{SAMPLES[activeSample].credit}</p>
+      )}
     </div>
   );
 }

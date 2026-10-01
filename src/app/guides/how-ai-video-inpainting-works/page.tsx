@@ -15,7 +15,7 @@ const description =
   "A plain-language explanation of how video inpainting fills in a marked region using nearby pixels and nearby frames, and where the approach runs into trouble.";
 const path = "/guides/how-ai-video-inpainting-works";
 const publishedDate = "2026-08-25";
-const updatedDate = "2026-08-25";
+const updatedDate = "2026-10-01";
 
 export const metadata: Metadata = buildPageMetadata({ title, description, path });
 
@@ -40,7 +40,7 @@ const steps = [
   {
     n: "01",
     title: "Marking the region",
-    desc: "You draw a box around the badge, logo, or timestamp on a single preview frame. That's the only manual step: everything past this point is automatic.",
+    desc: "You draw a box around the unwanted object (a passer-by, a stray cable, a lens smudge) on a single preview frame. That's the only manual step: everything past this point is automatic.",
   },
   {
     n: "02",
@@ -50,7 +50,7 @@ const steps = [
   {
     n: "03",
     title: "Checking nearby frames",
-    desc: "Video has an advantage a single photo doesn't: nearby frames. Because the camera or the subject usually moves at least slightly between frames, a spot hidden by the mark in one frame is often visible, unmarked, a few frames earlier or later. The system tracks that motion and borrows real pixel information from those frames when it can, instead of only guessing from the current frame's surroundings.",
+    desc: "Video has an advantage a single photo doesn't: nearby frames. Because the camera or the subject usually moves at least slightly between frames, a spot hidden by the object in one frame is often visible a few frames earlier or later. The system tracks that motion and borrows real pixel information from those frames when it can, instead of only guessing from the current frame's surroundings.",
   },
   {
     n: "04",
@@ -81,7 +81,7 @@ export default function Page() {
               How <span className="text-gradient">AI video inpainting</span> works
             </>
           }
-          intro="No jargon required: here's what actually happens between marking an overlay and getting a clean clip back."
+          intro="No jargon required: here's what actually happens between marking an unwanted object and getting a clean clip back."
         />
 
         <section className="py-8">
@@ -123,7 +123,7 @@ export default function Page() {
                 When there&apos;s nothing nearby to borrow from
               </h2>
               <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
-                Sometimes no nearby frame has a clean view of what&apos;s behind the mark: the camera
+                Sometimes no nearby frame has a clean view of what&apos;s behind the object: the camera
                 never reveals that spot, or something else blocks it the whole time. This is called{" "}
                 <strong className="text-foreground">occlusion</strong>, and it&apos;s the scenario
                 with the least real information to work with. The system falls back to estimating from
@@ -167,11 +167,7 @@ export default function Page() {
               <Link href="/about#limitations" className="underline hover:text-foreground text-cyan-600">
                 product limitations
               </Link>{" "}
-              for how this applies in practice, and{" "}
-              <Link href="/research/video-cleanup-test" className="underline hover:text-foreground text-cyan-600">
-                WipeClip Research
-              </Link>{" "}
-              for real test results as they&apos;re published.
+              for how this applies in practice.
             </p>
           </div>
         </section>
@@ -179,7 +175,7 @@ export default function Page() {
         <section className="py-8">
           <div className="mx-auto max-w-3xl px-6">
             <p className="text-xs text-muted leading-relaxed">
-              This explains the general approach behind reconstruction-based overlay removal. It
+              This explains the general approach behind reconstruction-based object removal. It
               describes the concepts involved, not the internals of any specific implementation.
             </p>
           </div>
@@ -188,19 +184,9 @@ export default function Page() {
         <RelatedGuides
           links={[
             {
-              href: "/guides/ai-inpainting-vs-blur-vs-crop",
-              label: "AI Inpainting vs Blur vs Crop",
-              desc: "How this approach compares to methods that don't reconstruct pixels at all.",
-            },
-            {
               href: "/guides/does-ai-cleanup-reduce-video-quality",
               label: "Does AI Cleanup Reduce Video Quality?",
               desc: "Why the reconstructed region is an estimate, and what else affects quality.",
-            },
-            {
-              href: "/research/video-cleanup-test",
-              label: "WipeClip Research: AI Video Cleanup Test",
-              desc: "Real before/after tests across static, moving, and difficult overlay cases.",
             },
           ]}
         />

@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/terms" },
 };
 
-const updated = "August 19, 2026";
+const updated = "October 1, 2026";
 
 function H2({ children }: { children: React.ReactNode }) {
   return (
@@ -43,13 +43,12 @@ export default function TermsPage() {
 
       <H2>1. What the Service does</H2>
       <P>
-        WipeClip.co is an AI video and image cleanup tool. You mark a region
-        of a file you provide and the Service reconstructs or replaces it
-        (for example a timestamp, caption, logo, or another
-        unwanted object) using automated image/video processing, so you can
-        restore a clean version of footage you own or are authorized to
-        edit. You choose the region; the Service does not automatically
-        detect or target any specific brand&apos;s mark.
+        WipeClip.co is a browser-based video editor with AI object removal.
+        You mark an unwanted object in a file you provide (for example a
+        passer-by, a stray cable, or a lens smudge) and the Service
+        reconstructs that region using automated image/video processing.
+        You choose the region; the Service does not detect, target, or
+        remove watermarks, logos, or other ownership marks.
       </P>
 
       <H2>2. Eligibility</H2>
@@ -76,10 +75,9 @@ export default function TermsPage() {
           person or entity;
         </li>
         <li>
-          your use does not circumvent, remove, or alter copyright management
-          information, provenance metadata, or a required disclosure mark in
-          a way that facilitates copyright infringement or violates
-          applicable law; and
+          you will not use the Service to remove, obscure, or alter any
+          watermark, logo, copyright notice, copyright management
+          information, provenance metadata, or required disclosure mark; and
         </li>
         <li>
           your use complies with the terms of service of any platform the
@@ -102,6 +100,7 @@ export default function TermsPage() {
       <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-muted">
         <li>process content you do not own and do not have permission to edit;</li>
         <li>infringe or facilitate infringement of any intellectual property right;</li>
+        <li>remove or obscure a watermark, logo, or other mark identifying the owner or source of content;</li>
         <li>violate any applicable law, including copyright, trademark, or AI-disclosure law;</li>
         <li>upload unlawful, defamatory, or content depicting a real person without their consent (including non-consensual intimate imagery);</li>
         <li>upload sexually explicit or adult content;</li>
@@ -139,9 +138,12 @@ export default function TermsPage() {
       </P>
       <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-muted">
         <li>
-          <strong>Billing:</strong> Paid transactions are processed by
-          Payments.lk (a Payable company) and charged in Sri Lankan rupees
-          (LKR). When purchasing a plan, you agree to Payments.lk&apos;s
+          <strong>Billing:</strong> Customers outside Sri Lanka buy through
+          our online reseller Paddle.com, which is the Merchant of Record for
+          those orders and also handles related customer service inquiries
+          and returns; those purchases are subject to Paddle&apos;s buyer
+          terms. Customers in Sri Lanka pay through Payments.lk (a Payable
+          company) in Sri Lankan rupees (LKR), subject to Payments.lk&apos;s
           customer terms and privacy policy.
         </li>
         <li>

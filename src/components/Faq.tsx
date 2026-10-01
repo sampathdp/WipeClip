@@ -4,19 +4,19 @@ import Reveal from "./Reveal";
 const faqs = [
   {
     q: "Can I also trim, cut, or edit my video?",
-    a: "Yes. The WipeClip video editor (wipeclip.co/editor) lets you trim, split and remove sections, reorder clips, add transitions and stickers, and run AI cleanup on a single clip, then export at your original aspect ratio and frame rate.",
+    a: "Yes. The WipeClip video editor (wipeclip.co/editor) lets you trim, split and remove sections, reorder clips, add transitions and stickers, and run AI object removal on a single clip, then export at your original aspect ratio and frame rate.",
   },
   {
     q: "Can I use this on any video I find online?",
-    a: "No. WipeClip.co is for content you own or have explicit permission to edit, such as your own recordings, personal B-roll, or footage with client authorization. You confirm this before every job.",
+    a: "No. WipeClip.co is for footage you shot yourself or have the rights to edit, such as your own recordings, personal B-roll, or client footage you're contracted to edit. You confirm this before every job.",
   },
   {
     q: "Does this actually reconstruct the area, or just blur it?",
     a: "WipeClip.co blends the marked region in from surrounding pixels and temporal motion vectors rather than covering it with a static blur box or destructive crop.",
   },
   {
-    q: "Which overlays are supported?",
-    a: "Timestamps, captions, your own logos and graphics, or unwanted objects in footage you own. You mark the region yourself on the preview frame.",
+    q: "What can I remove?",
+    a: "Unwanted physical objects in your own shots, like a passer-by, a stray cable, a boom mic or a lens smudge. You mark the region yourself on the preview frame. WipeClip.co does not remove watermarks, logos, or other ownership or copyright marks.",
   },
   {
     q: "Will the output lose resolution or quality?",

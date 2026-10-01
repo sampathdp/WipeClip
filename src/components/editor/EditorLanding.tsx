@@ -41,8 +41,8 @@ const features = [
     desc: "Turn one video into 16:9, 9:16 for Shorts, TikTok and Reels, 1:1 or 4:5, with fit or fill and a color, gradient, blurred or image background.",
   },
   {
-    title: "AI Cleanup on any clip",
-    desc: "Mark a logo, caption or overlay on one clip and WipeClip's reconstruction engine rebuilds the pixels underneath, for just that part of the timeline.",
+    title: "AI object removal on any clip",
+    desc: "Mark an unwanted object, like a passer-by or a stray cable, on one clip and WipeClip's reconstruction engine rebuilds the pixels behind it, for just that part of the timeline.",
   },
 ];
 
@@ -71,7 +71,7 @@ const faqs = [
     a: "WipeClip keeps your original aspect ratio (16:9, 9:16, 1:1 and others) and frame rate, never upscales, and encodes at a visually near-lossless quality setting. You choose the maximum resolution when you export.",
   },
   {
-    q: "Can I remove an object or caption from just part of my video?",
+    q: "Can I remove an object from just part of my video?",
     a: "Yes. Select a clip on the timeline and use AI Cleanup. Only that clip is processed, and the cleaned result replaces it in your project. Undo brings the original back.",
   },
   {
@@ -91,7 +91,7 @@ const jsonLd = {
       operatingSystem: "Web",
       browserRequirements: "Requires a modern browser with HTML5 video support",
       description:
-        "Browser-based video editor: trim, split and reorder clips, add text, music, filters, effects, transitions, stickers and images, resize for any platform, and remove overlays from a clip with AI cleanup.",
+        "Browser-based video editor: trim, split and reorder clips, add text, music, filters, effects, transitions, stickers and images, resize for any platform, and remove unwanted objects from a clip with AI.",
       featureList: [
         "Trim video",
         "Split and cut video",
@@ -103,7 +103,7 @@ const jsonLd = {
         "Music and audio tracks with volume, fades and audio extraction",
         "Filters, color adjustments and timed effects",
         "Canvas presets for YouTube, Shorts, TikTok, Reels and Instagram",
-        "AI cleanup of logos, captions and overlays on a selected clip",
+        "AI removal of unwanted objects on a selected clip",
         "Export MP4 at the original aspect ratio and frame rate",
       ],
       publisher: { "@id": `${SITE_URL}/#organization` },
@@ -161,9 +161,9 @@ export default function EditorLanding() {
           ))}
         </ol>
         <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-muted">
-          Only need an overlay gone from the whole video? The{" "}
+          Only need an object gone from the whole video? The{" "}
           <Link href="/#upload" className="underline hover:text-foreground">
-            one-step AI video cleanup tool
+            one-step AI object removal tool
           </Link>{" "}
           is quicker. Read{" "}
           <Link href="/guides/how-ai-video-inpainting-works" className="underline hover:text-foreground">

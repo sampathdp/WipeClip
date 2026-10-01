@@ -2,8 +2,8 @@ import Link from "next/link";
 
 const points = [
   {
-    title: "Mark the unwanted overlay",
-    desc: "Draw a box around the badge, logo, or timestamp on one preview frame. You don't trace it frame by frame yourself.",
+    title: "Mark the unwanted object",
+    desc: "Draw a box around the passer-by, stray cable, boom mic or lens smudge on one preview frame. You don't trace it frame by frame yourself.",
   },
   {
     title: "WipeClip reconstructs that region",
@@ -11,7 +11,7 @@ const points = [
   },
   {
     title: "The rest of the frame stays untouched",
-    desc: "Only the marked region is rebuilt. There's no need to crop, resize, or blur the whole video to hide one overlay.",
+    desc: "Only the marked region is rebuilt. There's no need to crop, resize, or blur the whole video to hide one distraction.",
   },
 ];
 
@@ -44,7 +44,7 @@ export default function WhatWipeClipDoes() {
 
         <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-muted leading-relaxed">
           Reconstruction is an estimate built from the footage around the marked region, not a
-          guaranteed pixel-perfect recovery of whatever was originally behind the overlay. See{" "}
+          guaranteed pixel-perfect recovery of whatever was originally behind the object. See{" "}
           <a href="#limitations" className="underline hover:text-foreground">
             limitations
           </a>{" "}

@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     template: "%s | WipeClip.co",
   },
   description:
-    "WipeClip is an online video editor for creators. Trim, cut, add transitions, text, stickers, filters and music in your browser, then export for YouTube, Shorts and Reels. Built-in AI tools remove unwanted objects, timestamps and captions from footage you own.",
+    "WipeClip is an online video editor for creators. Trim, cut, add transitions, text, stickers, filters and music in your browser, then export for YouTube, Shorts and Reels. Built-in AI object removal takes distractions out of footage you shot.",
   keywords: [
     "online video editor",
     "free video editor",
@@ -39,7 +39,6 @@ export const metadata: Metadata = {
     "add stickers to video",
     "video filters online",
     "remove object from video",
-    "AI video cleanup",
     "wipeclip",
   ],
   authors: [{ name: "WipeClip.co" }],
@@ -127,7 +126,7 @@ const jsonLd = {
       operatingSystem: "Web",
       url: siteUrl,
       description:
-        "AI video cleanup for creators: reconstructs the pixels behind a logo, badge, caption, timestamp or unwanted object across a whole clip, for footage you own or have rights to edit, plus a browser-based video editor for trimming, cutting, transitions and stickers.",
+        "Browser-based video editor for creators: trim, cut, transitions, text and stickers, plus AI object removal that rebuilds the pixels behind an unwanted object across a whole clip of footage you shot.",
       offers: {
         "@type": "Offer",
         price: "0",

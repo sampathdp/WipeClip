@@ -11,6 +11,61 @@ import { landingPagePath, trackEvent } from "@/lib/analytics";
 
 type Billing = "month" | "year";
 
+/** GET /api/checkout - which checkout this visitor gets (decided server
+ * side by country) and, for Paddle, what Paddle.js needs. */
+type CheckoutConfig = {
+  gateway: "payments_lk" | "paddle" | null;
+  paddle: { clientToken: string; environment: "sandbox" | "production"; customerId: string | null } | null;
+};
+
+type PaddleJs = {
+  Environment: { set(env: "sandbox"): void };
+  Initialize(options: { token: string; pwCustomer?: { id: string } }): void;
+  Checkout: {
+    open(options: {
+      transactionId: string;
+      customer?: { email: string };
+      settings?: { displayMode?: "overlay"; successUrl?: string };
+    }): void;
+  };
+};
+
+declare global {
+  interface Window {
+    Paddle?: PaddleJs;
+  }
+}
+
+let paddleLoad: Promise<PaddleJs> | null = null;
+
+/** Loads and initializes Paddle.js once per page. Sandbox is set only for a
+ * sandbox token; live is Paddle.js's default. pwCustomer is the signed-in
+ * user's Paddle customer ID (ctm_...), for Paddle Retain - never our own
+ * user id or email. */
+function loadPaddle(config: NonNullable<CheckoutConfig["paddle"]>): Promise<PaddleJs> {
+  paddleLoad ??= new Promise<PaddleJs>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.paddle.com/paddle/v2/paddle.js";
+    script.async = true;
+    script.onload = () => {
+      const paddle = window.Paddle;
+      if (!paddle) return reject(new Error("Paddle.js did not load."));
+      if (config.environment === "sandbox") paddle.Environment.set("sandbox");
+      paddle.Initialize({
+        token: config.clientToken,
+        ...(config.customerId ? { pwCustomer: { id: config.customerId } } : {}),
+      });
+      resolve(paddle);
+    };
+    script.onerror = () => {
+      paddleLoad = null;
+      reject(new Error("Could not load the checkout. Check your connection or ad blocker and try again."));
+    };
+    document.head.appendChild(script);
+  });
+  return paddleLoad;
+}
+
 const res = (r: string) => (r === "4k" ? "4K" : r);
 
 /** Card copy per tier. Limits come from TIER_LIMITS so the page can't
@@ -119,6 +174,8 @@ export default function PricingClient() {
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [currentTier, setCurrentTier] = useState<Tier | null>(null);
+  const [checkoutConfig, setCheckoutConfig] = useState<CheckoutConfig | null>(null);
+  const showLkr = checkoutConfig?.gateway !== "paddle";
 
   useEffect(() => {
     if (checkoutUrl) window.location.href = checkoutUrl;
@@ -132,6 +189,16 @@ export default function PricingClient() {
       const signedIn = Boolean(data.user);
       setIsSignedIn(signedIn);
       trackEvent("pricing_viewed", { logged_in: signedIn, source: landingPagePath() });
+      // After the session read, so Paddle Retain gets the signed-in
+      // customer. Paddle.js loads up front so the overlay opens instantly.
+      fetch("/api/checkout")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((c: CheckoutConfig | null) => {
+          if (!c) return;
+          setCheckoutConfig(c);
+          if (c.paddle) loadPaddle(c.paddle).catch(() => {});
+        })
+        .catch(() => {});
       if (signedIn) {
         fetch("/api/credits")
           .then((r) => (r.ok ? r.json() : null))
@@ -141,7 +208,7 @@ export default function PricingClient() {
     });
   }, []);
 
-  // Payments.lk bounces back here with ?success=1&plan=<key> after a
+  // Payments.lk (and Paddle's successUrl) bounces back here with ?success=1&plan=<key> after a
   // completed hosted checkout (see successUrl in /api/checkout). The
   // webhook is still the source of truth for actually granting credits -
   // this only marks the funnel's purchase step and never touches billing
@@ -170,10 +237,24 @@ export default function PricingClient() {
       // Parsed from text so an HTML error page (proxy or platform error, not
       // this app's JSON) surfaces as a status code instead of a JSON parse error.
       const text = await res.text();
-      let data: { url?: string; error?: string } | null = null;
+      let data: {
+        url?: string;
+        paddle?: { transactionId: string; email: string | null; successUrl: string };
+        error?: string;
+      } | null = null;
       try {
         data = JSON.parse(text);
       } catch {}
+      if (res.ok && data?.paddle && checkoutConfig?.paddle) {
+        const paddle = await loadPaddle(checkoutConfig.paddle);
+        paddle.Checkout.open({
+          transactionId: data.paddle.transactionId,
+          ...(data.paddle.email ? { customer: { email: data.paddle.email } } : {}),
+          settings: { displayMode: "overlay", successUrl: data.paddle.successUrl },
+        });
+        setLoading(null);
+        return;
+      }
       if (!res.ok || !data?.url) throw new Error(data?.error ?? `Could not start checkout (HTTP ${res.status}).`);
       setCheckoutUrl(data.url);
     } catch (e) {
@@ -258,7 +339,8 @@ export default function PricingClient() {
                     <span className="text-xs text-muted"> / {plan ? plan.period : "forever"}</span>
                     {plan && (
                       <p className="mt-1 text-[11px] text-muted">
-                        Charged as {formatLkr(plan.amountCents)} · {plan.credits} AI credits included
+                        {showLkr ? `Charged as ${formatLkr(plan.amountCents)} · ` : ""}
+                        {plan.credits} AI credits included
                       </p>
                     )}
                   </div>
@@ -284,7 +366,7 @@ export default function PricingClient() {
                       disabled={loading !== null}
                       className={`w-full rounded-full py-3 text-xs font-bold transition-all ${card.popular ? "btn-primary" : "btn-secondary"} disabled:opacity-50`}
                     >
-                      {loading === key ? "Redirecting to Checkout…" : isCurrent ? `Renew ${plan.label}` : `Get ${plan.label}`}
+                      {loading === key ? "Opening checkout…" : isCurrent ? `Renew ${plan.label}` : `Get ${plan.label}`}
                     </button>
                   ) : (
                     <Link href="/editor" className="btn-secondary block w-full rounded-full py-3 text-center text-xs font-semibold">
@@ -362,7 +444,8 @@ export default function PricingClient() {
                   <div>
                     <p className="text-sm font-bold text-foreground">{pack.label}</p>
                     <p className="mt-0.5 text-xs text-muted">
-                      {pack.credits} AI credits · {pack.priceLabel} ({formatLkr(pack.amountCents)})
+                      {pack.credits} AI credits · {pack.priceLabel}
+                      {showLkr && ` (${formatLkr(pack.amountCents)})`}
                     </p>
                   </div>
                   <button
@@ -370,7 +453,7 @@ export default function PricingClient() {
                     disabled={loading !== null}
                     className="btn-secondary shrink-0 rounded-full px-4 py-2 text-xs font-bold disabled:opacity-50"
                   >
-                    {loading === key ? "Redirecting…" : "Buy"}
+                    {loading === key ? "Opening…" : "Buy"}
                   </button>
                 </div>
               );

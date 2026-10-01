@@ -95,7 +95,7 @@ export default function AiCleanupDialog({
     const hardStop = setTimeout(() => controller.abort(), 20 * 60 * 1000);
     trackEvent("processing_started", { tool: TOOL, mode: "remove", resolution });
     try {
-      const blob = await processVideo(source.file, "remove", region, resolution, null, controller.signal, {
+      const blob = await processVideo(source.file, region, resolution, controller.signal, {
         start: clip.start,
         end: clip.end,
       });
@@ -146,7 +146,7 @@ export default function AiCleanupDialog({
     <Dialog title="AI Cleanup" onClose={step === "processing" ? undefined : onClose} wide>
       <p className="text-sm text-muted">
         Clip {formatTime(clip.start, true)} – {formatTime(clip.end, true)} ({formatTime(clip.end - clip.start, true)}). Drag a box over the
-        logo, caption, or overlay to remove. It&apos;s reconstructed across every frame of this clip.
+        unwanted object to remove. It&apos;s reconstructed across every frame of this clip.
       </p>
 
       {step === "frame" && (
@@ -196,8 +196,8 @@ export default function AiCleanupDialog({
               className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
             />
             <span>
-              I own this video, or have permission to edit it, and won&apos;t use WipeClip.co to infringe copyright or violate a
-              platform&apos;s terms of service.{" "}
+              I shot this video or have the rights to edit it, and the area I mark is not a watermark, logo or other
+              ownership or copyright mark.{" "}
               <Link href="/terms" className="underline" target="_blank">
                 Terms
               </Link>

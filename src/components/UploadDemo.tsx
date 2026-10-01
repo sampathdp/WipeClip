@@ -13,25 +13,18 @@ import { trackEvent, useToolView } from "@/lib/analytics";
 import {
   ContentBlockedError,
   InsufficientCreditsError,
-  detectWatermark,
   probeVideo,
   processVideo,
   type Region,
   type Resolution,
   type VideoInfo,
-  type WatermarkCandidate,
 } from "@/lib/toolsApi";
-
-// Below this, the detector's own signal is too weak to prefill with -
-// let the user mark the region manually instead of guessing wrong.
-const WATERMARK_SUGGESTION_MIN_CONFIDENCE = 0.45;
 
 type Step = "idle" | "probing" | "select" | "processing" | "done" | "error" | "blocked";
 type BlockReason = "content" | "credits";
-type Mode = "remove" | "replace";
 
 const MAX_BYTES = 300 * 1024 * 1024;
-const TOOL = "video_watermark_remover";
+const TOOL = "video_object_remover";
 
 const RESOLUTION_OPTIONS: { key: Resolution; label: string; minHeight: number; credits: number }[] = [
   { key: "720p", label: "720p HD", minHeight: 720, credits: 1 },
@@ -85,10 +78,7 @@ export default function UploadDemo() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [originalUrl, setOriginalUrl] = useState<string | null>(null);
   const [region, setRegion] = useState<Region | null>(null);
-  const [suggestion, setSuggestion] = useState<WatermarkCandidate | null>(null);
-  const [mode, setMode] = useState<Mode>("remove");
   const [resolution, setResolution] = useState<Resolution>("720p");
-  const [logo, setLogo] = useState<File | null>(null);
   const [consent, setConsent] = useState(false);
   const [progress, setProgress] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -99,7 +89,6 @@ export default function UploadDemo() {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [showSignInModal, setShowSignInModal] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const logoInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -188,10 +177,7 @@ export default function UploadDemo() {
     setPreviewUrl(null);
     setOriginalUrl(null);
     setRegion(null);
-    setSuggestion(null);
-    setMode("remove");
     setResolution("720p");
-    setLogo(null);
     setConsent(false);
     setProgress(0);
     setElapsedMs(0);
@@ -215,14 +201,9 @@ export default function UploadDemo() {
     setOriginalUrl(URL.createObjectURL(picked));
     setStep("probing");
     try {
-      const [{ info, previewUrl: url }, candidates] = await Promise.all([
-        probeVideo(picked),
-        detectWatermark(picked),
-      ]);
+      const { info, previewUrl: url } = await probeVideo(picked);
       setVideoInfo(info);
       setPreviewUrl(url);
-      const top = candidates[0];
-      setSuggestion(top && top.confidence >= WATERMARK_SUGGESTION_MIN_CONFIDENCE ? top : null);
       setStep("select");
       trackEvent("mask_started", { tool: TOOL });
     } catch (e) {
@@ -273,8 +254,8 @@ export default function UploadDemo() {
     setProgress(0);
     setElapsedMs(0);
     setError(null);
-    trackEvent("mask_completed", { tool: TOOL, mode });
-    trackEvent("processing_started", { tool: TOOL, mode, resolution });
+    trackEvent("mask_completed", { tool: TOOL });
+    trackEvent("processing_started", { tool: TOOL, resolution });
 
     // Indeterminate: the backend processes the whole clip before it
     // responds, so there's no real percentage to read. Ease asymptotically
@@ -295,13 +276,13 @@ export default function UploadDemo() {
     const abortTimer = setTimeout(() => controller.abort(), 20 * 60 * 1000);
 
     try {
-      const blob = await processVideo(file, mode, region, resolution, logo, controller.signal);
+      const blob = await processVideo(file, region, resolution, controller.signal);
       clearTimeout(abortTimer);
       if (timerRef.current) clearInterval(timerRef.current);
       setProgress(100);
       setResultUrl(URL.createObjectURL(blob));
       setStep("done");
-      trackEvent("processing_completed", { tool: TOOL, mode, resolution });
+      trackEvent("processing_completed", { tool: TOOL, resolution });
       window.dispatchEvent(new Event("credits:refresh"));
       // Anonymous result: save it so it survives whatever sign-in path the
       // visitor takes at the download step (see resultCache.ts) - signed-in
@@ -338,7 +319,7 @@ export default function UploadDemo() {
       setStep("error");
       trackEvent("processing_failed", { tool: TOOL, error_category: "processing_error" });
     }
-  }, [file, region, mode, resolution, logo, isSignedIn]);
+  }, [file, region, resolution, isSignedIn]);
 
   const editorTools = (heading: string) => (
     <div className="mt-6 rounded-2xl border border-border bg-surface-2/50 p-4">
@@ -390,10 +371,10 @@ export default function UploadDemo() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl text-foreground">
-            Try it now: <span className="text-gradient">Clean Up a Clip</span>
+            Try it now: <span className="text-gradient">Remove an Object</span>
           </h2>
           <p className="mt-1.5 text-sm sm:text-base text-muted">
-            Upload a clip you own, mark the overlay once, download the clean version. Zero files stored.
+            Upload a clip you shot, mark the unwanted object once, download the clean version. Zero files stored.
           </p>
         </div>
       </div>
@@ -553,54 +534,8 @@ export default function UploadDemo() {
                 previewUrl={previewUrl}
                 naturalWidth={videoInfo.width}
                 naturalHeight={videoInfo.height}
-                suggestion={suggestion}
                 onChange={setRegion}
               />
-
-              {/* Mode Toggle */}
-              <div className="mt-6 flex rounded-xl bg-surface-3/80 p-1 border border-border text-sm">
-                <button
-                  onClick={() => setMode("remove")}
-                  className={`flex-1 rounded-lg py-2.5 font-medium transition-all ${
-                    mode === "remove"
-                      ? "bg-accent text-white shadow-[0_0_15px_rgba(124,92,255,0.4)]"
-                      : "text-muted hover:text-foreground"
-                  }`}
-                >
-                  Remove Overlay
-                </button>
-                <button
-                  onClick={() => setMode("replace")}
-                  className={`flex-1 rounded-lg py-2.5 font-medium transition-all ${
-                    mode === "replace"
-                      ? "bg-accent text-white shadow-[0_0_15px_rgba(124,92,255,0.4)]"
-                      : "text-muted hover:text-foreground"
-                  }`}
-                >
-                  Replace with My Logo
-                </button>
-              </div>
-
-              {mode === "replace" && (
-                <div className="mt-3">
-                  <input
-                    ref={logoInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => setLogo(e.target.files?.[0] ?? null)}
-                  />
-                  <button
-                    onClick={() => logoInputRef.current?.click()}
-                    className="btn-secondary w-full rounded-xl px-4 py-3 text-sm text-left flex items-center justify-between"
-                  >
-                    <span className={logo ? "text-foreground font-medium" : "text-muted"}>
-                      {logo ? logo.name : "Choose a replacement logo image (PNG)"}
-                    </span>
-                    <span className="text-xs text-cyan-600 font-semibold">Browse</span>
-                  </button>
-                </div>
-              )}
 
               {/* Resolution options */}
               <p className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Output resolution</p>
@@ -662,9 +597,9 @@ export default function UploadDemo() {
                   className="mt-0.5 h-4 w-4 shrink-0 rounded border-border bg-surface-3 accent-cyan-400 cursor-pointer"
                 />
                 <span>
-                  I own this video, or have permission to edit it, and won&apos;t
-                  use WipeClip.co to infringe copyright or violate a platform&apos;s
-                  terms of service.{" "}
+                  I created this video or have the rights to edit it, and the area I
+                  marked is not a watermark, logo or other ownership or copyright
+                  mark.{" "}
                   <Link href="/terms" className="underline hover:text-foreground text-cyan-600">
                     Terms of Service
                   </Link>
@@ -674,10 +609,10 @@ export default function UploadDemo() {
               {/* Process Button */}
               <button
                 onClick={process}
-                disabled={!region || !consent || (mode === "replace" && !logo)}
+                disabled={!region || !consent}
                 className="btn-primary mt-6 w-full rounded-full py-3.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {mode === "remove" ? "Clean Up Video Now" : "Replace Overlay Now"}
+                Remove Object Now
               </button>
             </div>
           )}
@@ -717,7 +652,7 @@ export default function UploadDemo() {
                 {isSignedIn ? (
                   <a
                     href={resultUrl}
-                    download={`unmarked-${file.name}`}
+                    download={`cleaned-${file.name}`}
                     onClick={() => trackEvent("download_clicked", { tool: TOOL })}
                     className="flex-1 rounded-full bg-emerald-500 hover:bg-emerald-400 px-6 py-3.5 text-center text-sm font-bold text-black shadow-[0_0_25px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-2"
                   >

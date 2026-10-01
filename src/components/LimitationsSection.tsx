@@ -2,8 +2,8 @@ import Link from "next/link";
 
 const limitations = [
   {
-    title: "Overlay size",
-    desc: "A small badge is easier to rebuild convincingly than a large logo covering a big share of the frame.",
+    title: "Object size",
+    desc: "A small object is easier to rebuild convincingly than a large one covering a big share of the frame.",
   },
   {
     title: "Background complexity",

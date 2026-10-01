@@ -11,7 +11,7 @@ const MARQUEE_ITEMS = [
   "MOTION-AWARE INPAINTING",
   "TRIM · CUT · TRANSITIONS",
   "STICKERS",
-  "YOUR FOOTAGE, YOUR RIGHTS",
+  "YOUR OWN FOOTAGE",
   "~15s AVG RENDER",
 ];
 
@@ -63,8 +63,8 @@ export default function Hero() {
             <p className="mx-auto mt-7 max-w-md text-base leading-relaxed text-muted sm:text-lg lg:mx-0 lg:border-l-2 lg:border-accent/40 lg:pl-5">
               Trim, cut and arrange clips, add transitions, text, stickers,
               filters and music, then export for YouTube, Shorts and Reels, all
-              in your browser. Built-in AI tools clean up unwanted objects,
-              timestamps and captions in footage you own.
+              in your browser. Built-in AI object removal takes out passers-by,
+              cables and other distractions from footage you shot.
             </p>
 
             {/* Action CTAs */}

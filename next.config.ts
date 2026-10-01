@@ -13,40 +13,26 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   // Denies browser features this site never uses; trims what a
   // compromised third-party script embedded here could reach for.
+  // `payment` is left to Paddle's checkout frame only, which needs it for
+  // Apple Pay and Google Pay.
   {
     key: "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    value:
+      'camera=(), microphone=(), geolocation=(), payment=("https://buy.paddle.com" "https://sandbox-buy.paddle.com"), usb=(), interest-cohort=()',
   },
-];
-
-// Retired brand-specific landing pages; send old links and search results
-// to the homepage instead of a 404.
-const RETIRED_PLATFORM_PAGES = [
-  "tiktok",
-  "capcut",
-  "canva",
-  "instagram",
-  "snapchat",
-  "facebook",
-  "kapwing",
-  "inshot",
 ];
 
 const nextConfig: NextConfig = {
   async redirects() {
     return [
-      ...RETIRED_PLATFORM_PAGES.map((p) => ({
-        source: `/remove-${p}-watermark`,
-        destination: "/",
-        permanent: true,
-      })),
-      { source: "/remove-image-watermark", destination: "/image-cleanup", permanent: true },
+      // Retired pages: the old watermark-removal landing pages, research
+      // section and method-comparison guide are intentionally left to 404
+      // so search engines drop them.
       {
         source: "/guides/does-watermark-removal-reduce-video-quality",
         destination: "/guides/does-ai-cleanup-reduce-video-quality",
         permanent: true,
       },
-      { source: "/research/video-watermark-removal-test", destination: "/research/video-cleanup-test", permanent: true },
     ];
   },
   async headers() {

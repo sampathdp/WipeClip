@@ -4,10 +4,6 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import Reveal from "@/components/Reveal";
 import WhatWipeClipDoes from "@/components/WhatWipeClipDoes";
-import StaticVsMovingWatermarks from "@/components/StaticVsMovingWatermarks";
-import RemovalMethodComparison from "@/components/RemovalMethodComparison";
-import SupportedSituations from "@/components/SupportedSituations";
-import EvidenceSection from "@/components/EvidenceSection";
 import LimitationsSection from "@/components/LimitationsSection";
 import PrivacyProcessing from "@/components/PrivacyProcessing";
 import CtaBanner from "@/components/CtaBanner";
@@ -16,29 +12,24 @@ import { buildPageMetadata } from "@/lib/seo";
 export const metadata: Metadata = buildPageMetadata({
   title: "About WipeClip - How AI Video Cleanup Works",
   description:
-    "What WipeClip is, how its AI reconstruction removes logos, captions and overlays from footage you own, how it compares with blur and crop, its limitations, and how your files are handled.",
+    "What WipeClip is: a browser video editor for creators, with AI object removal for footage you shot yourself. How the reconstruction works, its limitations, and how your files are handled.",
   path: "/about",
 });
 
 const SECTIONS = [
   { id: "what-it-does", label: "What it does" },
-  { id: "static-vs-moving", label: "Static vs moving" },
-  { id: "comparison", label: "Compared" },
-  { id: "situations", label: "Use cases" },
-  { id: "evidence", label: "Evidence" },
   { id: "limitations", label: "Limitations" },
   { id: "privacy", label: "Privacy" },
-  { id: "related", label: "Platforms" },
 ];
 
 const PRINCIPLES = [
   {
     title: "Reconstruct, don't cover up",
-    desc: "A blur box or crop hides a problem. WipeClip rebuilds the pixels behind it from the surrounding frames.",
+    desc: "A blur box or crop hides a distraction. WipeClip rebuilds the pixels behind it from the surrounding frames.",
   },
   {
-    title: "Your footage, your rights",
-    desc: "Built for creators cleaning up video they own or have permission to edit. You confirm that before every job.",
+    title: "Your own footage only",
+    desc: "Built for creators editing video they shot themselves. WipeClip does not remove watermarks, logos or copyright marks, and you confirm that before every job.",
   },
   {
     title: "Nothing kept",
@@ -46,7 +37,7 @@ const PRINCIPLES = [
   },
   {
     title: "Honest about limits",
-    desc: "Reconstruction is an estimate. We publish what works well, what doesn't, and the evidence behind both.",
+    desc: "Reconstruction is an estimate. We say plainly what works well and what doesn't.",
   },
 ];
 
@@ -54,7 +45,7 @@ const STATS = [
   { value: "0", label: "files stored" },
   { value: "300MB", label: "per upload" },
   { value: "Full", label: "source resolution kept" },
-  { value: "8", label: "platforms covered" },
+  { value: "100%", label: "in-browser editor" },
 ];
 
 export default function AboutPage() {
@@ -77,13 +68,13 @@ export default function AboutPage() {
                 Clean footage for creators, <span className="text-gradient">without the cover-up</span>
               </h1>
               <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-muted sm:text-lg">
-                WipeClip removes logos, captions, timestamps and other overlays that editing apps and platforms bake into
-                video, by reconstructing what was underneath. It also includes a lightweight browser editor to trim, cut
-                and finish the clip.
+                WipeClip is a browser video editor for creators: trim, cut, add transitions, text, music and stickers,
+                and export for any platform. Its AI object removal takes out distractions you didn&apos;t want in your own
+                shots, like a passer-by, a stray cable or a lens smudge, by reconstructing what was behind them.
               </p>
               <div className="mt-8 flex flex-wrap justify-center gap-3">
                 <Link href="/#upload" className="btn-primary rounded-full px-6 py-3 text-sm font-semibold">
-                  Clean up a clip free
+                  Remove an object free
                 </Link>
                 <Link href="/editor" className="btn-secondary rounded-full px-6 py-3 text-sm font-semibold">
                   Open the video editor
@@ -142,22 +133,6 @@ export default function AboutPage() {
         {/* Long-form sections, alternating bands */}
         <Reveal>
           <WhatWipeClipDoes />
-        </Reveal>
-        <div className="bg-surface-2/40">
-          <Reveal>
-            <StaticVsMovingWatermarks />
-          </Reveal>
-        </div>
-        <Reveal>
-          <RemovalMethodComparison />
-        </Reveal>
-        <div className="bg-surface-2/40">
-          <Reveal>
-            <SupportedSituations />
-          </Reveal>
-        </div>
-        <Reveal>
-          <EvidenceSection />
         </Reveal>
         <div className="bg-surface-2/40">
           <Reveal>

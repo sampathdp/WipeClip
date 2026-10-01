@@ -246,44 +246,11 @@ async def api_video_probe(file: UploadFile = File(...)):
     )
 
 
-@app.post("/api/video/detect-watermark")
-async def api_video_detect_watermark(file: UploadFile = File(...)):
-    """Suggests a likely watermark/logo region by finding areas that stay
-    pixel-static across sampled frames while the rest of the frame moves -
-    see detect_watermark_candidates() in app/pipeline/video.py. Coordinates
-    only, never processes the video; the frontend prefills RegionSelector
-    with the top candidate for the user to accept, drag, or ignore.
-    """
-    data = await file.read()
-    if len(data) > MAX_VIDEO_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=400, detail=f"Video too large (max {MAX_VIDEO_UPLOAD_BYTES // (1024 * 1024)}MB)"
-        )
-
-    with tempfile.TemporaryDirectory() as tmp:
-        in_path = os.path.join(tmp, f"input{Path(file.filename or '').suffix or '.mp4'}")
-        with open(in_path, "wb") as f:
-            f.write(data)
-        try:
-            candidates, width, height = video_pipeline.detect_watermark_candidates(in_path)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return {
-        "width": width,
-        "height": height,
-        "candidates": [
-            {"x": c.x, "y": c.y, "w": c.w, "h": c.h, "confidence": c.confidence}
-            for c in candidates
-        ],
-    }
-
-
 @app.post("/api/video/process")
 async def api_video_process(
     request: Request,
     file: UploadFile = File(...),
-    mode: str = Form(...),  # "remove" | "replace"
+    mode: str = Form("remove"),  # only "remove" (object removal) is supported
     x: int = Form(...),
     y: int = Form(...),
     w: int = Form(...),
@@ -294,10 +261,9 @@ async def api_video_process(
     start: Optional[float] = Form(None),  # optional source-time range (seconds) -
     end: Optional[float] = Form(None),  # see the docstring
 ):
-    """Removes (delogo) or replaces (overlay) a user-marked rectangular
-    region for the full video duration. The region is always user-supplied -
-    see app/pipeline/video.py for why there's no automatic watermark
-    detector.
+    """Removes an unwanted object inside a user-marked rectangular region
+    for the full video duration. The region is always user-supplied; there's
+    no automatic region detection.
 
     `start`/`end`, when both given, restrict the job to that range of the
     upload: it's cut out first (editor.cut_range) and only the cut is
@@ -307,8 +273,8 @@ async def api_video_process(
     the editor's frame grab gives it. Omitted, behavior is unchanged.
     """
     _assert_internal_caller(request)
-    if mode not in ("remove", "replace"):
-        raise HTTPException(status_code=400, detail="mode must be 'remove' or 'replace'")
+    if mode != "remove":
+        raise HTTPException(status_code=400, detail="mode must be 'remove'")
     if resolution not in RESOLUTION_HEIGHTS:
         raise HTTPException(
             status_code=400,
@@ -318,8 +284,6 @@ async def api_video_process(
         raise HTTPException(status_code=400, detail="quality must be 'standard' or 'pro'")
     if w < MIN_REGION_PX or h < MIN_REGION_PX:
         raise HTTPException(status_code=400, detail=f"Region too small; minimum {MIN_REGION_PX}px per side")
-    if mode == "replace" and logo is None:
-        raise HTTPException(status_code=400, detail="A logo image is required for mode='replace'")
 
     data = await file.read()
     if len(data) > MAX_VIDEO_UPLOAD_BYTES:
@@ -857,30 +821,6 @@ async def api_video_export(
 
     return Response(content=result, media_type="video/mp4")
 
-
-
-@app.post("/api/image/detect-artifacts")
-async def api_image_detect_artifacts(file: UploadFile = File(...)):
-    """Suggests likely watermark/blemish regions via detect_artifacts.
-    detect_artifact_candidates() - suggest-only, never processes the image;
-    the frontend prefills RegionSelector with the top candidate, same
-    suggest-then-confirm contract as /api/video/detect-watermark.
-    """
-    data = await file.read()
-    try:
-        bgra, _ = io_utils.decode_upload_to_bgra(data)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    candidates = detect_artifacts.detect_artifact_candidates(bgra)
-    h, w = bgra.shape[:2]
-    return {
-        "width": w,
-        "height": h,
-        "candidates": [
-            {"x": c.x, "y": c.y, "w": c.w, "h": c.h, "confidence": c.confidence} for c in candidates
-        ],
-    }
 
 
 @app.post("/api/image/remove")

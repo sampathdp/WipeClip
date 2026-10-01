@@ -177,13 +177,15 @@ export async function POST(request: NextRequest) {
     p_filename: uploadedFile instanceof File ? uploadedFile.name : null,
   });
 
-  // Pro-only quality tier (optical-flow-assisted reconstruction, see
-  // remove_logo() in the backend's video.py) - decided here, server-side,
-  // from the caller's actual plan, never from a client-supplied value, so
-  // it can't be requested by a non-Pro account. mode="replace" ignores
-  // this field entirely (no reconstruction involved), so it's harmless to
-  // always set.
-  if (formData.get("mode") === "remove" && (await isProUser(supabase, user.id))) {
+  // Object removal is the only supported mode; never forward anything else.
+  formData.set("mode", "remove");
+  formData.delete("logo");
+
+  // Pro-only quality tier (optical-flow-assisted reconstruction in the
+  // backend's video.py) - decided here, server-side, from the caller's
+  // actual plan, never from a client-supplied value, so it can't be
+  // requested by a non-Pro account.
+  if (await isProUser(supabase, user.id)) {
     formData.set("quality", "pro");
   }
 

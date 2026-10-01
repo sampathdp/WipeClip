@@ -4,7 +4,9 @@ import { PLANS, type PlanKey } from "@/lib/credits";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { effectivePlan } from "@/lib/plan";
 import { TIER_LABELS, TIERS, toTier } from "@/lib/entitlements";
-import { createCheckout, getSecretKey, PaymentsLkError } from "@/lib/paymentsLk";
+import { createCheckout, PaymentsLkError } from "@/lib/paymentsLk";
+import { createTransaction, getClientToken, PaddleError, paddleEnvironment, priceIdFor } from "@/lib/paddle";
+import { gatewayFor } from "@/lib/checkoutGateway";
 
 // Payments.lk requires customer.name (2 to 80 characters) whenever a
 // customer object is sent, and refuses the whole checkout otherwise. Send
@@ -15,6 +17,32 @@ function checkoutCustomer(email: string | undefined, metadata: Record<string, un
   const name = typeof raw === "string" ? raw.trim().slice(0, 80) : "";
   if (!email || name.length < 2) return undefined;
   return { name, email };
+}
+
+/** Which checkout this visitor gets, and what Paddle.js needs to run it:
+ * the public client token, the environment, and - for Paddle Retain - the
+ * signed-in user's Paddle customer ID (ctm_...), once a purchase has
+ * recorded it. */
+export async function GET(request: NextRequest) {
+  const gateway = gatewayFor(request);
+  if (gateway !== "paddle") return NextResponse.json({ gateway, paddle: null });
+
+  let customerId: string | null = null;
+  if (isSupabaseConfigured()) {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      const { data } = await supabase.from("profiles").select("paddle_customer_id").eq("id", user.id).single();
+      customerId = data?.paddle_customer_id ?? null;
+    }
+  }
+
+  return NextResponse.json({
+    gateway,
+    paddle: { clientToken: getClientToken(), environment: paddleEnvironment(), customerId },
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -43,14 +71,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unknown plan." }, { status: 400 });
   }
 
-  if (!getSecretKey()) {
+  const gateway = gatewayFor(request);
+  if (!gateway) {
     return NextResponse.json(
-      { error: "Checkout isn't configured yet - set PAYMENTS_LK_SECRET_KEY in the environment." },
+      { error: "Checkout isn't configured yet - set PAYMENTS_LK_SECRET_KEY or the PADDLE_* keys in the environment." },
+      { status: 501 }
+    );
+  }
+  const priceId = gateway === "paddle" ? priceIdFor(plan) : undefined;
+  if (gateway === "paddle" && !priceId) {
+    return NextResponse.json(
+      { error: `Checkout isn't configured for this plan yet - set PADDLE_PRICE_${plan.toUpperCase()}.` },
       { status: 501 }
     );
   }
 
-  const { amountCents, credits, label, period, tier } = PLANS[plan];
+  const { amountCents, usdCents, credits, label, period, tier } = PLANS[plan];
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? request.nextUrl.origin;
   const admin = createServiceClient();
 
@@ -68,19 +104,56 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Payments.lk has no free-form metadata on a checkout, so the order is
-  // recorded here first and its id travels as the checkout's `reference`.
-  // The webhook reads the reference back to find which account to credit
-  // and how much - the plan, credits and price are fixed now, server side,
-  // never taken from anything the browser or the redirect sends.
+  // The order is recorded here first and its id travels with the checkout
+  // (Payments.lk's `reference`, Paddle's custom_data.order_id). The webhook
+  // reads it back to find which account to credit and how much - the plan,
+  // credits and price are fixed now, server side, never taken from anything
+  // the browser or the redirect sends.
   const { data: order, error: orderError } = await admin
     .from("payment_orders")
-    .insert({ user_id: user.id, plan, credits, amount_cents: amountCents })
+    .insert({
+      user_id: user.id,
+      plan,
+      credits,
+      provider: gateway,
+      ...(gateway === "paddle"
+        ? { amount_cents: usdCents, currency: "USD" }
+        : { amount_cents: amountCents, currency: "LKR" }),
+    })
     .select("id")
     .single();
 
   if (orderError || !order) {
     return NextResponse.json({ error: "Could not record the order." }, { status: 500 });
+  }
+
+  if (gateway === "paddle") {
+    try {
+      const { data: profile } = await admin.from("profiles").select("paddle_customer_id").eq("id", user.id).single();
+      const txn = await createTransaction({
+        priceId: priceId!,
+        customData: { order_id: order.id, user_id: user.id },
+        customerId: profile?.paddle_customer_id,
+      });
+      await admin.from("payment_orders").update({ checkout_id: txn.id }).eq("id", order.id);
+      // Paddle.js opens this in its overlay; the email prefills the checkout
+      // when Paddle doesn't already know the customer.
+      return NextResponse.json({
+        paddle: {
+          transactionId: txn.id,
+          email: profile?.paddle_customer_id ? null : (user.email ?? null),
+          successUrl: `${siteUrl}/pricing?success=1&plan=${plan}`,
+        },
+      });
+    } catch (e) {
+      await admin.from("payment_orders").update({ status: "failed" }).eq("id", order.id);
+      console.error("Paddle transaction creation failed", e);
+      const message =
+        e instanceof PaddleError
+          ? `Paddle checkout creation failed: ${e.message}${e.code ? ` [${e.code}]` : ""}`
+          : "Paddle checkout creation failed.";
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
   }
 
   try {

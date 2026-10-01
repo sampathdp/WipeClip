@@ -49,7 +49,7 @@ export default async function ProfilePage() {
 
   const links = [
     { href: "/editor", title: "Video Editor", desc: "Trim, cut, add transitions and stickers." },
-    { href: "/#upload", title: "Clean up a clip", desc: "Remove a logo, caption or overlay." },
+    { href: "/#upload", title: "Remove an object", desc: "Take a distraction out of your own clip." },
     {
       href: "/history",
       title: "Job History",

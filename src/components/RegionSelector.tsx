@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Region, WatermarkCandidate } from "@/lib/toolsApi";
+import type { Region } from "@/lib/toolsApi";
 
 type Box = { x: number; y: number; w: number; h: number };
 type Corner = "tl" | "tr" | "bl" | "br";
@@ -21,13 +21,11 @@ export default function RegionSelector({
   previewUrl,
   naturalWidth,
   naturalHeight,
-  suggestion,
   onChange,
 }: {
   previewUrl: string;
   naturalWidth: number;
   naturalHeight: number;
-  suggestion?: WatermarkCandidate | null;
   onChange: (region: Region) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -68,33 +66,20 @@ export default function RegionSelector({
     [naturalWidth, naturalHeight, onChange]
   );
 
-  // Prefill from the auto-detected candidate when there's a confident one;
-  // otherwise fall back to the old sensible default (bottom-right corner,
-  // ~20% width) - either way the user can still drag to relocate/resize.
+  // Starts with a centered box (~20% of each side) that the user drags to
+  // the object they want removed and resizes with the corner handles.
   // Guarded on imgLoaded (see above) and re-runs once it flips true, so
   // this never computes off a zero-height wrapper.
   useEffect(() => {
     const el = wrapRef.current;
     if (!el || !imgLoaded || el.clientWidth === 0 || el.clientHeight === 0) return;
-    let b: Box;
-    if (suggestion) {
-      const scaleX = el.clientWidth / naturalWidth;
-      const scaleY = el.clientHeight / naturalHeight;
-      b = {
-        x: suggestion.x * scaleX,
-        y: suggestion.y * scaleY,
-        w: suggestion.w * scaleX,
-        h: suggestion.h * scaleY,
-      };
-    } else {
-      const w = el.clientWidth * 0.2;
-      const h = w * (naturalHeight / naturalWidth) * 0.6;
-      b = { x: el.clientWidth - w - 8, y: el.clientHeight - h - 8, w, h };
-    }
+    const w = el.clientWidth * 0.2;
+    const h = el.clientHeight * 0.2;
+    const b: Box = { x: (el.clientWidth - w) / 2, y: (el.clientHeight - h) / 2, w, h };
     setBox(b);
     emit(b);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [naturalWidth, naturalHeight, suggestion, imgLoaded]);
+  }, [naturalWidth, naturalHeight, imgLoaded]);
 
   const pointFromEvent = (e: React.PointerEvent) => {
     const rect = wrapRef.current!.getBoundingClientRect();
@@ -204,9 +189,7 @@ export default function RegionSelector({
       </div>
       <p className="mt-2.5 text-xs text-muted flex items-center gap-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
-        {suggestion
-          ? "Auto-detected likely overlay region. Drag to adjust, or resize with the corner handles."
-          : "Nothing detected automatically. Click & drag on the frame to mark it, then resize with the corner handles."}
+        Click &amp; drag on the frame to mark the object, then resize with the corner handles.
       </p>
     </div>
   );

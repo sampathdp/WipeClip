@@ -74,14 +74,23 @@ create table if not exists payment_orders (
   user_id uuid not null references profiles (id) on delete cascade,
   plan text not null,
   credits int not null,
-  amount_cents int not null, -- whole cents of LKR
+  amount_cents int not null, -- whole cents of `currency`
   status text not null default 'open', -- 'open' | 'paid' | 'failed' | 'expired'
-  checkout_id text unique,
+  checkout_id text unique, -- Payments.lk checkout id, or Paddle transaction id (txn_...)
   payment_id text,
   created_at timestamptz not null default now(),
   paid_at timestamptz
 );
 create index if not exists payment_orders_user_id_idx on payment_orders (user_id);
+
+-- Additive - safe to re-run. Sri Lanka pays through Payments.lk in LKR,
+-- everyone else through Paddle in USD (see src/lib/checkoutGateway.ts).
+alter table payment_orders add column if not exists provider text not null default 'payments_lk'; -- 'payments_lk' | 'paddle'
+alter table payment_orders add column if not exists currency text not null default 'LKR';
+-- The account's Paddle customer (ctm_...), recorded by the Paddle webhook
+-- on the first purchase; reused for later checkouts and passed to Paddle
+-- Retain as pwCustomer.
+alter table profiles add column if not exists paddle_customer_id text;
 
 -- User-submitted bug reports, feature requests and general feedback from
 -- /feedback. Anyone can submit (user_id is null for signed-out visitors,

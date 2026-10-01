@@ -192,7 +192,7 @@ export function ClipPanel({
         <div className="rounded-xl border border-accent/25 bg-accent/5 p-3">
           <p className="text-xs font-semibold text-foreground">AI Cleanup</p>
           <p className="mt-1 text-xs text-muted">
-            Remove a logo, caption, or overlay from just this clip. The cleaned result replaces the clip (undo brings the original back).
+            Remove an unwanted object from just this clip. The cleaned result replaces the clip (undo brings the original back).
           </p>
           <div className="mt-2.5">
             <ActionButton onClick={onAiCleanup} tone="accent">

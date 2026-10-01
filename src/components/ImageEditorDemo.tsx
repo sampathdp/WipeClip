@@ -12,25 +12,16 @@ import {
   ContentBlockedError,
   InsufficientCreditsError,
   ProRequiredError,
-  detectImageArtifacts,
   processImage,
-  type ArtifactCandidate,
   type Region,
 } from "@/lib/toolsApi";
-
-// Below this, the detector's own signal is too weak to prefill with - let
-// the user mark the region manually instead of guessing wrong. Same idea as
-// UploadDemo's WATERMARK_SUGGESTION_MIN_CONFIDENCE, tuned slightly lower
-// since detect_artifact_candidates' confidence is scored relative to other
-// candidates in the same image rather than an absolute signal.
-const ARTIFACT_SUGGESTION_MIN_CONFIDENCE = 0.4;
 
 type Step = "idle" | "reading" | "select" | "processing" | "done" | "error" | "blocked";
 type BlockReason = "content" | "credits" | "auth" | "pro";
 type PlanState = "loading" | "pro" | "not-pro";
 
 const MAX_BYTES = 25 * 1024 * 1024;
-const TOOL = "image_watermark_remover";
+const TOOL = "image_object_remover";
 
 export default function ImageEditorDemo() {
   useToolView(TOOL);
@@ -42,7 +33,6 @@ export default function ImageEditorDemo() {
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [region, setRegion] = useState<Region | null>(null);
-  const [suggestion, setSuggestion] = useState<ArtifactCandidate | null>(null);
   const [consent, setConsent] = useState(false);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -85,7 +75,6 @@ export default function ImageEditorDemo() {
     setNaturalSize(null);
     setPreviewUrl(null);
     setRegion(null);
-    setSuggestion(null);
     setConsent(false);
     setResultUrl(null);
   }, [resultUrl, previewUrl]);
@@ -114,9 +103,6 @@ export default function ImageEditorDemo() {
         img.src = url;
       });
       setNaturalSize(size);
-      const { candidates } = await detectImageArtifacts(picked);
-      const top = candidates[0];
-      setSuggestion(top && top.confidence >= ARTIFACT_SUGGESTION_MIN_CONFIDENCE ? top : null);
       setStep("select");
       trackEvent("mask_started", { tool: TOOL });
     } catch (e) {
@@ -186,7 +172,7 @@ export default function ImageEditorDemo() {
             AI Image <span className="text-gradient">Cleanup</span>
           </h2>
           <p className="mt-1.5 text-sm sm:text-base text-muted">
-            Upload an image you own, mark what to remove once, download the clean version.
+            Upload a photo you took, mark the unwanted object once, download the clean version.
           </p>
         </div>
         <div className="mt-8 flex w-full flex-col items-center justify-center gap-3 rounded-[1.75rem] border-2 border-dashed border-border px-6 py-14 text-center opacity-60">
@@ -225,7 +211,7 @@ export default function ImageEditorDemo() {
             AI Image <span className="text-gradient">Cleanup</span>
           </h2>
           <p className="mt-1.5 text-sm sm:text-base text-muted">
-            Upload an image you own, mark what to remove once, download the clean version.
+            Upload a photo you took, mark the unwanted object once, download the clean version.
           </p>
         </div>
       </div>
@@ -356,7 +342,6 @@ export default function ImageEditorDemo() {
                 previewUrl={previewUrl}
                 naturalWidth={naturalSize.width}
                 naturalHeight={naturalSize.height}
-                suggestion={suggestion}
                 onChange={setRegion}
               />
 
@@ -368,8 +353,8 @@ export default function ImageEditorDemo() {
                   className="mt-0.5 h-4 w-4 shrink-0 rounded border-border bg-surface-3 accent-cyan-400 cursor-pointer"
                 />
                 <span>
-                  I own this image, or have permission to edit it, and won&apos;t use WipeClip.co
-                  to infringe copyright.{" "}
+                  I created this image or have the rights to edit it, and the area I marked
+                  is not a watermark, logo or other ownership or copyright mark.{" "}
                   <Link href="/terms" className="underline hover:text-foreground text-cyan-600">
                     Terms of Service
                   </Link>
@@ -403,7 +388,7 @@ export default function ImageEditorDemo() {
               <div className="flex flex-col gap-3 sm:flex-row">
                 <a
                   href={resultUrl}
-                  download={`unmarked-${file.name.replace(/\.[^.]+$/, "")}.png`}
+                  download={`cleaned-${file.name.replace(/\.[^.]+$/, "")}.png`}
                   onClick={() => trackEvent("download_clicked", { tool: TOOL })}
                   className="flex-1 rounded-full bg-emerald-500 hover:bg-emerald-400 px-6 py-3.5 text-center text-sm font-bold text-black shadow-[0_0_25px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-2"
                 >

@@ -4,9 +4,9 @@ import Footer from "@/components/Footer";
 import ImageEditorDemo from "@/components/ImageEditorDemo";
 import { buildPageMetadata } from "@/lib/seo";
 
-const title = "AI Image Cleanup - Pro Tool";
+const title = "AI Object Removal for Photos - Pro Tool";
 const description =
-  "Mark an unwanted region on an image you own once, and WipeClip.co reconstructs the pixels beneath it. A Pro-plan tool, same motion-free inpainting as the video tool.";
+  "Mark an unwanted object on a photo you took, and WipeClip.co reconstructs the pixels behind it. A Pro-plan tool, same motion-free inpainting as the video tool.";
 
 export const metadata: Metadata = buildPageMetadata({
   title,
@@ -62,12 +62,12 @@ export default function Page() {
               Pro Tool
             </div>
             <h1 className="font-display text-4xl font-extrabold tracking-tight sm:text-5xl text-foreground text-balance">
-              Clean up <span className="text-gradient">your own images</span>
+              Remove objects from <span className="text-gradient">your own photos</span>
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
-              Mark the badge or logo once and WipeClip.co reconstructs the pixels beneath it,
-              same reconstruction engine as the video tool, applied to a single frame. For images
-              you own or have the rights to edit.
+              Mark a passer-by, a power line or a dust spot once and WipeClip.co reconstructs the
+              pixels behind it, same reconstruction engine as the video tool, applied to a single
+              frame. For photos you took or have the rights to edit.
             </p>
           </div>
         </section>

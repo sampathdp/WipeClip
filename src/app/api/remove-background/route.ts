@@ -7,9 +7,9 @@ import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 /** Free-tool analogue of /api/process (video): same anonymous-preview +
  * signed-in-credit gate in front of the FastAPI backend's
  * /api/image/auto-enhance, but with no Pro requirement - unlike
- * /api/process-image (the watermark/object-removal image tool, which is
+ * /api/process-image (the object-removal image tool, which is
  * Pro-gated), background removal is meant to be a low-friction free tool
- * that drives traffic to the paid watermark tool, not a paid feature
+ * that drives traffic to the paid object-removal tool, not a paid feature
  * itself. The browser never talks to the FastAPI backend directly, same
  * reasoning as the other process routes.
  */

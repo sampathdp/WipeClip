@@ -84,32 +84,6 @@ export interface Region {
   h: number;
 }
 
-export interface WatermarkCandidate extends Region {
-  confidence: number;
-}
-
-/** Best-effort watermark region suggestion (temporal-static-region
- * detection - see detect_watermark_candidates in the backend). Doesn't
- * touch billing, so it's called directly like /probe. Never throws: a
- * failed/empty detection just means no suggestion, the user still marks
- * the region manually via RegionSelector.
- */
-export async function detectWatermark(file: File): Promise<WatermarkCandidate[]> {
-  const body = new FormData();
-  body.append("file", file);
-  try {
-    const res = await fetch(`${TOOLS_API_URL}/api/video/detect-watermark`, {
-      method: "POST",
-      body,
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.candidates ?? [];
-  } catch {
-    return [];
-  }
-}
-
 export type Resolution = "720p" | "1080p" | "4k";
 
 /** Goes through our own /api/process route (credit-gated), not the FastAPI
@@ -118,22 +92,19 @@ export type Resolution = "720p" | "1080p" | "4k";
  */
 export async function processVideo(
   file: File,
-  mode: "remove" | "replace",
   region: Region,
   resolution: Resolution,
-  logo?: File | null,
   signal?: AbortSignal,
   range?: { start: number; end: number }
 ): Promise<Blob> {
   const body = new FormData();
   body.append("file", file);
-  body.append("mode", mode);
+  body.append("mode", "remove");
   body.append("x", String(region.x));
   body.append("y", String(region.y));
   body.append("w", String(region.w));
   body.append("h", String(region.h));
   body.append("resolution", resolution);
-  if (mode === "replace" && logo) body.append("logo", logo);
   // Editor AI cleanup: process (and return) only this source-time range.
   if (range) {
     body.append("start", range.start.toFixed(3));
@@ -185,33 +156,6 @@ export async function exportEditorProject(
     await throwApiError(res, "Export failed. Your original video is safe. Please try exporting again.");
   }
   return res.blob();
-}
-
-export interface ArtifactCandidate extends Region {
-  confidence: number;
-}
-
-/** Image analogue of detectWatermark - suggest-only, doesn't touch
- * billing, so it's called directly against the FastAPI backend like
- * /probe. Never throws: a failed/empty detection just means no
- * suggestion, the user still marks the region manually via RegionSelector.
- */
-export async function detectImageArtifacts(
-  file: File
-): Promise<{ candidates: ArtifactCandidate[]; width: number; height: number }> {
-  const body = new FormData();
-  body.append("file", file);
-  try {
-    const res = await fetch(`${TOOLS_API_URL}/api/image/detect-artifacts`, {
-      method: "POST",
-      body,
-    });
-    if (!res.ok) return { candidates: [], width: 0, height: 0 };
-    const data = await res.json();
-    return { candidates: data.candidates ?? [], width: data.width, height: data.height };
-  } catch {
-    return { candidates: [], width: 0, height: 0 };
-  }
 }
 
 /** Goes through our own /api/process-image route (Pro-plan + credit

@@ -25,7 +25,7 @@ const faqs = [
   },
   {
     q: "How is this different from WipeClip.co's AI cleanup tool?",
-    a: "Background removal cuts out the subject automatically, no marking required. The AI cleanup tool reconstructs a small marked region (like a timestamp or caption) instead of removing the whole background. Both share the same image-processing engine underneath.",
+    a: "Background removal cuts out the subject automatically, no marking required. The AI object removal tool reconstructs a small marked region (like a stray object) instead of removing the whole background. Both share the same image-processing engine underneath.",
   },
   {
     q: "Will edges look rough on hair or fine detail?",

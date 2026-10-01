@@ -8,17 +8,14 @@ import DirectAnswer from "@/components/guides/DirectAnswer";
 import ArticleByline from "@/components/guides/ArticleByline";
 import RelatedGuides from "@/components/guides/RelatedGuides";
 import QualityFactorsTable from "@/components/guides/QualityFactorsTable";
-import ResearchDisclaimer from "@/components/research/ResearchDisclaimer";
-import BenchmarkTable from "@/components/research/BenchmarkTable";
 import { buildPageMetadata, SITE_URL } from "@/lib/seo";
-import { RESEARCH_TESTS } from "@/lib/researchData";
 
 const title = "Does AI Cleanup Reduce Video Quality?";
 const description =
-  "Resolution isn't the same as visual quality. A clear look at how resolution, bitrate, codec, re-encoding, and reconstructed pixels actually affect a video after removing an overlay or object.";
+  "Resolution isn't the same as visual quality. A clear look at how resolution, bitrate, codec, re-encoding, and reconstructed pixels actually affect a video after removing an unwanted object.";
 const path = "/guides/does-ai-cleanup-reduce-video-quality";
 const publishedDate = "2026-08-25";
-const updatedDate = "2026-08-25";
+const updatedDate = "2026-10-01";
 
 export const metadata: Metadata = buildPageMetadata({ title, description, path });
 
@@ -58,7 +55,7 @@ export default function Page() {
           eyebrow="Quality Explainer"
           h1={
             <>
-              Does removing an overlay{" "}
+              Does removing an object{" "}
               <span className="text-gradient">reduce video quality</span>?
             </>
           }
@@ -121,39 +118,12 @@ export default function Page() {
           </div>
         </section>
 
-        <section id="real-measurements" className="scroll-mt-28 py-8">
-          <div className="mx-auto max-w-3xl px-6">
-            <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">
-              Real quality measurements
-            </h2>
-            <p className="mt-4 text-sm sm:text-base leading-relaxed text-muted">
-              Rather than asserting numbers here, this section pulls directly from WipeClip&apos;s
-              published research data: it will show real input/output resolution, framerate, and
-              processing time for each test once available.
-            </p>
-            <div className="mt-6 space-y-6">
-              <ResearchDisclaimer compact />
-              <BenchmarkTable tests={RESEARCH_TESTS} />
-            </div>
-          </div>
-        </section>
-
         <RelatedGuides
           links={[
             {
               href: "/guides/how-ai-video-inpainting-works",
               label: "How AI Video Inpainting Works",
               desc: "Why the reconstructed region is an estimate rather than a copy of the original.",
-            },
-            {
-              href: "/guides/ai-inpainting-vs-blur-vs-crop",
-              label: "AI Inpainting vs Blur vs Crop",
-              desc: "How reconstruction compares to methods that avoid touching pixels at all.",
-            },
-            {
-              href: "/research/video-cleanup-test",
-              label: "WipeClip Research: AI Video Cleanup Test",
-              desc: "Where the measurements referenced above will be published.",
             },
             {
               href: "/privacy",

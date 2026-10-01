@@ -10,8 +10,7 @@ import Faq from "@/components/Faq";
 import CtaBanner from "@/components/CtaBanner";
 import Footer from "@/components/Footer";
 
-// The long-form explainers (what it does, static vs moving overlays, method
-// comparison, use cases, evidence, limitations, privacy) live on /about,
+// The long-form explainers (what it does, limitations, privacy) live on /about,
 // linked from WhyWipeClip and the navbar, so the homepage stays focused on
 // the tool itself.
 export default function Home() {

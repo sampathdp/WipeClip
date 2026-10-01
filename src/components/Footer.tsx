@@ -17,9 +17,6 @@ export default function Footer() {
             <Link href="/about" className="transition-colors hover:text-foreground">
               About
             </Link>
-            <Link href="/research" className="transition-colors hover:text-foreground">
-              Research
-            </Link>
             <Link href="/feedback" className="transition-colors hover:text-foreground">
               Feedback &amp; Bugs
             </Link>
@@ -56,12 +53,11 @@ export default function Footer() {
           </Link>
         </div>
         <p className="mt-4 text-xs text-muted">
-          For content you own or have permission to edit only. Not affiliated
-          with any third-party video platform or AI model provider. All product
-          names, logos, and brands are property of their respective owners and
-          are used for identification purposes only. Using WipeClip.co to
-          infringe copyright or to violate another platform&apos;s terms of
-          service is strictly prohibited. Please review our{" "}
+          For content you created or have the rights to edit only. WipeClip.co
+          does not remove watermarks, logos, or other ownership or copyright
+          marks, and using it to do so, or to infringe anyone&apos;s copyright,
+          is prohibited. Not affiliated with any third-party video platform or
+          AI model provider. Please review our{" "}
           <Link href="/terms" className="underline hover:text-foreground">
             Terms of Service
           </Link>

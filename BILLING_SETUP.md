@@ -1,4 +1,4 @@
-# Billing setup (Supabase + Payments.lk)
+# Billing setup (Supabase + Payments.lk + Paddle)
 
 Everything is wired in code with placeholder env vars. Nothing works until
 these are filled in with real values.
@@ -76,6 +76,51 @@ no subscription object (automatic renewals would need saved cards, which
 require Payable's Advanced plan). Each purchase grants the credits and
 sets `plan` + `plan_expires_at`; `src/lib/plan.ts` reads an expired pass
 as `free`. Buying the same tier again early extends it by 30 days.
+
+## 3. Paddle (international, sandbox first)
+
+Sri Lankan visitors (by the edge's geo header, `x-vercel-ip-country` or
+`cf-ipcountry`) keep paying through Payments.lk. Everyone else pays through
+Paddle, which is Merchant of Record and handles their VAT/sales tax. The
+choice is made server side in `src/lib/checkoutGateway.ts`; until Paddle's
+keys are set, everyone gets Payments.lk. Set `CHECKOUT_COUNTRY=US` (or
+`LK`) locally to test either path.
+
+1. In a Paddle **sandbox** account, create one product per plan and a
+   **one-time** USD price (no billing cycle) for each `PLANS` entry in
+   `src/lib/credits.ts`, at its `usdCents`. Put each price ID (`pri_...`)
+   in `PADDLE_PRICE_<PLAN>` (e.g. `PADDLE_PRICE_STARTER_YEARLY`).
+2. Developer tools -> Authentication: create an API key
+   (`pdl_sdbx_apikey_...`, needs transaction write) into `PADDLE_API_KEY`,
+   and a client-side token (`test_...`) into `PADDLE_CLIENT_TOKEN`.
+3. Developer tools -> Notifications: add a destination for
+   `https://<your-domain>/api/webhooks/paddle` with the
+   `transaction.completed` event. Copy its secret key into
+   `PADDLE_WEBHOOK_SECRET`.
+4. The webhook only accepts deliveries from Paddle's published IPs,
+   fetched from `https://sandbox-api.paddle.com/ips` or
+   `https://api.paddle.com/ips` (cached for an hour, never hard-coded).
+   Behind Cloudflare, set `PADDLE_WEBHOOK_IP_HEADER=cf-connecting-ip`.
+5. Re-run `supabase/schema.sql` - it adds `payment_orders.provider`,
+   `payment_orders.currency` and `profiles.paddle_customer_id`.
+6. Checkout -> Checkout settings: set the default payment link to your
+   pricing page (sandbox accepts localhost).
+7. Test: with `CHECKOUT_COUNTRY=US`, sign in, open `/pricing`, buy a plan.
+   Paddle's overlay opens; pay with card `4242 4242 4242 4242`, any future
+   expiry, CVC `100`. The webhook should credit the account, set the order
+   to `paid` and record `profiles.paddle_customer_id`.
+
+Going live: once sandbox passes, create the same products and prices in
+the live account and swap every `PADDLE_*` value for its live counterpart
+(`pdl_live_apikey_...`, `live_...`, the live destination's secret, live
+`pri_...` IDs). The key prefixes switch the API base and Paddle.js
+environment, so no code changes. Live checkout also needs an approved
+domain and a default payment link on that domain.
+
+Paddle prices are one-time, matching the Payments.lk passes, so
+`usdCents`, `priceLabel` and the Paddle catalog price must agree. Refunds
+are issued in the Paddle dashboard; like Payments.lk refunds, they don't
+yet remove the plan or credits automatically.
 
 ## How a purchase actually grants credits
 

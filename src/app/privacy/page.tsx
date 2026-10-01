@@ -67,11 +67,12 @@ export default function PrivacyPage() {
       <H2>4. Payment information</H2>
       <P>
         Payments for WipeClip.co plans and credit packs are securely processed
-        by Payments.lk (a Payable company) on its hosted checkout. Card details
-        are entered only on that checkout - we do not collect, store, or
-        process your credit card numbers or raw billing details on our
-        servers. All transactions are subject to Payments.lk&apos;s Privacy
-        Policy and Security Standards.
+        by Paddle.com, our Merchant of Record, for customers outside Sri
+        Lanka, and by Payments.lk (a Payable company) for customers in Sri
+        Lanka. Card details are entered only on their checkouts - we do not
+        collect, store, or process your credit card numbers or raw billing
+        details on our servers. Transactions are subject to the processing
+        provider&apos;s privacy policy and security standards.
       </P>
 
       <H2>5. Sharing</H2>

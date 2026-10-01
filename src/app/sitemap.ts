@@ -7,7 +7,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     {
       url: siteUrl,
-      lastModified: "2026-08-20",
+      lastModified: "2026-10-01",
       changeFrequency: "weekly",
       priority: 1,
     },
@@ -25,13 +25,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
     {
       url: `${siteUrl}/editor`,
-      lastModified: "2026-09-30",
+      lastModified: "2026-10-01",
       changeFrequency: "weekly",
       priority: 0.9,
     },
     {
       url: `${siteUrl}/image-cleanup`,
-      lastModified: "2026-08-20",
+      lastModified: "2026-10-01",
       changeFrequency: "weekly",
       priority: 0.8,
     },
@@ -54,32 +54,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.8,
     },
     {
-      url: `${siteUrl}/research`,
-      lastModified: "2026-08-25",
-      changeFrequency: "weekly",
-      priority: 0.6,
-    },
-    {
-      url: `${siteUrl}/research/video-cleanup-test`,
-      lastModified: "2026-08-25",
-      changeFrequency: "weekly",
-      priority: 0.6,
-    },
-    {
-      url: `${siteUrl}/guides/ai-inpainting-vs-blur-vs-crop`,
-      lastModified: "2026-08-25",
-      changeFrequency: "monthly",
-      priority: 0.6,
-    },
-    {
       url: `${siteUrl}/guides/does-ai-cleanup-reduce-video-quality`,
-      lastModified: "2026-08-25",
+      lastModified: "2026-10-01",
       changeFrequency: "monthly",
       priority: 0.6,
     },
     {
       url: `${siteUrl}/guides/how-ai-video-inpainting-works`,
-      lastModified: "2026-08-25",
+      lastModified: "2026-10-01",
       changeFrequency: "monthly",
       priority: 0.6,
     },
