@@ -66,6 +66,17 @@ function loadPaddle(config: NonNullable<CheckoutConfig["paddle"]>): Promise<Padd
   return paddleLoad;
 }
 
+/** While online checkout is being set up, buyers message us on WhatsApp
+ * and get a payment link by hand. On when NEXT_PUBLIC_MANUAL_PAYMENTS=1,
+ * or automatically when no gateway is configured. */
+const MANUAL_PAYMENTS_FLAG = process.env.NEXT_PUBLIC_MANUAL_PAYMENTS === "1";
+const SUPPORT_PHONE_DISPLAY = "075 445 3334";
+const SUPPORT_WHATSAPP = "94754453334";
+
+function whatsappLink(text: string) {
+  return `https://wa.me/${SUPPORT_WHATSAPP}?text=${encodeURIComponent(text)}`;
+}
+
 const res = (r: string) => (r === "4k" ? "4K" : r);
 
 /** Card copy per tier. Limits come from TIER_LIMITS so the page can't
@@ -175,7 +186,9 @@ export default function PricingClient() {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [currentTier, setCurrentTier] = useState<Tier | null>(null);
   const [checkoutConfig, setCheckoutConfig] = useState<CheckoutConfig | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const showLkr = checkoutConfig?.gateway !== "paddle";
+  const manualPayments = MANUAL_PAYMENTS_FLAG || checkoutConfig?.gateway === null;
 
   useEffect(() => {
     if (checkoutUrl) window.location.href = checkoutUrl;
@@ -188,6 +201,7 @@ export default function PricingClient() {
     supabase.auth.getUser().then(({ data }) => {
       const signedIn = Boolean(data.user);
       setIsSignedIn(signedIn);
+      setUserEmail(data.user?.email ?? null);
       trackEvent("pricing_viewed", { logged_in: signedIn, source: landingPagePath() });
       // After the session read, so Paddle Retain gets the signed-in
       // customer. Paddle.js loads up front so the overlay opens instantly.
@@ -225,7 +239,15 @@ export default function PricingClient() {
   }, []);
 
   const buy = async (plan: PlanKey) => {
-    trackEvent("checkout_started", { plan, logged_in: isSignedIn });
+    trackEvent("checkout_started", { plan, logged_in: isSignedIn, ...(manualPayments ? { gateway: "manual" } : {}) });
+    if (manualPayments) {
+      const p = PLANS[plan];
+      const text =
+        `Hi WipeClip, I'd like to buy the ${p.label} plan (${p.priceLabel} / ${p.period}).` +
+        (userEmail ? ` My account email: ${userEmail}` : "");
+      window.open(whatsappLink(text), "_blank", "noopener,noreferrer");
+      return;
+    }
     setLoading(plan);
     setError(null);
     try {
@@ -306,6 +328,28 @@ export default function PricingClient() {
           </div>
         </div>
 
+        {manualPayments && (
+          <div
+            role="status"
+            className="mx-auto mt-10 max-w-2xl rounded-2xl border border-amber-400/60 bg-amber-400/10 px-5 py-4 text-center text-sm text-foreground"
+          >
+            <p className="font-semibold">Online payments are under construction 🚧</p>
+            <p className="mt-1 text-muted">
+              You can still upgrade. Message us on WhatsApp at{" "}
+              <a
+                href={whatsappLink("Hi WipeClip, I'd like a payment link for a plan.")}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-foreground underline"
+              >
+                {SUPPORT_PHONE_DISPLAY}
+              </a>{" "}
+              and we&apos;ll send you a secure payment link. Include the email you signed up with so we can
+              activate your plan.
+            </p>
+          </div>
+        )}
+
         <div className="mx-auto mt-14 grid max-w-7xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {TIERS.map((card) => {
             const key = card.tier === "free" ? null : SUBSCRIPTION_KEYS[card.tier][billing];
@@ -366,7 +410,13 @@ export default function PricingClient() {
                       disabled={loading !== null}
                       className={`w-full rounded-full py-3 text-xs font-bold transition-all ${card.popular ? "btn-primary" : "btn-secondary"} disabled:opacity-50`}
                     >
-                      {loading === key ? "Opening checkout…" : isCurrent ? `Renew ${plan.label}` : `Get ${plan.label}`}
+                      {loading === key
+                        ? "Opening checkout…"
+                        : manualPayments
+                          ? `Get ${plan.label} via WhatsApp`
+                          : isCurrent
+                            ? `Renew ${plan.label}`
+                            : `Get ${plan.label}`}
                     </button>
                   ) : (
                     <Link href="/editor" className="btn-secondary block w-full rounded-full py-3 text-center text-xs font-semibold">
@@ -453,7 +503,7 @@ export default function PricingClient() {
                     disabled={loading !== null}
                     className="btn-secondary shrink-0 rounded-full px-4 py-2 text-xs font-bold disabled:opacity-50"
                   >
-                    {loading === key ? "Opening…" : "Buy"}
+                    {loading === key ? "Opening…" : manualPayments ? "Buy via WhatsApp" : "Buy"}
                   </button>
                 </div>
               );
