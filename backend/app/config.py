@@ -5,6 +5,7 @@ README for context on what each stage does. Values here are defaults; most
 are also exposed as per-request overrides in the API schemas.
 """
 
+import os
 from pathlib import Path
 
 # --- Alpha classification thresholds (0-255) --------------------------------
@@ -284,6 +285,14 @@ EDITOR_MAX_EFFECTS: int = 30
 # src/lib/editor/timeline.ts.
 EDITOR_MAX_REVERSE_SECONDS: float = 10.0
 EDITOR_MAX_FREEZE_SECONDS: float = 30.0
+
+# --- Auto captions (app/pipeline/captions.py) ---------------------------------
+# faster-whisper model name: "tiny" / "base" / "small" / "medium" (bigger =
+# more accurate, slower; CPU int8). Overridable per deployment.
+CAPTIONS_MODEL: str = os.environ.get("CAPTIONS_MODEL", "base")
+CAPTIONS_MAX_SECONDS: float = 600.0  # same cap as a video
+# 16 kHz mono 16-bit WAV is 32 KB/s; 10 minutes is ~19 MB.
+CAPTIONS_MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
 
 # --- Content moderation (explicit-content screening) -------------------------
 # Local, self-hosted classifier only - flags likely nudity so the API can

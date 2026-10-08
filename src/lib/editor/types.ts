@@ -136,6 +136,8 @@ interface OverlayBase {
   animOut: AnimOut;
   hidden: boolean;
   locked: boolean;
+  /** Made by auto captions - restyled / replaced together. */
+  caption?: boolean;
 }
 
 export type Overlay =

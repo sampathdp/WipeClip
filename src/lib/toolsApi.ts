@@ -204,6 +204,23 @@ export async function removeBackground(file: File): Promise<Blob> {
   return res.blob();
 }
 
+export interface CaptionsResult {
+  language: string;
+  words: { start: number; end: number; text: string }[];
+}
+
+/** Editor auto captions via /api/captions (signed in, costs credits).
+ * `wav` is the timeline's speech mix; word times come back in timeline
+ * seconds. */
+export async function generateCaptions(wav: Blob, language: string, signal?: AbortSignal): Promise<CaptionsResult> {
+  const body = new FormData();
+  body.append("file", wav, "speech.wav");
+  body.append("language", language);
+  const res = await fetch("/api/captions", { method: "POST", body, signal });
+  if (!res.ok) await throwApiError(res, "Captioning failed. Try again.");
+  return res.json();
+}
+
 export type SharpenStrength = "light" | "standard" | "strong";
 
 /** Goes through /api/sharpen-image - same free, non-Pro gate as

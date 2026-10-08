@@ -8,6 +8,7 @@ rembg>=2.0.57
 onnxruntime>=1.17.0
 nudenet>=3.4.2
 imageio-ffmpeg>=0.5.1
+faster-whisper>=1.1.0  # editor auto captions - see app/pipeline/captions.py (model: CAPTIONS_MODEL)
 a2wsgi>=1.10.0
 redis>=5.0.0        # RQ job queue - see app/queue.py (opt-in via REDIS_URL)
 rq>=1.16.0

@@ -65,7 +65,8 @@ import {
   type Selection,
   type TextStyle,
 } from "@/lib/editor/types";
-import { ApiError, ContentBlockedError, probeVideo } from "@/lib/toolsApi";
+import { ApiError, AuthRequiredError, ContentBlockedError, generateCaptions, probeVideo } from "@/lib/toolsApi";
+import { buildSpeechWav, captionOverlays, captionText, CAPTION_STYLES, groupWords, lineCharsFor } from "@/lib/editor/captions";
 import { TIER_LIMITS, toTier, type Tier } from "@/lib/entitlements";
 import AiCleanupDialog from "./AiCleanupDialog";
 import ExportDialog from "./ExportDialog";
@@ -80,6 +81,8 @@ import {
   EffectPanel,
   EffectsAddPanel,
   ElementsPanel,
+  CaptionsPanel,
+  type CaptionOptions,
   LayersPanel,
   LookPanel,
   OverlayPanel,
@@ -106,6 +109,7 @@ import {
   SplitIcon,
   FreezeIcon,
   TextIcon,
+  CaptionsIcon,
   TransitionIcon,
   TrashIcon,
   TrimIcon,
@@ -121,7 +125,7 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const EMPTY: Project = { clips: [], overlays: [], audio: [], effects: [], canvas: DEFAULT_CANVAS };
 const RATES = [0.5, 1, 1.5, 2];
 
-type Tool = "text" | "elements" | "audio" | "effects" | "filters" | "adjust" | "canvas" | "layers";
+type Tool = "text" | "captions" | "elements" | "audio" | "effects" | "filters" | "adjust" | "canvas" | "layers";
 type Dialogs = { kind: "cleanup"; clipId: string; frameTime: number } | { kind: "export" } | null;
 type ClipboardItem = { kind: "overlay"; item: Overlay } | { kind: "audio"; item: AudioClip } | { kind: "effect"; item: EffectClip };
 
@@ -149,6 +153,8 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
   const [dialog, setDialog] = useState<Dialogs>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [captionOpts, setCaptionOpts] = useState<CaptionOptions>({ language: "auto", maxWords: 3, style: "bold", y: 0.82 });
+  const [captioning, setCaptioning] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [signedInTier, setSignedInTier] = useState<Tier>("free");
   const [showSignIn, setShowSignIn] = useState(false);
@@ -663,6 +669,51 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     [addSource, addOverlay, baseOverlay, canvasSize, say]
   );
 
+  // --- auto captions -------------------------------------------------------
+  const runCaptions = useCallback(async () => {
+    setPlaying(false);
+    setCaptioning(true);
+    setBusy("Preparing audio…");
+    try {
+      const wav = await buildSpeechWav(lay, project, sources);
+      if (!wav) {
+        say("There's no sound in your clips to caption.");
+        return;
+      }
+      setBusy("Transcribing speech… this can take a minute");
+      const res = await generateCaptions(wav, captionOpts.language);
+      window.dispatchEvent(new Event("credits:refresh"));
+      const chunks = groupWords(res.words, captionOpts.maxWords, lineCharsFor(canvasSize), lay.total);
+      if (chunks.length === 0) {
+        say("No speech was found in your clips.");
+        return;
+      }
+      const caps = captionOverlays(chunks, captionOpts.style, captionOpts.y);
+      // One undo step; regenerating replaces earlier captions.
+      apply((p) => ({ ...p, overlays: [...p.overlays.filter((o) => !o.caption), ...caps] }));
+      say(`Added ${caps.length} captions. Click one to edit its text.`);
+    } catch (e) {
+      if (e instanceof AuthRequiredError) setShowSignIn(true);
+      else say(e instanceof Error && e.message ? e.message : "Captioning failed. Please try again.");
+    } finally {
+      setBusy(null);
+      setCaptioning(false);
+    }
+  }, [lay, project, sources, captionOpts, canvasSize, apply, say]);
+
+  const restyleCaptions = useCallback(
+    (opts: CaptionOptions) =>
+      apply((p) => ({
+        ...p,
+        overlays: p.overlays.map((o) =>
+          o.caption && o.kind === "text"
+            ? { ...o, y: opts.y, animIn: CAPTION_STYLES[opts.style].animIn, text: captionText(o.text.content, opts.style) }
+            : o
+        ),
+      })),
+    [apply]
+  );
+
   const uploadBackground = useCallback(
     async (file: File) => {
       const src = await importImage(file);
@@ -1156,6 +1207,19 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
         gesture={gesture}
       />
     );
+  } else if (tool === "captions") {
+    panel = (
+      <CaptionsPanel
+        options={captionOpts}
+        onOptions={setCaptionOpts}
+        count={project.overlays.filter((o) => o.caption).length}
+        busy={captioning}
+        onGenerate={() => void runCaptions()}
+        onRestyle={restyleCaptions}
+        onRemoveAll={() => apply((p) => ({ ...p, overlays: p.overlays.filter((o) => !o.caption) }))}
+        onClose={() => setTool(null)}
+      />
+    );
   } else if (tool === "layers") {
     panel = (
       <LayersPanel
@@ -1458,6 +1522,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
             </ToolButton>
             <span className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden />
             {toolBtn("text", "Text", <TextIcon />, "Add text (T)")}
+            {toolBtn("captions", "Captions", <CaptionsIcon />, "Auto captions from speech")}
             {toolBtn("audio", "Audio", <MusicIcon />, "Music and audio")}
             {toolBtn("elements", "Elements", <ElementsIcon />, "Stickers and images")}
             {toolBtn("effects", "Effects", <EffectIcon />, "Timed effects")}

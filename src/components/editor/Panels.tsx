@@ -30,6 +30,8 @@ import {
   type Overlay,
   type TextStyle,
 } from "@/lib/editor/types";
+import { CAPTION_POSITIONS, CAPTION_STYLES, type CaptionStyleId } from "@/lib/editor/captions";
+import { CAPTIONS_CREDIT_COST } from "@/lib/credits";
 import { isPremiumEffect, isPremiumFilter } from "@/lib/entitlements";
 import GradeFilter from "./GradeFilter";
 import PremiumBadge from "./PremiumBadge";
@@ -507,6 +509,159 @@ export function ElementsPanel({
         Upload image (PNG, JPG, WebP)
       </button>
       <StickerLibrary onAdd={onAddSticker} />
+    </PanelShell>
+  );
+}
+
+// --- Auto captions ----------------------------------------------------------
+
+export const CAPTION_LANGUAGES: { code: string; label: string }[] = [
+  { code: "auto", label: "Detect automatically" },
+  { code: "en", label: "English" },
+  { code: "si", label: "Sinhala" },
+  { code: "ta", label: "Tamil" },
+  { code: "hi", label: "Hindi" },
+  { code: "es", label: "Spanish" },
+  { code: "fr", label: "French" },
+  { code: "de", label: "German" },
+  { code: "it", label: "Italian" },
+  { code: "pt", label: "Portuguese" },
+  { code: "nl", label: "Dutch" },
+  { code: "ru", label: "Russian" },
+  { code: "uk", label: "Ukrainian" },
+  { code: "pl", label: "Polish" },
+  { code: "tr", label: "Turkish" },
+  { code: "ar", label: "Arabic" },
+  { code: "bn", label: "Bengali" },
+  { code: "ur", label: "Urdu" },
+  { code: "id", label: "Indonesian" },
+  { code: "ms", label: "Malay" },
+  { code: "th", label: "Thai" },
+  { code: "vi", label: "Vietnamese" },
+  { code: "zh", label: "Chinese" },
+  { code: "ja", label: "Japanese" },
+  { code: "ko", label: "Korean" },
+];
+
+export interface CaptionOptions {
+  language: string;
+  maxWords: number;
+  style: CaptionStyleId;
+  y: number;
+}
+
+export function CaptionsPanel({
+  options,
+  onOptions,
+  count,
+  busy,
+  onGenerate,
+  onRestyle,
+  onRemoveAll,
+  onClose,
+}: {
+  options: CaptionOptions;
+  onOptions: (o: CaptionOptions) => void;
+  /** Caption layers already on the timeline. */
+  count: number;
+  busy: boolean;
+  onGenerate: () => void;
+  /** Applies the current style/position to the existing captions. */
+  onRestyle: (o: CaptionOptions) => void;
+  onRemoveAll: () => void;
+  onClose: () => void;
+}) {
+  const set = (patch: Partial<CaptionOptions>, restyle = false) => {
+    const next = { ...options, ...patch };
+    onOptions(next);
+    if (restyle && count > 0) onRestyle(next);
+  };
+  return (
+    <PanelShell title="Auto captions" onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-xs text-muted">
+          Turns the speech in your clips into timed text layers. Music tracks are ignored. Edit any caption afterwards like normal text.
+        </p>
+        <Field label="Language">
+          <select className={inputCls} value={options.language} onChange={(e) => set({ language: e.target.value })}>
+            {CAPTION_LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div>
+          <SectionTitle>Words per caption</SectionTitle>
+          <Chips
+            label="Words per caption"
+            value={options.maxWords}
+            onChange={(maxWords) => set({ maxWords })}
+            options={[
+              { value: 1, label: "1 word" },
+              { value: 3, label: "Short" },
+              { value: 8, label: "Phrase" },
+            ]}
+          />
+        </div>
+        <div>
+          <SectionTitle>Style</SectionTitle>
+          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Caption style">
+            {(Object.keys(CAPTION_STYLES) as CaptionStyleId[]).map((id) => {
+              const s = CAPTION_STYLES[id].style;
+              const active = options.style === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => set({ style: id }, true)}
+                  className={`flex h-14 items-center justify-center rounded-xl border bg-neutral-700 px-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+                    active ? "border-accent-2 ring-1 ring-accent-2" : "border-border hover:border-accent/50"
+                  }`}
+                >
+                  <span
+                    className="rounded px-1.5 py-0.5 text-sm"
+                    style={{
+                      color: s.color ?? "#ffffff",
+                      fontWeight: s.weight ?? 700,
+                      background: s.backgroundOpacity ? `rgba(0,0,0,${s.backgroundOpacity})` : undefined,
+                      WebkitTextStroke: s.strokeWidth ? `1px ${s.strokeColor}` : undefined,
+                      textShadow: s.shadow ? "0 1px 3px rgba(0,0,0,0.8)" : undefined,
+                      textTransform: CAPTION_STYLES[id].upper ? "uppercase" : undefined,
+                    }}
+                  >
+                    {CAPTION_STYLES[id].label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div>
+          <SectionTitle>Position</SectionTitle>
+          <Chips
+            label="Caption position"
+            value={options.y}
+            onChange={(y) => set({ y }, true)}
+            options={CAPTION_POSITIONS.map((p) => ({ value: p.y, label: p.label }))}
+          />
+        </div>
+        <ActionButton onClick={onGenerate} disabled={busy} tone="accent">
+          {busy ? "Generating…" : `${count > 0 ? "Regenerate" : "Generate"} captions · ${CAPTIONS_CREDIT_COST} credit`}
+        </ActionButton>
+        {count > 0 && (
+          <div className="space-y-2 border-t border-border pt-4">
+            <p className="text-xs text-muted">
+              {count} caption{count === 1 ? "" : "s"} on the Text track. Style and position changes apply to all of them; regenerating replaces them.
+            </p>
+            <ActionButton onClick={onRemoveAll} tone="danger">
+              <TrashIcon width={14} height={14} /> Remove all captions
+            </ActionButton>
+          </div>
+        )}
+      </div>
     </PanelShell>
   );
 }

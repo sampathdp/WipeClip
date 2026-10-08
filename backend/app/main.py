@@ -55,6 +55,8 @@ from pydantic import BaseModel, Field, ValidationError
 from app import jobs
 from app.config import (
     BG_REMOVE_PREVIEW_MAX_MEGAPIXELS,
+    CAPTIONS_MAX_SECONDS,
+    CAPTIONS_MAX_UPLOAD_BYTES,
     EDITOR_MAX_AUDIO,
     EDITOR_MAX_AUDIO_BYTES,
     EDITOR_MAX_CLIPS,
@@ -75,6 +77,7 @@ from app.config import (
     SHARPEN_AMOUNT_PRESETS,
 )
 from app.pipeline import io_utils, moderation
+from app.pipeline import captions as captions_pipeline
 from app.pipeline import editor as editor_pipeline
 from app.pipeline import video as video_pipeline
 from app.queue import get_queue
@@ -874,6 +877,54 @@ async def api_video_export(
 
     return Response(content=result, media_type="video/mp4")
 
+
+
+@app.post("/api/video/captions")
+async def api_video_captions(
+    request: Request,
+    file: UploadFile = File(...),
+    language: str = Form("auto"),  # "auto" or a code in captions.LANGUAGES
+):
+    """Auto captions for the editor: word-timed transcript of a WAV the
+    browser mixed from the timeline's own speech (16 kHz mono, timeline
+    time). Returns {"language", "words": [{"start", "end", "text"}]}.
+    Credits are charged by the Next.js /api/captions route in front.
+    """
+    _assert_internal_caller(request)
+    if language != "auto" and language not in captions_pipeline.LANGUAGES:
+        raise HTTPException(status_code=400, detail="Unsupported language")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wav_path = os.path.join(tmp, "speech.wav")
+        out_path = os.path.join(tmp, "captions.json")
+        _save_upload(file, wav_path, CAPTIONS_MAX_UPLOAD_BYTES)
+        try:
+            duration = captions_pipeline.wav_duration(wav_path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Audio could not be read") from exc
+        if duration <= 0.2:
+            raise HTTPException(status_code=400, detail="There's no audio to caption")
+        if duration > CAPTIONS_MAX_SECONDS + 1:
+            raise HTTPException(status_code=400, detail="Video too long to caption")
+
+        try:
+            await _run_pipeline_job(
+                jobs.captions_job,
+                wav_path,
+                out_path,
+                None if language == "auto" else language,
+                # CPU Whisper "base" runs well under real time; generous
+                # headroom for bigger models and a cold model load.
+                timeout=max(120.0, duration * 3),
+            )
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500, detail={"code": "captions_failed", "message": "Captioning failed. Please try again."}
+            ) from exc
+
+        with open(out_path, encoding="utf-8") as f:
+            return json.load(f)
 
 
 @app.post("/api/image/remove")
