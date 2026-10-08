@@ -9,7 +9,8 @@ import type { MediaSource, Project } from "./types";
  *  - `sources`: videos, original first (it sets frame rate and canvas
  *    size); only ones a clip or an extracted-audio track uses are sent.
  *  - `overlays`: one PNG per distinct sticker/text/image raster - the same
- *    PNGs the preview draws - referenced by index.
+ *    PNGs the preview draws - referenced by index. Video layers reference a
+ *    source video instead.
  *  - `audios`: uploaded audio files.
  *  - `background`: the canvas background image, if one is set.
  * Hidden layers and muted audio are left out entirely.
@@ -36,6 +37,25 @@ export async function exportProject(
   const imageBlobs: Blob[] = [];
   const overlayPayload = [];
   for (const o of overlays) {
+    if (o.kind === "video") {
+      // Sent as a source video; the backend plays it (and its sound) itself.
+      if (!sources[o.sourceId]) continue;
+      overlayPayload.push({
+        video: addSourceRef(o.sourceId),
+        offset: round(o.offset),
+        volume: o.volume,
+        start: round(o.start),
+        end: round(o.end),
+        x: o.x,
+        y: o.y,
+        width: o.width,
+        rotation: o.rotation,
+        opacity: o.opacity,
+        animIn: o.animIn,
+        animOut: o.animOut,
+      });
+      continue;
+    }
     const key = rasterKey(o);
     const raster = await loadRaster(o, sources);
     if (!imageKeys.includes(key)) {

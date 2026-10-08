@@ -618,6 +618,51 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     [importImage, addOverlay, baseOverlay, canvasSize]
   );
 
+  /** Imports a video as a picture-in-picture layer at the playhead: same
+   * browser decode check and server screening as the main import. */
+  const uploadVideoLayer = useCallback(
+    async (file: File) => {
+      if (!file.type.startsWith("video/")) {
+        say("Please choose a video file (MP4, MOV or WebM).");
+        return;
+      }
+      if (file.size > MAX_BYTES) {
+        say("That video is over the 300MB limit.");
+        return;
+      }
+      setBusy("Adding video layer…");
+      const url = URL.createObjectURL(file);
+      try {
+        const [meta, probe] = await Promise.all([loadVideoMeta(url), probeVideo(file)]);
+        URL.revokeObjectURL(probe.previewUrl);
+        const src: MediaSource = {
+          id: newId("lyr"),
+          kind: "layer",
+          file,
+          url,
+          duration: meta.duration,
+          width: meta.width,
+          height: meta.height,
+          fps: probe.info.fps > 0 && probe.info.fps <= 240 ? probe.info.fps : 30,
+          hasAudio: probe.info.hasAudio ?? true,
+        };
+        addSource(src);
+        const aspect = canvasSize.width / canvasSize.height;
+        // 40% of the canvas on the video's long side, like an image layer.
+        const width = src.width / src.height > aspect ? 0.4 : (0.4 * (src.width / src.height)) / aspect;
+        addOverlay({ ...baseOverlay(meta.duration), width, kind: "video", sourceId: src.id, offset: 0, volume: 1 });
+      } catch (e) {
+        URL.revokeObjectURL(url);
+        if (e instanceof ContentBlockedError || e instanceof ApiError) say(e.message);
+        else if (e instanceof Error && e.message === "media_error") say("Your browser can't play this video's format. Try an MP4 (H.264) file.");
+        else say("Couldn't add this video. Check your connection and try again.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [addSource, addOverlay, baseOverlay, canvasSize, say]
+  );
+
   const uploadBackground = useCallback(
     async (file: File) => {
       const src = await importImage(file);
@@ -733,7 +778,19 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
       } else if (track === "effects") {
         apply((p) => updateEffect(p, id, { start, end }), false);
       } else {
-        apply((p) => updateOverlay(p, id, { start, end }), false);
+        apply((p) => {
+          const o = p.overlays.find((x) => x.id === id);
+          if (o?.kind !== "video") return updateOverlay(p, id, { start, end });
+          // Video layers trim like audio: the front edge moves where the
+          // video is read from, the back edge stops at the video's end.
+          const srcDur = sourcesRef.current[o.sourceId]?.duration ?? o.offset + (o.end - o.start);
+          if (mode === "move") return updateOverlay(p, id, { start, end });
+          if (mode === "start") {
+            const delta = Math.max(-o.offset, start - o.start);
+            return updateOverlay(p, id, { start: o.start + delta, offset: o.offset + delta } as Partial<Overlay>);
+          }
+          return updateOverlay(p, id, { end: Math.min(end, o.start + srcDur - o.offset) });
+        }, false);
       }
     },
     [apply]
@@ -1077,7 +1134,14 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
   } else if (tool === "text") {
     panel = <TextAddPanel onAdd={addText} onClose={() => setTool(null)} />;
   } else if (tool === "elements") {
-    panel = <ElementsPanel onAddSticker={addSticker} onUploadImage={(f) => void uploadImage(f)} onClose={() => setTool(null)} />;
+    panel = (
+      <ElementsPanel
+        onAddSticker={addSticker}
+        onUploadImage={(f) => void uploadImage(f)}
+        onUploadVideo={(f) => void uploadVideoLayer(f)}
+        onClose={() => setTool(null)}
+      />
+    );
   } else if (tool === "audio") {
     panel = <AudioAddPanel audio={project.audio} onUpload={(f) => void uploadAudio(f)} onSelect={(id) => select({ kind: "audio", id })} onClose={() => setTool(null)} />;
   } else if (tool === "effects") {
@@ -1152,6 +1216,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
       <OverlayPanel
         overlay={selectedOverlay}
         total={lay.total}
+        sourceDuration={selectedOverlay.kind === "video" ? sources[selectedOverlay.sourceId]?.duration : undefined}
         onChange={(patch) => apply((p) => updateOverlay(p, selectedOverlay.id, patch))}
         onDuplicate={duplicate}
         onDelete={deleteSelection}
@@ -1258,9 +1323,17 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
             id: o.id,
             start: o.start,
             end: o.end,
-            label: o.kind === "sticker" ? (def?.label ?? "Sticker") : "Image",
-            thumb: o.kind === "image" ? sources[o.sourceId]?.url : def ? stickerThumbSrc(def) : null,
-            glyph: def?.kind === "emoji" ? def.char : "★",
+            label: o.kind === "sticker" ? (def?.label ?? "Sticker") : o.kind === "video" ? "Video" : "Image",
+            thumb:
+              o.kind === "image"
+                ? sources[o.sourceId]?.url
+                : o.kind === "video"
+                  ? (thumbs[o.sourceId]?.urls[0] ?? null)
+                  : def
+                    ? stickerThumbSrc(def)
+                    : null,
+            glyph: o.kind === "video" ? "▶" : def?.kind === "emoji" ? def.char : "★",
+            wave: o.kind === "video" ? { sourceId: o.sourceId, offset: o.offset, duration: o.end - o.start, gain: o.volume } : undefined,
             hidden: o.hidden,
             locked: o.locked,
             selected: isSel("overlay", o.id),
@@ -1334,6 +1407,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
                 canvasSize={canvasSize}
                 overlays={project.overlays}
                 rasters={rasters}
+                playback={{ playing, rate, volume, muted }}
                 selectedId={selectedOverlay?.id ?? null}
                 onSelect={(id) => {
                   if (id) select({ kind: "overlay", id });

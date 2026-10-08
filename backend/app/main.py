@@ -466,7 +466,12 @@ class _EditorClip(BaseModel):
 
 
 class _EditorOverlay(BaseModel):
-    image: int = Field(ge=0, lt=EDITOR_MAX_STICKERS)
+    # Exactly one of: a PNG (index into `overlays`), or a video source
+    # (index into `sources`) for a picture-in-picture layer.
+    image: Optional[int] = Field(None, ge=0, lt=EDITOR_MAX_STICKERS)
+    video: Optional[int] = Field(None, ge=0, lt=EDITOR_MAX_SOURCES)
+    offset: float = Field(0, ge=0)  # video layers: source seconds it starts from
+    volume: float = Field(1, ge=0, le=2)
     start: float = Field(ge=0)
     end: float = Field(gt=0)
     x: float = Field(ge=-0.5, le=1.5)
@@ -633,8 +638,10 @@ async def api_video_export(
         if c.look.filter not in editor_pipeline.FILTER_IDS:
             raise HTTPException(status_code=400, detail="Unknown filter")
     for o in spec.overlays:
-        if o.image >= len(overlays):
-            raise HTTPException(status_code=400, detail="Layer refers to a missing image")
+        if (o.image is None) == (o.video is None):
+            raise HTTPException(status_code=400, detail="Invalid layer")
+        if (o.image is not None and o.image >= len(overlays)) or (o.video is not None and o.video >= len(sources)):
+            raise HTTPException(status_code=400, detail="Layer refers to a missing file")
         if o.animIn not in editor_pipeline.ANIMS_IN or o.animOut not in editor_pipeline.ANIMS_OUT:
             raise HTTPException(status_code=400, detail="Unknown animation")
     for a in spec.audio:
@@ -775,16 +782,29 @@ async def api_video_export(
 
         # Layers entirely past the end of the (possibly shortened) timeline
         # are skipped; the rest are clamped to it.
+        layer_audio: list[editor_pipeline.PlanAudio] = []
         for o in spec.overlays:
             start, end = o.start, min(o.end, total)
+            if o.video is not None:
+                info = source_infos[o.video]
+                end = min(end, start + info.duration - o.offset)
             if end - start < 0.05:
                 continue
-            path, iw, ih = overlay_images[o.image]
+            if o.video is not None:
+                info = source_infos[o.video]
+                path, iw, ih = source_paths[o.video], info.width, info.height
+                if info.has_audio and o.volume > 0:
+                    layer_audio.append(
+                        editor_pipeline.PlanAudio(path=path, start=start, offset=o.offset, duration=end - start, volume=o.volume)
+                    )
+            else:
+                path, iw, ih = overlay_images[o.image]  # type: ignore[index]
             plan.overlays.append(
                 editor_pipeline.PlanOverlay(
                     image_path=path, image_width=iw, image_height=ih, start=start, end=end,
                     x=o.x, y=o.y, width=o.width, rotation=o.rotation, opacity=o.opacity,
                     anim_in=o.animIn, anim_out=o.animOut,
+                    video=o.video is not None, offset=o.offset,
                 )
             )
         if branding == "1":
@@ -821,6 +841,7 @@ async def api_video_export(
                     volume=a.volume, fade_in=min(a.fadeIn, duration / 2), fade_out=min(a.fadeOut, duration / 2),
                 )
             )
+        plan.audio.extend(layer_audio)
         plan.with_audio = bool(plan.audio) or any(c.source_has_audio for c in plan.clips)
 
         out_path = os.path.join(tmp, "export.mp4")

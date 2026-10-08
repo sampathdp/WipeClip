@@ -458,15 +458,36 @@ export function TextAddPanel({ onAdd, onClose }: { onAdd: (style: Partial<TextSt
 export function ElementsPanel({
   onAddSticker,
   onUploadImage,
+  onUploadVideo,
   onClose,
 }: {
   onAddSticker: (id: string) => void;
   onUploadImage: (file: File) => void;
+  onUploadVideo: (file: File) => void;
   onClose: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
+  const videoInput = useRef<HTMLInputElement>(null);
   return (
     <PanelShell title="Elements" onClose={onClose}>
+      <input
+        ref={videoInput}
+        type="file"
+        accept="video/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onUploadVideo(f);
+          e.target.value = "";
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => videoInput.current?.click()}
+        className="mb-2 w-full rounded-xl border-2 border-dashed border-border py-3 text-sm font-semibold text-foreground transition hover:border-accent-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+      >
+        Add video layer (picture-in-picture)
+      </button>
       <input
         ref={input}
         type="file"
@@ -495,6 +516,7 @@ export function ElementsPanel({
 export function OverlayPanel({
   overlay,
   total,
+  sourceDuration,
   onChange,
   onDuplicate,
   onDelete,
@@ -505,6 +527,8 @@ export function OverlayPanel({
 }: {
   overlay: Overlay;
   total: number;
+  /** Length of a video layer's source, to cap its end. */
+  sourceDuration?: number;
   onChange: (patch: Partial<Overlay>) => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -514,7 +538,8 @@ export function OverlayPanel({
   textAreaRef?: React.RefObject<HTMLTextAreaElement | null>;
 }) {
   const o = overlay;
-  const title = o.kind === "text" ? "Text" : o.kind === "image" ? "Image" : `Sticker · ${getStickerDef(o.stickerId)?.label ?? ""}`;
+  const title =
+    o.kind === "text" ? "Text" : o.kind === "image" ? "Image" : o.kind === "video" ? "Video layer" : `Sticker · ${getStickerDef(o.stickerId)?.label ?? ""}`;
   const setText = (patch: Partial<TextStyle>) => o.kind === "text" && onChange({ text: { ...o.text, ...patch } } as Partial<Overlay>);
 
   return (
@@ -598,10 +623,34 @@ export function OverlayPanel({
               <SecondsInput value={o.start} min={0} max={o.end - 0.2} onCommit={(start) => onChange({ start })} />
             </Field>
             <Field label="Disappears at">
-              <SecondsInput value={o.end} min={o.start + 0.2} max={Math.max(total, o.start + 0.2)} onCommit={(end) => onChange({ end })} />
+              <SecondsInput
+                value={o.end}
+                min={o.start + 0.2}
+                max={Math.max(o.start + 0.2, o.kind === "video" && sourceDuration ? Math.min(total, o.start + sourceDuration - o.offset) : total)}
+                onCommit={(end) => onChange({ end })}
+              />
             </Field>
           </div>
         </div>
+
+        {o.kind === "video" && (
+          <div className="space-y-3">
+            <SectionTitle>Video</SectionTitle>
+            <SliderField
+              label="Volume"
+              value={Math.round(o.volume * 100)}
+              min={0}
+              max={200}
+              neutral={100}
+              format={(v) => `${v}%`}
+              onChange={(v) => onChange({ volume: v / 100 } as Partial<Overlay>)}
+              gesture={gesture}
+            />
+            <p className="text-[11px] text-muted">
+              Plays from {formatTime(o.offset, true)} of its video. Drag the layer&apos;s left edge on the timeline to start later in the video.
+            </p>
+          </div>
+        )}
 
         <div className="space-y-3">
           <SectionTitle>Transform</SectionTitle>
@@ -1009,7 +1058,7 @@ export function LayersPanel({
               ? `“${o.text.content.split("\n")[0].slice(0, 24) || "Text"}”`
               : o.kind === "sticker"
                 ? (getStickerDef(o.stickerId)?.label ?? "Sticker")
-                : (sources[o.sourceId]?.file.name ?? "Image");
+                : (sources[o.sourceId]?.file.name ?? (o.kind === "video" ? "Video" : "Image"));
           const thumb = o.kind === "sticker" ? stickerThumbSrc(getStickerDef(o.stickerId)!) : o.kind === "image" ? sources[o.sourceId]?.url : null;
           return (
             <li
@@ -1023,6 +1072,8 @@ export function LayersPanel({
                     <img src={thumb} alt="" className="h-full w-full object-contain" />
                   ) : o.kind === "sticker" ? (
                     getStickerDef(o.stickerId)?.kind === "emoji" ? (getStickerDef(o.stickerId) as { char: string }).char : "★"
+                  ) : o.kind === "video" ? (
+                    "▶"
                   ) : (
                     "T"
                   )}

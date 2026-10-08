@@ -16,16 +16,17 @@ type Drag =
 const SNAP = 0.015; // fraction of canvas - center/edge guides pull within this
 const GUIDES = [0.5, 0.1, 0.9]; // center + safe-area lines
 
-/** Stickers, text and images drawn over the preview in canvas-relative
- * units (fractions of the canvas), bottom to top in project order, using
- * the same PNG the export composites - so position, size, rotation,
- * opacity and animation land the same in both.
+/** Stickers, text, images and video layers drawn over the preview in
+ * canvas-relative units (fractions of the canvas), bottom to top in project
+ * order, using the same PNG (or video) the export composites - so position,
+ * size, rotation, opacity and animation land the same in both.
  */
 export default function OverlayLayer({
   clock,
   canvasSize,
   overlays,
   rasters,
+  playback,
   selectedId,
   onSelect,
   onChange,
@@ -37,6 +38,8 @@ export default function OverlayLayer({
   canvasSize: { width: number; height: number };
   overlays: Overlay[];
   rasters: { byKey: Record<string, RasterSticker>; byId: Record<string, RasterSticker> };
+  /** Player state the video layers follow. */
+  playback: { playing: boolean; rate: number; volume: number; muted: boolean };
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onChange: (id: string, patch: Partial<Overlay>) => void;
@@ -159,19 +162,34 @@ export default function OverlayLayer({
                 pointerEvents: o.locked ? "none" : undefined,
               }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={img.url}
-                alt=""
-                draggable={false}
-                className={`h-full w-full cursor-move ${selected ? "" : "hover:outline hover:outline-1 hover:outline-white/60"}`}
-                onDoubleClick={() => o.kind === "text" && onEditText(o.id)}
-                onPointerDown={(e) => {
-                  onSelect(o.id);
-                  const p = toCanvas(e);
-                  begin(e, { kind: "move", id: o.id, px: p.x, py: p.y, x: o.x, y: o.y });
-                }}
-              />
+              {o.kind === "video" ? (
+                <OverlayVideo
+                  url={img.url}
+                  sourceTime={o.offset + (time - o.start)}
+                  gain={o.volume}
+                  playback={playback}
+                  className={`h-full w-full cursor-move object-fill ${selected ? "" : "hover:outline hover:outline-1 hover:outline-white/60"}`}
+                  onPointerDown={(e) => {
+                    onSelect(o.id);
+                    const p = toCanvas(e);
+                    begin(e, { kind: "move", id: o.id, px: p.x, py: p.y, x: o.x, y: o.y });
+                  }}
+                />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={img.url}
+                  alt=""
+                  draggable={false}
+                  className={`h-full w-full cursor-move ${selected ? "" : "hover:outline hover:outline-1 hover:outline-white/60"}`}
+                  onDoubleClick={() => o.kind === "text" && onEditText(o.id)}
+                  onPointerDown={(e) => {
+                    onSelect(o.id);
+                    const p = toCanvas(e);
+                    begin(e, { kind: "move", id: o.id, px: p.x, py: p.y, x: o.x, y: o.y });
+                  }}
+                />
+              )}
               {selected && (
                 <>
                   <div className="pointer-events-none absolute -inset-1 rounded-sm border-2 border-accent-2 shadow-[0_0_0_1px_rgba(0,0,0,0.4)]" />
@@ -210,5 +228,60 @@ export default function OverlayLayer({
         })}
       </div>
     </div>
+  );
+}
+
+/** A video layer's <video>, kept on the playhead like the audio tracks in
+ * PreviewPlayer: re-seeked on a real jump, otherwise left to play. Only
+ * mounted while the layer is on screen; pausing on unmount matters, since a
+ * detached media element keeps playing its sound.
+ */
+function OverlayVideo({
+  url,
+  sourceTime,
+  gain,
+  playback,
+  className,
+  onPointerDown,
+}: {
+  url: string;
+  sourceTime: number;
+  gain: number;
+  playback: { playing: boolean; rate: number; volume: number; muted: boolean };
+  className: string;
+  onPointerDown: (e: React.PointerEvent) => void;
+}) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const { playing, rate, volume, muted } = playback;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.playbackRate = rate;
+    el.muted = muted;
+    // HTML media volume can't exceed 1, so >100% previews at 100%.
+    el.volume = Math.min(1, Math.max(0, volume * gain));
+    const drift = Math.abs(el.currentTime - sourceTime);
+    if (el.readyState >= 1 && !el.seeking && drift > (playing ? 0.3 : 0.04)) el.currentTime = sourceTime;
+    if (playing && el.paused && !el.ended) el.play().catch(() => {});
+    if (!playing && !el.paused) el.pause();
+  }, [sourceTime, gain, playing, rate, volume, muted]);
+
+  useEffect(() => {
+    const el = ref.current;
+    return () => el?.pause();
+  }, []);
+
+  return (
+    <video
+      ref={ref}
+      src={url}
+      playsInline
+      preload="auto"
+      draggable={false}
+      aria-hidden
+      className={className}
+      onPointerDown={onPointerDown}
+    />
   );
 }

@@ -141,7 +141,10 @@ interface OverlayBase {
 export type Overlay =
   | (OverlayBase & { kind: "sticker"; stickerId: string })
   | (OverlayBase & { kind: "image"; sourceId: string })
-  | (OverlayBase & { kind: "text"; text: TextStyle });
+  | (OverlayBase & { kind: "text"; text: TextStyle })
+  /** Picture-in-picture: a video playing from `offset` (source seconds)
+   * for the layer's time range, with its own sound at `volume` (0..2). */
+  | (OverlayBase & { kind: "video"; sourceId: string; offset: number; volume: number });
 
 // --- Audio and effects ----------------------------------------------------
 
@@ -209,7 +212,8 @@ export interface Project {
  */
 export interface MediaSource {
   id: string;
-  kind: "original" | "cleaned" | "audio" | "image";
+  /** "layer": a video imported for a picture-in-picture layer. */
+  kind: "original" | "cleaned" | "audio" | "image" | "layer";
   file: File;
   url: string; // object URL
   duration: number; // 0 for images

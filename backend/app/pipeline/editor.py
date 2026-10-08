@@ -21,9 +21,10 @@ is an actual operation in the exported file:
   3. Effects. Timed effects run on the joined video, each limited to its
      time range with ffmpeg's timeline `enable`.
   4. Overlays. Stickers, text and images - all PNGs rasterized by the
-     browser, the same images the preview shows - are composited bottom to
-     top with their position, size, rotation, opacity, time range and
-     in/out animation.
+     browser, the same images the preview shows - and picture-in-picture
+     video layers are composited bottom to top with their position, size,
+     rotation, opacity, time range and in/out animation. A video layer's
+     sound joins the audio mix like an audio clip.
   5. Audio. The clips' own audio (after joins) is mixed with every added /
      extracted audio clip (trimmed, delayed to its timeline position, with
      volume and fades), then limited to avoid clipping.
@@ -246,6 +247,8 @@ class PlanOverlay:
     opacity: float = 1.0
     anim_in: str = "none"
     anim_out: str = "none"
+    video: bool = False  # image_path is a video, played from `offset`
+    offset: float = 0.0
 
 
 @dataclass
@@ -509,6 +512,11 @@ def _overlay_filters(o: PlanOverlay, input_idx: int, n: int, plan: ExportPlan, b
     rad = f"{_num(o.rotation)}*PI/180"
 
     parts = [f"format=rgba,scale={target_w}:{target_h}:flags=lanczos"]
+    if o.video:
+        # Shift the trimmed input to start at the layer's timeline position,
+        # at the output frame rate, so the time-based fades/animations and
+        # `enable` below see timeline time.
+        parts.insert(0, f"setpts=PTS-STARTPTS+{s}/TB,fps={_num(plan.fps)}")
     if o.opacity < 0.999:
         parts.append(f"colorchannelmixer=aa={_num(max(0.0, o.opacity))}")
     if abs(o.rotation) > 0.01:
@@ -545,7 +553,7 @@ def _overlay_filters(o: PlanOverlay, input_idx: int, n: int, plan: ExportPlan, b
 
     in_label, out_label = f"ol{n}", f"oo{n}"
     chain = (
-        f"[{input_idx}:v]{','.join(parts)}[{in_label}];"
+        f"[{input_idx}:v:0]{','.join(parts)}[{in_label}];"
         f"[{base_label}][{in_label}]overlay=x='{x_expr}-overlay_w/2':y='{y_expr}-overlay_h/2':"
         f"enable='between(t,{s},{_num(o.end)})':eval=frame:eof_action=pass:format=auto[{out_label}]"
     )
@@ -606,9 +614,14 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
         v_acc = "vfx"
 
     for n, o in enumerate(plan.overlays):
-        # Looped still from t=0 so its timestamps line up with the output
-        # timeline; eof_action=pass leaves the video untouched afterwards.
-        idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end + 0.1), "-i", o.image_path)
+        if o.video:
+            # Just the layer's range of its video; shifted into place in
+            # _overlay_filters, and gone after its end (eof_action=pass).
+            idx = inputs.add("-ss", _num(o.offset), "-t", _num(o.end - o.start), "-i", o.image_path)
+        else:
+            # Looped still from t=0 so its timestamps line up with the output
+            # timeline; eof_action=pass leaves the video untouched afterwards.
+            idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end + 0.1), "-i", o.image_path)
         chain, v_acc = _overlay_filters(o, idx, n, plan, v_acc)
         graph.append(chain)
     graph.append(f"[{v_acc}]format=yuv420p[outv]")
