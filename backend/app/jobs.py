@@ -20,7 +20,6 @@ from pathlib import Path
 import numpy as np
 
 from app.config import DEFAULT_SHARPEN_RADIUS
-from app.pipeline import captions as captions_pipeline
 from app.pipeline import editor as editor_pipeline
 from app.pipeline import full_pipeline, io_utils, manual_inpaint, sharpen as sharpen_pipeline
 from app.pipeline import video as video_pipeline
@@ -51,7 +50,7 @@ def editor_export_job(plan_json: str, out_path: str) -> None:
     """
     raw = json.loads(plan_json)
     plan = editor_pipeline.ExportPlan(
-        **{k: raw[k] for k in ("width", "height", "fps", "with_audio", "fit", "background", "color", "color2", "background_image")},
+        **{k: raw[k] for k in ("width", "height", "fps", "with_audio", "fit", "background", "color", "color2", "background_image", "crf", "audio_bitrate")},
         clips=[editor_pipeline.PlanClip(**c) for c in raw["clips"]],
         overlays=[editor_pipeline.PlanOverlay(**o) for o in raw["overlays"]],
         audio=[editor_pipeline.PlanAudio(**a) for a in raw["audio"]],
@@ -61,12 +60,6 @@ def editor_export_job(plan_json: str, out_path: str) -> None:
     # serializing; don't apply it twice.
     plan._quantized = True  # type: ignore[attr-defined]
     asyncio.run(editor_pipeline.render_export(plan, out_path))
-
-
-def captions_job(wav_path: str, out_path: str, language: str | None) -> None:
-    """Writes captions.transcribe()'s result as JSON to `out_path`."""
-    result = captions_pipeline.transcribe(wav_path, language)
-    Path(out_path).write_text(json.dumps(result), encoding="utf-8")
 
 
 def image_remove_job(in_path: str, out_path: str, x: int, y: int, w: int, h: int) -> None:

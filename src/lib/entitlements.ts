@@ -26,13 +26,15 @@ export interface TierLimits {
   exportBranding: boolean;
   /** Editor exports per day for a signed-in user. */
   dailyExports: number;
+  /** Encoded smaller (more compression) to keep bandwidth costs down. */
+  compactExport: boolean;
 }
 
 export const TIER_LIMITS: Record<Tier, TierLimits> = {
-  free: { maxResolution: "720p", premiumEffects: false, exportBranding: true, dailyExports: 5 },
-  lite: { maxResolution: "720p", premiumEffects: true, exportBranding: false, dailyExports: 20 },
-  starter: { maxResolution: "1080p", premiumEffects: true, exportBranding: false, dailyExports: 50 },
-  pro: { maxResolution: "4k", premiumEffects: true, exportBranding: false, dailyExports: 200 },
+  free: { maxResolution: "720p", premiumEffects: false, exportBranding: true, dailyExports: 5, compactExport: true },
+  lite: { maxResolution: "720p", premiumEffects: true, exportBranding: false, dailyExports: 20, compactExport: false },
+  starter: { maxResolution: "1080p", premiumEffects: true, exportBranding: false, dailyExports: 50, compactExport: false },
+  pro: { maxResolution: "4k", premiumEffects: true, exportBranding: false, dailyExports: 200, compactExport: false },
 };
 
 const RESOLUTION_ORDER: Resolution[] = ["720p", "1080p", "4k"];

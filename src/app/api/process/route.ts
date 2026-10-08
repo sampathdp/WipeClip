@@ -1,35 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Agent } from "undici";
 import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { RESOLUTION_CREDIT_COST } from "@/lib/credits";
-import { TOOLS_API_URL } from "@/lib/toolsApi";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { isProUser } from "@/lib/plan";
+import { issueTicket } from "@/lib/jobTicket";
 
-// The FastAPI backend processes the video synchronously inside this
-// request: a long clip, a high output resolution, or the Pro optical-flow
-// quality tier can each keep the connection open well past undici's
-// default 300s headersTimeout. When that fired, this route caught the
-// aborted fetch and returned a bogus "backend_unreachable" 502 (and
-// refunded credits) while the job was actually still running fine. This
-// dispatcher lifts the header/body idle timeouts for the backend call
-// only; a genuinely stuck job is still bounded by the backend's own
-// per-job timeout (_run_pipeline_job) and by `maxDuration` below.
-const backendDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
+function errorResponse(code: string, message: string, status: number) {
+  return NextResponse.json({ detail: { code, message } }, { status });
+}
 
-// Give the route as long as the deploy platform allows for the backend to
-// finish (ignored by `next dev`). 60s is the ceiling every Vercel plan
-// accepts at build time; a Pro/Fluid deployment can raise this to 300 (or
-// up to 800 with Fluid compute). A value above the plan's limit fails the
-// build outright.
-export const maxDuration = 60;
-
-/** Server-side gate in front of the FastAPI processing backend. Signed-in
- * callers spend credits atomically before forwarding the job, refunded if
- * the backend rejects or fails the request. The browser never talks to the
- * FastAPI backend's /process endpoint directly (unlike /probe, which
- * doesn't touch billing) - that's what makes the credit check
- * non-bypassable.
+/** Server-side gate for the FastAPI backend's video object removal
+ * (/api/video/process). Takes JSON `{ resolution, filename }` and answers
+ * `{ ticket, resolution }`; the browser then uploads the video with that
+ * ticket straight to the backend (see src/lib/jobTicket.ts). Signed-in
+ * callers spend credits atomically here, before the ticket exists; the
+ * backend refunds them through /api/internal/ticket if the job fails or is
+ * rejected. The ticket also carries the quality tier, decided from the
+ * caller's real plan - that's what keeps both non-bypassable.
  *
  * Anonymous callers are allowed through too, deliberately: the product
  * lets anyone upload/process/preview a result with no account, only
@@ -42,10 +29,14 @@ export const maxDuration = 60;
  */
 export async function POST(request: NextRequest) {
   if (!isSupabaseConfigured()) {
-    return NextResponse.json(
-      { detail: { code: "server_error", message: "Accounts aren't configured yet." } },
-      { status: 501 }
-    );
+    return errorResponse("server_error", "Accounts aren't configured yet.", 501);
+  }
+
+  let body: { resolution?: unknown; filename?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse("bad_request", "Invalid request.", 400);
   }
 
   const supabase = await createClient();
@@ -59,59 +50,12 @@ export async function POST(request: NextRequest) {
     // cap below. Namespaced separately from other IP-keyed limits
     // (rateLimitKeyFor's own "ip:" prefix) so it can't collide with them.
     if (!(await checkRateLimit(`anon-process:${rateLimitKeyFor(request)}`, 3, 24 * 60 * 60 * 1000))) {
-      return NextResponse.json(
-        {
-          detail: {
-            code: "rate_limited",
-            message: "Free preview limit reached for today. Sign in for more.",
-          },
-        },
-        { status: 429 }
-      );
+      return errorResponse("rate_limited", "Free preview limit reached for today. Sign in for more.", 429);
     }
-
-    const formData = await request.formData();
     // Hard cap, ignoring whatever the client sent - defense in depth
     // alongside the UI already disabling non-720p options when signed out.
-    formData.set("resolution", "720p");
-
-    let backendRes: Response;
-    try {
-      backendRes = await fetch(`${TOOLS_API_URL}/api/video/process`, {
-        method: "POST",
-        body: formData,
-        headers: process.env.INTERNAL_API_SECRET
-          ? { "X-Internal-Process-Secret": process.env.INTERNAL_API_SECRET }
-          : undefined,
-        dispatcher: backendDispatcher,
-      } as RequestInit & { dispatcher: Agent });
-    } catch (e) {
-      return NextResponse.json(
-        {
-          detail: {
-            code: "backend_unreachable",
-            message: e instanceof Error ? e.message : "Could not reach the processing backend.",
-          },
-        },
-        { status: 502 }
-      );
-    }
-
-    if (!backendRes.ok) {
-      const body = await backendRes.text();
-      return new NextResponse(body, {
-        status: backendRes.status,
-        headers: { "Content-Type": backendRes.headers.get("Content-Type") ?? "application/json" },
-      });
-    }
-
-    return new NextResponse(backendRes.body, {
-      status: 200,
-      headers: {
-        "Content-Type": backendRes.headers.get("Content-Type") ?? "video/mp4",
-        "Content-Disposition": backendRes.headers.get("Content-Disposition") ?? "attachment",
-      },
-    });
+    const ticket = issueTicket({ kind: "process", resolution: "720p", quality: "standard", userId: null, cost: 0 });
+    return NextResponse.json({ ticket, resolution: "720p" });
   }
 
   // 30 processing requests/hour/user - the credit system already caps
@@ -119,21 +63,13 @@ export async function POST(request: NextRequest) {
   // (e.g. repeated failed attempts, or free-tier requests that cost credits
   // but still burn a full ffmpeg encode either way).
   if (!(await checkRateLimit(`${rateLimitKeyFor(request, user.id)}:video`, 30, 60 * 60 * 1000))) {
-    return NextResponse.json(
-      { detail: { code: "rate_limited", message: "Too many processing requests. Try again later." } },
-      { status: 429 }
-    );
+    return errorResponse("rate_limited", "Too many processing requests. Try again later.", 429);
   }
 
-  const formData = await request.formData();
-  const resolution = String(formData.get("resolution") ?? "720p");
+  const resolution = String(body.resolution ?? "720p");
   const cost = RESOLUTION_CREDIT_COST[resolution as keyof typeof RESOLUTION_CREDIT_COST];
-
   if (!cost) {
-    return NextResponse.json(
-      { detail: { code: "bad_resolution", message: "Unknown resolution." } },
-      { status: 400 }
-    );
+    return errorResponse("bad_resolution", "Unknown resolution.", 400);
   }
 
   // consume_credits/refund_credits are locked to service_role at the DB
@@ -147,87 +83,32 @@ export async function POST(request: NextRequest) {
     p_amount: cost,
     p_resolution: resolution,
   });
-
   if (consumeErr) {
-    return NextResponse.json(
-      { detail: { code: "server_error", message: consumeErr.message } },
-      { status: 500 }
-    );
+    return errorResponse("server_error", consumeErr.message, 500);
   }
-
   if (!consumed) {
-    return NextResponse.json(
-      {
-        detail: {
-          code: "insufficient_credits",
-          message: `Not enough credits for ${resolution} (${cost} credit${cost > 1 ? "s" : ""}). Free credits renew daily, or buy more.`,
-        },
-      },
-      { status: 402 }
+    return errorResponse(
+      "insufficient_credits",
+      `Not enough credits for ${resolution} (${cost} credit${cost > 1 ? "s" : ""}). Free credits renew daily, or buy more.`,
+      402
     );
   }
 
   // Best-effort: tags the transaction just inserted with which tool ran
   // and the source filename, for the Job History view. Not billing-
   // critical, so its result is intentionally not checked.
-  const uploadedFile = formData.get("file");
   void supabaseAdmin.rpc("tag_last_transaction", {
     p_user_id: user.id,
     p_tool: "video",
-    p_filename: uploadedFile instanceof File ? uploadedFile.name : null,
+    p_filename: typeof body.filename === "string" ? body.filename.slice(0, 255) : null,
   });
-
-  // Object removal is the only supported mode; never forward anything else.
-  formData.set("mode", "remove");
-  formData.delete("logo");
 
   // Pro-only quality tier (optical-flow-assisted reconstruction in the
   // backend's video.py) - decided here, server-side, from the caller's
   // actual plan, never from a client-supplied value, so it can't be
   // requested by a non-Pro account.
-  if (await isProUser(supabase, user.id)) {
-    formData.set("quality", "pro");
-  }
+  const quality = (await isProUser(supabase, user.id)) ? "pro" : "standard";
 
-  let backendRes: Response;
-  try {
-    backendRes = await fetch(`${TOOLS_API_URL}/api/video/process`, {
-      method: "POST",
-      body: formData,
-      headers: process.env.INTERNAL_API_SECRET
-        ? { "X-Internal-Process-Secret": process.env.INTERNAL_API_SECRET }
-        : undefined,
-      dispatcher: backendDispatcher,
-    } as RequestInit & { dispatcher: Agent });
-  } catch (e) {
-    await supabaseAdmin.rpc("refund_credits", { p_user_id: user.id, p_amount: cost, p_resolution: resolution });
-    return NextResponse.json(
-      {
-        detail: {
-          code: "backend_unreachable",
-          message: e instanceof Error ? e.message : "Could not reach the processing backend.",
-        },
-      },
-      { status: 502 }
-    );
-  }
-
-  if (!backendRes.ok) {
-    // Covers both real failures and a content-moderation rejection - either
-    // way the user didn't get a usable result, so they get their credits back.
-    await supabaseAdmin.rpc("refund_credits", { p_user_id: user.id, p_amount: cost, p_resolution: resolution });
-    const body = await backendRes.text();
-    return new NextResponse(body, {
-      status: backendRes.status,
-      headers: { "Content-Type": backendRes.headers.get("Content-Type") ?? "application/json" },
-    });
-  }
-
-  return new NextResponse(backendRes.body, {
-    status: 200,
-    headers: {
-      "Content-Type": backendRes.headers.get("Content-Type") ?? "video/mp4",
-      "Content-Disposition": backendRes.headers.get("Content-Disposition") ?? "attachment",
-    },
-  });
+  const ticket = issueTicket({ kind: "process", resolution, quality, userId: user.id, cost });
+  return NextResponse.json({ ticket, resolution });
 }

@@ -1,12 +1,12 @@
-/** Auto captions, browser side: mixes the timeline's speech down to the
- * WAV the backend transcribes (backend/app/pipeline/captions.py), and
- * turns the word timings it returns into caption text layers.
+/** Auto captions, all in the browser: mixes the timeline's speech down to
+ * 16 kHz mono, transcribes it with Whisper in a worker (captions.worker.ts),
+ * and turns the word timings into caption text layers.
  */
 import { DEFAULT_TEXT } from "./textRaster";
 import { newId, type Layout } from "./timeline";
 import type { AnimIn, MediaSource, Overlay, Project, TextStyle } from "./types";
 
-const RATE = 16000; // what Whisper works at - no point sending more
+const RATE = 16000; // what Whisper works at
 const MAX_DECODE_BYTES = 400 * 1024 * 1024; // decodeAudioData holds the whole file
 
 export interface CaptionWord {
@@ -15,13 +15,17 @@ export interface CaptionWord {
   text: string;
 }
 
-/** The timeline's own speech, in timeline time, as a 16 kHz mono 16-bit
- * WAV: every clip's sound at its speed and position, plus audio extracted
- * from videos. Uploaded music is left out (it only confuses
- * transcription), as are freeze frames and reversed clips. Null when
- * nothing on the timeline has sound.
+/** The timeline's own speech, in timeline time, as 16 kHz mono samples:
+ * every clip's sound at its speed and position, plus audio extracted from
+ * videos. Uploaded music is left out (it only confuses transcription), as
+ * are freeze frames and reversed clips. Null when nothing on the timeline
+ * has sound.
  */
-export async function buildSpeechWav(lay: Layout, project: Project, sources: Record<string, MediaSource>): Promise<Blob | null> {
+export async function buildSpeechAudio(
+  lay: Layout,
+  project: Project,
+  sources: Record<string, MediaSource>
+): Promise<Float32Array | null> {
   if (lay.total <= 0) return null;
   const ctx = new OfflineAudioContext(1, Math.ceil(lay.total * RATE), RATE);
   const decoded = new Map<string, Promise<AudioBuffer | null>>();
@@ -68,30 +72,220 @@ export async function buildSpeechWav(lay: Layout, project: Project, sources: Rec
   }
   if (scheduled === 0) return null;
   const mixed = await ctx.startRendering();
-  return encodeWav(mixed.getChannelData(0), RATE);
+  return mixed.getChannelData(0);
 }
 
-function encodeWav(samples: Float32Array, rate: number): Blob {
-  const out = new DataView(new ArrayBuffer(44 + samples.length * 2));
-  const text = (at: number, s: string) => [...s].forEach((ch, i) => out.setUint8(at + i, ch.charCodeAt(0)));
-  text(0, "RIFF");
-  out.setUint32(4, 36 + samples.length * 2, true);
-  text(8, "WAVE");
-  text(12, "fmt ");
-  out.setUint32(16, 16, true); // PCM header size
-  out.setUint16(20, 1, true); // PCM
-  out.setUint16(22, 1, true); // mono
-  out.setUint32(24, rate, true);
-  out.setUint32(28, rate * 2, true); // byte rate
-  out.setUint16(32, 2, true); // block align
-  out.setUint16(34, 16, true); // bits per sample
-  text(36, "data");
-  out.setUint32(40, samples.length * 2, true);
-  for (let i = 0; i < samples.length; i++) {
-    const v = Math.max(-1, Math.min(1, samples[i]));
-    out.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+export interface CaptionsProgress {
+  stage: "download" | "prepare" | "transcribe";
+  value: number; // 0..1
+}
+
+// --- Transcription (captions.worker.ts) --------------------------------------
+
+const MAX_SEGMENT = 28 * RATE; // Whisper's window is 30 s; leave room so no word is cut off
+const MIN_SEGMENT = 10 * RATE;
+const SEARCH = 6 * RATE; // look this far back from a segment's end for a quiet spot to cut at
+const FRAME = RATE / 10; // 100 ms loudness frames
+const SILENCE_RMS = 0.004; // segments quieter than this are skipped (Whisper invents text in silence)
+// More than two was measured slower, not faster: the workers then fight
+// over cores and memory bandwidth (6-core laptop, 2-minute clip: 1 worker
+// 50 s, 2 workers 37 s, 3 workers 46 s).
+const MAX_CPU_WORKERS = 2;
+
+function rms(samples: Float32Array, from: number, to: number): number {
+  let sum = 0;
+  for (let i = from; i < to; i++) sum += samples[i] * samples[i];
+  return Math.sqrt(sum / Math.max(1, to - from));
+}
+
+/** Splits audio into segments of at most `length` samples, cut at the
+ * quietest 100 ms near each segment's end so words aren't split. Silent
+ * segments are dropped. */
+function speechSegments(samples: Float32Array, length = MAX_SEGMENT): [number, number][] {
+  const out: [number, number][] = [];
+  let start = 0;
+  while (start < samples.length) {
+    let end = start + length;
+    if (end >= samples.length) {
+      end = samples.length;
+    } else {
+      let best = end;
+      let bestRms = Infinity;
+      for (let at = end - FRAME; at >= end - SEARCH; at -= FRAME) {
+        const level = rms(samples, at, at + FRAME);
+        if (level < bestRms) {
+          bestRms = level;
+          best = at + FRAME / 2;
+        }
+      }
+      end = best;
+    }
+    if (rms(samples, start, end) >= SILENCE_RMS) out.push([start, end]);
+    start = end;
   }
-  return new Blob([out.buffer], { type: "audio/wav" });
+  return out;
+}
+
+/** Workers to run side by side. Each holds its own model (~250 MB of
+ * memory), so this is bounded by cores and, where the browser reports it,
+ * by the device's memory. */
+function cpuWorkerCount(): number {
+  const cores = navigator.hardwareConcurrency || 2;
+  const memoryGb = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
+  return Math.max(1, Math.min(MAX_CPU_WORKERS, cores - 1, Math.floor(memoryGb / 1.5)));
+}
+
+/** A captions.worker.ts instance with promise-based requests on top of
+ * postMessage; one request in flight at a time. */
+class ModelWorker {
+  private readonly w = new Worker(new URL("./captions.worker.ts", import.meta.url), { type: "module" });
+  private pending: { resolve: (m: unknown) => void; reject: (e: Error) => void } | null = null;
+  onProgress: ((p: CaptionsProgress) => void) | null = null;
+  dead = false;
+
+  constructor() {
+    this.w.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === "progress") {
+        this.onProgress?.(m);
+        return;
+      }
+      const p = this.pending;
+      this.pending = null;
+      if (m.type === "error") p?.reject(new Error(m.message || "Captioning failed"));
+      else p?.resolve(m);
+    };
+    this.w.onerror = (e) => {
+      // A crashed worker (e.g. out of memory) can't be reused.
+      this.terminate();
+      this.pending?.reject(new Error(e.message || "Captioning failed"));
+      this.pending = null;
+    };
+  }
+
+  request<T>(msg: Record<string, unknown>, transfer: Transferable[] = []): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.pending = { resolve: resolve as (m: unknown) => void, reject };
+      this.w.postMessage(msg, transfer);
+    });
+  }
+
+  terminate() {
+    this.dead = true;
+    this.w.terminate();
+  }
+}
+
+type Device = "webgpu" | "wasm";
+let pool: { device: Device; workers: ModelWorker[] } | null = null;
+
+/** The worker pool, kept between runs: cpuWorkerCount() workers, with the
+ * encoder on WebGPU when the browser has it. The first worker loads (and
+ * caches) the model before the others start, so it's downloaded only once. */
+async function getPool(onProgress: (p: CaptionsProgress) => void, forceCpu: boolean) {
+  if (pool && pool.workers.every((w) => !w.dead) && !(forceCpu && pool.device === "webgpu")) return pool;
+  pool?.workers.forEach((w) => w.terminate());
+  pool = null;
+
+  let first = new ModelWorker();
+  first.onProgress = onProgress;
+  let device: Device = "wasm";
+  if (!forceCpu && "gpu" in navigator) {
+    try {
+      ({ device } = await first.request<{ device: Device }>({ type: "init", device: "webgpu" }));
+    } catch (err) {
+      // A browser can list a GPU and still fail to use it (drivers,
+      // blocklists); the CPU path then starts in a fresh worker.
+      console.warn("[captions] WebGPU unavailable, using the CPU", err);
+      first.terminate();
+      first = new ModelWorker();
+      first.onProgress = onProgress;
+    }
+  }
+  if (device === "wasm") await first.request({ type: "init", device: "wasm" });
+  first.onProgress = null;
+  const workers = [first];
+  // The decoder runs on the CPU either way, so both modes use the pool.
+  {
+    const extra = Array.from({ length: cpuWorkerCount() - 1 }, () => new ModelWorker());
+    // Extra workers only add speed: one that fails to start is dropped.
+    const started = await Promise.all(
+      extra.map((w) =>
+        w.request({ type: "init", device }).then(
+          () => w,
+          () => {
+            w.terminate();
+            return null;
+          }
+        )
+      )
+    );
+    workers.push(...started.filter((w): w is ModelWorker => w !== null));
+  }
+  pool = { device, workers };
+  return pool;
+}
+
+const round = (t: number) => Math.round(t * 1000) / 1000;
+
+async function runOnPool(
+  samples: Float32Array,
+  language: string,
+  onProgress: (p: CaptionsProgress) => void,
+  forceCpu: boolean
+): Promise<{ language: string; words: CaptionWord[] }> {
+  if (speechSegments(samples).length === 0) return { language: language === "auto" ? "en" : language, words: [] };
+
+  const { workers } = await getPool(onProgress, forceCpu);
+  // Short audio is split evenly across the workers instead of leaving some
+  // idle (the cut lands up to SEARCH early, hence the half-SEARCH slack).
+  const perWorker = Math.ceil(samples.length / workers.length) + SEARCH / 2;
+  const segments = speechSegments(samples, Math.max(MIN_SEGMENT, Math.min(MAX_SEGMENT, perWorker)));
+  onProgress({ stage: "transcribe", value: 0 });
+  const lang =
+    language !== "auto"
+      ? language
+      : (await workers[0].request<{ language: string }>({ type: "detect", samples: samples.slice(...segments[0]) })).language;
+
+  // Each worker takes the next segment as soon as it's free.
+  const results: CaptionWord[][] = new Array(segments.length);
+  let next = 0;
+  let done = 0;
+  await Promise.all(
+    workers.map(async (w) => {
+      while (next < segments.length) {
+        const i = next++;
+        const [s, t] = segments[i];
+        const part = samples.slice(s, t);
+        const { words } = await w.request<{ words: CaptionWord[] }>(
+          { type: "transcribe", id: i, samples: part, language: lang },
+          [part.buffer]
+        );
+        const offset = s / RATE;
+        results[i] = words.map((x) => ({ ...x, start: round(x.start + offset), end: round(x.end + offset) }));
+        onProgress({ stage: "transcribe", value: ++done / segments.length });
+      }
+    })
+  );
+  return { language: lang, words: results.flat() };
+}
+
+/** Word-timed transcript of `samples` (16 kHz mono, timeline time).
+ * `language` is a code from CAPTION_LANGUAGES, or "auto" to let Whisper
+ * detect it. Runs on WebGPU when available; if that fails, the run is
+ * retried once on the CPU. */
+export async function transcribe(
+  samples: Float32Array,
+  language: string,
+  onProgress: (p: CaptionsProgress) => void
+): Promise<{ language: string; words: CaptionWord[] }> {
+  try {
+    return await runOnPool(samples, language, onProgress, false);
+  } catch (err) {
+    if (pool?.device !== "webgpu") throw err;
+    console.warn("[captions] WebGPU run failed, retrying on the CPU", err);
+    return runOnPool(samples, language, onProgress, true);
+  }
 }
 
 // --- Grouping words into captions ------------------------------------------

@@ -95,6 +95,22 @@ DETECT_BOX_PADDING_PX: int = 6               # padding added around each blob's
 PNG_COMPRESSION_LEVEL: int = 6
 MAX_UPLOAD_DIMENSION: int = 6000  # px, safety cap on longest side
 
+# --- Resource limits (per process) ---------------------------------------------
+# Every job peaks at roughly 1-3 GB of RAM and will happily use every core,
+# so how many run at once is what actually sizes the server. Inline mode (no
+# REDIS_URL) queues requests past MAX_CONCURRENT_JOBS instead of running
+# them side by side; with RQ, concurrency is the number of worker processes.
+MAX_CONCURRENT_JOBS: int = max(1, int(os.environ.get("MAX_CONCURRENT_JOBS", "1")))
+# Threads one job may use: ffmpeg (decode, filters, x264 - fewer threads
+# also means fewer frames in flight, so less RAM), OpenCV and the
+# ONNX models (rembg, NudeNet). Defaults to an even share of the cores, so
+# concurrent jobs don't oversubscribe the CPU.
+JOB_THREADS: int = max(
+    1, int(os.environ.get("JOB_THREADS", str(max(1, (os.cpu_count() or 1) // MAX_CONCURRENT_JOBS))))
+)
+# onnxruntime (via rembg/NudeNet) reads this when a session is created.
+os.environ.setdefault("OMP_NUM_THREADS", str(JOB_THREADS))
+
 # --- Video watermark removal (ffmpeg-based) -----------------------------------
 # Synchronous request/response (no job queue) - these caps keep a single
 # ffmpeg encode within a request/response cycle a browser will actually wait
@@ -284,15 +300,18 @@ EDITOR_MAX_EFFECTS: int = 30
 # reversed clip's source range is capped. Must match MAX_REVERSE_SECONDS in
 # src/lib/editor/timeline.ts.
 EDITOR_MAX_REVERSE_SECONDS: float = 10.0
+# The seconds cap alone isn't enough: 10 s of 4K60 is ~7.5 GB of buffered
+# frames. main.py also rejects a reversed clip whose estimated frame buffer
+# (frames x scaled frame size, yuv420p) is past this.
+EDITOR_MAX_REVERSE_BUFFER_BYTES: int = int(
+    float(os.environ.get("EDITOR_MAX_REVERSE_BUFFER_MB", "1024")) * 1024 * 1024
+)
 EDITOR_MAX_FREEZE_SECONDS: float = 30.0
-
-# --- Auto captions (app/pipeline/captions.py) ---------------------------------
-# faster-whisper model name: "tiny" / "base" / "small" / "medium" (bigger =
-# more accurate, slower; CPU int8). Overridable per deployment.
-CAPTIONS_MODEL: str = os.environ.get("CAPTIONS_MODEL", "base")
-CAPTIONS_MAX_SECONDS: float = 600.0  # same cap as a video
-# 16 kHz mono 16-bit WAV is 32 KB/s; 10 minutes is ~19 MB.
-CAPTIONS_MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
+# Free-tier exports ("compact", decided by the Next.js /api/export route):
+# a higher CRF and lower audio bitrate make files ~30-40% smaller, which is
+# what the bandwidth bill is paid on. Barely visible at 720p.
+EDITOR_COMPACT_CRF: int = 23
+EDITOR_COMPACT_AUDIO_BITRATE: str = "128k"
 
 # --- Content moderation (explicit-content screening) -------------------------
 # Local, self-hosted classifier only - flags likely nudity so the API can

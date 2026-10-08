@@ -11,9 +11,6 @@ export const FREE_DAILY_CREDITS = 2;
 // Flat cost for the image tool - no resolution tiers, unlike video.
 export const IMAGE_CREDIT_COST = 1;
 
-// Editor auto captions (speech-to-text over the whole timeline).
-export const CAPTIONS_CREDIT_COST = 1;
-
 // Sri Lankan visitors pay through Payments.lk, which only charges in rupees:
 // amountCents is what its hosted checkout bills (whole cents of LKR - Rs.
 // 600 is 60000). Everyone else pays through Paddle, which bills the price

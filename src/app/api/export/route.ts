@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Agent } from "undici";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { TOOLS_API_URL, type Resolution } from "@/lib/toolsApi";
+import type { Resolution } from "@/lib/toolsApi";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
+import { issueTicket, sha256Hex } from "@/lib/jobTicket";
 import { effectivePlan } from "@/lib/plan";
 import {
   canExportAt,
@@ -15,45 +15,20 @@ import {
   type Tier,
 } from "@/lib/entitlements";
 
-// Same long-running backend call as /api/process - see the comment there.
-const backendDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
-
-export const maxDuration = 60;
-
 function errorResponse(code: string, message: string, status: number) {
   return NextResponse.json({ detail: { code, message } }, { status });
-}
-
-async function forwardToBackend(formData: FormData): Promise<Response | null> {
-  try {
-    return await fetch(`${TOOLS_API_URL}/api/video/export`, {
-      method: "POST",
-      body: formData,
-      headers: process.env.INTERNAL_API_SECRET
-        ? { "X-Internal-Process-Secret": process.env.INTERNAL_API_SECRET }
-        : undefined,
-      dispatcher: backendDispatcher,
-    } as RequestInit & { dispatcher: Agent });
-  } catch (e) {
-    console.error("[export] backend unreachable", e);
-    return null;
-  }
-}
-
-function relay(backendRes: Response) {
-  return new NextResponse(backendRes.body, {
-    status: backendRes.status,
-    headers: {
-      "Content-Type":
-        backendRes.headers.get("Content-Type") ?? (backendRes.ok ? "video/mp4" : "application/json"),
-    },
-  });
 }
 
 const RESOLUTIONS: ReadonlySet<string> = new Set<Resolution>(["720p", "1080p", "4k"]);
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Plan gate in front of the backend's editor export (/api/video/export).
+/** Plan gate for the backend's editor export (/api/video/export). Takes
+ * JSON `{ project, resolution }` - `project` is the timeline JSON string -
+ * and answers `{ ticket, resolution }`: the browser then uploads the files
+ * with that ticket straight to the backend (see src/lib/jobTicket.ts for
+ * why they don't pass through here). The ticket pins the checked project
+ * (by hash), resolution, branding and compact encoding.
+ *
  * Exports don't spend credits - the subscription tier decides what's
  * allowed (see src/lib/entitlements.ts): the highest resolution, whether
  * premium transitions/filters/effects may be rendered, the daily export
@@ -81,8 +56,14 @@ export async function POST(request: NextRequest) {
   }
   const limits = TIER_LIMITS[tier];
 
-  const formData = await request.formData();
-  const resolution = user ? String(formData.get("resolution") ?? "720p") : "720p";
+  let body: { project?: unknown; resolution?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse("bad_project", "Invalid project data.", 400);
+  }
+  const projectJson = typeof body.project === "string" ? body.project : "";
+  const resolution = user ? String(body.resolution ?? "720p") : "720p";
   if (!RESOLUTIONS.has(resolution)) {
     return errorResponse("bad_resolution", "Unknown resolution.", 400);
   }
@@ -93,7 +74,7 @@ export async function POST(request: NextRequest) {
 
   let project: PremiumCheckable;
   try {
-    project = JSON.parse(String(formData.get("project") ?? ""));
+    project = JSON.parse(projectJson);
     if (!Array.isArray(project.clips) || !Array.isArray(project.effects ?? [])) throw new Error();
     project.effects ??= [];
   } catch {
@@ -121,14 +102,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  formData.set("resolution", resolution);
-  // Always set server side: the backend trusts this field, so a client
-  // value must never reach it.
-  formData.set("branding", limits.exportBranding ? "1" : "0");
-
-  const backendRes = await forwardToBackend(formData);
-  if (!backendRes) {
-    return errorResponse("backend_unreachable", "Couldn't reach the export service. Please try again.", 502);
-  }
-  return relay(backendRes);
+  const ticket = issueTicket({
+    kind: "export",
+    resolution,
+    branding: limits.exportBranding,
+    compact: limits.compactExport,
+    projectHash: sha256Hex(projectJson),
+  });
+  return NextResponse.json({ ticket, resolution });
 }

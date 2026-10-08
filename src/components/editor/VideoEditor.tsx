@@ -65,8 +65,8 @@ import {
   type Selection,
   type TextStyle,
 } from "@/lib/editor/types";
-import { ApiError, AuthRequiredError, ContentBlockedError, generateCaptions, probeVideo } from "@/lib/toolsApi";
-import { buildSpeechWav, captionOverlays, captionText, CAPTION_STYLES, groupWords, lineCharsFor } from "@/lib/editor/captions";
+import { ApiError, ContentBlockedError, probeVideo } from "@/lib/toolsApi";
+import { buildSpeechAudio, captionOverlays, captionText, CAPTION_STYLES, groupWords, lineCharsFor, transcribe } from "@/lib/editor/captions";
 import { TIER_LIMITS, toTier, type Tier } from "@/lib/entitlements";
 import AiCleanupDialog from "./AiCleanupDialog";
 import ExportDialog from "./ExportDialog";
@@ -675,14 +675,21 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     setCaptioning(true);
     setBusy("Preparing audio…");
     try {
-      const wav = await buildSpeechWav(lay, project, sources);
-      if (!wav) {
+      const samples = await buildSpeechAudio(lay, project, sources);
+      if (!samples) {
         say("There's no sound in your clips to caption.");
         return;
       }
-      setBusy("Transcribing speech… this can take a minute");
-      const res = await generateCaptions(wav, captionOpts.language);
-      window.dispatchEvent(new Event("credits:refresh"));
+      setBusy("Loading speech model…");
+      const res = await transcribe(samples, captionOpts.language, ({ stage, value }) =>
+        setBusy(
+          stage === "download"
+            ? `Downloading speech model (first time only)… ${Math.round(value * 100)}%`
+            : stage === "prepare"
+              ? "Preparing speech model…"
+              : `Transcribing speech on your device… ${Math.round(value * 100)}%`
+        )
+      );
       const chunks = groupWords(res.words, captionOpts.maxWords, lineCharsFor(canvasSize), lay.total);
       if (chunks.length === 0) {
         say("No speech was found in your clips.");
@@ -693,8 +700,8 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
       apply((p) => ({ ...p, overlays: [...p.overlays.filter((o) => !o.caption), ...caps] }));
       say(`Added ${caps.length} captions. Click one to edit its text.`);
     } catch (e) {
-      if (e instanceof AuthRequiredError) setShowSignIn(true);
-      else say(e instanceof Error && e.message ? e.message : "Captioning failed. Please try again.");
+      console.error("[captions]", e);
+      say("Captioning failed. Check your connection and try again.");
     } finally {
       setBusy(null);
       setCaptioning(false);

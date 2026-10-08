@@ -42,6 +42,7 @@ import imageio_ffmpeg
 import numpy as np
 
 from app.config import (
+    JOB_THREADS,
     VIDEO_ENCODE_CRF,
     VIDEO_ENCODE_PRESET,
     WATERMARK_DETECT_BAR_FLATNESS_THRESHOLD,
@@ -73,6 +74,11 @@ def get_ffmpeg_path() -> str:
     if system_ffmpeg:
         return system_ffmpeg
     return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+# OpenCV's own thread pool (FSR/Telea inpainting, optical flow) - same per-job
+# share as ffmpeg gets, see JOB_THREADS.
+cv2.setNumThreads(JOB_THREADS)
 
 
 @dataclass
@@ -355,6 +361,10 @@ async def _run_ffmpeg(args: list[str]) -> None:
     # doesn't touch asyncio's subprocess transport at all, so it works
     # identically regardless of which loop implementation is active.
     ffmpeg = get_ffmpeg_path()
+    # Every caller ends its args with the output path; -threads must sit
+    # right before it to reach the encoder.
+    n = str(JOB_THREADS)
+    args = ["-filter_complex_threads", n, "-filter_threads", n, *args[:-1], "-threads", n, args[-1]]
 
     def _run() -> subprocess.CompletedProcess:
         return subprocess.run([ffmpeg, *args], capture_output=True)

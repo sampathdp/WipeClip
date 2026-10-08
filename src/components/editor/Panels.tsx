@@ -31,7 +31,6 @@ import {
   type TextStyle,
 } from "@/lib/editor/types";
 import { CAPTION_POSITIONS, CAPTION_STYLES, type CaptionStyleId } from "@/lib/editor/captions";
-import { CAPTIONS_CREDIT_COST } from "@/lib/credits";
 import { isPremiumEffect, isPremiumFilter } from "@/lib/entitlements";
 import GradeFilter from "./GradeFilter";
 import PremiumBadge from "./PremiumBadge";
@@ -580,7 +579,7 @@ export function CaptionsPanel({
     <PanelShell title="Auto captions" onClose={onClose}>
       <div className="space-y-4">
         <p className="text-xs text-muted">
-          Turns the speech in your clips into timed text layers. Music tracks are ignored. Edit any caption afterwards like normal text.
+          Turns the speech in your clips into timed text layers. Music tracks are ignored. Edit any caption afterwards like normal text. Runs on your device; the first time downloads a speech model (about 80 MB).
         </p>
         <Field label="Language">
           <select className={inputCls} value={options.language} onChange={(e) => set({ language: e.target.value })}>
@@ -649,7 +648,7 @@ export function CaptionsPanel({
           />
         </div>
         <ActionButton onClick={onGenerate} disabled={busy} tone="accent">
-          {busy ? "Generating…" : `${count > 0 ? "Regenerate" : "Generate"} captions · ${CAPTIONS_CREDIT_COST} credit`}
+          {busy ? "Generating…" : `${count > 0 ? "Regenerate" : "Generate"} captions · free`}
         </ActionButton>
         {count > 0 && (
           <div className="space-y-2 border-t border-border pt-4">

@@ -285,6 +285,8 @@ class ExportPlan:
     color: str = "#000000"
     color2: str = "#000000"
     background_image: str | None = None
+    crf: int = VIDEO_ENCODE_CRF
+    audio_bitrate: str = "192k"
 
 
 def quantize_plan(plan: ExportPlan) -> None:
@@ -657,14 +659,14 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
 
     args = ["-y", "-hide_banner", *inputs.args, "-filter_complex_script", script, "-map", "[outv]"]
     if plan.with_audio:
-        args += ["-map", f"[{a_acc}]", "-c:a", "aac", "-b:a", "192k"]
+        args += ["-map", f"[{a_acc}]", "-c:a", "aac", "-b:a", plan.audio_bitrate]
     args += [
         "-c:v",
         "libx264",
         "-preset",
         VIDEO_ENCODE_PRESET,
         "-crf",
-        str(VIDEO_ENCODE_CRF),
+        str(plan.crf),
         "-pix_fmt",
         "yuv420p",
         "-r",

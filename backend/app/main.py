@@ -10,14 +10,18 @@ Environment variables:
                          "local" (default, self-hosted nudity classifier)
                          or a hosted provider you've wired up - see
                          app/pipeline/moderation.py
-    INTERNAL_API_SECRET  if set, /api/video/process requires this exact
-                         value in an X-Internal-Process-Secret header.
-                         The Next.js frontend's /api/process route (which
-                         checks and spends credits before forwarding here)
-                         sends it automatically - this is what stops that
-                         credit check from being bypassable by calling this
-                         backend directly. Unset by default so local dev
-                         works with no extra config, same as ALLOWED_ORIGINS.
+    INTERNAL_API_SECRET  if set, the image routes require this exact value
+                         in an X-Internal-Process-Secret header (the Next.js
+                         routes in front of them send it), and the job
+                         tickets for /api/video/process and /api/video/export
+                         must be signed with it (see app/tickets.py) - this
+                         is what stops the credit and plan checks from being
+                         bypassable by calling this backend directly. Unset
+                         by default so local dev works with no extra config,
+                         same as ALLOWED_ORIGINS.
+    SITE_URL             the Next.js site, for claiming job tickets and
+                         refunding failed paid jobs (app/tickets.py). Unset:
+                         neither happens (local dev).
     ENABLE_API_DOCS      set to "1" to serve /docs, /redoc and /openapi.json.
                          Off by default: this API has no per-endpoint auth
                          beyond INTERNAL_API_SECRET above, so a public
@@ -31,11 +35,17 @@ Environment variables:
                          and its filesystem-locality caveat. Unset by
                          default, same "no-op until configured" pattern as
                          INTERNAL_API_SECRET above.
+    MAX_CONCURRENT_JOBS  jobs run at once in inline mode (default 1); more
+                         requests wait their turn - see app/config.py.
+    JOB_THREADS          CPU threads per job (default cores / jobs).
+    EDITOR_MAX_REVERSE_BUFFER_MB  RAM budget for one reversed clip's frame
+                         buffer (default 1024).
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
 import os
@@ -49,20 +59,22 @@ import cv2
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, ValidationError
+from starlette.background import BackgroundTask
 
-from app import jobs
+from app import jobs, tickets
 from app.config import (
     BG_REMOVE_PREVIEW_MAX_MEGAPIXELS,
-    CAPTIONS_MAX_SECONDS,
-    CAPTIONS_MAX_UPLOAD_BYTES,
+    EDITOR_COMPACT_AUDIO_BITRATE,
+    EDITOR_COMPACT_CRF,
     EDITOR_MAX_AUDIO,
     EDITOR_MAX_AUDIO_BYTES,
     EDITOR_MAX_CLIPS,
     EDITOR_MAX_EFFECTS,
     EDITOR_MAX_FPS,
     EDITOR_MAX_FREEZE_SECONDS,
+    EDITOR_MAX_REVERSE_BUFFER_BYTES,
     EDITOR_MAX_REVERSE_SECONDS,
     EDITOR_MAX_SOURCES,
     EDITOR_MAX_STICKER_BYTES,
@@ -70,6 +82,7 @@ from app.config import (
     EDITOR_MAX_STICKERS,
     EDITOR_MAX_TOTAL_UPLOAD_BYTES,
     EDITOR_MAX_TRANSITION_SECONDS,
+    MAX_CONCURRENT_JOBS,
     MAX_VIDEO_DURATION_SECONDS,
     MAX_VIDEO_UPLOAD_BYTES,
     MIN_REGION_PX,
@@ -77,7 +90,6 @@ from app.config import (
     SHARPEN_AMOUNT_PRESETS,
 )
 from app.pipeline import io_utils, moderation
-from app.pipeline import captions as captions_pipeline
 from app.pipeline import editor as editor_pipeline
 from app.pipeline import video as video_pipeline
 from app.queue import get_queue
@@ -164,6 +176,12 @@ def _assert_image_safe(bgra) -> None:
         )
 
 
+# Inline mode's concurrency cap (see MAX_CONCURRENT_JOBS in config.py):
+# requests past it wait here instead of all running at once and exhausting
+# RAM. With RQ, the worker count bounds concurrency instead.
+_job_slots = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+
+
 async def _run_pipeline_job(job_func, *args, timeout: float) -> None:
     """Runs one of app/jobs.py's synchronous job functions - through the RQ
     queue when REDIS_URL is configured (see app/queue.py), otherwise inline
@@ -176,7 +194,8 @@ async def _run_pipeline_job(job_func, *args, timeout: float) -> None:
     """
     queue = get_queue()
     if queue is None:
-        await asyncio.to_thread(job_func, *args)
+        async with _job_slots:
+            await asyncio.to_thread(job_func, *args)
         return
 
     job = queue.enqueue(job_func, *args, job_timeout=int(timeout) + 30, result_ttl=300, failure_ttl=300)
@@ -196,6 +215,17 @@ async def _run_pipeline_job(job_func, *args, timeout: float) -> None:
     await asyncio.to_thread(_wait_for_job)
 
 
+def _stream_result(path: str, media_type: str) -> FileResponse:
+    """Streams a job's output file instead of reading it into memory. The
+    file is moved out of the request's TemporaryDirectory first (which is
+    deleted as the handler returns) and removed once it has been sent.
+    """
+    fd, kept = tempfile.mkstemp(suffix=Path(path).suffix)
+    os.close(fd)
+    os.replace(path, kept)
+    return FileResponse(kept, media_type=media_type, background=BackgroundTask(os.remove, kept))
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
@@ -207,16 +237,9 @@ async def api_video_probe(file: UploadFile = File(...)):
     response headers, so the frontend can let the user draw a watermark
     region against real pixel coordinates before committing to a full encode.
     """
-    data = await file.read()
-    if len(data) > MAX_VIDEO_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=400, detail=f"Video too large (max {MAX_VIDEO_UPLOAD_BYTES // (1024 * 1024)}MB)"
-        )
-
     with tempfile.TemporaryDirectory() as tmp:
         in_path = os.path.join(tmp, f"input{Path(file.filename or '').suffix or '.mp4'}")
-        with open(in_path, "wb") as f:
-            f.write(data)
+        _save_upload(file, in_path, MAX_VIDEO_UPLOAD_BYTES)
         try:
             info, frame_png = video_pipeline.probe_video(in_path)
         except ValueError as exc:
@@ -253,22 +276,23 @@ async def api_video_probe(file: UploadFile = File(...)):
 
 @app.post("/api/video/process")
 async def api_video_process(
-    request: Request,
+    ticket: str = Form(...),
     file: UploadFile = File(...),
-    mode: str = Form("remove"),  # only "remove" (object removal) is supported
     x: int = Form(...),
     y: int = Form(...),
     w: int = Form(...),
     h: int = Form(...),
-    resolution: str = Form("720p"),  # "720p" | "1080p" | "4k"
-    quality: str = Form("standard"),  # "standard" | "pro" - see remove_logo() in video.py
-    logo: Optional[UploadFile] = File(None),
     start: Optional[float] = Form(None),  # optional source-time range (seconds) -
     end: Optional[float] = Form(None),  # see the docstring
 ):
     """Removes an unwanted object inside a user-marked rectangular region
     for the full video duration. The region is always user-supplied; there's
     no automatic region detection.
+
+    Called by the browser directly, with a ticket from the Next.js
+    /api/process route (see app/tickets.py): the output resolution and the
+    quality tier come from the ticket, which also says who paid, so a failed
+    or rejected job is refunded.
 
     `start`/`end`, when both given, restrict the job to that range of the
     upload: it's cut out first (editor.cut_range) and only the cut is
@@ -277,30 +301,38 @@ async def api_video_process(
     region is then expected in display-oriented pixels too - which is what
     the editor's frame grab gives it. Omitted, behavior is unchanged.
     """
-    _assert_internal_caller(request)
-    if mode != "remove":
-        raise HTTPException(status_code=400, detail="mode must be 'remove'")
-    if resolution not in RESOLUTION_HEIGHTS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"resolution must be one of {', '.join(RESOLUTION_HEIGHTS)}",
-        )
-    if quality not in ("standard", "pro"):
-        raise HTTPException(status_code=400, detail="quality must be 'standard' or 'pro'")
+    job = tickets.verify(ticket, "process")
+    resolution, quality = job.get("resolution"), job.get("quality")
+    if resolution not in RESOLUTION_HEIGHTS or quality not in ("standard", "pro"):
+        raise HTTPException(status_code=403, detail="Invalid job ticket.")
+    await tickets.claim(ticket)
+    try:
+        return await _video_process(file, x, y, w, h, start, end, resolution, quality)
+    except (Exception, asyncio.CancelledError):
+        # Any failure, rejection (moderation, bad region) or disconnect: no
+        # usable result, so the credits go back.
+        await tickets.refund(ticket)
+        raise
+
+
+async def _video_process(
+    file: UploadFile,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    start: Optional[float],
+    end: Optional[float],
+    resolution: str,
+    quality: str,
+):
     if w < MIN_REGION_PX or h < MIN_REGION_PX:
         raise HTTPException(status_code=400, detail=f"Region too small; minimum {MIN_REGION_PX}px per side")
-
-    data = await file.read()
-    if len(data) > MAX_VIDEO_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=400, detail=f"Video too large (max {MAX_VIDEO_UPLOAD_BYTES // (1024 * 1024)}MB)"
-        )
 
     with tempfile.TemporaryDirectory() as tmp:
         in_path = os.path.join(tmp, f"input{Path(file.filename or '').suffix or '.mp4'}")
         out_path = os.path.join(tmp, "output.mp4")
-        with open(in_path, "wb") as f:
-            f.write(data)
+        _save_upload(file, in_path, MAX_VIDEO_UPLOAD_BYTES)
 
         try:
             info, _ = video_pipeline.probe_video(in_path)
@@ -361,37 +393,18 @@ async def api_video_process(
         job_timeout = max(180.0, info.duration * (16 if quality == "pro" else 10))
 
         try:
-            if mode == "remove":
-                await _run_pipeline_job(
-                    jobs.remove_logo_job,
-                    in_path,
-                    out_path,
-                    x,
-                    y,
-                    w,
-                    h,
-                    output_height,
-                    quality,
-                    timeout=job_timeout,
-                )
-            else:
-                assert logo is not None  # checked above
-                logo_data = await logo.read()
-                logo_path = os.path.join(tmp, "logo.png")
-                with open(logo_path, "wb") as f:
-                    f.write(logo_data)
-                await _run_pipeline_job(
-                    jobs.replace_logo_job,
-                    in_path,
-                    out_path,
-                    logo_path,
-                    x,
-                    y,
-                    w,
-                    h,
-                    output_height,
-                    timeout=job_timeout,
-                )
+            await _run_pipeline_job(
+                jobs.remove_logo_job,
+                in_path,
+                out_path,
+                x,
+                y,
+                w,
+                h,
+                output_height,
+                quality,
+                timeout=job_timeout,
+            )
         except Exception as exc:  # noqa: BLE001
             # Broad on purpose (not just RuntimeError): ffmpeg failures are
             # RuntimeError, but subprocess-launch failures (e.g. a bad ffmpeg
@@ -404,10 +417,7 @@ async def api_video_process(
                 status_code=500, detail=f"Video processing failed: {type(exc).__name__}: {exc}"
             ) from exc
 
-        with open(out_path, "rb") as f:
-            result = f.read()
-
-    return Response(content=result, media_type="video/mp4")
+        return _stream_result(out_path, "video/mp4")
 
 
 _HEX_COLOR = r"^#[0-9a-fA-F]{6}$"
@@ -594,10 +604,8 @@ def _branding_overlay(tmp: str) -> tuple[str, int, int]:
 
 @app.post("/api/video/export")
 async def api_video_export(
-    request: Request,
+    ticket: str = Form(...),
     project: str = Form(...),
-    resolution: str = Form("720p"),
-    branding: str = Form("0"),
     sources: list[UploadFile] = File(...),
     overlays: list[UploadFile] = File(default=[]),
     audios: list[UploadFile] = File(default=[]),
@@ -615,14 +623,20 @@ async def api_video_export(
     decoded, size-checked, screened and re-encoded, all ranges are validated
     against probed durations, and every name (transition, filter, effect,
     animation, canvas) is whitelisted. Plan limits are enforced by the
-    Next.js /api/export route in front of this, which also decides
-    `branding` ("1" stamps the free-tier mark over the whole video).
+    Next.js /api/export route, which checks the project and issues the
+    ticket this is called with (see app/tickets.py): the ticket pins that
+    exact project (by hash) and decides the resolution, the free-tier mark
+    (`branding`) and the smaller free-tier encoding (`compact`, see
+    EDITOR_COMPACT_CRF).
     """
-    _assert_internal_caller(request)
+    job = tickets.verify(ticket, "export")
+    if hashlib.sha256(project.encode()).hexdigest() != job.get("projectHash"):
+        raise HTTPException(status_code=403, detail="Invalid job ticket.")
+    resolution = job.get("resolution")
     if resolution not in RESOLUTION_HEIGHTS:
-        raise HTTPException(
-            status_code=400, detail=f"resolution must be one of {', '.join(RESOLUTION_HEIGHTS)}"
-        )
+        raise HTTPException(status_code=403, detail="Invalid job ticket.")
+    branding, compact = bool(job.get("branding")), bool(job.get("compact"))
+    await tickets.claim(ticket)
     if not sources or len(sources) > EDITOR_MAX_SOURCES:
         raise HTTPException(status_code=400, detail="Invalid number of source videos")
     if len(overlays) > EDITOR_MAX_STICKERS or len(audios) > EDITOR_MAX_AUDIO:
@@ -735,6 +749,17 @@ async def api_video_export(
                     raise HTTPException(status_code=400, detail="A clip's time range is outside its video")
                 if c.reverse and end - c.start > EDITOR_MAX_REVERSE_SECONDS + 0.01:
                     raise HTTPException(status_code=400, detail="A reversed clip is too long")
+                if c.reverse:
+                    # ffmpeg's reverse buffers every frame, after scaling to
+                    # the clip's fitted box (canvas size times its zoom) -
+                    # yuv420p is 1.5 bytes per pixel.
+                    zoom = max(1.0, c.transform.scale)
+                    frames = (end - c.start) / c.speed * fps
+                    if out_w * out_h * zoom * zoom * 1.5 * frames > EDITOR_MAX_REVERSE_BUFFER_BYTES:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="A reversed clip is too long for this resolution. Shorten it or export at a lower resolution.",
+                        )
                 start, duration = c.start, end - c.start
             # Clamp the crop into the frame (x + w <= 1, y + h <= 1).
             crop_w, crop_h = min(c.crop.w, 1 - c.crop.x), min(c.crop.h, 1 - c.crop.y)
@@ -778,6 +803,9 @@ async def api_video_export(
             color2=canvas.background.color2,
             background_image=background_path,
         )
+        if compact:
+            plan.crf = EDITOR_COMPACT_CRF
+            plan.audio_bitrate = EDITOR_COMPACT_AUDIO_BITRATE
         editor_pipeline.quantize_plan(plan)
         total = editor_pipeline.timeline_duration(plan)
         if total > MAX_VIDEO_DURATION_SECONDS:
@@ -810,7 +838,7 @@ async def api_video_export(
                     video=o.video is not None, offset=o.offset,
                 )
             )
-        if branding == "1":
+        if branding:
             # Drawn last, so it sits above every user layer.
             path, iw, ih = _branding_overlay(tmp)
             mark_h = 0.045 * out_h
@@ -850,7 +878,7 @@ async def api_video_export(
         out_path = os.path.join(tmp, "export.mp4")
         plan_json = json.dumps(
             {
-                **{k: getattr(plan, k) for k in ("width", "height", "fps", "with_audio", "fit", "background", "color", "color2", "background_image")},
+                **{k: getattr(plan, k) for k in ("width", "height", "fps", "with_audio", "fit", "background", "color", "color2", "background_image", "crf", "audio_bitrate")},
                 "clips": [vars(c) for c in plan.clips],
                 "overlays": [vars(o) for o in plan.overlays],
                 "audio": [vars(a) for a in plan.audio],
@@ -872,59 +900,8 @@ async def api_video_export(
                 },
             ) from exc
 
-        with open(out_path, "rb") as f:
-            result = f.read()
+        return _stream_result(out_path, "video/mp4")
 
-    return Response(content=result, media_type="video/mp4")
-
-
-
-@app.post("/api/video/captions")
-async def api_video_captions(
-    request: Request,
-    file: UploadFile = File(...),
-    language: str = Form("auto"),  # "auto" or a code in captions.LANGUAGES
-):
-    """Auto captions for the editor: word-timed transcript of a WAV the
-    browser mixed from the timeline's own speech (16 kHz mono, timeline
-    time). Returns {"language", "words": [{"start", "end", "text"}]}.
-    Credits are charged by the Next.js /api/captions route in front.
-    """
-    _assert_internal_caller(request)
-    if language != "auto" and language not in captions_pipeline.LANGUAGES:
-        raise HTTPException(status_code=400, detail="Unsupported language")
-
-    with tempfile.TemporaryDirectory() as tmp:
-        wav_path = os.path.join(tmp, "speech.wav")
-        out_path = os.path.join(tmp, "captions.json")
-        _save_upload(file, wav_path, CAPTIONS_MAX_UPLOAD_BYTES)
-        try:
-            duration = captions_pipeline.wav_duration(wav_path)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Audio could not be read") from exc
-        if duration <= 0.2:
-            raise HTTPException(status_code=400, detail="There's no audio to caption")
-        if duration > CAPTIONS_MAX_SECONDS + 1:
-            raise HTTPException(status_code=400, detail="Video too long to caption")
-
-        try:
-            await _run_pipeline_job(
-                jobs.captions_job,
-                wav_path,
-                out_path,
-                None if language == "auto" else language,
-                # CPU Whisper "base" runs well under real time; generous
-                # headroom for bigger models and a cold model load.
-                timeout=max(120.0, duration * 3),
-            )
-        except Exception as exc:  # noqa: BLE001
-            traceback.print_exc()
-            raise HTTPException(
-                status_code=500, detail={"code": "captions_failed", "message": "Captioning failed. Please try again."}
-            ) from exc
-
-        with open(out_path, encoding="utf-8") as f:
-            return json.load(f)
 
 
 @app.post("/api/image/remove")
@@ -976,10 +953,7 @@ async def api_image_remove(
                 status_code=500, detail=f"Image processing failed: {type(exc).__name__}: {exc}"
             ) from exc
 
-        with open(out_path, "rb") as f:
-            result = f.read()
-
-    return Response(content=result, media_type="image/png")
+        return _stream_result(out_path, "image/png")
 
 
 @app.post("/api/image/sharpen")
@@ -1022,10 +996,7 @@ async def api_image_sharpen(
                 status_code=500, detail=f"Image processing failed: {type(exc).__name__}: {exc}"
             ) from exc
 
-        with open(out_path, "rb") as f:
-            result = f.read()
-
-    return Response(content=result, media_type="image/png")
+        return _stream_result(out_path, "image/png")
 
 
 @app.post("/api/image/auto-enhance")
@@ -1070,7 +1041,4 @@ async def api_image_auto_enhance(
                 status_code=500, detail=f"Image processing failed: {type(exc).__name__}: {exc}"
             ) from exc
 
-        with open(out_path, "rb") as f:
-            result = f.read()
-
-    return Response(content=result, media_type="image/png")
+        return _stream_result(out_path, "image/png")
