@@ -279,6 +279,11 @@ EDITOR_MAX_FPS: float = 60.0
 EDITOR_MAX_AUDIO: int = 12  # audio clips (and uploaded audio files) per export
 EDITOR_MAX_AUDIO_BYTES: int = 50 * 1024 * 1024
 EDITOR_MAX_EFFECTS: int = 30
+# ffmpeg's reverse filter buffers every frame of the clip in memory, so a
+# reversed clip's source range is capped. Must match MAX_REVERSE_SECONDS in
+# src/lib/editor/timeline.ts.
+EDITOR_MAX_REVERSE_SECONDS: float = 10.0
+EDITOR_MAX_FREEZE_SECONDS: float = 30.0
 
 # --- Content moderation (explicit-content screening) -------------------------
 # Local, self-hosted classifier only - flags likely nudity so the API can

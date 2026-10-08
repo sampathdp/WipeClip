@@ -60,6 +60,8 @@ from app.config import (
     EDITOR_MAX_CLIPS,
     EDITOR_MAX_EFFECTS,
     EDITOR_MAX_FPS,
+    EDITOR_MAX_FREEZE_SECONDS,
+    EDITOR_MAX_REVERSE_SECONDS,
     EDITOR_MAX_SOURCES,
     EDITOR_MAX_STICKER_BYTES,
     EDITOR_MAX_STICKER_DIMENSION,
@@ -440,10 +442,22 @@ class _EditorTransform(BaseModel):
     rotation: float = Field(0, ge=-360, le=360)
 
 
+class _EditorCrop(BaseModel):
+    x: float = Field(0, ge=0, le=0.9)
+    y: float = Field(0, ge=0, le=0.9)
+    w: float = Field(1, ge=0.05, le=1)
+    h: float = Field(1, ge=0.05, le=1)
+
+
 class _EditorClip(BaseModel):
     source: int = Field(ge=0, lt=EDITOR_MAX_SOURCES)
     start: float = Field(ge=0)
     end: float = Field(gt=0)
+    # Freeze frame: the source time of the held frame; start/end then only
+    # give the hold length.
+    freeze: Optional[float] = Field(None, ge=0)
+    reverse: bool = False
+    crop: _EditorCrop = Field(default_factory=_EditorCrop)
     transition: Optional[_EditorTransition] = None
     speed: float = Field(1, ge=0.5, le=2)
     volume: float = Field(1, ge=0, le=2)
@@ -699,17 +713,35 @@ async def api_video_export(
         plan_clips: list[editor_pipeline.PlanClip] = []
         for c in spec.clips:
             info = source_infos[c.source]
-            end = min(c.end, info.duration)
-            if c.start >= end - 0.5 / fps:
-                raise HTTPException(status_code=400, detail="A clip's time range is outside its video")
+            if c.freeze is not None:
+                hold = c.end - c.start
+                if hold > EDITOR_MAX_FREEZE_SECONDS + 0.01 or hold < 0.5 / fps:
+                    raise HTTPException(status_code=400, detail="A freeze frame is too long")
+                # Last decodable frame at the latest; then held for `hold`.
+                start, duration = max(0.0, min(c.freeze, info.duration - 2 / fps)), hold
+            else:
+                end = min(c.end, info.duration)
+                if c.start >= end - 0.5 / fps:
+                    raise HTTPException(status_code=400, detail="A clip's time range is outside its video")
+                if c.reverse and end - c.start > EDITOR_MAX_REVERSE_SECONDS + 0.01:
+                    raise HTTPException(status_code=400, detail="A reversed clip is too long")
+                start, duration = c.start, end - c.start
+            # Clamp the crop into the frame (x + w <= 1, y + h <= 1).
+            crop_w, crop_h = min(c.crop.w, 1 - c.crop.x), min(c.crop.h, 1 - c.crop.y)
             plan_clips.append(
                 editor_pipeline.PlanClip(
                     source_path=source_paths[c.source],
-                    source_has_audio=info.has_audio,
+                    source_has_audio=info.has_audio and c.freeze is None,
                     source_width=info.width,
                     source_height=info.height,
-                    start=c.start,
-                    duration=end - c.start,
+                    start=start,
+                    duration=duration,
+                    freeze=c.freeze is not None,
+                    reverse=c.reverse and c.freeze is None,
+                    crop_x=c.crop.x,
+                    crop_y=c.crop.y,
+                    crop_w=crop_w,
+                    crop_h=crop_h,
                     transition=c.transition.type if c.transition and c.transition.duration > 0 else None,
                     transition_duration=c.transition.duration if c.transition else 0.0,
                     speed=c.speed,
@@ -789,7 +821,7 @@ async def api_video_export(
                     volume=a.volume, fade_in=min(a.fadeIn, duration / 2), fade_out=min(a.fadeOut, duration / 2),
                 )
             )
-        plan.with_audio = bool(plan.audio) or any(source_infos[c.source].has_audio for c in spec.clips)
+        plan.with_audio = bool(plan.audio) or any(c.source_has_audio for c in plan.clips)
 
         out_path = os.path.join(tmp, "export.mp4")
         plan_json = json.dumps(

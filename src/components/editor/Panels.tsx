@@ -9,10 +9,12 @@ import {
   ANIM_OUT_LABELS,
   CANVAS_PRESETS,
   EFFECT_LABELS,
+  MAX_REVERSE_SECONDS,
   SPEEDS,
   formatTime,
 } from "@/lib/editor/timeline";
 import {
+  FULL_CROP,
   NEUTRAL_ADJUST,
   type Adjustments,
   type AnimIn,
@@ -20,6 +22,7 @@ import {
   type AudioClip,
   type Canvas,
   type Clip,
+  type Crop,
   type EffectClip,
   type EffectType,
   type Look,
@@ -165,7 +168,68 @@ function Chips<T extends string | number>({
   );
 }
 
-// --- Clip: speed, volume, transform, look shortcut ------------------------
+// --- Clip: speed, volume, reverse, crop, transform, look shortcut ----------
+
+const CROP_RATIOS: { key: string; label: string; ar: number | null }[] = [
+  { key: "none", label: "None", ar: null },
+  { key: "1:1", label: "1:1", ar: 1 },
+  { key: "9:16", label: "9:16", ar: 9 / 16 },
+  { key: "16:9", label: "16:9", ar: 16 / 9 },
+  { key: "4:5", label: "4:5", ar: 4 / 5 },
+  { key: "4:3", label: "4:3", ar: 4 / 3 },
+];
+const MIN_CROP = 0.1; // smallest kept fraction of either side
+
+/** Largest centered crop of a `srcAr` frame with aspect `ar`. */
+function centerCrop(srcAr: number, ar: number | null): Crop {
+  if (ar === null) return FULL_CROP;
+  const w = ar < srcAr ? ar / srcAr : 1;
+  const h = ar < srcAr ? 1 : srcAr / ar;
+  return { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
+}
+
+const sameCrop = (a: Crop, b: Crop) =>
+  Math.abs(a.x - b.x) < 1e-3 && Math.abs(a.y - b.y) < 1e-3 && Math.abs(a.w - b.w) < 1e-3 && Math.abs(a.h - b.h) < 1e-3;
+
+function CropSection({ crop, source, onChange, gesture }: { crop: Crop; source: MediaSource; onChange: (c: Crop) => void; gesture: Gesture }) {
+  const srcAr = source.width / Math.max(1, source.height);
+  const preset = CROP_RATIOS.find((r) => sameCrop(crop, centerCrop(srcAr, r.ar)))?.key ?? "custom";
+  const right = 1 - crop.x - crop.w;
+  const bottom = 1 - crop.y - crop.h;
+  const pct = (v: number) => `${v}%`;
+  const sides: { label: string; value: number; set: (v: number) => Crop }[] = [
+    { label: "Left", value: crop.x, set: (v) => ({ ...crop, x: Math.min(v, 1 - right - MIN_CROP), w: 1 - Math.min(v, 1 - right - MIN_CROP) - right }) },
+    { label: "Right", value: right, set: (v) => ({ ...crop, w: 1 - crop.x - Math.min(v, 1 - crop.x - MIN_CROP) }) },
+    { label: "Top", value: crop.y, set: (v) => ({ ...crop, y: Math.min(v, 1 - bottom - MIN_CROP), h: 1 - Math.min(v, 1 - bottom - MIN_CROP) - bottom }) },
+    { label: "Bottom", value: bottom, set: (v) => ({ ...crop, h: 1 - crop.y - Math.min(v, 1 - crop.y - MIN_CROP) }) },
+  ];
+  return (
+    <div>
+      <SectionTitle>Crop</SectionTitle>
+      <Chips
+        label="Crop ratio"
+        value={preset}
+        onChange={(key) => onChange(centerCrop(srcAr, CROP_RATIOS.find((r) => r.key === key)?.ar ?? null))}
+        options={[...CROP_RATIOS.map((r) => ({ value: r.key, label: r.label })), ...(preset === "custom" ? [{ value: "custom", label: "Custom" }] : [])]}
+      />
+      <div className="mt-3 space-y-3">
+        {sides.map((s) => (
+          <SliderField
+            key={s.label}
+            label={s.label}
+            value={Math.round(s.value * 100)}
+            min={0}
+            max={90}
+            neutral={0}
+            format={pct}
+            onChange={(v) => onChange(s.set(v / 100))}
+            gesture={gesture}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function ClipExtras({
   clip,
@@ -183,27 +247,51 @@ export function ClipExtras({
   gesture: Gesture;
 }) {
   const t = clip.transform;
+  const frozen = clip.freeze !== null;
+  const tooLongToReverse = clip.end - clip.start > MAX_REVERSE_SECONDS + 1e-6;
   return (
     <div className="space-y-4">
-      <div>
-        <SectionTitle>Speed</SectionTitle>
-        <Chips label="Speed" value={clip.speed} onChange={(speed) => onChange({ speed })} options={SPEEDS.map((s) => ({ value: s, label: `${s}×` }))} />
-      </div>
-      <SliderField
-        label="Volume"
-        value={Math.round(clip.volume * 100)}
-        min={0}
-        max={200}
-        neutral={100}
-        format={(v) => `${v}%`}
-        onChange={(v) => onChange({ volume: v / 100 })}
-        gesture={gesture}
-      />
-      {source.hasAudio && (
-        <ActionButton onClick={onExtractAudio} title="Move this clip's sound to its own audio track">
-          Extract audio
-        </ActionButton>
+      {!frozen && (
+        <>
+          <div>
+            <SectionTitle>Speed</SectionTitle>
+            <Chips label="Speed" value={clip.speed} onChange={(speed) => onChange({ speed })} options={SPEEDS.map((s) => ({ value: s, label: `${s}×` }))} />
+          </div>
+          <SliderField
+            label="Volume"
+            value={Math.round(clip.volume * 100)}
+            min={0}
+            max={200}
+            neutral={100}
+            format={(v) => `${v}%`}
+            onChange={(v) => onChange({ volume: v / 100 })}
+            gesture={gesture}
+          />
+          {source.hasAudio && !clip.reverse && (
+            <ActionButton onClick={onExtractAudio} title="Move this clip's sound to its own audio track">
+              Extract audio
+            </ActionButton>
+          )}
+          <div>
+            <SectionTitle>Reverse</SectionTitle>
+            <Chips
+              label="Reverse"
+              value={clip.reverse ? "on" : "off"}
+              onChange={(v) => onChange({ reverse: v === "on" })}
+              options={[
+                { value: "off", label: "Forward" },
+                ...(tooLongToReverse && !clip.reverse ? [] : [{ value: "on", label: "Reverse" }]),
+              ]}
+            />
+            <p className="mt-1.5 text-[11px] text-muted">
+              {tooLongToReverse && !clip.reverse
+                ? `Clips up to ${MAX_REVERSE_SECONDS}s can be reversed. Split this one into a shorter part first.`
+                : "Plays picture and sound backwards. The preview may look choppy and plays it silent; the export is smooth."}
+            </p>
+          </div>
+        </>
       )}
+      <CropSection crop={clip.crop} source={source} onChange={(crop) => onChange({ crop })} gesture={gesture} />
       <div>
         <SectionTitle>Position &amp; size</SectionTitle>
         <div className="space-y-3">

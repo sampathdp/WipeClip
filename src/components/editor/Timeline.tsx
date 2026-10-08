@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useClockTime, type Clock } from "@/lib/editor/clock";
-import type { ThumbnailStrip } from "@/lib/editor/media";
+import type { ThumbnailStrip, Waveform } from "@/lib/editor/media";
 import {
+  MAX_FREEZE_SECONDS,
+  MAX_REVERSE_SECONDS,
   MIN_CLIP_SECONDS,
   TRANSITION_LABELS,
   clipVisualSpan,
@@ -17,14 +19,36 @@ const PAD = 16; // px before t=0 so the first trim handle is reachable
 const CLIP_H = 64;
 const LANE_H = 30;
 const TICK_STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
+const SNAP_PX = 8; // edges within this many pixels of a target stick to it
 
 type Gesture =
-  | { kind: "trim"; clipId: string; edge: "start" | "end"; x0: number; start: number; end: number; max: number }
+  | {
+      kind: "trim";
+      clipId: string;
+      edge: "start" | "end";
+      x0: number;
+      start: number;
+      end: number;
+      min: number; // bounds for source start / end
+      max: number;
+      tlStart: number; // timeline time the clip starts
+      speed: number;
+      reverse: boolean;
+      targets: number[];
+    }
   | { kind: "reorder"; index: number; x0: number; active: boolean }
-  | { kind: "item"; track: string; id: string; mode: ItemMode; x0: number; start: number; end: number }
+  | { kind: "item"; track: string; id: string; mode: ItemMode; x0: number; start: number; end: number; targets: number[] }
   | { kind: "seek" };
 
 export type ItemMode = "move" | "start" | "end";
+
+/** Which part of a source's audio an item plays, for drawing its waveform. */
+export interface WaveSlice {
+  sourceId: string;
+  offset: number; // source seconds
+  duration: number;
+  gain: number; // volume, 0 = muted
+}
 
 export interface TrackItem {
   id: string;
@@ -33,6 +57,7 @@ export interface TrackItem {
   label: string;
   thumb?: string | null;
   glyph?: string;
+  wave?: WaveSlice;
   hidden?: boolean;
   locked?: boolean;
   selected: boolean;
@@ -70,6 +95,7 @@ interface Props {
   lay: Layout;
   sources: Record<string, MediaSource>;
   thumbnails: Record<string, ThumbnailStrip>;
+  waveforms: Record<string, Waveform>;
   tracks: TimelineTrack[];
   selection: Selection;
   clock: Clock;
@@ -85,13 +111,15 @@ interface Props {
 }
 
 export default function Timeline(props: Props) {
-  const { lay, sources, thumbnails, selection, clock, playing } = props;
+  const { lay, sources, thumbnails, waveforms, selection, clock, playing } = props;
   const scroller = useRef<HTMLDivElement>(null);
   const [pps, setPps] = useState<number | null>(null); // pixels per second
   const [viewWidth, setViewWidth] = useState(800);
   const gesture = useRef<Gesture | null>(null);
   const [drag, setDrag] = useState<{ index: number; dx: number; target: number; markerX: number } | null>(null);
   const [trimLabel, setTrimLabel] = useState<{ x: number; text: string } | null>(null);
+  const [snapOn, setSnapOn] = useState(true);
+  const [snapAt, setSnapAt] = useState<number | null>(null); // timeline time of the active snap guide
 
   useEffect(() => {
     const el = scroller.current;
@@ -116,6 +144,37 @@ export default function Timeline(props: Props) {
   const ticks: number[] = [];
   for (let t = 0; t <= lay.total + 1e-6; t += tickStep) ticks.push(t);
 
+  /** Times an edge can snap to: playhead, timeline ends, clip boundaries
+   * and every layer item except the one being dragged. `clipsBefore` keeps
+   * only boundaries up to that clip's start - a trim ripples everything after it.
+   */
+  const snapTargets = (exclude?: string, clipsBefore = lay.clips.length) => {
+    const ts = [0, clock.get()];
+    if (clipsBefore === lay.clips.length) ts.push(lay.total);
+    for (let i = 0; i < clipsBefore; i++) {
+      const span = clipVisualSpan(lay, i);
+      ts.push(span.from, span.to);
+    }
+    if (clipsBefore < lay.clips.length) ts.push(clipVisualSpan(lay, clipsBefore).from);
+    for (const track of props.tracks) for (const it of track.items) if (it.id !== exclude) ts.push(it.start, it.end);
+    return ts;
+  };
+
+  /** Closest target within SNAP_PX of any of `edges`, as the shift to apply
+   * (none while Alt is held or snapping is off). Also moves the snap guide. */
+  const snapShift = (e: React.PointerEvent, targets: number[], edges: number[]) => {
+    let best: { d: number; at: number } | null = null;
+    if (snapOn && !e.altKey) {
+      for (const edge of edges)
+        for (const t of targets) {
+          const d = t - edge;
+          if (Math.abs(d) * scale <= SNAP_PX && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, at: t };
+        }
+    }
+    setSnapAt(best?.at ?? null);
+    return best?.d ?? 0;
+  };
+
   const startGesture = (e: React.PointerEvent, g: Gesture) => {
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -132,14 +191,28 @@ export default function Timeline(props: Props) {
     }
     if (g.kind === "trim") {
       const dt = (e.clientX - g.x0) / scale;
-      if (g.edge === "start") {
-        const start = Math.min(g.end - MIN_CLIP_SECONDS, Math.max(0, g.start + dt));
+      // A reversed clip plays its range backwards: its left handle trims the
+      // source end and its right handle the source start.
+      const setStart = (start: number) => {
+        start = Math.min(g.end - MIN_CLIP_SECONDS, Math.max(g.min, start));
         props.onClipChange(g.clipId, { start });
-        setTrimLabel({ x: e.clientX, text: `Start ${formatTime(start, true)}` });
-      } else {
-        const end = Math.max(g.start + MIN_CLIP_SECONDS, Math.min(g.max, g.end + dt));
+        return start;
+      };
+      const setEnd = (end: number) => {
+        end = Math.max(g.start + MIN_CLIP_SECONDS, Math.min(g.max, end));
         props.onClipChange(g.clipId, { end });
-        setTrimLabel({ x: e.clientX, text: `End ${formatTime(end, true)} · ${formatTime(end - g.start, true)} long` });
+        return end;
+      };
+      if (g.edge === "start") {
+        const v = g.reverse ? setEnd(g.end - dt) : setStart(g.start + dt);
+        setTrimLabel({ x: e.clientX, text: `${g.reverse ? "End" : "Start"} ${formatTime(v, true)}` });
+      } else {
+        let len = g.end - g.start + dt;
+        // Snap the clip's timeline end; source time moves `speed`x as fast.
+        len += snapShift(e, g.targets, [g.tlStart + len / g.speed]) * g.speed;
+        const v = g.reverse ? setStart(g.end - len) : setEnd(g.start + len);
+        const kept = g.reverse ? g.end - v : v - g.start;
+        setTrimLabel({ x: e.clientX, text: `${g.reverse ? "Start" : "End"} ${formatTime(v, true)} · ${formatTime(kept, true)} long` });
       }
       return;
     }
@@ -169,15 +242,21 @@ export default function Timeline(props: Props) {
       const dt = (e.clientX - g.x0) / scale;
       const len = g.end - g.start;
       if (g.mode === "move") {
-        const start = Math.min(Math.max(0, g.start + dt), Math.max(0, lay.total - len));
+        let start = g.start + dt;
+        start += snapShift(e, g.targets, [start, start + len]);
+        start = Math.min(Math.max(0, start), Math.max(0, lay.total - len));
         props.onItemChange(g.track, g.id, "move", start, start + len);
         setTrimLabel({ x: e.clientX, text: `${formatTime(start, true)} → ${formatTime(start + len, true)}` });
       } else if (g.mode === "start") {
-        const start = Math.min(g.end - 0.2, Math.max(0, g.start + dt));
+        let start = g.start + dt;
+        start += snapShift(e, g.targets, [start]);
+        start = Math.min(g.end - 0.2, Math.max(0, start));
         props.onItemChange(g.track, g.id, "start", start, g.end);
         setTrimLabel({ x: e.clientX, text: `Starts ${formatTime(start, true)}` });
       } else {
-        const end = Math.max(g.start + 0.2, Math.min(lay.total, g.end + dt));
+        let end = g.end + dt;
+        end += snapShift(e, g.targets, [end]);
+        end = Math.max(g.start + 0.2, Math.min(lay.total, end));
         props.onItemChange(g.track, g.id, "end", g.start, end);
         setTrimLabel({ x: e.clientX, text: `Ends ${formatTime(end, true)}` });
       }
@@ -188,6 +267,7 @@ export default function Timeline(props: Props) {
     const g = gesture.current;
     gesture.current = null;
     setTrimLabel(null);
+    setSnapAt(null);
     if (!g) return;
     if (g.kind === "trim" || g.kind === "item") props.onGestureEnd();
     if (g.kind === "reorder") {
@@ -213,6 +293,13 @@ export default function Timeline(props: Props) {
           <TimeReadout clock={clock} /> / {formatTime(lay.total, true)}
         </span>
         <div className="flex items-center gap-1">
+          <IconButton
+            label={snapOn ? "Snapping on (hold Alt to bypass)" : "Snapping off"}
+            pressed={snapOn}
+            onClick={() => setSnapOn((v) => !v)}
+          >
+            <span className="px-1 text-[11px] font-semibold">Snap</span>
+          </IconButton>
           <IconButton label="Zoom out timeline" onClick={() => zoom(1 / 1.5)}>
             <ZoomOutIcon width={16} height={16} />
           </IconButton>
@@ -259,12 +346,22 @@ export default function Timeline(props: Props) {
               const src = sources[c.clip.sourceId];
               const selected = selection?.kind === "clip" && selection.id === c.clip.id;
               const dragging = drag?.index === i;
+              const frozen = c.clip.freeze !== null;
+              // Source bounds a trim may reach: a freeze holds up to
+              // MAX_FREEZE_SECONDS; a reversed range is capped in length.
+              const srcDur = src?.duration ?? c.clip.end;
+              const bounds = frozen
+                ? { min: 0, max: c.clip.start + MAX_FREEZE_SECONDS }
+                : c.clip.reverse
+                  ? { min: Math.max(0, c.clip.end - MAX_REVERSE_SECONDS), max: Math.min(srcDur, c.clip.start + MAX_REVERSE_SECONDS) }
+                  : { min: 0, max: srcDur };
+              const badges = `${frozen ? " · Freeze" : ""}${c.clip.reverse ? " · Reversed" : ""}`;
               return (
                 <div
                   key={c.clip.id}
                   role="button"
                   tabIndex={0}
-                  aria-label={`Clip ${i + 1}, ${formatTime(c.clip.start, true)} to ${formatTime(c.clip.end, true)}${src?.kind === "cleaned" ? ", AI cleaned" : ""}`}
+                  aria-label={`Clip ${i + 1}${badges}, ${formatTime(c.clip.start, true)} to ${formatTime(c.clip.end, true)}${src?.kind === "cleaned" ? ", AI cleaned" : ""}`}
                   aria-pressed={selected}
                   className={`group absolute top-0 h-full overflow-hidden rounded-lg border-2 bg-surface-3 outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-accent-2 ${
                     selected ? "z-10 border-accent-2 shadow-[0_0_0_2px_rgba(34,211,238,0.25)]" : "border-border hover:border-accent/60"
@@ -286,8 +383,23 @@ export default function Timeline(props: Props) {
                   }}
                 >
                   <ClipThumbs strip={thumbnails[c.clip.sourceId]} clip={c.clip} width={(span.to - span.from) * scale} />
+                  {waveforms[c.clip.sourceId] && !frozen && (
+                    <WaveCanvas
+                      wave={waveforms[c.clip.sourceId]}
+                      offset={c.clip.start}
+                      duration={c.clip.end - c.clip.start}
+                      gain={c.clip.volume}
+                      width={(span.to - span.from) * scale}
+                      height={20}
+                      mirror={c.clip.reverse}
+                      className="bottom-0 left-0 text-white/60"
+                    />
+                  )}
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/75 to-transparent px-2 pb-1 pt-4 text-[10px] font-semibold text-white">
-                    <span className="truncate">{src?.kind === "cleaned" ? "✨ AI cleaned" : `Clip ${i + 1}`}</span>
+                    <span className="truncate">
+                      {src?.kind === "cleaned" ? "✨ AI cleaned" : `Clip ${i + 1}`}
+                      {badges}
+                    </span>
                     <span className="font-mono">{formatTime(c.duration, true)}</span>
                   </div>
                   <TrimHandle
@@ -301,7 +413,11 @@ export default function Timeline(props: Props) {
                         x0: e.clientX,
                         start: c.clip.start,
                         end: c.clip.end,
-                        max: src?.duration ?? c.clip.end,
+                        ...bounds,
+                        tlStart: c.start,
+                        speed: c.clip.speed,
+                        reverse: c.clip.reverse,
+                        targets: snapTargets(undefined, i),
                       })
                     }
                   />
@@ -316,7 +432,11 @@ export default function Timeline(props: Props) {
                         x0: e.clientX,
                         start: c.clip.start,
                         end: c.clip.end,
-                        max: src?.duration ?? c.clip.end,
+                        ...bounds,
+                        tlStart: c.start,
+                        speed: c.clip.speed,
+                        reverse: c.clip.reverse,
+                        targets: snapTargets(undefined, i),
                       })
                     }
                   />
@@ -395,7 +515,7 @@ export default function Timeline(props: Props) {
                       const now = clock.get();
                       if (now < it.start || now >= it.end) props.onSeek(it.start);
                       if (it.locked) return;
-                      startGesture(e, { kind: "item", track: track.key, id: it.id, mode: "move", x0: e.clientX, start: it.start, end: it.end });
+                      startGesture(e, { kind: "item", track: track.key, id: it.id, mode: "move", x0: e.clientX, start: it.start, end: it.end, targets: snapTargets(it.id) });
                     }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
@@ -404,13 +524,24 @@ export default function Timeline(props: Props) {
                       }
                     }}
                   >
+                    {it.wave && waveforms[it.wave.sourceId] && (
+                      <WaveCanvas
+                        wave={waveforms[it.wave.sourceId]}
+                        offset={it.wave.offset}
+                        duration={it.wave.duration}
+                        gain={it.wave.gain}
+                        width={Math.max(10, (it.end - it.start) * scale)}
+                        height={LANE_H - 8}
+                        className="left-0 top-0 text-foreground/25"
+                      />
+                    )}
                     {it.thumb ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={it.thumb} alt="" className="h-4 w-4 shrink-0 object-contain" draggable={false} />
                     ) : (
-                      it.glyph && <span className="shrink-0">{it.glyph}</span>
+                      it.glyph && <span className="relative shrink-0">{it.glyph}</span>
                     )}
-                    <span className="truncate">{it.label}</span>
+                    <span className="relative truncate">{it.label}</span>
                     {it.locked && <span className="shrink-0" aria-hidden>🔒</span>}
                     {!it.locked && (
                       <>
@@ -419,7 +550,7 @@ export default function Timeline(props: Props) {
                           className="absolute inset-y-0 left-0 w-2 cursor-ew-resize hover:bg-accent-2/60"
                           onPointerDown={(e) => {
                             props.onSelect(it.sel);
-                            startGesture(e, { kind: "item", track: track.key, id: it.id, mode: "start", x0: e.clientX, start: it.start, end: it.end });
+                            startGesture(e, { kind: "item", track: track.key, id: it.id, mode: "start", x0: e.clientX, start: it.start, end: it.end, targets: snapTargets(it.id) });
                           }}
                         />
                         <span
@@ -427,7 +558,7 @@ export default function Timeline(props: Props) {
                           className="absolute inset-y-0 right-0 w-2 cursor-ew-resize hover:bg-accent-2/60"
                           onPointerDown={(e) => {
                             props.onSelect(it.sel);
-                            startGesture(e, { kind: "item", track: track.key, id: it.id, mode: "end", x0: e.clientX, start: it.start, end: it.end });
+                            startGesture(e, { kind: "item", track: track.key, id: it.id, mode: "end", x0: e.clientX, start: it.start, end: it.end, targets: snapTargets(it.id) });
                           }}
                         />
                       </>
@@ -438,6 +569,12 @@ export default function Timeline(props: Props) {
             );
           })}
 
+          {snapAt !== null && (
+            <div
+              className="pointer-events-none absolute inset-y-0 z-30 w-px bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.8)]"
+              style={{ left: xOf(snapAt) }}
+            />
+          )}
 
           <Playhead clock={clock} xOf={xOf} scroller={scroller} follow={playing} />
         </div>
@@ -487,7 +624,8 @@ function ClipThumbs({ strip, clip, width }: { strip?: ThumbnailStrip; clip: Clip
   return (
     <div className="pointer-events-none absolute inset-0 flex">
       {Array.from({ length: tiles }, (_, k) => {
-        const t = clip.start + ((k + 0.5) / tiles) * duration;
+        const f = (k + 0.5) / tiles;
+        const t = clip.freeze ?? (clip.reverse ? clip.end - f * duration : clip.start + f * duration);
         const idx = Math.min(strip.urls.length - 1, Math.max(0, Math.floor(t / strip.interval)));
         return (
           // eslint-disable-next-line @next/next/no-img-element
@@ -495,6 +633,65 @@ function ClipThumbs({ strip, clip, width }: { strip?: ThumbnailStrip; clip: Clip
         );
       })}
     </div>
+  );
+}
+
+const MAX_WAVE_CANVAS = 8192; // backing pixels; wider clips stretch the bitmap
+
+/** Peak bars for one slice of a source's audio, in the text color of
+ * `className`. Bar height follows the item's volume (capped at full). */
+function WaveCanvas({
+  wave,
+  offset,
+  duration,
+  gain,
+  width,
+  height,
+  mirror = false,
+  className,
+}: {
+  wave: Waveform;
+  offset: number;
+  duration: number;
+  gain: number;
+  width: number;
+  height: number;
+  /** Draw right-to-left (reversed clips). */
+  mirror?: boolean;
+  className: string;
+}) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const dpr = typeof window === "undefined" ? 1 : Math.min(2, window.devicePixelRatio || 1);
+  const pw = Math.max(1, Math.min(MAX_WAVE_CANVAS, Math.round(width * dpr)));
+  const ph = Math.max(1, Math.round(height * dpr));
+
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv) return;
+    cv.width = pw;
+    cv.height = ph;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, pw, ph);
+    ctx.fillStyle = getComputedStyle(cv).color;
+    const { peaks, rate } = wave;
+    for (let x = 0; x < pw; x++) {
+      const i0 = Math.floor((offset + (x / pw) * duration) * rate);
+      const i1 = Math.max(i0 + 1, Math.ceil((offset + ((x + 1) / pw) * duration) * rate));
+      let m = 0;
+      for (let i = Math.max(0, i0); i < i1 && i < peaks.length; i++) if (peaks[i] > m) m = peaks[i];
+      const h = Math.min(1, m * gain) * ph;
+      if (h > 0) ctx.fillRect(x, (ph - h) / 2, 1, Math.max(1, h));
+    }
+  }, [wave, offset, duration, gain, pw, ph]);
+
+  return (
+    <canvas
+      ref={ref}
+      aria-hidden
+      className={`pointer-events-none absolute ${className}`}
+      style={{ width, height, transform: mirror ? "scaleX(-1)" : undefined }}
+    />
   );
 }
 
@@ -534,14 +731,27 @@ function TimeReadout({ clock }: { clock: Clock }) {
   return <>{formatTime(t, true)}</>;
 }
 
-function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+function IconButton({
+  label,
+  onClick,
+  pressed,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  pressed?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <button
       type="button"
       aria-label={label}
+      aria-pressed={pressed}
       title={label}
       onClick={onClick}
-      className="inline-flex h-7 min-w-7 items-center justify-center rounded-md text-muted hover:bg-surface-3 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+      className={`inline-flex h-7 min-w-7 items-center justify-center rounded-md hover:bg-surface-3 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+        pressed ? "bg-accent-2/15 text-accent-2" : "text-muted"
+      }`}
     >
       {children}
     </button>

@@ -31,6 +31,11 @@ export const SplitIcon = (p: P) => (
     <path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12" />
   </svg>
 );
+export const FreezeIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M12 2v20M4.9 7l14.2 10M4.9 17 19.1 7M9.5 3.5 12 6l2.5-2.5M9.5 20.5 12 18l2.5 2.5" />
+  </svg>
+);
 export const TrashIcon = (p: P) => (
   <svg {...base} {...p}>
     <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />

@@ -122,6 +122,52 @@ export async function generateThumbnails(
   }).catch(() => {});
 }
 
+export interface Waveform {
+  rate: number; // peaks per second of source time
+  peaks: Float32Array; // 0..1, normalized to the loudest peak
+}
+
+const WAVE_RATE = 50;
+const WAVE_SAMPLE_RATE = 8000; // decode low-rate: plenty for drawing, ~6x less memory
+const MAX_WAVE_FILE_BYTES = 400 * 1024 * 1024;
+
+/** Peak envelope of a file's audio for the timeline. Unlike the helpers
+ * above this does read the whole file into memory (decodeAudioData needs
+ * the bytes), so very large files are skipped. Resolves null when the file
+ * has no decodable audio, is too large, or `signal` aborts.
+ */
+export async function generateWaveform(file: File, signal: AbortSignal): Promise<Waveform | null> {
+  if (file.size > MAX_WAVE_FILE_BYTES) return null;
+  try {
+    const bytes = await file.arrayBuffer();
+    if (signal.aborted) return null;
+    const audio = await new OfflineAudioContext(1, 1, WAVE_SAMPLE_RATE).decodeAudioData(bytes);
+    if (signal.aborted) return null;
+    const block = Math.max(1, Math.round(audio.sampleRate / WAVE_RATE));
+    const count = Math.ceil(audio.length / block);
+    const peaks = new Float32Array(count);
+    for (let ch = 0; ch < audio.numberOfChannels; ch++) {
+      const data = audio.getChannelData(ch);
+      for (let i = 0; i < count; i++) {
+        let max = peaks[i];
+        const end = Math.min(data.length, (i + 1) * block);
+        for (let s = i * block; s < end; s++) {
+          const v = data[s] < 0 ? -data[s] : data[s];
+          if (v > max) max = v;
+        }
+        peaks[i] = max;
+      }
+    }
+    let loudest = 0;
+    for (const p of peaks) if (p > loudest) loudest = p;
+    if (loudest < 1e-4) return null; // silent track - nothing to draw
+    for (let i = 0; i < count; i++) peaks[i] /= loudest;
+    return { rate: audio.sampleRate / block, peaks };
+  } catch {
+    return null;
+  }
+}
+
 /** Duration of an audio (or video) file's audio, via an <audio> element.
  * Rejects with "media_error" when the browser can't decode it. */
 export function loadAudioMeta(url: string): Promise<number> {

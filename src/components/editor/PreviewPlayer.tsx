@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { Clock } from "@/lib/editor/clock";
 import { gradeOf, isNeutralColor } from "@/lib/editor/look";
-import { DIP_AUDIO, locate, videoBox, type Layout } from "@/lib/editor/timeline";
-import type { AudioClip, Canvas, EffectClip, MediaSource } from "@/lib/editor/types";
+import { DIP_AUDIO, locate, sourceTimeAt, videoBox, type Layout } from "@/lib/editor/timeline";
+import type { AudioClip, Canvas, Clip, Crop, EffectClip, MediaSource } from "@/lib/editor/types";
 import GradeFilter from "./GradeFilter";
 
 interface Need {
@@ -12,6 +12,12 @@ interface Need {
   time: number;
   role: "primary" | "incoming";
 }
+
+/** Freeze and reversed clips can't use native playback: their slot stays
+ * paused and is seeked to each frame instead, with the wall clock driving
+ * time. Reversed playback is silent in the preview (the export reverses the
+ * sound too). */
+const seekDriven = (clip: Clip) => clip.freeze !== null || clip.reverse;
 
 /** Plays the timeline, not a file. Two <video> elements take turns: clip i
  * always plays in slot i % 2, so while one clip plays the other slot is
@@ -147,14 +153,18 @@ export default function PreviewPlayer({
           el.playbackRate = rate * clip.speed;
           ensureSrc(el, src.url);
           const drift = Math.abs(el.currentTime - need.time);
+          const driven = seekDriven(clip);
           // The primary drives the clock while playing, so it's only
           // re-seeked on a real jump (scrub, clip switch); the incoming
-          // clip is kept within a quarter second of it.
-          const tolerance = playing ? (need.role === "primary" ? 0.5 : 0.25) : 0.03;
-          if (el.readyState >= 1 && !el.seeking && drift > tolerance && !el.ended) {
+          // clip is kept within a quarter second of it. Seek-driven slots
+          // follow every frame.
+          const tolerance = driven ? 0.02 : playing ? (need.role === "primary" ? 0.5 : 0.25) : 0.03;
+          if (el.readyState >= 1 && !el.seeking && drift > tolerance && (driven || !el.ended)) {
             el.currentTime = need.time;
           }
-          if (playing && !el.ended && (el.seeking || el.readyState < 3)) stalled = true;
+          // A seek-driven slot is always mid-seek while playing; holding the
+          // playhead for it would freeze playback.
+          if (playing && !driven && !el.ended && (el.seeking || el.readyState < 3)) stalled = true;
         } else {
           if (!el.paused) el.pause();
           // Park on the next clip's first frame so the cut is instant.
@@ -163,8 +173,9 @@ export default function PreviewPlayer({
           const nextSrc = next ? sources[next.clip.sourceId] : undefined;
           if (next && nextSrc) {
             ensureSrc(el, nextSrc.url);
-            if (el.readyState >= 1 && !el.seeking && Math.abs(el.currentTime - next.clip.start) > 0.03) {
-              el.currentTime = next.clip.start;
+            const first = sourceTimeAt(next, next.start);
+            if (el.readyState >= 1 && !el.seeking && Math.abs(el.currentTime - first) > 0.03) {
+              el.currentTime = first;
             }
           }
         }
@@ -175,7 +186,7 @@ export default function PreviewPlayer({
         const clipLay = lay.clips[loc.primary.index];
         const wall = t + dt * rate;
         const fromElement = clipLay.start + (primaryEl.currentTime - clipLay.clip.start) / clipLay.clip.speed;
-        const elementUsable = !primaryEl.paused && !primaryEl.seeking && !primaryEl.ended;
+        const elementUsable = !seekDriven(clipLay.clip) && !primaryEl.paused && !primaryEl.seeking && !primaryEl.ended;
         t = elementUsable && Math.abs(fromElement - wall) < 0.3 ? Math.max(t, fromElement) : wall;
         if (t >= lay.total) {
           t = lay.total;
@@ -186,7 +197,7 @@ export default function PreviewPlayer({
       for (let slot = 0; slot < 2; slot++) {
         const el = els[slot]!;
         const need = needs[slot];
-        if (need && playing && !stalled && !el.ended) {
+        if (need && playing && !stalled && !el.ended && !seekDriven(lay.clips[need.index].clip)) {
           if (el.paused && !playPending.current[slot]) {
             playPending.current[slot] = true;
             el.play()
@@ -203,7 +214,12 @@ export default function PreviewPlayer({
       const stageW = stage.clientWidth;
       const stageH = stage.clientHeight;
       applyComposite(els as HTMLVideoElement[], needs, loc, lay, sources, canvas, canvasSize, stageW, stageH, dipRef.current, volume, muted);
-      drawBlurBackground(blurBgRef.current, canvas, loc ? els[loc.primary.index % 2]! : null);
+      drawBlurBackground(
+        blurBgRef.current,
+        canvas,
+        loc ? els[loc.primary.index % 2]! : null,
+        loc ? lay.clips[loc.primary.index].clip.crop : null
+      );
       applyEffects(effects, t, stage, stageW, stageH, {
         rgb: rgbOffsets.current,
         flash: flashRef.current,
@@ -395,10 +411,19 @@ function applyComposite(
     const g = gradeOf(clip.look);
     const bw = b.w * W;
     const bh = b.h * H;
-    el.style.width = `${bw}px`;
-    el.style.height = `${bh}px`;
-    el.style.left = `${clip.transform.x * W - bw / 2}px`;
-    el.style.top = `${clip.transform.y * H - bh / 2}px`;
+    // Crop: the element is the whole frame, sized so the kept part fills the
+    // box, then clipped to that part and rotated around its center.
+    const c = clip.crop;
+    const fw = bw / c.w;
+    const fh = bh / c.h;
+    el.style.width = `${fw}px`;
+    el.style.height = `${fh}px`;
+    el.style.left = `${clip.transform.x * W - bw / 2 - c.x * fw}px`;
+    el.style.top = `${clip.transform.y * H - bh / 2 - c.y * fh}px`;
+    const cropped = c.x > 0 || c.y > 0 || c.w < 1 || c.h < 1;
+    const pct = (v: number) => `${(v * 100).toFixed(3)}%`;
+    el.style.clipPath = cropped ? `inset(${pct(c.y)} ${pct(1 - c.x - c.w)} ${pct(1 - c.y - c.h)} ${pct(c.x)})` : "";
+    el.style.transformOrigin = `${pct(c.x + c.w / 2)} ${pct(c.y + c.h / 2)}`;
     el.style.objectFit = "fill";
     el.style.visibility = extra[slot].visible ? "visible" : "hidden";
     el.style.zIndex = need.role === "incoming" ? "2" : "1";
@@ -415,19 +440,23 @@ function applyComposite(
   }
 }
 
-function drawBlurBackground(c: HTMLCanvasElement | null, canvas: Canvas, src: HTMLVideoElement | null) {
+function drawBlurBackground(c: HTMLCanvasElement | null, canvas: Canvas, src: HTMLVideoElement | null, crop: Crop | null) {
   if (!c || canvas.background.type !== "blur" || !src || src.readyState < 2) return;
   const ctx = c.getContext("2d");
   if (!ctx) return;
   const ar = c.clientWidth / Math.max(1, c.clientHeight) || 1;
   c.width = 64;
   c.height = Math.max(1, Math.round(64 / ar));
-  const vr = src.videoWidth / Math.max(1, src.videoHeight);
+  // The clip's cropped frame, cover-fit like the export's scale+crop
+  // before its gaussian blur.
+  const k = crop ?? { x: 0, y: 0, w: 1, h: 1 };
+  const sw = src.videoWidth * k.w;
+  const sh = src.videoHeight * k.h;
+  const vr = sw / Math.max(1, sh);
   const cr = c.width / c.height;
-  // cover-fit, like the export's scale+crop before its gaussian blur
   const w = vr > cr ? c.height * vr : c.width;
   const h = vr > cr ? c.height : c.width / vr;
-  ctx.drawImage(src, (c.width - w) / 2, (c.height - h) / 2, w, h);
+  ctx.drawImage(src, src.videoWidth * k.x, src.videoHeight * k.y, sw, sh, (c.width - w) / 2, (c.height - h) / 2, w, h);
 }
 
 /** Preview counterparts of _effect_filters() in editor.py. Blur, flash,

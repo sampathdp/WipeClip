@@ -11,7 +11,15 @@ import { createClient } from "@/lib/supabase/client";
 import { createClock, useClockTime, type Clock } from "@/lib/editor/clock";
 import { takeHandedOffFile } from "@/lib/editor/handoff";
 import { useProjectHistory } from "@/lib/editor/history";
-import { generateThumbnails, loadAudioMeta, loadVideoMeta, normalizeImage, type ThumbnailStrip } from "@/lib/editor/media";
+import {
+  generateThumbnails,
+  generateWaveform,
+  loadAudioMeta,
+  loadVideoMeta,
+  normalizeImage,
+  type ThumbnailStrip,
+  type Waveform,
+} from "@/lib/editor/media";
 import {
   clearLastExport,
   clearProject,
@@ -36,6 +44,7 @@ import {
   newId,
   restackOverlay,
   splitAt,
+  insertFreezeAt,
   splitAudioAt,
   updateAudio,
   updateClip,
@@ -95,6 +104,7 @@ import {
   RedoIcon,
   SparkleIcon,
   SplitIcon,
+  FreezeIcon,
   TextIcon,
   TransitionIcon,
   TrashIcon,
@@ -135,6 +145,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [thumbs, setThumbs] = useState<Record<string, ThumbnailStrip>>({});
+  const [waves, setWaves] = useState<Record<string, Waveform>>({});
   const [dialog, setDialog] = useState<Dialogs>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -146,7 +157,8 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
   const stageRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
-  const thumbJobs = useRef(new Map<string, AbortController>());
+  const thumbJobs = useRef(new Map<string, AbortController>()); // thumbnail + "wave:" jobs
+  const waveQueue = useRef<Promise<void>>(Promise.resolve());
   const clipboard = useRef<ClipboardItem | null>(null);
 
   const original = originalId ? sources[originalId] : undefined;
@@ -240,6 +252,21 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     }
   }, [sources]);
 
+  // Audio waveforms, one at a time - decoding holds the whole file in memory.
+  useEffect(() => {
+    for (const src of Object.values(sources)) {
+      const key = `wave:${src.id}`;
+      if (src.kind === "image" || !src.hasAudio || thumbJobs.current.has(key)) continue;
+      const controller = new AbortController();
+      thumbJobs.current.set(key, controller);
+      waveQueue.current = waveQueue.current.then(async () => {
+        if (controller.signal.aborted) return;
+        const wave = await generateWaveform(src.file, controller.signal);
+        if (wave && !controller.signal.aborted) setWaves((w) => ({ ...w, [src.id]: wave }));
+      });
+    }
+  }, [sources]);
+
   // --- project lifecycle ---------------------------------------------------
   const startProject = useCallback(
     (srcs: MediaSource[], next: Project) => {
@@ -247,6 +274,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
       thumbJobs.current.clear();
       Object.values(sourcesRef.current).forEach((s) => URL.revokeObjectURL(s.url));
       setThumbs({});
+      setWaves({});
       setSources(Object.fromEntries(srcs.map((s) => [s.id, s])));
       setOriginalId(srcs.find((s) => s.kind === "original")?.id ?? srcs[0].id);
       reset(next);
@@ -420,6 +448,18 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     }
     apply(() => next);
   }, [selection, project, lay, clock, apply, say]);
+
+  const freezeFrame = useCallback(() => {
+    setPlaying(false);
+    const next = insertFreezeAt(project, lay, clock.get());
+    if (!next) {
+      say("Move the playhead off the transition to freeze a frame.");
+      return;
+    }
+    apply(() => next.project);
+    setSelection({ kind: "clip", id: next.clipId });
+    say("Freeze frame added. Drag its edge to hold it longer.");
+  }, [project, lay, clock, apply, say]);
 
   const deleteSelection = useCallback(() => {
     if (selection?.kind === "overlay") {
@@ -632,6 +672,10 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     (clipId: string) => {
       const laid = lay.clips.find((c) => c.clip.id === clipId);
       if (!laid) return;
+      if (laid.clip.freeze !== null || laid.clip.reverse) {
+        say("Freeze frames and reversed clips have no audio to extract.");
+        return;
+      }
       if (laid.clip.speed !== 1) {
         say("Set the clip's speed to 1× before extracting its audio.");
         return;
@@ -730,13 +774,17 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     const idx = selectedClip ? selectedClip.index : clipIndexAtPlayhead();
     const laid = lay.clips[idx];
     if (!laid) return;
+    if (laid.clip.freeze !== null) {
+      say("AI Cleanup works on video clips. Clean the clip this frame came from, then freeze again.");
+      return;
+    }
     setPlaying(false);
     const loc = locate(lay, clock.get());
     const inside = loc && loc.primary.index === idx && !loc.incoming;
     const frameTime = inside ? loc.primary.sourceTime : laid.clip.start + (laid.clip.end - laid.clip.start) / 2;
     select({ kind: "clip", id: laid.clip.id });
     setDialog({ kind: "cleanup", clipId: laid.clip.id, frameTime });
-  }, [selectedClip, clipIndexAtPlayhead, lay, clock, select]);
+  }, [selectedClip, clipIndexAtPlayhead, lay, clock, select, say]);
 
   const onCleaned = useCallback(
     (clipId: string, src: MediaSource) => {
@@ -755,6 +803,8 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     thumbJobs.current.forEach((c) => c.abort());
     thumbJobs.current.clear();
     Object.values(sourcesRef.current).forEach((s) => URL.revokeObjectURL(s.url));
+    setThumbs({});
+    setWaves({});
     setSources({});
     setOriginalId(null);
     reset(EMPTY);
@@ -807,6 +857,9 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
       } else if (key === "t") {
         e.preventDefault();
         addText({}, 0.5);
+      } else if (key === "f" && !mod) {
+        e.preventDefault();
+        freezeFrame();
       } else if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         deleteSelection();
@@ -822,7 +875,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase, dialog, showSignIn, undo, redo, copy, paste, duplicate, currentItem, togglePlay, split, addText, deleteSelection, moveSelected, seek, clock, lay.fps]);
+  }, [phase, dialog, showSignIn, undo, redo, copy, paste, duplicate, currentItem, togglePlay, split, freezeFrame, addText, deleteSelection, moveSelected, seek, clock, lay.fps]);
 
   const toggleFullscreen = () => {
     const el = stageRef.current;
@@ -1162,7 +1215,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
           </ActionButton>
         </div>
         <p className="mt-6 text-[11px] leading-relaxed text-muted">
-          Shortcuts: Space play/pause · S split · T text · Delete remove · Ctrl+C / Ctrl+V copy/paste · Ctrl+D duplicate · ←/→ frame step (Shift:
+          Shortcuts: Space play/pause · S split · F freeze frame · T text · Delete remove · Ctrl+C / Ctrl+V copy/paste · Ctrl+D duplicate · ←/→ frame step (Shift:
           1s) · Alt+←/→ move clip · Ctrl+Z / Ctrl+Shift+Z undo/redo
         </p>
       </PanelShell>
@@ -1226,6 +1279,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
         end: a.start + a.duration,
         label: `${a.muted ? "🔇 " : ""}${a.label}`,
         glyph: "♪",
+        wave: { sourceId: a.sourceId, offset: a.offset, duration: a.duration, gain: a.muted ? 0 : a.volume },
         selected: isSel("audio", a.id),
         sel: { kind: "audio" as const, id: a.id },
       })),
@@ -1319,6 +1373,9 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
             <ToolButton label="Split at playhead (S)" onClick={split} text="Split">
               <SplitIcon />
             </ToolButton>
+            <ToolButton label="Freeze the frame at the playhead (F)" onClick={freezeFrame} text="Freeze">
+              <FreezeIcon />
+            </ToolButton>
             <ToolButton label="Trim the clip at the playhead" onClick={openTrim} text="Trim">
               <TrimIcon />
             </ToolButton>
@@ -1348,6 +1405,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
               lay={lay}
               sources={sources}
               thumbnails={thumbs}
+              waveforms={waves}
               tracks={tracks}
               selection={selection}
               clock={clock}
