@@ -69,14 +69,28 @@ export interface VideoTransform {
   rotation: number;
 }
 
+/** Part of the source frame to keep, as fractions of its width/height. */
+export interface Crop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** A playable range of one source. `start`/`end` are source time; where
  * the clip sits on the timeline is derived from clip order (see layout()).
+ * A freeze clip shows the single source frame at `freeze` instead, and its
+ * `start`/`end` only measure how long it holds.
  */
 export interface Clip {
   id: string;
   sourceId: string;
   start: number;
   end: number;
+  freeze: number | null;
+  /** Plays the range backwards (picture and sound). */
+  reverse: boolean;
+  crop: Crop;
   /** Transition into the *next* clip; ignored on the last clip. */
   transition: Transition | null;
   speed: number; // 0.5..2
@@ -122,12 +136,17 @@ interface OverlayBase {
   animOut: AnimOut;
   hidden: boolean;
   locked: boolean;
+  /** Made by auto captions - restyled / replaced together. */
+  caption?: boolean;
 }
 
 export type Overlay =
   | (OverlayBase & { kind: "sticker"; stickerId: string })
   | (OverlayBase & { kind: "image"; sourceId: string })
-  | (OverlayBase & { kind: "text"; text: TextStyle });
+  | (OverlayBase & { kind: "text"; text: TextStyle })
+  /** Picture-in-picture: a video playing from `offset` (source seconds)
+   * for the layer's time range, with its own sound at `volume` (0..2). */
+  | (OverlayBase & { kind: "video"; sourceId: string; offset: number; volume: number });
 
 // --- Audio and effects ----------------------------------------------------
 
@@ -195,7 +214,8 @@ export interface Project {
  */
 export interface MediaSource {
   id: string;
-  kind: "original" | "cleaned" | "audio" | "image";
+  /** "layer": a video imported for a picture-in-picture layer. */
+  kind: "original" | "cleaned" | "audio" | "image" | "layer";
   file: File;
   url: string; // object URL
   duration: number; // 0 for images
@@ -231,6 +251,7 @@ export const NEUTRAL_ADJUST: Adjustments = {
 
 export const DEFAULT_LOOK: Look = { filter: "original", intensity: 100, adjust: NEUTRAL_ADJUST };
 export const DEFAULT_TRANSFORM: VideoTransform = { x: 0.5, y: 0.5, scale: 1, rotation: 0 };
+export const FULL_CROP: Crop = { x: 0, y: 0, w: 1, h: 1 };
 export const DEFAULT_CANVAS: Canvas = { aspect: "original", fit: "fit", background: { type: "color", color: "#000000" } };
 
 export function newClip(id: string, sourceId: string, start: number, end: number): Clip {
@@ -239,6 +260,9 @@ export function newClip(id: string, sourceId: string, start: number, end: number
     sourceId,
     start,
     end,
+    freeze: null,
+    reverse: false,
+    crop: FULL_CROP,
     transition: null,
     speed: 1,
     volume: 1,
@@ -257,6 +281,7 @@ export function migrateProject(raw: unknown): Project {
     ...c,
     look: { ...DEFAULT_LOOK, ...c.look, adjust: { ...NEUTRAL_ADJUST, ...c.look?.adjust } },
     transform: { ...DEFAULT_TRANSFORM, ...c.transform },
+    crop: { ...FULL_CROP, ...c.crop },
   })) as Clip[];
 
   let overlays = (p.overlays as Overlay[]) ?? [];

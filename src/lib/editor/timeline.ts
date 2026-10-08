@@ -15,6 +15,13 @@ import type {
 export const MIN_CLIP_SECONDS = 0.2;
 export const TRANSITION_DURATIONS = [0.2, 0.5, 1, 1.5, 2] as const;
 export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+/** Default and longest hold of a freeze frame. */
+export const FREEZE_SECONDS = 3;
+export const MAX_FREEZE_SECONDS = 30;
+/** Longest source range that can be reversed - ffmpeg's reverse filter
+ * buffers every frame in memory. Must match EDITOR_MAX_REVERSE_SECONDS in
+ * backend/app/config.py. */
+export const MAX_REVERSE_SECONDS = 10;
 
 // Must match ANIM_SECONDS / SLIDE_DISTANCE in backend/app/pipeline/editor.py
 // - preview and export animate identically.
@@ -147,7 +154,11 @@ export interface Located {
 
 /** Source time inside a laid-out clip at timeline time `t`. */
 export function sourceTimeAt(c: LaidOutClip, t: number): number {
-  return c.clip.start + (t - c.start) * (c.clip.speed || 1);
+  const { clip } = c;
+  if (clip.freeze !== null) return clip.freeze;
+  const local = (t - c.start) * (clip.speed || 1);
+  // Reversed: starts on the range's last frame (just inside `end`).
+  return clip.reverse ? Math.max(clip.start, clip.end - 0.001 - local) : clip.start + local;
 }
 
 export function locate(lay: Layout, time: number): Located | null {
@@ -232,11 +243,17 @@ export function newId(prefix: string): string {
 export function splitAt(project: Project, lay: Layout, time: number): Project | null {
   const loc = locate(lay, time);
   if (!loc || loc.incoming) return null; // can't cut inside a transition
-  const { index, sourceTime } = loc.primary;
+  const { index } = loc.primary;
   const clip = project.clips[index];
-  if (sourceTime - clip.start < MIN_CLIP_SECONDS || clip.end - sourceTime < MIN_CLIP_SECONDS) return null;
-  const left: Clip = { ...clip, end: sourceTime, transition: null };
-  const right: Clip = { ...clip, id: newId("clip"), start: sourceTime };
+  // Split by how far into the clip the playhead is, not by its source time:
+  // a freeze has no source range and a reversed clip reads it backwards.
+  const local = (time - lay.clips[index].start) * (clip.speed || 1);
+  if (local < MIN_CLIP_SECONDS || clip.end - clip.start - local < MIN_CLIP_SECONDS) return null;
+  const cut = clip.reverse ? clip.end - local : clip.start + local;
+  const first = clip.reverse ? { start: cut, end: clip.end } : { start: clip.start, end: cut };
+  const second = clip.reverse ? { start: clip.start, end: cut } : { start: cut, end: clip.end };
+  const left: Clip = { ...clip, ...first, transition: null };
+  const right: Clip = { ...clip, ...second, id: newId("clip") };
   const clips = [...project.clips];
   clips.splice(index, 1, left, right);
   return { ...project, clips };
@@ -250,6 +267,36 @@ export function splitAudioAt(project: Project, id: string, t: number): Project |
   const left: AudioClip = { ...a, duration: leftDur, fadeOut: 0 };
   const right: AudioClip = { ...a, id: newId("aud"), start: t, offset: a.offset + leftDur, duration: a.duration - leftDur, fadeIn: 0 };
   return { ...project, audio: project.audio.flatMap((x) => (x.id === id ? [left, right] : [x])) };
+}
+
+/** Inserts a FREEZE_SECONDS still of the frame under the playhead, splitting
+ * the clip there first (or placing it before/after when at an edge). */
+export function insertFreezeAt(project: Project, lay: Layout, time: number): { project: Project; clipId: string } | null {
+  const loc = locate(lay, time);
+  if (!loc || loc.incoming) return null;
+  const laid = lay.clips[loc.primary.index];
+  const still: Clip = {
+    ...laid.clip,
+    id: newId("clip"),
+    freeze: loc.primary.sourceTime,
+    reverse: false,
+    start: 0,
+    end: FREEZE_SECONDS,
+    speed: 1,
+    transition: null,
+  };
+  const split = splitAt(project, lay, time);
+  const atStart = time - laid.start < laid.duration / 2;
+  const base = split ?? project;
+  const at = split ? loc.primary.index + 1 : atStart ? loc.primary.index : loc.primary.index + 1;
+  const clips = [...base.clips];
+  // The still takes over the outgoing transition when it lands after the clip.
+  if (!split && !atStart) {
+    still.transition = clips[at - 1].transition;
+    clips[at - 1] = { ...clips[at - 1], transition: null };
+  }
+  clips.splice(at, 0, still);
+  return { project: { ...base, clips }, clipId: still.id };
 }
 
 export function deleteClip(project: Project, clipId: string): Project | null {
@@ -310,15 +357,15 @@ export function formatTime(seconds: number, precise = false): string {
 }
 
 /** The clip's on-canvas box as fractions of canvas width/height: the
- * source's aspect contained in (fit) or covering (fill) the canvas, times
- * the clip's scale. Same rule as _clip_video_chain() in editor.py. */
+ * (cropped) source's aspect contained in (fit) or covering (fill) the
+ * canvas, times the clip's scale. Same rule as _clip_video_chain() in editor.py. */
 export function videoBox(
   clip: Clip,
   src: { width: number; height: number },
   canvas: { width: number; height: number },
   fit: "fit" | "fill"
 ): { w: number; h: number } {
-  const srcAr = src.width / Math.max(1, src.height);
+  const srcAr = (src.width * clip.crop.w) / Math.max(1, src.height * clip.crop.h);
   const canvasAr = canvas.width / canvas.height;
   let w: number;
   let h: number;

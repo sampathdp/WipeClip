@@ -86,9 +86,23 @@ export interface Region {
 
 export type Resolution = "720p" | "1080p" | "4k";
 
-/** Goes through our own /api/process route (credit-gated), not the FastAPI
- * backend directly - that's what makes credit consumption non-bypassable.
- * See src/app/api/process/route.ts.
+/** Asks one of our own routes (/api/process, /api/export) for a job ticket.
+ * That route does every plan and credit check; the files then go straight
+ * to the backend with the ticket - see src/lib/jobTicket.ts. */
+async function getTicket(route: string, payload: unknown, fallback: string, signal?: AbortSignal) {
+  const res = await fetch(route, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!res.ok) await throwApiError(res, fallback);
+  return (await res.json()) as { ticket: string; resolution: Resolution };
+}
+
+/** Object removal: /api/process checks and spends credits and hands back a
+ * ticket, then the video goes to the backend with it. A failed job is
+ * refunded by the backend. See src/app/api/process/route.ts.
  */
 export async function processVideo(
   file: File,
@@ -97,14 +111,14 @@ export async function processVideo(
   signal?: AbortSignal,
   range?: { start: number; end: number }
 ): Promise<Blob> {
+  const { ticket } = await getTicket("/api/process", { resolution, filename: file.name }, "Processing failed. Try again.", signal);
   const body = new FormData();
+  body.append("ticket", ticket);
   body.append("file", file);
-  body.append("mode", "remove");
   body.append("x", String(region.x));
   body.append("y", String(region.y));
   body.append("w", String(region.w));
   body.append("h", String(region.h));
-  body.append("resolution", resolution);
   // Editor AI cleanup: process (and return) only this source-time range.
   if (range) {
     body.append("start", range.start.toFixed(3));
@@ -115,7 +129,7 @@ export async function processVideo(
   // clip is done - minutes for a long or high-resolution video - so this
   // request has no natural timeout. `signal` lets the caller impose a hard
   // ceiling (see UploadDemo) rather than spinning forever if it wedges.
-  const res = await fetch("/api/process", {
+  const res = await fetch(`${TOOLS_API_URL}/api/video/process`, {
     method: "POST",
     body,
     signal,
@@ -128,8 +142,9 @@ export async function processVideo(
   return res.blob();
 }
 
-/** Renders a browser-editor project through our own /api/export route
- * (credit-gated like /api/process). `sources[0]` must be the original
+/** Renders a browser-editor project: /api/export checks the plan and hands
+ * back a ticket, then the files go to the backend with it (same flow as
+ * processVideo). `sources[0]` must be the original
  * upload - it sets the output size and frame rate. See
  * src/lib/editor/exportProject.ts for how the payload is assembled and
  * backend/app/main.py's api_video_export for how it's validated.
@@ -143,18 +158,20 @@ export async function exportEditorProject(
   resolution: Resolution,
   signal?: AbortSignal
 ): Promise<Blob> {
+  const projectJson = JSON.stringify(project);
+  const exportFailed = "Export failed. Your original video is safe. Please try exporting again.";
+  const { ticket } = await getTicket("/api/export", { project: projectJson, resolution }, exportFailed, signal);
   const body = new FormData();
-  body.append("project", JSON.stringify(project));
-  body.append("resolution", resolution);
+  body.append("ticket", ticket);
+  // Byte-for-byte the string the ticket was issued for (it carries its hash).
+  body.append("project", projectJson);
   for (const source of sources) body.append("sources", source, source.name);
   overlays.forEach((image, i) => body.append("overlays", image, `layer-${i}.png`));
   for (const audio of audios) body.append("audios", audio, audio.name);
   if (background) body.append("background", background, background.name);
 
-  const res = await fetch("/api/export", { method: "POST", body, signal });
-  if (!res.ok) {
-    await throwApiError(res, "Export failed. Your original video is safe. Please try exporting again.");
-  }
+  const res = await fetch(`${TOOLS_API_URL}/api/video/export`, { method: "POST", body, signal });
+  if (!res.ok) await throwApiError(res, exportFailed);
   return res.blob();
 }
 

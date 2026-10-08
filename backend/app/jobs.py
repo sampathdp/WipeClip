@@ -50,7 +50,7 @@ def editor_export_job(plan_json: str, out_path: str) -> None:
     """
     raw = json.loads(plan_json)
     plan = editor_pipeline.ExportPlan(
-        **{k: raw[k] for k in ("width", "height", "fps", "with_audio", "fit", "background", "color", "color2", "background_image")},
+        **{k: raw[k] for k in ("width", "height", "fps", "with_audio", "fit", "background", "color", "color2", "background_image", "crf", "audio_bitrate")},
         clips=[editor_pipeline.PlanClip(**c) for c in raw["clips"]],
         overlays=[editor_pipeline.PlanOverlay(**o) for o in raw["overlays"]],
         audio=[editor_pipeline.PlanAudio(**a) for a in raw["audio"]],

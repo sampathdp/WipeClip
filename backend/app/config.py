@@ -5,6 +5,7 @@ README for context on what each stage does. Values here are defaults; most
 are also exposed as per-request overrides in the API schemas.
 """
 
+import os
 from pathlib import Path
 
 # --- Alpha classification thresholds (0-255) --------------------------------
@@ -93,6 +94,22 @@ DETECT_BOX_PADDING_PX: int = 6               # padding added around each blob's
 # --- Output ---------------------------------------------------------------
 PNG_COMPRESSION_LEVEL: int = 6
 MAX_UPLOAD_DIMENSION: int = 6000  # px, safety cap on longest side
+
+# --- Resource limits (per process) ---------------------------------------------
+# Every job peaks at roughly 1-3 GB of RAM and will happily use every core,
+# so how many run at once is what actually sizes the server. Inline mode (no
+# REDIS_URL) queues requests past MAX_CONCURRENT_JOBS instead of running
+# them side by side; with RQ, concurrency is the number of worker processes.
+MAX_CONCURRENT_JOBS: int = max(1, int(os.environ.get("MAX_CONCURRENT_JOBS", "1")))
+# Threads one job may use: ffmpeg (decode, filters, x264 - fewer threads
+# also means fewer frames in flight, so less RAM), OpenCV and the
+# ONNX models (rembg, NudeNet). Defaults to an even share of the cores, so
+# concurrent jobs don't oversubscribe the CPU.
+JOB_THREADS: int = max(
+    1, int(os.environ.get("JOB_THREADS", str(max(1, (os.cpu_count() or 1) // MAX_CONCURRENT_JOBS))))
+)
+# onnxruntime (via rembg/NudeNet) reads this when a session is created.
+os.environ.setdefault("OMP_NUM_THREADS", str(JOB_THREADS))
 
 # --- Video watermark removal (ffmpeg-based) -----------------------------------
 # Synchronous request/response (no job queue) - these caps keep a single
@@ -279,6 +296,22 @@ EDITOR_MAX_FPS: float = 60.0
 EDITOR_MAX_AUDIO: int = 12  # audio clips (and uploaded audio files) per export
 EDITOR_MAX_AUDIO_BYTES: int = 50 * 1024 * 1024
 EDITOR_MAX_EFFECTS: int = 30
+# ffmpeg's reverse filter buffers every frame of the clip in memory, so a
+# reversed clip's source range is capped. Must match MAX_REVERSE_SECONDS in
+# src/lib/editor/timeline.ts.
+EDITOR_MAX_REVERSE_SECONDS: float = 10.0
+# The seconds cap alone isn't enough: 10 s of 4K60 is ~7.5 GB of buffered
+# frames. main.py also rejects a reversed clip whose estimated frame buffer
+# (frames x scaled frame size, yuv420p) is past this.
+EDITOR_MAX_REVERSE_BUFFER_BYTES: int = int(
+    float(os.environ.get("EDITOR_MAX_REVERSE_BUFFER_MB", "1024")) * 1024 * 1024
+)
+EDITOR_MAX_FREEZE_SECONDS: float = 30.0
+# Free-tier exports ("compact", decided by the Next.js /api/export route):
+# a higher CRF and lower audio bitrate make files ~30-40% smaller, which is
+# what the bandwidth bill is paid on. Barely visible at 720p.
+EDITOR_COMPACT_CRF: int = 23
+EDITOR_COMPACT_AUDIO_BITRATE: str = "128k"
 
 # --- Content moderation (explicit-content screening) -------------------------
 # Local, self-hosted classifier only - flags likely nudity so the API can

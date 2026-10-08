@@ -6,10 +6,14 @@ import type { MediaSource, Overlay } from "./types";
 /** Every overlay is drawn from one PNG: a rasterized sticker, rasterized
  * text, or a normalized uploaded image. The key identifies that PNG, so
  * identical layers share it in the preview and are uploaded once on export.
+ * Video layers have no PNG: their "raster" is the source video itself
+ * (url + display size), which the preview plays and the export sends as a
+ * source video instead.
  */
 export function rasterKey(o: Overlay): string {
   if (o.kind === "sticker") return `s:${o.stickerId}`;
   if (o.kind === "image") return `i:${o.sourceId}`;
+  if (o.kind === "video") return `v:${o.sourceId}`;
   return `t:${textKey(o.text)}`;
 }
 
@@ -17,7 +21,7 @@ export function loadRaster(o: Overlay, sources: Record<string, MediaSource>): Pr
   if (o.kind === "sticker") return rasterizeSticker(o.stickerId);
   if (o.kind === "text") return rasterizeText(o.text);
   const src = sources[o.sourceId];
-  if (!src) return Promise.reject(new Error("Missing image"));
+  if (!src) return Promise.reject(new Error(o.kind === "video" ? "Missing video" : "Missing image"));
   return Promise.resolve({ blob: src.file, url: src.url, width: src.width, height: src.height });
 }
 

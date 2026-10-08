@@ -11,7 +11,15 @@ import { createClient } from "@/lib/supabase/client";
 import { createClock, useClockTime, type Clock } from "@/lib/editor/clock";
 import { takeHandedOffFile } from "@/lib/editor/handoff";
 import { useProjectHistory } from "@/lib/editor/history";
-import { generateThumbnails, loadAudioMeta, loadVideoMeta, normalizeImage, type ThumbnailStrip } from "@/lib/editor/media";
+import {
+  generateThumbnails,
+  generateWaveform,
+  loadAudioMeta,
+  loadVideoMeta,
+  normalizeImage,
+  type ThumbnailStrip,
+  type Waveform,
+} from "@/lib/editor/media";
 import {
   clearLastExport,
   clearProject,
@@ -36,6 +44,7 @@ import {
   newId,
   restackOverlay,
   splitAt,
+  insertFreezeAt,
   splitAudioAt,
   updateAudio,
   updateClip,
@@ -57,6 +66,7 @@ import {
   type TextStyle,
 } from "@/lib/editor/types";
 import { ApiError, ContentBlockedError, probeVideo } from "@/lib/toolsApi";
+import { buildSpeechAudio, captionOverlays, captionText, CAPTION_STYLES, groupWords, lineCharsFor, transcribe } from "@/lib/editor/captions";
 import { TIER_LIMITS, toTier, type Tier } from "@/lib/entitlements";
 import AiCleanupDialog from "./AiCleanupDialog";
 import ExportDialog from "./ExportDialog";
@@ -71,6 +81,8 @@ import {
   EffectPanel,
   EffectsAddPanel,
   ElementsPanel,
+  CaptionsPanel,
+  type CaptionOptions,
   LayersPanel,
   LookPanel,
   OverlayPanel,
@@ -95,7 +107,9 @@ import {
   RedoIcon,
   SparkleIcon,
   SplitIcon,
+  FreezeIcon,
   TextIcon,
+  CaptionsIcon,
   TransitionIcon,
   TrashIcon,
   TrimIcon,
@@ -111,7 +125,7 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const EMPTY: Project = { clips: [], overlays: [], audio: [], effects: [], canvas: DEFAULT_CANVAS };
 const RATES = [0.5, 1, 1.5, 2];
 
-type Tool = "text" | "elements" | "audio" | "effects" | "filters" | "adjust" | "canvas" | "layers";
+type Tool = "text" | "captions" | "elements" | "audio" | "effects" | "filters" | "adjust" | "canvas" | "layers";
 type Dialogs = { kind: "cleanup"; clipId: string; frameTime: number } | { kind: "export" } | null;
 type ClipboardItem = { kind: "overlay"; item: Overlay } | { kind: "audio"; item: AudioClip } | { kind: "effect"; item: EffectClip };
 
@@ -135,9 +149,12 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [thumbs, setThumbs] = useState<Record<string, ThumbnailStrip>>({});
+  const [waves, setWaves] = useState<Record<string, Waveform>>({});
   const [dialog, setDialog] = useState<Dialogs>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [captionOpts, setCaptionOpts] = useState<CaptionOptions>({ language: "auto", maxWords: 3, style: "bold", y: 0.82 });
+  const [captioning, setCaptioning] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [signedInTier, setSignedInTier] = useState<Tier>("free");
   const [showSignIn, setShowSignIn] = useState(false);
@@ -146,7 +163,8 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
   const stageRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
-  const thumbJobs = useRef(new Map<string, AbortController>());
+  const thumbJobs = useRef(new Map<string, AbortController>()); // thumbnail + "wave:" jobs
+  const waveQueue = useRef<Promise<void>>(Promise.resolve());
   const clipboard = useRef<ClipboardItem | null>(null);
 
   const original = originalId ? sources[originalId] : undefined;
@@ -240,6 +258,21 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     }
   }, [sources]);
 
+  // Audio waveforms, one at a time - decoding holds the whole file in memory.
+  useEffect(() => {
+    for (const src of Object.values(sources)) {
+      const key = `wave:${src.id}`;
+      if (src.kind === "image" || !src.hasAudio || thumbJobs.current.has(key)) continue;
+      const controller = new AbortController();
+      thumbJobs.current.set(key, controller);
+      waveQueue.current = waveQueue.current.then(async () => {
+        if (controller.signal.aborted) return;
+        const wave = await generateWaveform(src.file, controller.signal);
+        if (wave && !controller.signal.aborted) setWaves((w) => ({ ...w, [src.id]: wave }));
+      });
+    }
+  }, [sources]);
+
   // --- project lifecycle ---------------------------------------------------
   const startProject = useCallback(
     (srcs: MediaSource[], next: Project) => {
@@ -247,6 +280,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
       thumbJobs.current.clear();
       Object.values(sourcesRef.current).forEach((s) => URL.revokeObjectURL(s.url));
       setThumbs({});
+      setWaves({});
       setSources(Object.fromEntries(srcs.map((s) => [s.id, s])));
       setOriginalId(srcs.find((s) => s.kind === "original")?.id ?? srcs[0].id);
       reset(next);
@@ -421,6 +455,18 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     apply(() => next);
   }, [selection, project, lay, clock, apply, say]);
 
+  const freezeFrame = useCallback(() => {
+    setPlaying(false);
+    const next = insertFreezeAt(project, lay, clock.get());
+    if (!next) {
+      say("Move the playhead off the transition to freeze a frame.");
+      return;
+    }
+    apply(() => next.project);
+    setSelection({ kind: "clip", id: next.clipId });
+    say("Freeze frame added. Drag its edge to hold it longer.");
+  }, [project, lay, clock, apply, say]);
+
   const deleteSelection = useCallback(() => {
     if (selection?.kind === "overlay") {
       apply((p) => ({ ...p, overlays: p.overlays.filter((o) => o.id !== selection.id) }));
@@ -578,6 +624,103 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     [importImage, addOverlay, baseOverlay, canvasSize]
   );
 
+  /** Imports a video as a picture-in-picture layer at the playhead: same
+   * browser decode check and server screening as the main import. */
+  const uploadVideoLayer = useCallback(
+    async (file: File) => {
+      if (!file.type.startsWith("video/")) {
+        say("Please choose a video file (MP4, MOV or WebM).");
+        return;
+      }
+      if (file.size > MAX_BYTES) {
+        say("That video is over the 300MB limit.");
+        return;
+      }
+      setBusy("Adding video layer…");
+      const url = URL.createObjectURL(file);
+      try {
+        const [meta, probe] = await Promise.all([loadVideoMeta(url), probeVideo(file)]);
+        URL.revokeObjectURL(probe.previewUrl);
+        const src: MediaSource = {
+          id: newId("lyr"),
+          kind: "layer",
+          file,
+          url,
+          duration: meta.duration,
+          width: meta.width,
+          height: meta.height,
+          fps: probe.info.fps > 0 && probe.info.fps <= 240 ? probe.info.fps : 30,
+          hasAudio: probe.info.hasAudio ?? true,
+        };
+        addSource(src);
+        const aspect = canvasSize.width / canvasSize.height;
+        // 40% of the canvas on the video's long side, like an image layer.
+        const width = src.width / src.height > aspect ? 0.4 : (0.4 * (src.width / src.height)) / aspect;
+        addOverlay({ ...baseOverlay(meta.duration), width, kind: "video", sourceId: src.id, offset: 0, volume: 1 });
+      } catch (e) {
+        URL.revokeObjectURL(url);
+        if (e instanceof ContentBlockedError || e instanceof ApiError) say(e.message);
+        else if (e instanceof Error && e.message === "media_error") say("Your browser can't play this video's format. Try an MP4 (H.264) file.");
+        else say("Couldn't add this video. Check your connection and try again.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [addSource, addOverlay, baseOverlay, canvasSize, say]
+  );
+
+  // --- auto captions -------------------------------------------------------
+  const runCaptions = useCallback(async () => {
+    setPlaying(false);
+    setCaptioning(true);
+    setBusy("Preparing audio…");
+    try {
+      const samples = await buildSpeechAudio(lay, project, sources);
+      if (!samples) {
+        say("There's no sound in your clips to caption.");
+        return;
+      }
+      setBusy("Loading speech model…");
+      const res = await transcribe(samples, captionOpts.language, ({ stage, value }) =>
+        setBusy(
+          stage === "download"
+            ? `Downloading speech model (first time only)… ${Math.round(value * 100)}%`
+            : stage === "prepare"
+              ? "Preparing speech model…"
+              : `Transcribing speech on your device… ${Math.round(value * 100)}%`
+        )
+      );
+      const chunks = groupWords(res.words, captionOpts.maxWords, lineCharsFor(canvasSize), lay.total);
+      if (chunks.length === 0) {
+        say("No speech was found in your clips.");
+        return;
+      }
+      const caps = captionOverlays(chunks, captionOpts.style, captionOpts.y);
+      // One undo step; regenerating replaces earlier captions.
+      apply((p) => ({ ...p, overlays: [...p.overlays.filter((o) => !o.caption), ...caps] }));
+      say(`Added ${caps.length} captions. Click one to edit its text.`);
+    } catch (e) {
+      console.error("[captions]", e);
+      say("Captioning failed. Check your connection and try again.");
+    } finally {
+      setBusy(null);
+      setCaptioning(false);
+    }
+  }, [lay, project, sources, captionOpts, canvasSize, apply, say]);
+
+  const restyleCaptions = useCallback(
+    (opts: CaptionOptions) =>
+      apply((p) => ({
+        ...p,
+        overlays: p.overlays.map((o) =>
+          o.caption && o.kind === "text"
+            ? { ...o, y: opts.y, animIn: CAPTION_STYLES[opts.style].animIn, text: captionText(o.text.content, opts.style) }
+            : o
+        ),
+      })),
+    [apply]
+  );
+
   const uploadBackground = useCallback(
     async (file: File) => {
       const src = await importImage(file);
@@ -632,6 +775,10 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     (clipId: string) => {
       const laid = lay.clips.find((c) => c.clip.id === clipId);
       if (!laid) return;
+      if (laid.clip.freeze !== null || laid.clip.reverse) {
+        say("Freeze frames and reversed clips have no audio to extract.");
+        return;
+      }
       if (laid.clip.speed !== 1) {
         say("Set the clip's speed to 1× before extracting its audio.");
         return;
@@ -689,7 +836,19 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
       } else if (track === "effects") {
         apply((p) => updateEffect(p, id, { start, end }), false);
       } else {
-        apply((p) => updateOverlay(p, id, { start, end }), false);
+        apply((p) => {
+          const o = p.overlays.find((x) => x.id === id);
+          if (o?.kind !== "video") return updateOverlay(p, id, { start, end });
+          // Video layers trim like audio: the front edge moves where the
+          // video is read from, the back edge stops at the video's end.
+          const srcDur = sourcesRef.current[o.sourceId]?.duration ?? o.offset + (o.end - o.start);
+          if (mode === "move") return updateOverlay(p, id, { start, end });
+          if (mode === "start") {
+            const delta = Math.max(-o.offset, start - o.start);
+            return updateOverlay(p, id, { start: o.start + delta, offset: o.offset + delta } as Partial<Overlay>);
+          }
+          return updateOverlay(p, id, { end: Math.min(end, o.start + srcDur - o.offset) });
+        }, false);
       }
     },
     [apply]
@@ -730,13 +889,17 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     const idx = selectedClip ? selectedClip.index : clipIndexAtPlayhead();
     const laid = lay.clips[idx];
     if (!laid) return;
+    if (laid.clip.freeze !== null) {
+      say("AI Cleanup works on video clips. Clean the clip this frame came from, then freeze again.");
+      return;
+    }
     setPlaying(false);
     const loc = locate(lay, clock.get());
     const inside = loc && loc.primary.index === idx && !loc.incoming;
     const frameTime = inside ? loc.primary.sourceTime : laid.clip.start + (laid.clip.end - laid.clip.start) / 2;
     select({ kind: "clip", id: laid.clip.id });
     setDialog({ kind: "cleanup", clipId: laid.clip.id, frameTime });
-  }, [selectedClip, clipIndexAtPlayhead, lay, clock, select]);
+  }, [selectedClip, clipIndexAtPlayhead, lay, clock, select, say]);
 
   const onCleaned = useCallback(
     (clipId: string, src: MediaSource) => {
@@ -755,6 +918,8 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     thumbJobs.current.forEach((c) => c.abort());
     thumbJobs.current.clear();
     Object.values(sourcesRef.current).forEach((s) => URL.revokeObjectURL(s.url));
+    setThumbs({});
+    setWaves({});
     setSources({});
     setOriginalId(null);
     reset(EMPTY);
@@ -807,6 +972,9 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
       } else if (key === "t") {
         e.preventDefault();
         addText({}, 0.5);
+      } else if (key === "f" && !mod) {
+        e.preventDefault();
+        freezeFrame();
       } else if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         deleteSelection();
@@ -822,7 +990,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase, dialog, showSignIn, undo, redo, copy, paste, duplicate, currentItem, togglePlay, split, addText, deleteSelection, moveSelected, seek, clock, lay.fps]);
+  }, [phase, dialog, showSignIn, undo, redo, copy, paste, duplicate, currentItem, togglePlay, split, freezeFrame, addText, deleteSelection, moveSelected, seek, clock, lay.fps]);
 
   const toggleFullscreen = () => {
     const el = stageRef.current;
@@ -1024,7 +1192,14 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
   } else if (tool === "text") {
     panel = <TextAddPanel onAdd={addText} onClose={() => setTool(null)} />;
   } else if (tool === "elements") {
-    panel = <ElementsPanel onAddSticker={addSticker} onUploadImage={(f) => void uploadImage(f)} onClose={() => setTool(null)} />;
+    panel = (
+      <ElementsPanel
+        onAddSticker={addSticker}
+        onUploadImage={(f) => void uploadImage(f)}
+        onUploadVideo={(f) => void uploadVideoLayer(f)}
+        onClose={() => setTool(null)}
+      />
+    );
   } else if (tool === "audio") {
     panel = <AudioAddPanel audio={project.audio} onUpload={(f) => void uploadAudio(f)} onSelect={(id) => select({ kind: "audio", id })} onClose={() => setTool(null)} />;
   } else if (tool === "effects") {
@@ -1037,6 +1212,19 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
         onUploadBackground={(f) => void uploadBackground(f)}
         onClose={() => setTool(null)}
         gesture={gesture}
+      />
+    );
+  } else if (tool === "captions") {
+    panel = (
+      <CaptionsPanel
+        options={captionOpts}
+        onOptions={setCaptionOpts}
+        count={project.overlays.filter((o) => o.caption).length}
+        busy={captioning}
+        onGenerate={() => void runCaptions()}
+        onRestyle={restyleCaptions}
+        onRemoveAll={() => apply((p) => ({ ...p, overlays: p.overlays.filter((o) => !o.caption) }))}
+        onClose={() => setTool(null)}
       />
     );
   } else if (tool === "layers") {
@@ -1099,6 +1287,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
       <OverlayPanel
         overlay={selectedOverlay}
         total={lay.total}
+        sourceDuration={selectedOverlay.kind === "video" ? sources[selectedOverlay.sourceId]?.duration : undefined}
         onChange={(patch) => apply((p) => updateOverlay(p, selectedOverlay.id, patch))}
         onDuplicate={duplicate}
         onDelete={deleteSelection}
@@ -1162,7 +1351,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
           </ActionButton>
         </div>
         <p className="mt-6 text-[11px] leading-relaxed text-muted">
-          Shortcuts: Space play/pause · S split · T text · Delete remove · Ctrl+C / Ctrl+V copy/paste · Ctrl+D duplicate · ←/→ frame step (Shift:
+          Shortcuts: Space play/pause · S split · F freeze frame · T text · Delete remove · Ctrl+C / Ctrl+V copy/paste · Ctrl+D duplicate · ←/→ frame step (Shift:
           1s) · Alt+←/→ move clip · Ctrl+Z / Ctrl+Shift+Z undo/redo
         </p>
       </PanelShell>
@@ -1205,9 +1394,17 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
             id: o.id,
             start: o.start,
             end: o.end,
-            label: o.kind === "sticker" ? (def?.label ?? "Sticker") : "Image",
-            thumb: o.kind === "image" ? sources[o.sourceId]?.url : def ? stickerThumbSrc(def) : null,
-            glyph: def?.kind === "emoji" ? def.char : "★",
+            label: o.kind === "sticker" ? (def?.label ?? "Sticker") : o.kind === "video" ? "Video" : "Image",
+            thumb:
+              o.kind === "image"
+                ? sources[o.sourceId]?.url
+                : o.kind === "video"
+                  ? (thumbs[o.sourceId]?.urls[0] ?? null)
+                  : def
+                    ? stickerThumbSrc(def)
+                    : null,
+            glyph: o.kind === "video" ? "▶" : def?.kind === "emoji" ? def.char : "★",
+            wave: o.kind === "video" ? { sourceId: o.sourceId, offset: o.offset, duration: o.end - o.start, gain: o.volume } : undefined,
             hidden: o.hidden,
             locked: o.locked,
             selected: isSel("overlay", o.id),
@@ -1226,6 +1423,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
         end: a.start + a.duration,
         label: `${a.muted ? "🔇 " : ""}${a.label}`,
         glyph: "♪",
+        wave: { sourceId: a.sourceId, offset: a.offset, duration: a.duration, gain: a.muted ? 0 : a.volume },
         selected: isSel("audio", a.id),
         sel: { kind: "audio" as const, id: a.id },
       })),
@@ -1280,6 +1478,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
                 canvasSize={canvasSize}
                 overlays={project.overlays}
                 rasters={rasters}
+                playback={{ playing, rate, volume, muted }}
                 selectedId={selectedOverlay?.id ?? null}
                 onSelect={(id) => {
                   if (id) select({ kind: "overlay", id });
@@ -1319,6 +1518,9 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
             <ToolButton label="Split at playhead (S)" onClick={split} text="Split">
               <SplitIcon />
             </ToolButton>
+            <ToolButton label="Freeze the frame at the playhead (F)" onClick={freezeFrame} text="Freeze">
+              <FreezeIcon />
+            </ToolButton>
             <ToolButton label="Trim the clip at the playhead" onClick={openTrim} text="Trim">
               <TrimIcon />
             </ToolButton>
@@ -1327,6 +1529,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
             </ToolButton>
             <span className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden />
             {toolBtn("text", "Text", <TextIcon />, "Add text (T)")}
+            {toolBtn("captions", "Captions", <CaptionsIcon />, "Auto captions from speech")}
             {toolBtn("audio", "Audio", <MusicIcon />, "Music and audio")}
             {toolBtn("elements", "Elements", <ElementsIcon />, "Stickers and images")}
             {toolBtn("effects", "Effects", <EffectIcon />, "Timed effects")}
@@ -1348,6 +1551,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
               lay={lay}
               sources={sources}
               thumbnails={thumbs}
+              waveforms={waves}
               tracks={tracks}
               selection={selection}
               clock={clock}

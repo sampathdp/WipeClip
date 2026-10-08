@@ -17,7 +17,6 @@ stage is specifically designed to clean up.
 
 from __future__ import annotations
 
-import io
 from functools import lru_cache
 from typing import Literal
 
@@ -155,17 +154,11 @@ def remove_background_ml(bgra: np.ndarray) -> np.ndarray:
     """
     from rembg import remove
 
-    rgba_in = cv2.cvtColor(bgra, cv2.COLOR_BGRA2RGBA)
-    im = Image.fromarray(rgba_in, mode="RGBA")
-    buf = io.BytesIO()
-    im.save(buf, format="PNG")
-
-    session = _rembg_session()
-    out_bytes = remove(buf.getvalue(), session=session)
-
-    out_im = Image.open(io.BytesIO(out_bytes)).convert("RGBA")
-    out_rgba = np.array(out_im, dtype=np.uint8)
-    return cv2.cvtColor(out_rgba, cv2.COLOR_RGBA2BGRA)
+    # Passed as a PIL image, not PNG bytes: rembg then skips a full-size PNG
+    # encode + decode round trip (and the extra copies it holds) per call.
+    im = Image.fromarray(cv2.cvtColor(bgra, cv2.COLOR_BGRA2RGBA), mode="RGBA")
+    out_im = remove(im, session=_rembg_session()).convert("RGBA")
+    return cv2.cvtColor(np.asarray(out_im, dtype=np.uint8), cv2.COLOR_RGBA2BGRA)
 
 
 def remove_background(bgra: np.ndarray, mode: BgMode, tolerance: float) -> np.ndarray:

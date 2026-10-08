@@ -12,16 +12,19 @@ is an actual operation in the exported file:
      color grade (look.py, baked into a 3D LUT), sharpen/blur, then placement
      on the canvas - fit or fill, plus the clip's own position/scale/
      rotation/opacity - over the canvas background (color, gradient, a
-     blurred copy of the clip, or an image).
+     blurred copy of the clip, or an image). A clip can also be cropped,
+     reversed (reverse/areverse) or be a freeze frame (one decoded frame
+     held for the clip's length, silent).
   2. Joins. Clips (now all canvas-sized, same fps/SAR/format) are joined
      pairwise with `concat` (a cut) or `xfade` + `acrossfade` (a
      transition), overlapping exactly like the editor's timeline math.
   3. Effects. Timed effects run on the joined video, each limited to its
      time range with ffmpeg's timeline `enable`.
   4. Overlays. Stickers, text and images - all PNGs rasterized by the
-     browser, the same images the preview shows - are composited bottom to
-     top with their position, size, rotation, opacity, time range and
-     in/out animation.
+     browser, the same images the preview shows - and picture-in-picture
+     video layers are composited bottom to top with their position, size,
+     rotation, opacity, time range and in/out animation. A video layer's
+     sound joins the audio mix like an audio clip.
   5. Audio. The clips' own audio (after joins) is mixed with every added /
      extracted audio clip (trimmed, delayed to its timeline position, with
      volume and fades), then limited to avoid clipping.
@@ -194,9 +197,15 @@ class PlanClip:
     source_has_audio: bool
     source_width: int
     source_height: int
-    start: float
+    start: float  # source seconds; for a freeze, the held frame's time
     duration: float  # source seconds; becomes timeline seconds in quantize_plan
     transition: str | None = None  # key of TRANSITIONS, into the next clip
+    freeze: bool = False
+    reverse: bool = False
+    crop_x: float = 0.0  # kept part of the source frame, fractions
+    crop_y: float = 0.0
+    crop_w: float = 1.0
+    crop_h: float = 1.0
     transition_duration: float = 0.0
     speed: float = 1.0
     volume: float = 1.0
@@ -238,6 +247,8 @@ class PlanOverlay:
     opacity: float = 1.0
     anim_in: str = "none"
     anim_out: str = "none"
+    video: bool = False  # image_path is a video, played from `offset`
+    offset: float = 0.0
 
 
 @dataclass
@@ -274,6 +285,8 @@ class ExportPlan:
     color: str = "#000000"
     color2: str = "#000000"
     background_image: str | None = None
+    crf: int = VIDEO_ENCODE_CRF
+    audio_bitrate: str = "192k"
 
 
 def quantize_plan(plan: ExportPlan) -> None:
@@ -339,7 +352,21 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
     d = _num(clip.duration)
     graph: list[str] = []
 
-    pre = [f"setpts=(PTS-STARTPTS)/{_num(clip.speed)}"]
+    pre: list[str] = []
+    if clip.freeze:
+        # The first decoded frame, repeated for the whole hold with fresh
+        # frame-rate timestamps (a lone frame would otherwise produce no
+        # output from the fps filter below).
+        frames = int(math.ceil(clip.duration * fps)) + 1
+        pre.append(f"trim=end_frame=1,loop=loop={frames}:size=1,setpts=N/({_num(fps)}*TB)")
+    cropped = clip.crop_x > 0 or clip.crop_y > 0 or clip.crop_w < 1 or clip.crop_h < 1
+    if cropped:
+        pre.append(
+            f"crop=w='trunc(iw*{_num(clip.crop_w)}/2)*2':h='trunc(ih*{_num(clip.crop_h)}/2)*2':"
+            f"x='iw*{_num(clip.crop_x)}':y='ih*{_num(clip.crop_y)}'"
+        )
+    if not clip.freeze:
+        pre.append(f"setpts=(PTS-STARTPTS)/{_num(clip.speed)}")
     if not look_pipeline.is_neutral_color(clip.filter, clip.intensity, clip.adjust):
         cube = os.path.join(tmp, f"look{i}.cube")
         look_pipeline.write_cube(cube, look_pipeline.grade_stages(clip.filter, clip.intensity, clip.adjust))
@@ -350,9 +377,9 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
     if clip.adjust["sharpness"] > 0:
         pre.append(f"unsharp=5:5:{_num(clip.adjust['sharpness'] / 100 * 1.5)}")
 
-    # Fitted box: the source's aspect, contained in (fit) or covering (fill)
-    # the canvas, times the clip's own scale.
-    src_ar = clip.source_width / max(1, clip.source_height)
+    # Fitted box: the (cropped) source's aspect, contained in (fit) or
+    # covering (fill) the canvas, times the clip's own scale.
+    src_ar = (clip.source_width * clip.crop_w) / max(1, clip.source_height * clip.crop_h)
     if (plan.fit == "fit") == (src_ar > W / H):
         box_w, box_h = W, W / src_ar
     else:
@@ -362,6 +389,9 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
     if clip.adjust["blur"] > 0:
         pre.append(f"gblur=sigma={_num(clip.adjust['blur'] / 100 * 0.02 * H)}")
     pre.append(f"fps={_num(fps)}")
+    if clip.reverse:
+        # After scaling, so the buffered frames are at most canvas-sized.
+        pre.append("reverse")
 
     opacity = max(0.0, min(1.0, clip.adjust["opacity"] / 100))
     post: list[str] = []
@@ -413,8 +443,9 @@ def _clip_audio_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int) -> str
     d = _num(clip.duration)
     src = f"[{idx}:a:0]" if clip.source_has_audio else f"anullsrc=r={AUDIO_RATE}:cl=stereo,"
     tempo = _atempo(clip.speed) if clip.source_has_audio else "anull"
+    rev = "areverse," if clip.reverse and clip.source_has_audio else ""
     return (
-        f"{src}aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,{tempo},"
+        f"{src}aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,{rev}{tempo},"
         f"volume={_num(clip.volume)},apad,atrim=duration={d},asetpts=PTS-STARTPTS[a{i}]"
     )
 
@@ -483,6 +514,11 @@ def _overlay_filters(o: PlanOverlay, input_idx: int, n: int, plan: ExportPlan, b
     rad = f"{_num(o.rotation)}*PI/180"
 
     parts = [f"format=rgba,scale={target_w}:{target_h}:flags=lanczos"]
+    if o.video:
+        # Shift the trimmed input to start at the layer's timeline position,
+        # at the output frame rate, so the time-based fades/animations and
+        # `enable` below see timeline time.
+        parts.insert(0, f"setpts=PTS-STARTPTS+{s}/TB,fps={_num(plan.fps)}")
     if o.opacity < 0.999:
         parts.append(f"colorchannelmixer=aa={_num(max(0.0, o.opacity))}")
     if abs(o.rotation) > 0.01:
@@ -519,7 +555,7 @@ def _overlay_filters(o: PlanOverlay, input_idx: int, n: int, plan: ExportPlan, b
 
     in_label, out_label = f"ol{n}", f"oo{n}"
     chain = (
-        f"[{input_idx}:v]{','.join(parts)}[{in_label}];"
+        f"[{input_idx}:v:0]{','.join(parts)}[{in_label}];"
         f"[{base_label}][{in_label}]overlay=x='{x_expr}-overlay_w/2':y='{y_expr}-overlay_h/2':"
         f"enable='between(t,{s},{_num(o.end)})':eval=frame:eof_action=pass:format=auto[{out_label}]"
     )
@@ -537,8 +573,10 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
     inputs = _Inputs()
     graph: list[str] = []
 
+    # A freeze only needs a moment of its source around the held frame.
     clip_idx = [
-        inputs.add("-ss", _num(c.start), "-t", _num(c.duration * c.speed), "-i", c.source_path) for c in plan.clips
+        inputs.add("-ss", _num(c.start), "-t", _num(0.5 if c.freeze else c.duration * c.speed), "-i", c.source_path)
+        for c in plan.clips
     ]
     for i, clip in enumerate(plan.clips):
         graph += _clip_video_chain(plan, clip, i, clip_idx[i], inputs, tmp)
@@ -578,9 +616,14 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
         v_acc = "vfx"
 
     for n, o in enumerate(plan.overlays):
-        # Looped still from t=0 so its timestamps line up with the output
-        # timeline; eof_action=pass leaves the video untouched afterwards.
-        idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end + 0.1), "-i", o.image_path)
+        if o.video:
+            # Just the layer's range of its video; shifted into place in
+            # _overlay_filters, and gone after its end (eof_action=pass).
+            idx = inputs.add("-ss", _num(o.offset), "-t", _num(o.end - o.start), "-i", o.image_path)
+        else:
+            # Looped still from t=0 so its timestamps line up with the output
+            # timeline; eof_action=pass leaves the video untouched afterwards.
+            idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end + 0.1), "-i", o.image_path)
         chain, v_acc = _overlay_filters(o, idx, n, plan, v_acc)
         graph.append(chain)
     graph.append(f"[{v_acc}]format=yuv420p[outv]")
@@ -616,14 +659,14 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
 
     args = ["-y", "-hide_banner", *inputs.args, "-filter_complex_script", script, "-map", "[outv]"]
     if plan.with_audio:
-        args += ["-map", f"[{a_acc}]", "-c:a", "aac", "-b:a", "192k"]
+        args += ["-map", f"[{a_acc}]", "-c:a", "aac", "-b:a", plan.audio_bitrate]
     args += [
         "-c:v",
         "libx264",
         "-preset",
         VIDEO_ENCODE_PRESET,
         "-crf",
-        str(VIDEO_ENCODE_CRF),
+        str(plan.crf),
         "-pix_fmt",
         "yuv420p",
         "-r",

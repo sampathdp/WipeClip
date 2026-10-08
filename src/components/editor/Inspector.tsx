@@ -3,6 +3,8 @@
 import { useState, type ReactNode } from "react";
 import { STICKER_CATEGORIES, STICKERS, stickerThumbSrc, type StickerCategory } from "@/lib/editor/stickers";
 import {
+  MAX_FREEZE_SECONDS,
+  MAX_REVERSE_SECONDS,
   MIN_CLIP_SECONDS,
   TRANSITION_DURATIONS,
   TRANSITION_LABELS,
@@ -130,47 +132,85 @@ export function ClipPanel({
 }) {
   const { clip, index } = laid;
   const canTrimHere = playheadSourceTime !== null;
+  const p = playheadSourceTime ?? 0;
+  const frozen = clip.freeze !== null;
+  // A reversed range has a length cap (the export buffers it in memory).
+  const cap = clip.reverse ? MAX_REVERSE_SECONDS : Infinity;
+  // Trimming "before the playhead" removes the start of what plays: the
+  // source start normally, the source end when reversed.
+  const trimStart = clip.reverse
+    ? { patch: { end: p }, blocked: clip.end - p < 0.01 || p - clip.start < MIN_CLIP_SECONDS }
+    : { patch: { start: p }, blocked: p - clip.start < 0.01 || clip.end - p < MIN_CLIP_SECONDS };
+  const trimEnd = clip.reverse
+    ? { patch: { start: p }, blocked: clip.end - p < MIN_CLIP_SECONDS }
+    : { patch: { end: p }, blocked: p - clip.start < MIN_CLIP_SECONDS };
   return (
-    <PanelShell title={`Clip ${index + 1}${source.kind === "cleaned" ? " · AI cleaned" : ""}`} onClose={onClose}>
+    <PanelShell
+      title={`Clip ${index + 1}${frozen ? " · Freeze frame" : source.kind === "cleaned" ? " · AI cleaned" : ""}`}
+      onClose={onClose}
+    >
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Starts at">
-            <SecondsInput value={clip.start} min={0} max={clip.end - MIN_CLIP_SECONDS} onCommit={(start) => onChange({ start })} />
-          </Field>
-          <Field label="Ends at">
-            <SecondsInput
-              value={clip.end}
-              min={clip.start + MIN_CLIP_SECONDS}
-              max={source.duration}
-              onCommit={(end) => onChange({ end })}
-            />
-          </Field>
-        </div>
-        <p className="text-xs text-muted">
-          Plays {formatTime(clip.end - clip.start, true)} of the {source.kind === "cleaned" ? "cleaned segment" : "original video"}.
-          Drag the clip&apos;s edges on the timeline to trim.
-        </p>
+        {frozen ? (
+          <>
+            <Field label="Hold for (seconds)">
+              <SecondsInput
+                value={clip.end - clip.start}
+                min={MIN_CLIP_SECONDS}
+                max={MAX_FREEZE_SECONDS}
+                onCommit={(hold) => onChange({ start: 0, end: hold })}
+              />
+            </Field>
+            <p className="text-xs text-muted">
+              Holds the frame at {formatTime(clip.freeze!, true)} of the video. Drag the clip&apos;s edges on the timeline to change how long.
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Starts at">
+                <SecondsInput
+                  value={clip.start}
+                  min={Math.max(0, clip.end - cap)}
+                  max={clip.end - MIN_CLIP_SECONDS}
+                  onCommit={(start) => onChange({ start })}
+                />
+              </Field>
+              <Field label="Ends at">
+                <SecondsInput
+                  value={clip.end}
+                  min={clip.start + MIN_CLIP_SECONDS}
+                  max={Math.min(source.duration, clip.start + cap)}
+                  onCommit={(end) => onChange({ end })}
+                />
+              </Field>
+            </div>
+            <p className="text-xs text-muted">
+              Plays {formatTime(clip.end - clip.start, true)} of the {source.kind === "cleaned" ? "cleaned segment" : "original video"}
+              {clip.reverse ? ", backwards" : ""}. Drag the clip&apos;s edges on the timeline to trim.
+            </p>
 
-        <div>
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Trim</p>
-          <div className="grid grid-cols-2 gap-2">
-            <ActionButton
-              disabled={!canTrimHere || playheadSourceTime! - clip.start < 0.01 || clip.end - playheadSourceTime! < MIN_CLIP_SECONDS}
-              onClick={() => onChange({ start: playheadSourceTime! })}
-              title="Remove everything in this clip before the playhead"
-            >
-              Trim start here
-            </ActionButton>
-            <ActionButton
-              disabled={!canTrimHere || playheadSourceTime! - clip.start < MIN_CLIP_SECONDS}
-              onClick={() => onChange({ end: playheadSourceTime! })}
-              title="Remove everything in this clip after the playhead"
-            >
-              Trim end here
-            </ActionButton>
-          </div>
-          {!canTrimHere && <p className="mt-1.5 text-[11px] text-muted">Move the playhead into this clip to trim at it.</p>}
-        </div>
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Trim</p>
+              <div className="grid grid-cols-2 gap-2">
+                <ActionButton
+                  disabled={!canTrimHere || trimStart.blocked}
+                  onClick={() => onChange(trimStart.patch)}
+                  title="Remove everything in this clip before the playhead"
+                >
+                  Trim start here
+                </ActionButton>
+                <ActionButton
+                  disabled={!canTrimHere || trimEnd.blocked}
+                  onClick={() => onChange(trimEnd.patch)}
+                  title="Remove everything in this clip after the playhead"
+                >
+                  Trim end here
+                </ActionButton>
+              </div>
+              {!canTrimHere && <p className="mt-1.5 text-[11px] text-muted">Move the playhead into this clip to trim at it.</p>}
+            </div>
+          </>
+        )}
 
         <div className="grid grid-cols-2 gap-2">
           <ActionButton onClick={onSplit} disabled={!canTrimHere}>
@@ -189,17 +229,19 @@ export function ClipPanel({
 
         {extra}
 
-        <div className="rounded-xl border border-accent/25 bg-accent/5 p-3">
-          <p className="text-xs font-semibold text-foreground">AI Cleanup</p>
-          <p className="mt-1 text-xs text-muted">
-            Remove an unwanted object from just this clip. The cleaned result replaces the clip (undo brings the original back).
-          </p>
-          <div className="mt-2.5">
-            <ActionButton onClick={onAiCleanup} tone="accent">
-              <SparkleIcon width={14} height={14} /> Clean up this clip
-            </ActionButton>
+        {!frozen && (
+          <div className="rounded-xl border border-accent/25 bg-accent/5 p-3">
+            <p className="text-xs font-semibold text-foreground">AI Cleanup</p>
+            <p className="mt-1 text-xs text-muted">
+              Remove an unwanted object from just this clip. The cleaned result replaces the clip (undo brings the original back).
+            </p>
+            <div className="mt-2.5">
+              <ActionButton onClick={onAiCleanup} tone="accent">
+                <SparkleIcon width={14} height={14} /> Clean up this clip
+              </ActionButton>
+            </div>
           </div>
-        </div>
+        )}
 
         <p className="text-[11px] leading-relaxed text-muted">
           Tip: to cut out a section, split at its start and end, then delete the middle clip. The rest joins up automatically.
