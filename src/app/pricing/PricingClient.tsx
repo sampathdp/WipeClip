@@ -89,7 +89,6 @@ const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[
       "Full video editor: trim, split, text, stickers, audio",
       "Basic transitions, filters and effects",
       `Exports up to ${res(TIER_LIMITS.free.maxResolution)}`,
-      "Small \"Made with WipeClip\" mark on exports",
       `${TIER_LIMITS.free.dailyExports} exports a day`,
       `${FREE_DAILY_CREDITS} AI credits a day`,
     ],
@@ -101,7 +100,6 @@ const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[
       "Everything in Free",
       "All premium transitions, filters and effects",
       `Exports up to ${res(TIER_LIMITS.lite.maxResolution)}`,
-      "No WipeClip mark on exports",
       `${TIER_LIMITS.lite.dailyExports} exports a day`,
       "AI credits for cleanup, background removal and sharpening",
     ],
@@ -157,7 +155,6 @@ const COMPARISON: { label: string; values: Record<Tier, string | boolean> }[] = 
       pro: res(TIER_LIMITS.pro.maxResolution),
     },
   },
-  { label: "WipeClip mark on exports", values: { free: "Yes", lite: "No", starter: "No", pro: "No" } },
   {
     label: "Exports per day",
     values: {
@@ -308,7 +305,7 @@ export default function PricingClient() {
           </h1>
           <p className="mt-4 text-base sm:text-lg text-muted max-w-xl mx-auto">
             The editor is free forever. Paid plans start at $1.99 a month and unlock premium transitions,
-            filters and effects, exports without the WipeClip mark, higher resolutions and more AI credits.
+            filters and effects, higher resolutions and more AI credits.
           </p>
 
           <div className="mt-8 inline-flex rounded-full border border-border bg-surface-2/80 p-1 text-sm font-semibold" role="radiogroup" aria-label="Billing period">

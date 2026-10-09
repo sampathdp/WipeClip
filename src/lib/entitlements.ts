@@ -22,7 +22,7 @@ export interface TierLimits {
   maxResolution: Resolution;
   /** Premium transitions, filters and effects allowed in exports. */
   premiumEffects: boolean;
-  /** Free exports carry a small "Made with WipeClip" mark. */
+  /** Exports carry a small "Made with WipeClip" mark (currently off for every tier). */
   exportBranding: boolean;
   /** Editor exports per day for a signed-in user. */
   dailyExports: number;
@@ -31,7 +31,7 @@ export interface TierLimits {
 }
 
 export const TIER_LIMITS: Record<Tier, TierLimits> = {
-  free: { maxResolution: "720p", premiumEffects: false, exportBranding: true, dailyExports: 5, compactExport: true },
+  free: { maxResolution: "720p", premiumEffects: false, exportBranding: false, dailyExports: 5, compactExport: true },
   lite: { maxResolution: "720p", premiumEffects: true, exportBranding: false, dailyExports: 20, compactExport: false },
   starter: { maxResolution: "1080p", premiumEffects: true, exportBranding: false, dailyExports: 50, compactExport: false },
   pro: { maxResolution: "4k", premiumEffects: true, exportBranding: false, dailyExports: 200, compactExport: false },
