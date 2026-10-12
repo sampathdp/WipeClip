@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { handOffToEditor } from "@/lib/editor/handoff";
 import RegionSelector from "./RegionSelector";
 import VideoCompareSlider from "./VideoCompareSlider";
+import ToolFeedback from "./ToolFeedback";
 import SignInModal from "./SignInModal";
 import { createClient } from "@/lib/supabase/client";
 import { clearPendingResult, loadPendingResult, savePendingResult } from "@/lib/resultCache";
@@ -689,6 +690,8 @@ export default function UploadDemo() {
                   </button>
                 )}
               </div>
+
+              <ToolFeedback tool={TOOL} />
             </div>
           )}
 

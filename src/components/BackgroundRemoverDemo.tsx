@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import ImageCompareSlider from "./ImageCompareSlider";
+import ToolFeedback from "./ToolFeedback";
 import SignInModal from "./SignInModal";
 import { createClient } from "@/lib/supabase/client";
 import { clearPendingResult, loadPendingResult, savePendingResult } from "@/lib/resultCache";
@@ -331,6 +332,8 @@ export default function BackgroundRemoverDemo() {
                   Process Another
                 </button>
               </div>
+
+              <ToolFeedback tool={TOOL} />
 
               <div className="mt-6 rounded-2xl border border-cyan-500/20 bg-cyan-50/70 p-4 text-center">
                 <p className="text-xs sm:text-sm text-muted">

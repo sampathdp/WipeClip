@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { trackEvent, useToolView } from "@/lib/analytics";
+import ToolFeedback from "./ToolFeedback";
 
 interface Capture {
   id: string;
@@ -477,6 +478,8 @@ export default function VideoFrameGrabberDemo() {
               </div>
             </div>
           )}
+
+          {(captures.length > 0 || suggestions.length > 0) && <ToolFeedback tool={TOOL} />}
 
           <div className="mt-6 rounded-2xl border border-cyan-500/20 bg-cyan-50/70 p-4 text-center">
             <p className="text-xs sm:text-sm text-muted">

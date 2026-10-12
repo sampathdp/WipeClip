@@ -12,6 +12,7 @@ import { ContentBlockedError, PlanRequiredError, type Resolution } from "@/lib/t
 import Dialog from "./Dialog";
 import { ExportIcon } from "./icons";
 import PremiumBadge from "./PremiumBadge";
+import ToolFeedback from "@/components/ToolFeedback";
 
 const TOOL = "video_editor";
 const TIERS: { key: Resolution; short: number }[] = [
@@ -265,6 +266,7 @@ export default function ExportDialog({
           <button type="button" onClick={() => setState("setup")} className="btn-secondary w-full rounded-full py-2.5 text-sm font-semibold">
             Export again
           </button>
+          <ToolFeedback tool={TOOL} className="" />
         </div>
       )}
 
