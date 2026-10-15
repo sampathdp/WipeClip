@@ -3,6 +3,7 @@ import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import ReferralCapture from "@/components/ReferralCapture";
+import ServiceBanner from "@/components/ServiceBanner";
 import { SITE_URL } from "@/lib/seo";
 import "./globals.css";
 
@@ -153,6 +154,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         />
       </head>
       <body className="min-h-full flex flex-col bg-background text-foreground font-sans">
+        <ServiceBanner />
         <ReferralCapture />
         {children}
         <Analytics />

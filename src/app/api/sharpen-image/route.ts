@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { IMAGE_CREDIT_COST } from "@/lib/credits";
-import { TOOLS_API_URL } from "@/lib/toolsApi";
+import { BACKEND_DISABLED, BACKEND_DISABLED_MESSAGE, TOOLS_API_URL } from "@/lib/toolsApi";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 
 /** Free-tool route for /api/image/sharpen, same anon-preview + signed-in-
@@ -9,6 +9,13 @@ import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
  * why this isn't Pro-gated like /api/process-image.
  */
 export async function POST(request: NextRequest) {
+  if (BACKEND_DISABLED) {
+    return NextResponse.json(
+      { detail: { code: "service_unavailable", message: BACKEND_DISABLED_MESSAGE } },
+      { status: 503 }
+    );
+  }
+
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
       { detail: { code: "server_error", message: "Accounts aren't configured yet." } },

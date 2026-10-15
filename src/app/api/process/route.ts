@@ -4,6 +4,7 @@ import { RESOLUTION_CREDIT_COST } from "@/lib/credits";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { isProUser } from "@/lib/plan";
 import { issueTicket } from "@/lib/jobTicket";
+import { BACKEND_DISABLED, BACKEND_DISABLED_MESSAGE } from "@/lib/toolsApi";
 
 function errorResponse(code: string, message: string, status: number) {
   return NextResponse.json({ detail: { code, message } }, { status });
@@ -28,6 +29,9 @@ function errorResponse(code: string, message: string, status: number) {
  * compute spigot.
  */
 export async function POST(request: NextRequest) {
+  if (BACKEND_DISABLED) {
+    return errorResponse("service_unavailable", BACKEND_DISABLED_MESSAGE, 503);
+  }
   if (!isSupabaseConfigured()) {
     return errorResponse("server_error", "Accounts aren't configured yet.", 501);
   }
