@@ -1,11 +1,13 @@
 import type { MetadataRoute } from "next";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "WipeClip.co: Online Video Editor for Creators",
     short_name: "WipeClip.co",
-    description:
-      "Online video editor for creators, with AI object removal for footage you shot yourself.",
+    description: AI_CLEANUP_ENABLED
+      ? "Online video editor for creators, with AI object removal for footage you shot yourself."
+      : "Online video editor for creators, with AI auto captions.",
     start_url: "/",
     display: "standalone",
     background_color: "#05060a",

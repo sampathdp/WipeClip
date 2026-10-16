@@ -10,6 +10,7 @@ import Faq from "@/components/Faq";
 import CtaBanner from "@/components/CtaBanner";
 import Footer from "@/components/Footer";
 import WelcomeModal from "@/components/WelcomeModal";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 // The long-form explainers (what it does, limitations, privacy) live on /about,
 // linked from WhyWipeClip and the navbar, so the homepage stays focused on
@@ -22,11 +23,15 @@ export default function Home() {
       <main className="flex-1">
         <Hero />
         <EditorPromo />
-        <section className="px-6">
-          <UploadDemo />
-        </section>
-        <HowItWorks includeSchema />
-        <WhyWipeClip />
+        {AI_CLEANUP_ENABLED && (
+          <>
+            <section className="px-6">
+              <UploadDemo />
+            </section>
+            <HowItWorks includeSchema />
+            <WhyWipeClip />
+          </>
+        )}
         <FreeTools />
         <Faq />
         <CtaBanner />

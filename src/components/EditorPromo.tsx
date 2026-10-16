@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Reveal from "./Reveal";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 const highlights = [
   "Trim the start and end",
@@ -7,7 +8,7 @@ const highlights = [
   "Drag clips into a new order",
   "Fade, slide, zoom and blur transitions",
   "Emoji, arrow and label stickers",
-  "AI Cleanup on just one clip",
+  AI_CLEANUP_ENABLED ? "AI Cleanup on just one clip" : "Auto captions from speech",
 ];
 
 // Illustrative timeline: three clips, two transitions, one sticker bar.
@@ -28,12 +29,14 @@ export default function EditorPromo() {
               New: Video Editor
             </div>
             <h2 className="font-display text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl">
-              Clean it up, then <span className="text-gradient">finish the edit</span>
+              {AI_CLEANUP_ENABLED ? "Clean it up, then " : "Cut it down, then "}
+              <span className="text-gradient">finish the edit</span>
             </h2>
             <p className="mt-4 text-base leading-relaxed text-muted">
-              WipeClip now includes a lightweight online video editor. Cut your clip down, rearrange it, add
-              transitions and stickers, and run AI Cleanup on the parts that need it, all in your browser. The
-              export keeps your original aspect ratio and frame rate.
+              {AI_CLEANUP_ENABLED
+                ? "WipeClip now includes a lightweight online video editor. Cut your clip down, rearrange it, add transitions and stickers, and run AI Cleanup on the parts that need it, all in your browser."
+                : "WipeClip is a lightweight online video editor. Cut your clip down, rearrange it, add transitions, stickers and captions, all in your browser."}{" "}
+              The export keeps your original aspect ratio and frame rate.
             </p>
             <ul className="mt-6 grid gap-2.5 sm:grid-cols-2">
               {highlights.map((h) => (
@@ -47,9 +50,11 @@ export default function EditorPromo() {
               <Link href="/editor" className="btn-primary rounded-full px-6 py-3 text-sm font-semibold">
                 Open the video editor
               </Link>
-              <a href="#upload" className="btn-secondary rounded-full px-6 py-3 text-sm font-semibold">
-                Just clean up a clip
-              </a>
+              {AI_CLEANUP_ENABLED && (
+                <a href="#upload" className="btn-secondary rounded-full px-6 py-3 text-sm font-semibold">
+                  Just clean up a clip
+                </a>
+              )}
             </div>
           </div>
 

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 export default function CtaBanner() {
   return (
@@ -17,17 +18,27 @@ export default function CtaBanner() {
 
           <div className="relative z-10">
             <h2 className="font-display text-3xl font-extrabold tracking-tight sm:text-5xl text-foreground">
-              Clean shots, <span className="text-gradient">distraction-free</span>
+              {AI_CLEANUP_ENABLED ? (
+                <>
+                  Clean shots, <span className="text-gradient">distraction-free</span>
+                </>
+              ) : (
+                <>
+                  Your next video, <span className="text-gradient">edited in minutes</span>
+                </>
+              )}
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-base sm:text-lg text-muted">
-              No registration needed to preview. Upload a clip you shot and see the crystal-clear result in under 15 seconds.
+              {AI_CLEANUP_ENABLED
+                ? "No registration needed to preview. Upload a clip you shot and see the crystal-clear result in under 15 seconds."
+                : "No registration needed to start. Drop in a clip, trim, add captions and export for any platform."}
             </p>
             <div className="mt-8">
               <Link
-                href="/#upload"
+                href={AI_CLEANUP_ENABLED ? "/#upload" : "/editor"}
                 className="btn-primary inline-flex items-center gap-2 rounded-full px-8 py-4 text-base font-bold shadow-[0_0_30px_rgba(124,92,255,0.5)]"
               >
-                <span>Remove an Object Free</span>
+                <span>{AI_CLEANUP_ENABLED ? "Remove an Object Free" : "Start Editing Free"}</span>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>

@@ -1,12 +1,15 @@
 import Link from "next/link";
 import Reveal from "./Reveal";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
-const tools = [
+const allTools = [
   {
     href: "/editor",
     badge: "New",
     title: "Online Video Editor",
-    desc: "Trim, split and cut out sections, reorder clips, add transitions and stickers, and AI-clean any clip. Right in your browser.",
+    desc: AI_CLEANUP_ENABLED
+      ? "Trim, split and cut out sections, reorder clips, add transitions and stickers, and AI-clean any clip. Right in your browser."
+      : "Trim, split and cut out sections, reorder clips, add transitions, stickers and auto captions. Right in your browser.",
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="6" cy="6" r="3" />
@@ -66,6 +69,8 @@ const tools = [
   },
 ];
 
+const tools = AI_CLEANUP_ENABLED ? allTools : allTools.filter((t) => t.href !== "/image-cleanup");
+
 export default function FreeTools() {
   return (
     <section id="tools" className="scroll-mt-28 py-24 relative overflow-hidden">
@@ -80,7 +85,7 @@ export default function FreeTools() {
             The Full Toolkit
           </div>
           <h2 className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-            More than <span className="text-gradient">video cleanup</span>
+            More than <span className="text-gradient">{AI_CLEANUP_ENABLED ? "video cleanup" : "video editing"}</span>
           </h2>
           <p className="mt-4 text-muted text-base leading-relaxed">
             Everything else you need for the same footage and photos: a full video editor, plus

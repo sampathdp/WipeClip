@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SITE_URL } from "@/lib/seo";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 /** Indexable content for /editor. The editor itself is a client app with
  * almost no text, so this server-rendered section is what search engines
@@ -40,10 +41,14 @@ const features = [
     title: "Any aspect ratio",
     desc: "Turn one video into 16:9, 9:16 for Shorts, TikTok and Reels, 1:1 or 4:5, with fit or fill and a color, gradient, blurred or image background.",
   },
-  {
-    title: "AI object removal on any clip",
-    desc: "Mark an unwanted object, like a passer-by or a stray cable, on one clip and WipeClip's reconstruction engine rebuilds the pixels behind it, for just that part of the timeline.",
-  },
+  ...(AI_CLEANUP_ENABLED
+    ? [
+        {
+          title: "AI object removal on any clip",
+          desc: "Mark an unwanted object, like a passer-by or a stray cable, on one clip and WipeClip's reconstruction engine rebuilds the pixels behind it, for just that part of the timeline.",
+        },
+      ]
+    : []),
 ];
 
 const steps = [
@@ -70,13 +75,17 @@ const faqs = [
     q: "Does exporting reduce quality?",
     a: "WipeClip keeps your original aspect ratio (16:9, 9:16, 1:1 and others) and frame rate, never upscales, and encodes at a visually near-lossless quality setting. You choose the maximum resolution when you export.",
   },
-  {
-    q: "Can I remove an object from just part of my video?",
-    a: "Yes. Select a clip on the timeline and use AI Cleanup. Only that clip is processed, and the cleaned result replaces it in your project. Undo brings the original back.",
-  },
+  ...(AI_CLEANUP_ENABLED
+    ? [
+        {
+          q: "Can I remove an object from just part of my video?",
+          a: "Yes. Select a clip on the timeline and use AI Cleanup. Only that clip is processed, and the cleaned result replaces it in your project. Undo brings the original back.",
+        },
+      ]
+    : []),
   {
     q: "Is my video uploaded or stored?",
-    a: "Editing happens in your browser. Your video is uploaded only to check it, and when you export or run AI Cleanup. It's processed in temporary storage and isn't kept. Your project is saved in your own browser so you can pick up where you left off.",
+    a: `Editing happens in your browser. Your video is uploaded only to check it, and when you export${AI_CLEANUP_ENABLED ? " or run AI Cleanup" : ""}. It's processed in temporary storage and isn't kept. Your project is saved in your own browser so you can pick up where you left off.`,
   },
 ];
 
@@ -91,7 +100,9 @@ const jsonLd = {
       operatingSystem: "Web",
       browserRequirements: "Requires a modern browser with HTML5 video support",
       description:
-        "Browser-based video editor: trim, split and reorder clips, add text, music, filters, effects, transitions, stickers and images, resize for any platform, and remove unwanted objects from a clip with AI.",
+        AI_CLEANUP_ENABLED
+          ? "Browser-based video editor: trim, split and reorder clips, add text, music, filters, effects, transitions, stickers and images, resize for any platform, and remove unwanted objects from a clip with AI."
+          : "Browser-based video editor: trim, split and reorder clips, add text, music, filters, effects, transitions, stickers and images, and resize for any platform.",
       featureList: [
         "Trim video",
         "Split and cut video",
@@ -103,7 +114,7 @@ const jsonLd = {
         "Music and audio tracks with volume, fades and audio extraction",
         "Filters, color adjustments and timed effects",
         "Canvas presets for YouTube, Shorts, TikTok, Reels and Instagram",
-        "AI removal of unwanted objects on a selected clip",
+        ...(AI_CLEANUP_ENABLED ? ["AI removal of unwanted objects on a selected clip"] : []),
         "Export MP4 at the original aspect ratio and frame rate",
       ],
       publisher: { "@id": `${SITE_URL}/#organization` },
@@ -160,17 +171,19 @@ export default function EditorLanding() {
             </li>
           ))}
         </ol>
-        <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-muted">
-          Only need an object gone from the whole video? The{" "}
-          <Link href="/#upload" className="underline hover:text-foreground">
-            one-step AI object removal tool
-          </Link>{" "}
-          is quicker. Read{" "}
-          <Link href="/guides/how-ai-video-inpainting-works" className="underline hover:text-foreground">
-            how the reconstruction works
-          </Link>
-          .
-        </p>
+        {AI_CLEANUP_ENABLED && (
+          <p className="mx-auto mt-8 max-w-2xl text-center text-sm text-muted">
+            Only need an object gone from the whole video? The{" "}
+            <Link href="/#upload" className="underline hover:text-foreground">
+              one-step AI object removal tool
+            </Link>{" "}
+            is quicker. Read{" "}
+            <Link href="/guides/how-ai-video-inpainting-works" className="underline hover:text-foreground">
+              how the reconstruction works
+            </Link>
+            .
+          </p>
+        )}
       </section>
 
       <section className="mx-auto max-w-3xl px-6 pt-20">

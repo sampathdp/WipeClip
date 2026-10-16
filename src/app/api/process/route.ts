@@ -5,6 +5,7 @@ import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { isProUser } from "@/lib/plan";
 import { issueTicket } from "@/lib/jobTicket";
 import { BACKEND_DISABLED, BACKEND_DISABLED_MESSAGE } from "@/lib/toolsApi";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 function errorResponse(code: string, message: string, status: number) {
   return NextResponse.json({ detail: { code, message } }, { status });
@@ -29,6 +30,9 @@ function errorResponse(code: string, message: string, status: number) {
  * compute spigot.
  */
 export async function POST(request: NextRequest) {
+  if (!AI_CLEANUP_ENABLED) {
+    return errorResponse("not_found", "This feature isn't available.", 404);
+  }
   if (BACKEND_DISABLED) {
     return errorResponse("service_unavailable", BACKEND_DISABLED_MESSAGE, 503);
   }

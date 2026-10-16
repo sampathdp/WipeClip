@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
@@ -60,6 +62,8 @@ const steps = [
 ];
 
 export default function Page() {
+  if (!AI_CLEANUP_ENABLED) notFound();
+
   return (
     <div className="flex flex-1 flex-col">
       <script

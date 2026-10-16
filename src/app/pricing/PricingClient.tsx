@@ -8,6 +8,7 @@ import { formatLkr, FREE_DAILY_CREDITS, PLANS, type PlanKey } from "@/lib/credit
 import { TIER_LIMITS, TIERS as TIER_ORDER, toTier, type Tier } from "@/lib/entitlements";
 import { createClient } from "@/lib/supabase/client";
 import { landingPagePath, trackEvent } from "@/lib/analytics";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 type Billing = "month" | "year";
 
@@ -101,7 +102,9 @@ const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[
       "All premium transitions, filters and effects",
       `Exports up to ${res(TIER_LIMITS.lite.maxResolution)}`,
       `${TIER_LIMITS.lite.dailyExports} exports a day`,
-      "AI credits for cleanup, background removal and sharpening",
+      AI_CLEANUP_ENABLED
+        ? "AI credits for cleanup, background removal and sharpening"
+        : "AI credits for background removal and sharpening",
     ],
   },
   {
@@ -123,8 +126,7 @@ const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[
       `Exports up to ${res(TIER_LIMITS.pro.maxResolution)} Ultra HD`,
       `${TIER_LIMITS.pro.dailyExports} exports a day`,
       "3x more AI credits than Starter",
-      "Image cleanup tool",
-      "Highest-quality AI cleanup (motion-tracked)",
+      ...(AI_CLEANUP_ENABLED ? ["Image cleanup tool", "Highest-quality AI cleanup (motion-tracked)"] : []),
       "Usage and billing history",
     ],
   },
@@ -428,7 +430,7 @@ export default function PricingClient() {
 
         <p className="mx-auto mt-6 max-w-2xl text-center text-xs text-muted">
           Plans are prepaid for the period shown and don&apos;t renew automatically. Renewing early adds the time to
-          your current plan. AI credits are used by the AI tools (object cleanup, background removal, sharpening);
+          your current plan. AI credits are used by the AI tools ({AI_CLEANUP_ENABLED ? "object cleanup, " : ""}background removal, sharpening);
           editing and exporting never use credits. Full refund within 14 days, see our{" "}
           <Link href="/refund-policy" className="underline hover:text-foreground">
             refund policy

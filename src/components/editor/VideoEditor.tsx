@@ -90,6 +90,7 @@ import {
   type Gesture,
 } from "./Panels";
 import PreviewPlayer from "./PreviewPlayer";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import Timeline, { type ItemMode, type TimelineTrack } from "./Timeline";
 import {
   AdjustIcon,
@@ -1160,7 +1161,7 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
               </p>
             )}
             <p className="mt-6 text-center text-xs text-muted">
-              Editing happens in your browser. Your video is only uploaded to check it and when you export or run AI Cleanup, and isn&apos;t stored.
+              Editing happens in your browser. Your video is only uploaded to check it and when you export{AI_CLEANUP_ENABLED ? " or run AI Cleanup" : ""}, and isn&apos;t stored.
             </p>
           </div>
         </main>
@@ -1346,9 +1347,11 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
           <ActionButton onClick={() => setTool("audio")}>
             <MusicIcon width={14} height={14} /> Add music
           </ActionButton>
-          <ActionButton onClick={openCleanup} tone="accent">
-            <SparkleIcon width={14} height={14} /> AI Cleanup
-          </ActionButton>
+          {AI_CLEANUP_ENABLED && (
+            <ActionButton onClick={openCleanup} tone="accent">
+              <SparkleIcon width={14} height={14} /> AI Cleanup
+            </ActionButton>
+          )}
         </div>
         <p className="mt-6 text-[11px] leading-relaxed text-muted">
           Shortcuts: Space play/pause · S split · F freeze frame · T text · Delete remove · Ctrl+C / Ctrl+V copy/paste · Ctrl+D duplicate · ←/→ frame step (Shift:
@@ -1540,10 +1543,14 @@ export default function VideoEditor({ children }: { children?: React.ReactNode }
             </ToolButton>
             {toolBtn("canvas", "Canvas", <CanvasIcon />, "Canvas size and background")}
             {toolBtn("layers", "Layers", <LayersIcon />, "Layer order, hide and lock")}
-            <span className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden />
-            <ToolButton label="AI Cleanup on the selected clip" onClick={openCleanup} text="AI Cleanup" accent>
-              <SparkleIcon />
-            </ToolButton>
+            {AI_CLEANUP_ENABLED && (
+              <>
+                <span className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden />
+                <ToolButton label="AI Cleanup on the selected clip" onClick={openCleanup} text="AI Cleanup" accent>
+                  <SparkleIcon />
+                </ToolButton>
+              </>
+            )}
           </div>
 
           <div className="max-h-[40dvh] overflow-y-auto p-2 sm:p-3 lg:max-h-[38dvh]">

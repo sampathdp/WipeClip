@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 export const metadata: Metadata = {
   title: "Terms of Service",
@@ -42,14 +43,23 @@ export default function TermsPage() {
       </P>
 
       <H2>1. What the Service does</H2>
-      <P>
-        WipeClip.co is a browser-based video editor with AI object removal.
-        You mark an unwanted object in a file you provide (for example a
-        passer-by, a stray cable, or a lens smudge) and the Service
-        reconstructs that region using automated image/video processing.
-        You choose the region; the Service does not detect, target, or
-        remove watermarks, logos, or other ownership marks.
-      </P>
+      {AI_CLEANUP_ENABLED ? (
+        <P>
+          WipeClip.co is a browser-based video editor with AI object removal.
+          You mark an unwanted object in a file you provide (for example a
+          passer-by, a stray cable, or a lens smudge) and the Service
+          reconstructs that region using automated image/video processing.
+          You choose the region; the Service does not detect, target, or
+          remove watermarks, logos, or other ownership marks.
+        </P>
+      ) : (
+        <P>
+          WipeClip.co is a browser-based video editor with automated captions
+          and photo tools (background removal, sharpening and frame capture).
+          The Service does not detect, target, or remove watermarks, logos, or
+          other ownership marks.
+        </P>
+      )}
 
       <H2>2. Eligibility</H2>
       <P>
@@ -154,8 +164,8 @@ export default function TermsPage() {
           your projects and purchased credits are kept.
         </li>
         <li>
-          <strong>Credits:</strong> AI credits are used by the AI tools (object
-          cleanup, background removal, sharpening); editing and exporting in
+          <strong>Credits:</strong> AI credits are used by the AI tools (
+          {AI_CLEANUP_ENABLED ? "object cleanup, " : ""}background removal, sharpening); editing and exporting in
           the video editor never use credits. Credits included with a plan are
           added when you buy it; purchased credits never expire and have no
           cash value. If an AI job fails due to an internal server error, the
