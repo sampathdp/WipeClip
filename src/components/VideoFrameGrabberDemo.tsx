@@ -3,6 +3,8 @@
 import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { trackEvent, useToolView } from "@/lib/analytics";
+import ToolFeedback from "./ToolFeedback";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 interface Capture {
   id: string;
@@ -478,11 +480,15 @@ export default function VideoFrameGrabberDemo() {
             </div>
           )}
 
+          {(captures.length > 0 || suggestions.length > 0) && <ToolFeedback tool={TOOL} />}
+
           <div className="mt-6 rounded-2xl border border-cyan-500/20 bg-cyan-50/70 p-4 text-center">
             <p className="text-xs sm:text-sm text-muted">
-              Need to remove an unwanted object instead of just grabbing a frame?{" "}
-              <Link href="/" className="font-semibold text-cyan-600 underline hover:text-cyan-700">
-                Try WipeClip.co&apos;s AI object removal free
+              {AI_CLEANUP_ENABLED
+                ? "Need to remove an unwanted object instead of just grabbing a frame? "
+                : "Need to trim or edit the whole clip? "}
+              <Link href={AI_CLEANUP_ENABLED ? "/" : "/editor"} className="font-semibold text-cyan-600 underline hover:text-cyan-700">
+                {AI_CLEANUP_ENABLED ? "Try WipeClip.co's AI object removal free" : "Try WipeClip.co's free video editor"}
               </Link>
             </p>
           </div>

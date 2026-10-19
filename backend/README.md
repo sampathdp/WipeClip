@@ -32,13 +32,18 @@ offline.
 
 ## Run locally
 
+From the repo root (full guide: [../docs/LOCAL_DEV.md](../docs/LOCAL_DEV.md)):
+
 ```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8001
+npm run dev:setup     # venv, requirements, backend/.env, models
+npm run dev           # site on :3000 + this backend on :8002
+npm run dev:check     # health check
 ```
+
+`npm run dev:setup` also removes `opencv-python-headless` after installing:
+nudenet depends on it, and it overwrites the `cv2` package from
+`opencv-contrib-python-headless`, which drops the `cv2.xphoto` inpainting
+that AI cleanup uses.
 
 Requires `ffmpeg` on PATH, or falls back to the static binary bundled by
 `imageio-ffmpeg` (already in requirements.txt) — no separate install needed.

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import type { Resolution } from "@/lib/toolsApi";
+import { getRequestAuth, isSupabaseConfigured } from "@/lib/supabase/server";
+import { preflight, withCors } from "@/lib/cors";
+import { BACKEND_DISABLED, BACKEND_DISABLED_MESSAGE, type Resolution } from "@/lib/toolsApi";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { issueTicket, sha256Hex } from "@/lib/jobTicket";
 import { effectivePlan } from "@/lib/plan";
@@ -37,14 +38,22 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * daily limit; the editor only gates the download itself behind sign-in.
  */
 export async function POST(request: NextRequest) {
+  return withCors(request, await handle(request));
+}
+
+export function OPTIONS(request: NextRequest) {
+  return preflight(request);
+}
+
+async function handle(request: NextRequest) {
+  if (BACKEND_DISABLED) {
+    return errorResponse("service_unavailable", BACKEND_DISABLED_MESSAGE, 503);
+  }
   if (!isSupabaseConfigured()) {
     return errorResponse("server_error", "Accounts aren't configured yet.", 501);
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getRequestAuth(request);
 
   let tier: Tier = "free";
   if (user) {

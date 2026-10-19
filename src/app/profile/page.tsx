@@ -6,6 +6,7 @@ import Footer from "@/components/Footer";
 import { FREE_DAILY_CREDITS } from "@/lib/credits";
 import { effectivePlan } from "@/lib/plan";
 import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 export const metadata: Metadata = {
   title: "Your Profile",
@@ -49,7 +50,9 @@ export default async function ProfilePage() {
 
   const links = [
     { href: "/editor", title: "Video Editor", desc: "Trim, cut, add transitions and stickers." },
-    { href: "/#upload", title: "Remove an object", desc: "Take a distraction out of your own clip." },
+    ...(AI_CLEANUP_ENABLED
+      ? [{ href: "/#upload", title: "Remove an object", desc: "Take a distraction out of your own clip." }]
+      : []),
     {
       href: "/history",
       title: "Job History",

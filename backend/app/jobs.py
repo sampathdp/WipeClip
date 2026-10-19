@@ -14,7 +14,6 @@ video processing already worked before this module existed.
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
 import numpy as np
@@ -48,14 +47,7 @@ def editor_export_job(plan_json: str, out_path: str) -> None:
     """`plan_json` is editor.ExportPlan serialized by main.py (a plain
     string, so it crosses the RQ boundary cheaply like the other jobs' args).
     """
-    raw = json.loads(plan_json)
-    plan = editor_pipeline.ExportPlan(
-        **{k: raw[k] for k in ("width", "height", "fps", "with_audio", "fit", "background", "color", "color2", "background_image", "crf", "audio_bitrate")},
-        clips=[editor_pipeline.PlanClip(**c) for c in raw["clips"]],
-        overlays=[editor_pipeline.PlanOverlay(**o) for o in raw["overlays"]],
-        audio=[editor_pipeline.PlanAudio(**a) for a in raw["audio"]],
-        effects=[editor_pipeline.PlanEffect(**e) for e in raw["effects"]],
-    )
+    plan = editor_pipeline.plan_from_json(plan_json)
     # main.py already quantized durations (speed + frame snapping) before
     # serializing; don't apply it twice.
     plan._quantized = True  # type: ignore[attr-defined]

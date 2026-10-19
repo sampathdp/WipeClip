@@ -1,6 +1,9 @@
 import { ImageResponse } from "next/og";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
-export const alt = "WipeClip.co: AI video cleanup for creators";
+export const alt = AI_CLEANUP_ENABLED
+  ? "WipeClip.co: AI video cleanup for creators"
+  : "WipeClip.co: online video editor for creators";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -94,7 +97,7 @@ export default function Image() {
             letterSpacing: -0.5,
           }}
         >
-          AI Video Cleanup for Creators
+          {AI_CLEANUP_ENABLED ? "AI Video Cleanup for Creators" : "Online Video Editor for Creators"}
         </div>
       </div>
     ),

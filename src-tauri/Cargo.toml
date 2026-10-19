@@ -1,0 +1,99 @@
+[package]
+name = "wipeclip"
+version = "0.1.0"
+description = "WipeClip desktop video editor"
+authors = ["WipeClip"]
+edition = "2021"
+rust-version = "1.80"
+publish = false
+
+[lib]
+# The _lib suffix avoids a name clash with the binary on Windows
+# (https://github.com/rust-lang/cargo/issues/8519).
+name = "wipeclip_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+uuid = { version = "1", features = ["v4"] }
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+# Recorder hotkeys (start/stop, pause, marker, screenshot). Registered from
+# Rust only; the page gets no global-shortcut plugin permissions.
+tauri-plugin-global-shortcut = "2"
+
+# Screen recorder input metadata (src/input): low-level mouse/keyboard hooks,
+# cursor polling, foreground window, free disk space.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_FileSystem",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+] }
+# Native screen capture (src/capture): Windows.Graphics.Capture for the
+# frames, a D3D11 video processor for scaling/NV12, Media Foundation for
+# H.264/AAC into fragmented MP4, WASAPI loopback for system audio. Same
+# version Tauri/WebView2 already pull in, so nothing new is downloaded.
+windows = { version = "0.62", features = [
+  "Foundation",
+  "Foundation_Metadata",
+  "Graphics",
+  "Graphics_Capture",
+  "Graphics_DirectX",
+  "Graphics_DirectX_Direct3D11",
+  "Security_Authorization_AppCapabilityAccess",
+  "Win32_Foundation",
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Graphics_Gdi",
+  "Win32_Media_Audio",
+  "Win32_Media_KernelStreaming",
+  "Win32_Media_MediaFoundation",
+  "Win32_Media_Multimedia",
+  "Win32_Storage_Xps",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Performance",
+  "Win32_System_Threading",
+  "Win32_System_Variant",
+  "Win32_System_WinRT",
+  "Win32_System_WinRT_Direct3D11",
+  "Win32_System_WinRT_Graphics_Capture",
+  "Win32_UI_WindowsAndMessaging",
+] }
+windows-future = "0.3"
+
+# Same on macOS: listen-only CGEventTap, cursor location, CGWindowList.
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.25"
+core-foundation = "0.10"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

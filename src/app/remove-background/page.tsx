@@ -3,10 +3,12 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import BackgroundRemoverDemo from "@/components/BackgroundRemoverDemo";
 import { buildPageMetadata } from "@/lib/seo";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 const title = "Remove Background From Image - Free";
 const description =
-  "Upload a photo and get a transparent-background PNG back in seconds. Free, no account required to preview. Powered by the same engine behind WipeClip.co's AI cleanup tools.";
+  "Upload a photo and get a transparent-background PNG back in seconds. Free, no account required to preview." +
+  (AI_CLEANUP_ENABLED ? " Powered by the same engine behind WipeClip.co's AI cleanup tools." : "");
 
 export const metadata: Metadata = buildPageMetadata({
   title,
@@ -23,10 +25,14 @@ const faqs = [
     q: "What file types come out?",
     a: "A PNG with a transparent alpha channel, so you can drop the subject straight onto a new background, a product page, or a slide.",
   },
-  {
-    q: "How is this different from WipeClip.co's AI cleanup tool?",
-    a: "Background removal cuts out the subject automatically, no marking required. The AI object removal tool reconstructs a small marked region (like a stray object) instead of removing the whole background. Both share the same image-processing engine underneath.",
-  },
+  ...(AI_CLEANUP_ENABLED
+    ? [
+        {
+          q: "How is this different from WipeClip.co's AI cleanup tool?",
+          a: "Background removal cuts out the subject automatically, no marking required. The AI object removal tool reconstructs a small marked region (like a stray object) instead of removing the whole background. Both share the same image-processing engine underneath.",
+        },
+      ]
+    : []),
   {
     q: "Will edges look rough on hair or fine detail?",
     a: "The pipeline runs edge decontamination and alpha smoothing after the initial cut specifically to clean up halos and rough edges around fine detail, not just a flat cutout mask.",

@@ -296,6 +296,12 @@ EDITOR_MAX_FPS: float = 60.0
 EDITOR_MAX_AUDIO: int = 12  # audio clips (and uploaded audio files) per export
 EDITOR_MAX_AUDIO_BYTES: int = 50 * 1024 * 1024
 EDITOR_MAX_EFFECTS: int = 30
+# Focus zooms / pointer effects (desktop screen recordings): rows of
+# per-frame values the browser sends only where they change.
+EDITOR_MAX_CAMERA_ROWS: int = 100_000  # per clip
+EDITOR_MAX_POINTER_ROWS: int = 200_000  # cursor + ring rows together
+EDITOR_MAX_MASKS: int = 40  # privacy masks per export
+EDITOR_MAX_MASK_ROWS: int = 50_000  # per mask
 # ffmpeg's reverse filter buffers every frame of the clip in memory, so a
 # reversed clip's source range is capped. Must match MAX_REVERSE_SECONDS in
 # src/lib/editor/timeline.ts.

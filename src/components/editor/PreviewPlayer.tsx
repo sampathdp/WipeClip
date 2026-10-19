@@ -4,7 +4,11 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } 
 import type { Clock } from "@/lib/editor/clock";
 import { gradeOf, isNeutralColor } from "@/lib/editor/look";
 import { DIP_AUDIO, locate, sourceTimeAt, videoBox, type Layout } from "@/lib/editor/timeline";
-import type { AudioClip, Canvas, Clip, Crop, EffectClip, MediaSource } from "@/lib/editor/types";
+import type { AudioClip, Canvas, Clip, Crop, EffectClip, MediaSource, Project } from "@/lib/editor/types";
+import { CameraCache, cameraCrop, clipView, evalCamera } from "@/lib/editor/camera";
+import { PointerCache, pointerScene } from "@/lib/editor/pointer";
+import { drawScene } from "@/lib/editor/pointerDraw";
+import { drawMasks } from "@/lib/editor/maskDraw";
 import GradeFilter from "./GradeFilter";
 
 interface Need {
@@ -52,8 +56,11 @@ export default function PreviewPlayer({
   volume,
   muted,
   stageRef,
+  project,
   children,
 }: {
+  /** For focus zooms and the pointer layer (recorded sources). */
+  project?: Project;
   lay: Layout;
   sources: Record<string, MediaSource>;
   canvas: Canvas;
@@ -79,15 +86,19 @@ export default function PreviewPlayer({
   const scanRef = useRef<HTMLDivElement>(null);
   const rgbOffsets = useRef<{ r: SVGFEOffsetElement | null; b: SVGFEOffsetElement | null; g: SVGFEOffsetElement | null }>({ r: null, b: null, g: null });
   const flashRef = useRef<SVGFEComponentTransferElement | null>(null);
-  const state = useRef({ lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded });
+  const pointerRef = useRef<HTMLCanvasElement>(null);
+  const maskWrapRef = useRef<HTMLDivElement>(null);
+  const maskCanvasRef = useRef<HTMLCanvasElement>(null);
+  const caches = useRef({ camera: new CameraCache(), pointer: new PointerCache() });
+  const state = useRef({ lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project });
   const playPending = useRef([false, false]);
   const audioPool = useRef(new Map<string, HTMLAudioElement>());
   const outerRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
-    state.current = { lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded };
-  }, [lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded]);
+    state.current = { lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project };
+  }, [lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project]);
 
   // Letterbox the stage into whatever space the layout gives the preview,
   // keeping the canvas's exact aspect ratio (9:16, 1:1, 16:9, ...).
@@ -123,7 +134,7 @@ export default function PreviewPlayer({
     const tick = (now: number) => {
       const dt = Math.min(0.25, (now - last) / 1000);
       last = now;
-      const { lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded } = state.current;
+      const { lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project } = state.current;
       const els = [slotA.current, slotB.current];
       const stage = fxRef.current;
       if (!els[0] || !els[1] || !stage || lay.clips.length === 0) {
@@ -213,13 +224,24 @@ export default function PreviewPlayer({
 
       const stageW = stage.clientWidth;
       const stageH = stage.clientHeight;
-      applyComposite(els as HTMLVideoElement[], needs, loc, lay, sources, canvas, canvasSize, stageW, stageH, dipRef.current, volume, muted);
-      drawBlurBackground(
-        blurBgRef.current,
-        canvas,
-        loc ? els[loc.primary.index % 2]! : null,
-        loc ? lay.clips[loc.primary.index].clip.crop : null
-      );
+      // Focus zooms: the camera window is applied as an extra crop, the
+      // same geometry the export's zoom chain produces (camera.ts).
+      const crops: (Crop | null)[] = needs.map((need) => {
+        if (!need) return null;
+        const clip = lay.clips[need.index].clip;
+        const view = clipView(clip, sources[clip.sourceId], canvasSize, canvas.fit);
+        const cam = caches.current.camera.track(project?.zooms, clip, view);
+        return cam ? cameraCrop(clip.crop, evalCamera(cam, need.time)) : clip.crop;
+      });
+      applyComposite(els as HTMLVideoElement[], needs, crops, loc, lay, sources, canvas, canvasSize, stageW, stageH, dipRef.current, volume, muted);
+      drawBlurBackground(blurBgRef.current, canvas, loc ? els[loc.primary.index % 2]! : null, loc ? crops[loc.primary.index % 2] : null);
+      if (maskWrapRef.current && maskCanvasRef.current) {
+        drawMasks(maskWrapRef.current, maskCanvasRef.current, project?.masks ?? [], t, lay, project ?? ({} as Project), sources, canvasSize, caches.current, loc ? els[loc.primary.index % 2]! : null);
+      }
+      if (pointerRef.current) {
+        const scene = project ? pointerScene(lay, project, sources, canvasSize, t, caches.current) : { cursor: null, rings: [] };
+        drawScene(pointerRef.current, scene, project?.pointer);
+      }
       applyEffects(effects, t, stage, stageW, stageH, {
         rgb: rgbOffsets.current,
         flash: flashRef.current,
@@ -327,6 +349,15 @@ export default function PreviewPlayer({
             style={{ display: "none", zIndex: 6, backgroundImage: "repeating-linear-gradient(to bottom, rgba(0,0,0,0.6) 0 1px, transparent 1px 4px)" }}
           />
         </div>
+        {/* Reconstructed cursor and click rings: above the video, not
+            moved by timed effects, below text/stickers - same order as the
+            export (effects, pointer, overlays). */}
+        {/* Privacy masks: over the video and its effects, under the pointer
+            and text/stickers - the export order. */}
+        <div ref={maskWrapRef} className="pointer-events-none absolute inset-0 z-[7] overflow-hidden" aria-hidden>
+          <canvas ref={maskCanvasRef} className="absolute inset-0 h-full w-full" />
+        </div>
+        <canvas ref={pointerRef} className="pointer-events-none absolute inset-0 z-[8] h-full w-full" aria-hidden />
         {children}
       </div>
     </div>
@@ -336,6 +367,7 @@ export default function PreviewPlayer({
 function applyComposite(
   els: HTMLVideoElement[],
   needs: (Need | null)[],
+  crops: (Crop | null)[],
   loc: ReturnType<typeof locate>,
   lay: Layout,
   sources: Record<string, MediaSource>,
@@ -413,9 +445,14 @@ function applyComposite(
     const bh = b.h * H;
     // Crop: the element is the whole frame, sized so the kept part fills the
     // box, then clipped to that part and rotated around its center.
-    const c = clip.crop;
+    const c = crops[slot] ?? clip.crop;
     const fw = bw / c.w;
     const fh = bh / c.h;
+    // The element is larger than the stage whenever part of the frame is
+    // cropped away (crop, recording region, focus zoom); the stylesheet's
+    // video { max-width: 100% } would squash it.
+    el.style.maxWidth = "none";
+    el.style.maxHeight = "none";
     el.style.width = `${fw}px`;
     el.style.height = `${fh}px`;
     el.style.left = `${clip.transform.x * W - bw / 2 - c.x * fw}px`;

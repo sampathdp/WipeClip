@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import CtaBanner from "@/components/CtaBanner";
@@ -37,6 +39,8 @@ const jsonLd = {
 };
 
 export default function Page() {
+  if (!AI_CLEANUP_ENABLED) notFound();
+
   return (
     <div className="flex flex-1 flex-col">
       <script

@@ -15,6 +15,7 @@ import type { Clip, MediaSource, TransitionType } from "@/lib/editor/types";
 import { isPremiumTransition } from "@/lib/entitlements";
 import { ChevronLeftIcon, ChevronRightIcon, SparkleIcon, SplitIcon, TrashIcon } from "./icons";
 import PremiumBadge from "./PremiumBadge";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 export function PanelShell({ title, onClose, children }: { title: string; onClose?: () => void; children: ReactNode }) {
   return (
@@ -229,7 +230,7 @@ export function ClipPanel({
 
         {extra}
 
-        {!frozen && (
+        {AI_CLEANUP_ENABLED && !frozen && (
           <div className="rounded-xl border border-accent/25 bg-accent/5 p-3">
             <p className="text-xs font-semibold text-foreground">AI Cleanup</p>
             <p className="mt-1 text-xs text-muted">

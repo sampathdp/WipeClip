@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the app's Info.plist by tauri build. macOS shows these
+     strings in its permission prompts for the screen recorder; without them
+     the system refuses microphone and camera access outright. -->
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>WipeClip records your microphone only while you're making a screen recording with it turned on.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>WipeClip records your camera only while you're making a screen recording with the webcam turned on.</string>
+</dict>
+</plist>

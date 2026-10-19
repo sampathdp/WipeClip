@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Logo from "./Logo";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 export default function Footer() {
   return (
@@ -47,10 +48,14 @@ export default function Footer() {
           <Link href="/sharpen-image" className="transition-colors hover:text-foreground">
             Photo Sharpener
           </Link>
-          <span className="text-border">&middot;</span>
-          <Link href="/image-cleanup" className="transition-colors hover:text-foreground">
-            Image Cleanup
-          </Link>
+          {AI_CLEANUP_ENABLED && (
+            <>
+              <span className="text-border">&middot;</span>
+              <Link href="/image-cleanup" className="transition-colors hover:text-foreground">
+                Image Cleanup
+              </Link>
+            </>
+          )}
         </div>
         <p className="mt-4 text-xs text-muted">
           For content you created or have the rights to edit only. WipeClip.co

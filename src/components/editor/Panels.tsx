@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { FILTERS, FILTER_ORDER } from "@/lib/editor/look";
 import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
 import { TEXT_FONTS, TEXT_TEMPLATES } from "@/lib/editor/textRaster";
@@ -28,9 +28,11 @@ import {
   type Look,
   type MediaSource,
   type Overlay,
+  type ShapeStyle,
   type TextStyle,
 } from "@/lib/editor/types";
 import { CAPTION_POSITIONS, CAPTION_STYLES, type CaptionStyleId } from "@/lib/editor/captions";
+import { SHAPE_LABELS } from "@/lib/editor/shapes";
 import { isPremiumEffect, isPremiumFilter } from "@/lib/entitlements";
 import GradeFilter from "./GradeFilter";
 import PremiumBadge from "./PremiumBadge";
@@ -558,7 +560,21 @@ export function CaptionsPanel({
   onRestyle,
   onRemoveAll,
   onClose,
+  modelCached = true,
+  hidden = false,
+  onToggleHidden,
+  onResize,
+  onAlign,
+  onExport,
 }: {
+  /** null = still checking. When false, generating asks to download the model first. */
+  modelCached?: boolean | null;
+  /** Every caption is hidden (toggled off). */
+  hidden?: boolean;
+  onToggleHidden?: () => void;
+  onResize?: (size: number) => void;
+  onAlign?: (align: "left" | "center" | "right") => void;
+  onExport?: (format: "srt" | "vtt" | "txt") => void;
   options: CaptionOptions;
   onOptions: (o: CaptionOptions) => void;
   /** Caption layers already on the timeline. */
@@ -575,11 +591,14 @@ export function CaptionsPanel({
     onOptions(next);
     if (restyle && count > 0) onRestyle(next);
   };
+  const [consent, setConsent] = useState(false);
+  const needsModel = modelCached === false && !consent;
   return (
     <PanelShell title="Auto captions" onClose={onClose}>
       <div className="space-y-4">
         <p className="text-xs text-muted">
-          Turns the speech in your clips into timed text layers. Music tracks are ignored. Edit any caption afterwards like normal text. Runs on your device; the first time downloads a speech model (about 80 MB).
+          Turns the speech in your clips (and a screen recording&apos;s microphone) into timed text layers. Music tracks are ignored. Edit any
+          caption&apos;s text and timing afterwards like normal text. Speech recognition runs on your device - your audio is not uploaded.
         </p>
         <Field label="Language">
           <select className={inputCls} value={options.language} onChange={(e) => set({ language: e.target.value })}>
@@ -647,14 +666,74 @@ export function CaptionsPanel({
             options={CAPTION_POSITIONS.map((p) => ({ value: p.y, label: p.label }))}
           />
         </div>
-        <ActionButton onClick={onGenerate} disabled={busy} tone="accent">
-          {busy ? "Generating…" : `${count > 0 ? "Regenerate" : "Generate"} captions · free`}
-        </ActionButton>
+        {needsModel ? (
+          <div className="space-y-2 rounded-xl border border-border bg-surface-2/60 p-3 text-xs text-muted">
+            <p className="font-semibold text-foreground">Speech model needed (one time)</p>
+            <p>
+              Whisper base, about 80 MB, downloaded from Hugging Face and kept on this device. Transcribing uses the CPU (or GPU where available)
+              and around 1 GB of memory; a 10-minute recording takes a few minutes.
+            </p>
+            <ActionButton tone="accent" onClick={() => setConsent(true)} disabled={busy}>
+              Download model (80 MB)
+            </ActionButton>
+          </div>
+        ) : (
+          <ActionButton onClick={onGenerate} disabled={busy || modelCached === null} tone="accent">
+            {busy ? "Generating…" : `${count > 0 ? "Regenerate" : "Generate"} captions · free`}
+          </ActionButton>
+        )}
         {count > 0 && (
           <div className="space-y-2 border-t border-border pt-4">
             <p className="text-xs text-muted">
               {count} caption{count === 1 ? "" : "s"} on the Text track. Style and position changes apply to all of them; regenerating replaces them.
             </p>
+            {onToggleHidden && (
+              <label className="flex items-center gap-2 text-xs font-medium text-foreground">
+                <input type="checkbox" className="accent-[var(--accent)]" checked={!hidden} onChange={onToggleHidden} />
+                Show captions (in the preview and the export)
+              </label>
+            )}
+            {onResize && (
+              <div>
+                <SectionTitle>Size</SectionTitle>
+                <Chips
+                  label="Caption size"
+                  value={0}
+                  onChange={(v) => v && onResize(v)}
+                  options={[
+                    { value: 0.04, label: "Small" },
+                    { value: 0.055, label: "Medium" },
+                    { value: 0.075, label: "Large" },
+                  ]}
+                />
+              </div>
+            )}
+            {onAlign && (
+              <div>
+                <SectionTitle>Alignment</SectionTitle>
+                <Chips
+                  label="Caption alignment"
+                  value={""}
+                  onChange={(v) => v && onAlign(v as "left" | "center" | "right")}
+                  options={[
+                    { value: "left", label: "Left" },
+                    { value: "center", label: "Center" },
+                    { value: "right", label: "Right" },
+                  ]}
+                />
+              </div>
+            )}
+            {onExport && (
+              <div>
+                <SectionTitle>Export</SectionTitle>
+                <div className="flex flex-wrap gap-2">
+                  <ActionButton onClick={() => onExport("srt")}>SRT</ActionButton>
+                  <ActionButton onClick={() => onExport("vtt")}>WebVTT</ActionButton>
+                  <ActionButton onClick={() => onExport("txt")}>Transcript (.txt)</ActionButton>
+                </div>
+                <p className="mt-1 text-[11px] text-muted">Subtitle files use your corrected text and timings. Visible captions are also burned into the video export.</p>
+              </div>
+            )}
             <ActionButton onClick={onRemoveAll} tone="danger">
               <TrashIcon width={14} height={14} /> Remove all captions
             </ActionButton>
@@ -693,12 +772,58 @@ export function OverlayPanel({
 }) {
   const o = overlay;
   const title =
-    o.kind === "text" ? "Text" : o.kind === "image" ? "Image" : o.kind === "video" ? "Video layer" : `Sticker · ${getStickerDef(o.stickerId)?.label ?? ""}`;
+    o.kind === "text"
+      ? o.keystroke
+        ? "Shortcut"
+        : "Text"
+      : o.kind === "image"
+        ? "Image"
+        : o.kind === "video"
+          ? "Video layer"
+          : o.kind === "shape"
+            ? SHAPE_LABELS[o.shape.type]
+            : `Sticker · ${getStickerDef(o.stickerId)?.label ?? ""}`;
+  const setShape = (patch: Partial<ShapeStyle>) => o.kind === "shape" && onChange({ shape: { ...o.shape, ...patch } } as Partial<Overlay>);
   const setText = (patch: Partial<TextStyle>) => o.kind === "text" && onChange({ text: { ...o.text, ...patch } } as Partial<Overlay>);
 
   return (
     <PanelShell title={title} onClose={onClose}>
       <div className="space-y-4">
+        {o.kind === "shape" && (
+          <div className="mb-4 space-y-3">
+            <ColorField label="Color" value={o.shape.color} onChange={(color) => setShape({ color })} gesture={gesture} />
+            {o.shape.type !== "outline" && (
+              <label className="flex items-center gap-2 text-xs font-medium text-foreground">
+                <input type="checkbox" className="accent-[var(--accent)]" checked={o.shape.filled} onChange={(e) => setShape({ filled: e.target.checked })} />
+                {o.shape.type === "circle" || o.shape.type === "rect" ? "Tinted fill" : "Filled"}
+              </label>
+            )}
+            {o.shape.type !== "step" && (
+              <SliderField
+                label="Proportions"
+                value={o.shape.aspect}
+                min={o.shape.type === "arrow" ? 1.5 : 0.3}
+                max={o.shape.type === "arrow" ? 6 : 4}
+                step={0.05}
+                format={(v) => `${v.toFixed(2)} : 1`}
+                onChange={(aspect) => setShape({ aspect })}
+                gesture={gesture}
+              />
+            )}
+            {(o.shape.type === "circle" || o.shape.type === "rect" || o.shape.type === "outline" || !o.shape.filled) && (
+              <SliderField label="Line width" value={o.shape.stroke} min={0.02} max={0.2} step={0.005} format={(v) => `${Math.round(v * 100)}%`} onChange={(stroke) => setShape({ stroke })} gesture={gesture} />
+            )}
+            {o.shape.type === "step" && (
+              <SliderField label="Number" value={o.shape.number} min={1} max={99} step={1} onChange={(number) => setShape({ number })} gesture={gesture} />
+            )}
+            {o.shape.type === "callout" && (
+              <Field label="Callout text">
+                <textarea value={o.shape.text} rows={2} maxLength={120} onChange={(e) => setShape({ text: e.target.value })} className={inputCls} />
+              </Field>
+            )}
+            {o.shape.type === "arrow" && <p className="text-[11px] text-muted">Rotate the layer (handle on the preview, or Rotation below) to aim the arrow.</p>}
+          </div>
+        )}
         {o.kind === "text" && (
           <>
             <textarea
@@ -1212,7 +1337,9 @@ export function LayersPanel({
               ? `“${o.text.content.split("\n")[0].slice(0, 24) || "Text"}”`
               : o.kind === "sticker"
                 ? (getStickerDef(o.stickerId)?.label ?? "Sticker")
-                : (sources[o.sourceId]?.file.name ?? (o.kind === "video" ? "Video" : "Image"));
+                : o.kind === "shape"
+                  ? SHAPE_LABELS[o.shape.type]
+                  : (sources[o.sourceId]?.file.name ?? (o.kind === "video" ? "Video" : "Image"));
           const thumb = o.kind === "sticker" ? stickerThumbSrc(getStickerDef(o.stickerId)!) : o.kind === "image" ? sources[o.sourceId]?.url : null;
           return (
             <li

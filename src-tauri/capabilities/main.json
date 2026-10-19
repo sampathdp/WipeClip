@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The bundled editor in the main window (the recording mini player has its own, smaller capability: mini.json). Remote pages get no IPC access (no `remote` entry). File dialogs, saving, links and the credential store go through the app's own commands in src-tauri/src, which validate their inputs - no fs, shell or opener plugin APIs are exposed to the page.",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit-to",
+    "deep-link:allow-get-current"
+  ]
+}

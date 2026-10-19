@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { trackEvent } from "@/lib/analytics";
+import { authRedirectUrl, IS_DESKTOP, openExternal } from "@/lib/platform";
 
 type View = "password" | "magic";
 type PasswordAction = "signin" | "signup";
@@ -65,19 +67,44 @@ export default function SignInModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
+  // Desktop app: Google sign-in and email links finish in the system
+  // browser, which hands the code back through the wipeclip:// deep link
+  // (see DesktopShell). This closes the modal once that lands.
+  const awaitingDesktopRedirect = IS_DESKTOP && open && (googleLoading || status === "sent");
+  useEffect(() => {
+    if (!awaitingDesktopRedirect) return;
+    const { data: sub } = createClient().auth.onAuthStateChange((event) => {
+      if (event !== "SIGNED_IN") return;
+      setGoogleLoading(false);
+      setStatus("idle");
+      onSignedIn?.();
+      onClose();
+    });
+    return () => sub.subscription.unsubscribe();
+  }, [awaitingDesktopRedirect, onSignedIn, onClose]);
+
   if (!open) return null;
 
   const signInWithGoogle = async () => {
     setError(null);
     setGoogleLoading(true);
     const supabase = createClient();
-    const { error: err } = await supabase.auth.signInWithOAuth({
+    const { data, error: err } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: { redirectTo: authRedirectUrl(), skipBrowserRedirect: IS_DESKTOP },
     });
     if (err) {
       setError(err.message);
       setGoogleLoading(false);
+      return;
+    }
+    if (IS_DESKTOP && data.url) {
+      // The consent screen opens in the system browser; this window waits
+      // for the deep link (effect above).
+      await openExternal(data.url).catch((e) => {
+        setError(e instanceof Error ? e.message : String(e));
+        setGoogleLoading(false);
+      });
     }
     // On success the browser navigates away to Google's consent screen -
     // the pending result is already saved to IndexedDB by this point
@@ -96,7 +123,7 @@ export default function SignInModal({
       const { data, error: err } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+        options: { emailRedirectTo: authRedirectUrl() },
       });
       if (err) {
         setError(err.message);
@@ -134,7 +161,7 @@ export default function SignInModal({
     const supabase = createClient();
     const { error: err } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      options: { emailRedirectTo: authRedirectUrl() },
     });
     if (err) {
       setError(err.message);
@@ -144,9 +171,13 @@ export default function SignInModal({
     setStatus("sent");
   };
 
-  return (
+  // Portal to <body>: callers like AuthStatus sit inside the navbar, whose
+  // backdrop-filter makes it the containing block for `fixed` descendants -
+  // rendered in place, the modal anchors to the navbar and its top half
+  // (heading, Google button) ends up above the viewport.
+  return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/70 backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <div
@@ -270,14 +301,17 @@ export default function SignInModal({
                     Use email and password instead
                   </button>
                 )}
-                <Link href="/sign-in" className="hover:text-foreground">
-                  Or open the full sign-in page
-                </Link>
+                {!IS_DESKTOP && (
+                  <Link href="/sign-in" className="hover:text-foreground">
+                    Or open the full sign-in page
+                  </Link>
+                )}
               </div>
             </form>
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

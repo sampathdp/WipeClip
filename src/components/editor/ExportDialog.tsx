@@ -9,9 +9,11 @@ import { saveLastExport } from "@/lib/editor/projectStore";
 import { canvasSize, formatTime } from "@/lib/editor/timeline";
 import type { MediaSource, Project } from "@/lib/editor/types";
 import { ContentBlockedError, PlanRequiredError, type Resolution } from "@/lib/toolsApi";
+import { IS_DESKTOP, revealExport, saveExportFile } from "@/lib/platform";
 import Dialog from "./Dialog";
 import { ExportIcon } from "./icons";
 import PremiumBadge from "./PremiumBadge";
+import ToolFeedback from "@/components/ToolFeedback";
 
 const TOOL = "video_editor";
 const TIERS: { key: Resolution; short: number }[] = [
@@ -237,14 +239,16 @@ export default function ExportDialog({
           <p className="font-mono text-xs text-muted">
             {Math.floor(elapsed / 60000)}:{String(Math.floor((elapsed % 60000) / 1000)).padStart(2, "0")}
           </p>
-          <p className="text-xs text-muted">Uploading, then applying every cut, transition and sticker. Keep this tab open.</p>
+          <p className="text-xs text-muted">Uploading, then applying every cut, transition and sticker. {IS_DESKTOP ? "Keep WipeClip open." : "Keep this tab open."}</p>
         </div>
       )}
 
       {state === "done" && result && (
         <div className="space-y-4">
           <video src={result.url} controls playsInline className="max-h-[50dvh] w-full rounded-xl bg-black" />
-          {isSignedIn ? (
+          {isSignedIn && IS_DESKTOP ? (
+            <DesktopSaveButton blob={result.blob} filename={filename} />
+          ) : isSignedIn ? (
             <a
               href={result.url}
               download={filename}
@@ -265,6 +269,7 @@ export default function ExportDialog({
           <button type="button" onClick={() => setState("setup")} className="btn-secondary w-full rounded-full py-2.5 text-sm font-semibold">
             Export again
           </button>
+          <ToolFeedback tool={TOOL} className="" />
         </div>
       )}
 
@@ -290,5 +295,51 @@ export default function ExportDialog({
         </div>
       )}
     </Dialog>
+  );
+}
+
+/** Desktop app: "Save MP4" opens the OS save dialog instead of a browser
+ * download (see saveExportFile in src/lib/platform). */
+function DesktopSaveButton({ blob, filename }: { blob: Blob; filename: string }) {
+  const [state, setState] = useState<{ kind: "idle" | "saving" } | { kind: "saved"; path: string } | { kind: "error"; message: string }>({
+    kind: "idle",
+  });
+
+  const save = async () => {
+    setState({ kind: "saving" });
+    trackEvent("download_clicked", { tool: TOOL });
+    try {
+      const res = await saveExportFile(blob, filename);
+      setState(res.status === "saved" ? { kind: "saved", path: res.path } : { kind: "idle" });
+    } catch (e) {
+      console.error("[editor] save failed", e);
+      setState({ kind: "error", message: typeof e === "string" ? e : e instanceof Error ? e.message : "Couldn't save the file." });
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={save}
+        disabled={state.kind === "saving"}
+        className="flex w-full items-center justify-center gap-2 rounded-full bg-emerald-500 py-3 text-sm font-bold text-black hover:bg-emerald-400 disabled:opacity-60"
+      >
+        <ExportIcon width={16} height={16} /> {state.kind === "saving" ? "Saving…" : "Save MP4…"}
+      </button>
+      {state.kind === "saved" && (
+        <p className="text-center text-xs text-muted" role="status">
+          Saved to <span className="break-all font-mono">{state.path}</span>{" "}
+          <button type="button" onClick={() => void revealExport(state.path)} className="font-semibold text-accent underline">
+            Show in folder
+          </button>
+        </p>
+      )}
+      {state.kind === "error" && (
+        <p className="text-center text-xs font-semibold text-rose-600 dark:text-rose-400" role="alert">
+          {state.message} Your export is still here - try another folder.
+        </p>
+      )}
+    </div>
   );
 }

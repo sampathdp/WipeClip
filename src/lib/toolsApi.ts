@@ -1,5 +1,14 @@
+import { apiFetch } from "@/lib/platform";
+
 export const TOOLS_API_URL =
   process.env.NEXT_PUBLIC_TOOLS_API_URL ?? "http://localhost:8001";
+
+/** Kill switch for the paid AI backend (see .env.local.example). When set,
+ * every backend call fails fast with BACKEND_DISABLED_MESSAGE instead of
+ * hitting a server that's been shut down. */
+export const BACKEND_DISABLED = process.env.NEXT_PUBLIC_BACKEND_DISABLED === "true";
+export const BACKEND_DISABLED_MESSAGE =
+  "AI processing is temporarily unavailable while we work on the service. Please check back soon.";
 
 export class ApiError extends Error {
   code?: string;
@@ -7,6 +16,10 @@ export class ApiError extends Error {
     super(message);
     this.code = code;
   }
+}
+
+function assertBackendEnabled(): void {
+  if (BACKEND_DISABLED) throw new ApiError(BACKEND_DISABLED_MESSAGE, "service_unavailable");
 }
 
 export class ContentBlockedError extends ApiError {}
@@ -53,6 +66,7 @@ export interface VideoInfo {
 export async function probeVideo(
   file: File
 ): Promise<{ info: VideoInfo; previewUrl: string }> {
+  assertBackendEnabled();
   const body = new FormData();
   body.append("file", file);
 
@@ -90,7 +104,8 @@ export type Resolution = "720p" | "1080p" | "4k";
  * That route does every plan and credit check; the files then go straight
  * to the backend with the ticket - see src/lib/jobTicket.ts. */
 async function getTicket(route: string, payload: unknown, fallback: string, signal?: AbortSignal) {
-  const res = await fetch(route, {
+  assertBackendEnabled();
+  const res = await apiFetch(route, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -187,6 +202,8 @@ export async function processImage(file: File, region: Region): Promise<Blob> {
   body.append("w", String(region.w));
   body.append("h", String(region.h));
 
+  assertBackendEnabled();
+
   const res = await fetch("/api/process-image", {
     method: "POST",
     body,
@@ -209,6 +226,8 @@ export async function removeBackground(file: File): Promise<Blob> {
   const body = new FormData();
   body.append("file", file);
 
+  assertBackendEnabled();
+
   const res = await fetch("/api/remove-background", {
     method: "POST",
     body,
@@ -230,6 +249,8 @@ export async function sharpenImage(file: File, strength: SharpenStrength): Promi
   const body = new FormData();
   body.append("file", file);
   body.append("strength", strength);
+
+  assertBackendEnabled();
 
   const res = await fetch("/api/sharpen-image", {
     method: "POST",

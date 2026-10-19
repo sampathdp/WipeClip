@@ -5,6 +5,7 @@
  * renders exactly this model; everything here is plain JSON so it fits in
  * undo history and IndexedDB.
  */
+import type { InteractionEvent, RecordingManifest, TrackKind } from "../recorder/format.ts";
 
 export type TransitionType =
   | "fade"
@@ -138,6 +139,27 @@ interface OverlayBase {
   locked: boolean;
   /** Made by auto captions - restyled / replaced together. */
   caption?: boolean;
+  /** A keyboard-shortcut indicator made from recorded shortcut events. */
+  keystroke?: boolean;
+}
+
+// --- Annotations: shapes drawn as PNGs like text (see shapes.ts) ----------
+
+export type ShapeType = "arrow" | "circle" | "rect" | "step" | "callout" | "outline";
+
+export interface ShapeStyle {
+  type: ShapeType;
+  color: string;
+  /** Filled body (circle, rect, step badge, callout) or outline only. */
+  filled: boolean;
+  /** Line width as a fraction of the shape's short side. */
+  stroke: number;
+  /** Width / height of the shape (arrow length vs head, rect proportions). */
+  aspect: number;
+  /** Numbered steps. */
+  number: number;
+  /** Callout text. */
+  text: string;
 }
 
 export type Overlay =
@@ -146,7 +168,9 @@ export type Overlay =
   | (OverlayBase & { kind: "text"; text: TextStyle })
   /** Picture-in-picture: a video playing from `offset` (source seconds)
    * for the layer's time range, with its own sound at `volume` (0..2). */
-  | (OverlayBase & { kind: "video"; sourceId: string; offset: number; volume: number });
+  | (OverlayBase & { kind: "video"; sourceId: string; offset: number; volume: number })
+  /** Arrow, highlight circle, rectangle, numbered step, callout, focus outline. */
+  | (OverlayBase & { kind: "shape"; shape: ShapeStyle });
 
 // --- Audio and effects ----------------------------------------------------
 
@@ -198,6 +222,134 @@ export interface Canvas {
     | { type: "image"; sourceId: string };
 }
 
+// --- Screen-recording focus effects (see camera.ts, pointer.ts, focus.ts) ---
+
+export type ZoomEase = "smooth" | "gentle" | "linear";
+
+/** A focus zoom on a recorded source. Times are *source* seconds (like a
+ * clip's start/end), so trimming, splitting or moving clips keeps every
+ * zoom on the same moment of the recording. The camera eases in over
+ * `easeIn` from `start`, holds, and eases back out over `easeOut` before
+ * `end`; zooms closer than CHAIN_GAP pan straight from one to the next.
+ */
+export interface CameraZoom {
+  id: string;
+  sourceId: string;
+  start: number;
+  end: number;
+  /** 1 = no zoom; the visible area is 1/zoom of the (cropped) frame. */
+  zoom: number;
+  /** Focus point, fractions of the full source frame. */
+  x: number;
+  y: number;
+  easeIn: number;
+  easeOut: number;
+  ease: ZoomEase;
+  enabled: boolean;
+  /** Made by the analyzer and not edited since - re-analysis replaces it. */
+  auto: boolean;
+  /** Why it was suggested, e.g. "3 clicks" or "Marker 2". */
+  reason?: string;
+  /** Where the focus moves while zoomed in (source time, frame fractions):
+   * the camera pans so it is at each point by its time - following clicks,
+   * a drag or the text cursor while typing. Starts at x/y; sorted by t.
+   * Set by the analyzer; moving the focus by hand removes it. */
+  path?: ZoomPathPoint[];
+}
+
+export interface ZoomPathPoint {
+  t: number;
+  x: number;
+  y: number;
+}
+
+/** How recorded pointer activity is drawn over recorded sources. */
+export interface PointerStyle {
+  /** Draw a reconstructed cursor. Only offered when the recording itself
+   * doesn't show the system cursor (no duplicate cursors). */
+  cursor: boolean;
+  /** Cursor height as a fraction of canvas height. */
+  cursorSize: number;
+  cursorColor: string;
+  /** 0 = raw positions, 1 = heavy smoothing; clicks always stay exact. */
+  smoothing: number;
+  clicks: boolean;
+  leftColor: string;
+  rightColor: string;
+  /** Ring radius at full size, fraction of canvas height. */
+  ringSize: number;
+  /** Seconds. */
+  ringDuration: number;
+  /** 0..1: ring opacity and how far it grows. */
+  intensity: number;
+}
+
+// --- Tutorial tools (Phase 3) -------------------------------------------------
+
+export type MaskMode = "blur" | "pixelate" | "solid";
+
+/** A privacy mask over part of the picture for a time range (timeline
+ * seconds). In "canvas" space the rectangle is fractions of the output
+ * canvas; in "video" space it is fractions of a source's frame, so it stays
+ * on the same content through crops and focus zooms. "pointer" keeps the
+ * rectangle centered on the recorded pointer (recordings only). */
+export interface PrivacyMask {
+  id: string;
+  start: number;
+  end: number;
+  mode: MaskMode;
+  /** 0..100: blur radius / pixel block size. */
+  strength: number;
+  color: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  space: "canvas" | "video";
+  sourceId?: string;
+  follow: "none" | "pointer";
+  enabled: boolean;
+  label?: string;
+}
+
+export type SuggestionKind =
+  | "silence"
+  | "dead-time"
+  | "clipping"
+  | "loud"
+  | "quiet"
+  | "idle"
+  | "repeated-clicks"
+  | "possible-retake"
+  | "navigation"
+  | "milestone"
+  | "retake";
+
+/** Something worth a look, in timeline seconds. Suggestions never change
+ * the edit by themselves: "cut" ones remove their range only when the
+ * user accepts them; "retake" ones are sections the user marked for
+ * replacement. */
+export interface EditSuggestion {
+  id: string;
+  kind: SuggestionKind;
+  start: number;
+  end: number;
+  title: string;
+  detail: string;
+  action: "cut" | "review" | "retake";
+  status: "pending" | "accepted" | "rejected";
+  confidence: "low" | "medium" | "high";
+}
+
+export interface Chapter {
+  id: string;
+  /** Timeline seconds. */
+  t: number;
+  title: string;
+  /** Suggested and not edited since. */
+  auto: boolean;
+}
+
 /** The undoable part of the editor state. */
 export interface Project {
   clips: Clip[];
@@ -206,6 +358,15 @@ export interface Project {
   audio: AudioClip[];
   effects: EffectClip[];
   canvas: Canvas;
+  /** Focus zooms on recorded sources (desktop recordings). */
+  zooms?: CameraZoom[];
+  /** Click/cursor drawing for recorded sources; null/absent = off. */
+  pointer?: PointerStyle | null;
+  /** Privacy masks (blur / pixelate / solid), drawn above the video. */
+  masks?: PrivacyMask[];
+  /** Review items from silence and interaction analysis, or user marks. */
+  suggestions?: EditSuggestion[];
+  chapters?: Chapter[];
 }
 
 /** An imported or generated file. Kept outside Project (and so outside
@@ -215,7 +376,7 @@ export interface Project {
 export interface MediaSource {
   id: string;
   /** "layer": a video imported for a picture-in-picture layer. */
-  kind: "original" | "cleaned" | "audio" | "image" | "layer";
+  kind: "original" | "cleaned" | "audio" | "image" | "layer" | "take";
   file: File;
   url: string; // object URL
   duration: number; // 0 for images
@@ -223,6 +384,23 @@ export interface MediaSource {
   height: number;
   fps: number;
   hasAudio: boolean;
+  /** Set on sources that came from a desktop screen recording. */
+  recording?: RecordingAttachment;
+}
+
+/** What a recorded source keeps from its recording (src/lib/recorder/
+ * format.ts): the capture details, and - on the screen source only - the
+ * interaction events, in that source's own time (recording ms), so they
+ * map through clip trims and splits like the picture does. */
+export interface RecordingAttachment {
+  trackKind: TrackKind;
+  /** The recording folder on disk. */
+  folder: string;
+  manifest: RecordingManifest;
+  events: InteractionEvent[];
+  /** Added to manifest times (markers, screenshots) to match the media;
+   * `events` already include it (recorder/importPlan.ts alignRecording). */
+  timeOffsetMs?: number;
 }
 
 export type Selection =
@@ -231,6 +409,9 @@ export type Selection =
   | { kind: "overlay"; id: string }
   | { kind: "audio"; id: string }
   | { kind: "effect"; id: string }
+  | { kind: "zoom"; id: string }
+  | { kind: "mask"; id: string }
+  | { kind: "chapter"; id: string }
   | null;
 
 // --- Defaults & migration ----------------------------------------------------
@@ -305,5 +486,27 @@ export function migrateProject(raw: unknown): Project {
     audio: (p.audio as AudioClip[]) ?? [],
     effects: (p.effects as EffectClip[]) ?? [],
     canvas: { ...DEFAULT_CANVAS, ...(p.canvas as Canvas | undefined) },
+    zooms: ((p.zooms as Partial<CameraZoom>[] | undefined) ?? []).map(
+      (z) => ({ ...z, ease: z.ease ?? ("smooth" as ZoomEase), enabled: z.enabled ?? true, auto: z.auto ?? false }) as CameraZoom
+    ),
+    pointer: p.pointer ? { ...DEFAULT_POINTER, ...(p.pointer as PointerStyle) } : null,
+    masks: ((p.masks as Partial<PrivacyMask>[] | undefined) ?? []).map(
+      (m) => ({ mode: "blur", strength: 60, color: "#000000", space: "canvas", follow: "none", enabled: true, ...m }) as PrivacyMask
+    ),
+    suggestions: (p.suggestions as EditSuggestion[] | undefined) ?? [],
+    chapters: (p.chapters as Chapter[] | undefined) ?? [],
   };
 }
+
+export const DEFAULT_POINTER: PointerStyle = {
+  cursor: false,
+  cursorSize: 0.045,
+  cursorColor: "#ffffff",
+  smoothing: 0.5,
+  clicks: true,
+  leftColor: "#22d3ee",
+  rightColor: "#f59e0b",
+  ringSize: 0.05,
+  ringDuration: 0.5,
+  intensity: 0.8,
+};

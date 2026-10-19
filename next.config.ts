@@ -23,6 +23,12 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  env: {
+    // "1" only in the desktop app's build (desktop/next.config.ts). Set
+    // explicitly here so desktop-only branches (src/lib/platform) are
+    // compiled out of the website instead of shipped and skipped.
+    NEXT_PUBLIC_WIPECLIP_DESKTOP: "0",
+  },
   async redirects() {
     return [
       // Retired pages: the old watermark-removal landing pages, research

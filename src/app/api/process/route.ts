@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { getRequestAuth, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { preflight, withCors } from "@/lib/cors";
 import { RESOLUTION_CREDIT_COST } from "@/lib/credits";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { isProUser } from "@/lib/plan";
 import { issueTicket } from "@/lib/jobTicket";
+import { BACKEND_DISABLED, BACKEND_DISABLED_MESSAGE } from "@/lib/toolsApi";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 function errorResponse(code: string, message: string, status: number) {
   return NextResponse.json({ detail: { code, message } }, { status });
@@ -28,6 +31,20 @@ function errorResponse(code: string, message: string, status: number) {
  * compute spigot.
  */
 export async function POST(request: NextRequest) {
+  return withCors(request, await handle(request));
+}
+
+export function OPTIONS(request: NextRequest) {
+  return preflight(request);
+}
+
+async function handle(request: NextRequest) {
+  if (!AI_CLEANUP_ENABLED) {
+    return errorResponse("not_found", "This feature isn't available.", 404);
+  }
+  if (BACKEND_DISABLED) {
+    return errorResponse("service_unavailable", BACKEND_DISABLED_MESSAGE, 503);
+  }
   if (!isSupabaseConfigured()) {
     return errorResponse("server_error", "Accounts aren't configured yet.", 501);
   }
@@ -39,10 +56,7 @@ export async function POST(request: NextRequest) {
     return errorResponse("bad_request", "Invalid request.", 400);
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getRequestAuth(request);
 
   if (!user) {
     // 3 free anonymous previews/24h/IP - no account to charge or hold

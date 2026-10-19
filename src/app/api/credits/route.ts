@@ -1,16 +1,22 @@
-import { NextResponse } from "next/server";
-import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getRequestAuth, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { effectivePlan } from "@/lib/plan";
+import { preflight, withCors } from "@/lib/cors";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  return withCors(request, await handle(request));
+}
+
+export function OPTIONS(request: NextRequest) {
+  return preflight(request);
+}
+
+async function handle(request: NextRequest) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ error: "Accounts aren't configured yet." }, { status: 501 });
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getRequestAuth(request);
 
   if (!user) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });

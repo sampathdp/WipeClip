@@ -70,10 +70,14 @@ from app.config import (
     EDITOR_COMPACT_CRF,
     EDITOR_MAX_AUDIO,
     EDITOR_MAX_AUDIO_BYTES,
+    EDITOR_MAX_CAMERA_ROWS,
     EDITOR_MAX_CLIPS,
     EDITOR_MAX_EFFECTS,
     EDITOR_MAX_FPS,
     EDITOR_MAX_FREEZE_SECONDS,
+    EDITOR_MAX_MASK_ROWS,
+    EDITOR_MAX_MASKS,
+    EDITOR_MAX_POINTER_ROWS,
     EDITOR_MAX_REVERSE_BUFFER_BYTES,
     EDITOR_MAX_REVERSE_SECONDS,
     EDITOR_MAX_SOURCES,
@@ -476,6 +480,95 @@ class _EditorClip(BaseModel):
     volume: float = Field(1, ge=0, le=2)
     transform: _EditorTransform = Field(default_factory=_EditorTransform)
     look: _EditorLook = Field(default_factory=_EditorLook)
+    # Focus zoom rows [t, x, y, s] in clip time (see PlanClip.camera).
+    camera: Optional[list[list[float]]] = Field(None, max_length=EDITOR_MAX_CAMERA_ROWS)
+
+
+class _EditorPointerCursor(BaseModel):
+    image: int = Field(ge=0, lt=EDITOR_MAX_STICKERS)
+    width: float = Field(gt=0, le=0.5)  # fractions of canvas height
+    height: float = Field(gt=0, le=0.5)
+    hotX: float = Field(ge=0, le=1)
+    hotY: float = Field(ge=0, le=1)
+
+
+class _EditorPointerRing(BaseModel):
+    image: int = Field(ge=0, lt=EDITOR_MAX_STICKERS)
+    size: float = Field(ge=1, le=4)  # sprite width / ring radius
+
+
+class _EditorPointer(BaseModel):
+    cursor: Optional[_EditorPointerCursor] = None
+    rings: list[_EditorPointerRing] = Field(default_factory=list, max_length=2)
+    cursorRows: list[list[float]] = Field(default_factory=list, max_length=EDITOR_MAX_POINTER_ROWS)
+    ringRows: list[list[float]] = Field(default_factory=list, max_length=EDITOR_MAX_POINTER_ROWS)
+
+
+def _finite(row: list[float], n: int) -> bool:
+    return len(row) == n and all(math.isfinite(v) for v in row)
+
+
+def _camera_rows(rows: list[list[float]]) -> list[tuple[float, float, float, float]]:
+    out = []
+    for r in rows:
+        if not _finite(r, 4):
+            raise HTTPException(status_code=400, detail="Invalid zoom data")
+        t, x, y, s = r
+        if t < 0 or not (0.2 <= s <= 1) or x < -1e-6 or y < -1e-6 or x + s > 1 + 1e-3 or y + s > 1 + 1e-3:
+            raise HTTPException(status_code=400, detail="Invalid zoom data")
+        out.append((t, max(0.0, x), max(0.0, y), s))
+    return out
+
+
+def _pointer_plan(p: _EditorPointer, overlay_images: list[tuple[str, int, int]]) -> editor_pipeline.PlanPointer:
+    if len(p.cursorRows) + len(p.ringRows) > EDITOR_MAX_POINTER_ROWS:
+        raise HTTPException(status_code=400, detail="Too much pointer data")
+    if any(i >= len(overlay_images) for i in [*(r.image for r in p.rings), *([p.cursor.image] if p.cursor else [])]):
+        raise HTTPException(status_code=400, detail="Pointer refers to a missing image")
+    cursor_rows = []
+    for r in p.cursorRows:
+        if not _finite(r, 3) or r[0] < 0 or not (-1 <= r[1] <= 2 and -1 <= r[2] <= 2):
+            raise HTTPException(status_code=400, detail="Invalid pointer data")
+        cursor_rows.append((r[0], r[1], r[2]))
+    ring_rows = []
+    for r in p.ringRows:
+        if not _finite(r, 6) or r[0] < 0 or r[1] not in (0, 1, 2, 3) or not (-1 <= r[2] <= 2 and -1 <= r[3] <= 2) or not (0 <= r[4] <= 0.5) or not (0 <= r[5] <= 1):
+            raise HTTPException(status_code=400, detail="Invalid pointer data")
+        ring_rows.append((r[0], int(r[1]), r[2], r[3], r[4], r[5]))
+    if ring_rows and not p.rings:
+        raise HTTPException(status_code=400, detail="Click highlights need their image")
+    return editor_pipeline.PlanPointer(
+        cursor_path=overlay_images[p.cursor.image][0] if p.cursor else None,
+        cursor_w=p.cursor.width if p.cursor else 0.0,
+        cursor_h=p.cursor.height if p.cursor else 0.0,
+        hot_x=p.cursor.hotX if p.cursor else 0.0,
+        hot_y=p.cursor.hotY if p.cursor else 0.0,
+        ring_paths=[overlay_images[r.image][0] for r in p.rings],
+        ring_sizes=[r.size for r in p.rings],
+        cursor_rows=cursor_rows if p.cursor else [],
+        ring_rows=ring_rows,
+    )
+
+
+class _EditorMask(BaseModel):
+    mode: str
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    strength: float = Field(60, ge=0, le=100)
+    color: str = Field("#000000", pattern=_HEX_COLOR)
+    rows: list[list[float]] = Field(min_length=1, max_length=EDITOR_MAX_MASK_ROWS)
+
+
+def _mask_plan(m: _EditorMask, total: float) -> editor_pipeline.PlanMask | None:
+    if m.mode not in editor_pipeline.MASK_MODES:
+        raise HTTPException(status_code=400, detail="Unknown mask type")
+    rows = []
+    for r in m.rows:
+        if not _finite(r, 5) or r[0] < 0 or not all(-0.01 <= v <= 1.01 for v in r[1:3]) or not all(0 <= v <= 1.01 for v in r[3:5]):
+            raise HTTPException(status_code=400, detail="Invalid mask data")
+        rows.append((r[0], r[1], r[2], r[3], r[4]))
+    end = min(m.end, total)
+    return editor_pipeline.PlanMask(m.mode, m.start, end, m.strength, m.color, rows) if end - m.start >= 0.02 else None
 
 
 class _EditorOverlay(BaseModel):
@@ -534,6 +627,13 @@ class _EditorProject(BaseModel):
     audio: list[_EditorAudio] = Field(default_factory=list, max_length=EDITOR_MAX_AUDIO)
     effects: list[_EditorEffect] = Field(default_factory=list, max_length=EDITOR_MAX_EFFECTS)
     canvas: _EditorCanvas = Field(default_factory=_EditorCanvas)
+    pointer: Optional[_EditorPointer] = None
+    masks: list[_EditorMask] = Field(default_factory=list, max_length=EDITOR_MAX_MASKS)
+    # Output frame rate the editor previews at. Screen recordings are
+    # variable frame rate (frames only when the screen changes), so their
+    # probed average (often ~15 fps) is far below the capture rate; without
+    # this, zooms and click rings would render at that average.
+    fps: Optional[float] = Field(None, ge=1, le=EDITOR_MAX_FPS)
 
 
 _VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
@@ -733,6 +833,8 @@ async def api_video_export(
         out_w = max(2, int(cw * scale) // 2 * 2)
         out_h = max(2, int(ch * scale) // 2 * 2)
         fps = base.fps if 1 <= base.fps <= EDITOR_MAX_FPS else (EDITOR_MAX_FPS if base.fps > EDITOR_MAX_FPS else 30.0)
+        if spec.fps:
+            fps = spec.fps
 
         plan_clips: list[editor_pipeline.PlanClip] = []
         for c in spec.clips:
@@ -788,6 +890,7 @@ async def api_video_export(
                     filter=c.look.filter,
                     intensity=c.look.intensity,
                     adjust=c.look.adjust.model_dump(),
+                    camera=_camera_rows(c.camera) if c.camera and c.freeze is None else [],
                 )
             )
 
@@ -803,6 +906,8 @@ async def api_video_export(
             color2=canvas.background.color2,
             background_image=background_path,
         )
+        if spec.pointer and (spec.pointer.cursorRows or spec.pointer.ringRows):
+            plan.pointer = _pointer_plan(spec.pointer, overlay_images)
         if compact:
             plan.crf = EDITOR_COMPACT_CRF
             plan.audio_bitrate = EDITOR_COMPACT_AUDIO_BITRATE
@@ -810,6 +915,10 @@ async def api_video_export(
         total = editor_pipeline.timeline_duration(plan)
         if total > MAX_VIDEO_DURATION_SECONDS:
             raise HTTPException(status_code=400, detail="The edited video is too long to export")
+        for m in spec.masks:
+            planned = _mask_plan(m, total)
+            if planned:
+                plan.masks.append(planned)
 
         # Layers entirely past the end of the (possibly shortened) timeline
         # are skipped; the rest are clamped to it.
@@ -876,15 +985,7 @@ async def api_video_export(
         plan.with_audio = bool(plan.audio) or any(c.source_has_audio for c in plan.clips)
 
         out_path = os.path.join(tmp, "export.mp4")
-        plan_json = json.dumps(
-            {
-                **{k: getattr(plan, k) for k in ("width", "height", "fps", "with_audio", "fit", "background", "color", "color2", "background_image", "crf", "audio_bitrate")},
-                "clips": [vars(c) for c in plan.clips],
-                "overlays": [vars(o) for o in plan.overlays],
-                "audio": [vars(a) for a in plan.audio],
-                "effects": [vars(e) for e in plan.effects],
-            }
-        )
+        plan_json = editor_pipeline.plan_to_json(plan)
         # Full re-encode of the timeline plus per-clip decode seeks; layers,
         # effects and grading add compositing work on top.
         job_timeout = max(180.0, total * (8 + 0.5 * (len(plan.overlays) + len(plan.effects))))

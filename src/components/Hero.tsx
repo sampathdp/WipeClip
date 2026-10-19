@@ -1,19 +1,67 @@
 import Link from "next/link";
 import BeforeAfterDemo from "./BeforeAfterDemo";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
-const MARQUEE_ITEMS = [
-  "MP4",
-  "MOV",
-  "WEBM",
-  "4K LOSSLESS",
-  "NO CROP",
-  "NO BLUR BOX",
-  "MOTION-AWARE INPAINTING",
-  "TRIM · CUT · TRANSITIONS",
-  "STICKERS",
-  "YOUR OWN FOOTAGE",
-  "~15s AVG RENDER",
+const MARQUEE_ITEMS = AI_CLEANUP_ENABLED
+  ? [
+      "MP4",
+      "MOV",
+      "WEBM",
+      "4K LOSSLESS",
+      "NO CROP",
+      "NO BLUR BOX",
+      "MOTION-AWARE INPAINTING",
+      "TRIM · CUT · TRANSITIONS",
+      "STICKERS",
+      "YOUR OWN FOOTAGE",
+      "~15s AVG RENDER",
+    ]
+  : [
+      "MP4",
+      "MOV",
+      "WEBM",
+      "TRIM · CUT · TRANSITIONS",
+      "AUTO CAPTIONS",
+      "PICTURE-IN-PICTURE",
+      "TEXT · STICKERS · MUSIC",
+      "FILTERS",
+      "YOUTUBE · SHORTS · REELS",
+    ];
+
+// Illustrative timeline under the hero video when the before/after cleanup
+// demo is hidden.
+const SHOWCASE_CLIPS = [
+  { w: "30%", cls: "from-accent/70 to-accent/40" },
+  { w: "38%", cls: "from-cyan-500/70 to-cyan-500/40" },
+  { w: "28%", cls: "from-fuchsia-500/60 to-fuchsia-500/30" },
 ];
+
+function EditorShowcase() {
+  return (
+    <div className="glass-card overflow-hidden rounded-[2.5rem] border border-cyan-500/20 p-4 sm:p-5">
+      <video
+        src="/demo-sintel.mp4"
+        autoPlay
+        muted
+        loop
+        playsInline
+        aria-label="Video editor preview"
+        className="aspect-video w-full rounded-[1.75rem] bg-black object-cover ring-1 ring-border"
+      />
+      <div aria-hidden className="mt-4 flex h-10 gap-1">
+        {SHOWCASE_CLIPS.map((c, i) => (
+          <div key={i} className={`h-full rounded-md bg-gradient-to-b ${c.cls} ring-1 ring-white/10`} style={{ width: c.w }} />
+        ))}
+      </div>
+      <div aria-hidden className="mt-1.5 h-5">
+        <div className="ml-[40%] h-full w-[24%] rounded-md border border-accent/50 bg-accent/25" />
+      </div>
+      <p className="mt-3 text-[10px] text-muted">
+        Sintel &copy; Blender Foundation | durian.blender.org | CC BY 3.0
+      </p>
+    </div>
+  );
+}
 
 export default function Hero() {
   return (
@@ -47,7 +95,7 @@ export default function Hero() {
                   fill="currentColor"
                 />
               </svg>
-              <span className="tracking-wide">AI Motion-Aware Inpainting</span>
+              <span className="tracking-wide">{AI_CLEANUP_ENABLED ? "AI Motion-Aware Inpainting" : "AI Auto Captions"}</span>
             </div>
 
             {/* Core Headline - stacked, oversized, mixed weight */}
@@ -63,8 +111,10 @@ export default function Hero() {
             <p className="mx-auto mt-7 max-w-md text-base leading-relaxed text-muted sm:text-lg lg:mx-0 lg:border-l-2 lg:border-accent/40 lg:pl-5">
               Trim, cut and arrange clips, add transitions, text, stickers,
               filters and music, then export for YouTube, Shorts and Reels, all
-              in your browser. Built-in AI object removal takes out passers-by,
-              cables and other distractions from footage you shot.
+              in your browser.
+              {AI_CLEANUP_ENABLED
+                ? " Built-in AI object removal takes out passers-by, cables and other distractions from footage you shot."
+                : " Auto captions and picture-in-picture included."}
             </p>
 
             {/* Action CTAs */}
@@ -78,12 +128,21 @@ export default function Hero() {
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>
               </Link>
-              <a
-                href="#upload"
-                className="btn-secondary rounded-full px-7 py-4 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2"
-              >
-                Try AI cleanup
-              </a>
+              {AI_CLEANUP_ENABLED ? (
+                <a
+                  href="#upload"
+                  className="btn-secondary rounded-full px-7 py-4 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2"
+                >
+                  Try AI cleanup
+                </a>
+              ) : (
+                <a
+                  href="#tools"
+                  className="btn-secondary rounded-full px-7 py-4 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2"
+                >
+                  Free photo tools
+                </a>
+              )}
             </div>
 
             {/* Trust Highlights */}
@@ -107,21 +166,25 @@ export default function Hero() {
             <div className="absolute inset-0 -z-10 translate-x-3 translate-y-3 rotate-[-2deg] rounded-[2.5rem] bg-gradient-to-br from-accent/10 to-cyan-400/8 blur-sm dark:from-accent/25 dark:to-cyan-400/20" />
             <div className="absolute inset-0 -z-10 -translate-x-2 translate-y-5 rotate-[2deg] rounded-[2.5rem] border border-cyan-500/10 bg-surface-2/40" />
 
-            <BeforeAfterDemo />
+            {AI_CLEANUP_ENABLED ? <BeforeAfterDemo /> : <EditorShowcase />}
 
             {/* Floating stat chips, overlapping the video edges */}
-            <div className="glass-card absolute -bottom-6 -left-4 hidden -rotate-3 rounded-2xl border border-cyan-500/20 px-5 py-3 shadow-2xl sm:block">
-              <div className="font-display text-xl font-extrabold text-foreground">0</div>
-              <div className="text-[10px] font-medium text-muted">files stored</div>
-            </div>
-            <div className="glass-card absolute -bottom-6 left-1/2 hidden -translate-x-1/2 rotate-1 rounded-2xl border border-cyan-500/20 px-5 py-3 shadow-2xl md:block">
-              <div className="font-display text-xl font-extrabold text-gradient-cyan">~15s</div>
-              <div className="text-[10px] font-medium text-muted">avg render</div>
-            </div>
-            <div className="glass-card absolute -bottom-6 right-4 hidden rotate-2 rounded-2xl border border-cyan-500/20 px-5 py-3 shadow-2xl sm:block">
-              <div className="font-display text-xl font-extrabold text-gradient">1080p+</div>
-              <div className="text-[10px] font-medium text-muted">lossless</div>
-            </div>
+            {AI_CLEANUP_ENABLED && (
+              <>
+                <div className="glass-card absolute -bottom-6 -left-4 hidden -rotate-3 rounded-2xl border border-cyan-500/20 px-5 py-3 shadow-2xl sm:block">
+                  <div className="font-display text-xl font-extrabold text-foreground">0</div>
+                  <div className="text-[10px] font-medium text-muted">files stored</div>
+                </div>
+                <div className="glass-card absolute -bottom-6 left-1/2 hidden -translate-x-1/2 rotate-1 rounded-2xl border border-cyan-500/20 px-5 py-3 shadow-2xl md:block">
+                  <div className="font-display text-xl font-extrabold text-gradient-cyan">~15s</div>
+                  <div className="text-[10px] font-medium text-muted">avg render</div>
+                </div>
+                <div className="glass-card absolute -bottom-6 right-4 hidden rotate-2 rounded-2xl border border-cyan-500/20 px-5 py-3 shadow-2xl sm:block">
+                  <div className="font-display text-xl font-extrabold text-gradient">1080p+</div>
+                  <div className="text-[10px] font-medium text-muted">lossless</div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

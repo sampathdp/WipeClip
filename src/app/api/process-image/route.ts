@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { IMAGE_CREDIT_COST } from "@/lib/credits";
-import { TOOLS_API_URL } from "@/lib/toolsApi";
+import { BACKEND_DISABLED, BACKEND_DISABLED_MESSAGE, TOOLS_API_URL } from "@/lib/toolsApi";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { isProUser } from "@/lib/plan";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 /** Image-tool analogue of /api/process: same auth-then-credit-then-forward
  * gate in front of the FastAPI backend, plus a Pro-plan check (the image
@@ -12,6 +13,20 @@ import { isProUser } from "@/lib/plan";
  * directly, same reasoning as the video route.
  */
 export async function POST(request: NextRequest) {
+  if (!AI_CLEANUP_ENABLED) {
+    return NextResponse.json(
+      { detail: { code: "not_found", message: "This feature isn't available." } },
+      { status: 404 }
+    );
+  }
+
+  if (BACKEND_DISABLED) {
+    return NextResponse.json(
+      { detail: { code: "service_unavailable", message: BACKEND_DISABLED_MESSAGE } },
+      { status: 503 }
+    );
+  }
+
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
       { detail: { code: "server_error", message: "Accounts aren't configured yet." } },

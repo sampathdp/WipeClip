@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import RegionSelector from "./RegionSelector";
 import ImageCompareSlider from "./ImageCompareSlider";
+import ToolFeedback from "./ToolFeedback";
 import { createClient } from "@/lib/supabase/client";
 import { trackEvent, useToolView } from "@/lib/analytics";
 import {
@@ -401,6 +402,8 @@ export default function ImageEditorDemo() {
                   Process Another
                 </button>
               </div>
+
+              <ToolFeedback tool={TOOL} />
             </div>
           )}
 

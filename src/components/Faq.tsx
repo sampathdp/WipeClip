@@ -1,7 +1,31 @@
 import Link from "next/link";
 import Reveal from "./Reveal";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
-const faqs = [
+const editorFaqs = [
+  {
+    q: "What can I do in the editor?",
+    a: "The WipeClip video editor (wipeclip.co/editor) lets you trim, split and remove sections, reorder clips, add transitions, text, stickers, music and auto captions, and layer clips picture-in-picture, then export at your original aspect ratio and frame rate.",
+  },
+  {
+    q: "Do I need to install anything?",
+    a: "No. The editor runs in your browser. Your project is saved in your own browser so you can pick up where you left off.",
+  },
+  {
+    q: "What is the maximum file size?",
+    a: "Clips up to 300MB are supported on the free plan.",
+  },
+  {
+    q: "Do you store or use my video files?",
+    a: "No. Editing happens in your browser. Files uploaded for export are processed in temporary storage and deleted once your result is ready.",
+  },
+  {
+    q: "Will you process explicit or adult content?",
+    a: "No. Every upload is automatically screened before processing, and clips flagged as explicit or abusive are immediately rejected.",
+  },
+];
+
+const cleanupFaqs = [
   {
     q: "Can I also trim, cut, or edit my video?",
     a: "Yes. The WipeClip video editor (wipeclip.co/editor) lets you trim, split and remove sections, reorder clips, add transitions and stickers, and run AI object removal on a single clip, then export at your original aspect ratio and frame rate.",
@@ -35,6 +59,8 @@ const faqs = [
     a: "No. Every upload is automatically screened before processing, and clips flagged as explicit or abusive are immediately rejected.",
   },
 ];
+
+const faqs = AI_CLEANUP_ENABLED ? cleanupFaqs : editorFaqs;
 
 const jsonLd = {
   "@context": "https://schema.org",

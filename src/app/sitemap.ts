@@ -1,10 +1,18 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/seo";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 const siteUrl = SITE_URL;
 
+// Pages that 404 while the AI cleanup feature is switched off.
+const CLEANUP_PATHS = [
+  "/image-cleanup",
+  "/guides/does-ai-cleanup-reduce-video-quality",
+  "/guides/how-ai-video-inpainting-works",
+];
+
 export default function sitemap(): MetadataRoute.Sitemap {
-  return [
+  const entries: MetadataRoute.Sitemap = [
     {
       url: siteUrl,
       lastModified: "2026-10-01",
@@ -96,4 +104,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.3,
     },
   ];
+  if (AI_CLEANUP_ENABLED) return entries;
+  return entries.filter((e) => !CLEANUP_PATHS.some((p) => e.url === `${siteUrl}${p}`));
 }

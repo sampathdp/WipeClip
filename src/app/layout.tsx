@@ -3,7 +3,9 @@ import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import ReferralCapture from "@/components/ReferralCapture";
+import ServiceBanner from "@/components/ServiceBanner";
 import { SITE_URL } from "@/lib/seo";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import "./globals.css";
 
 const inter = Inter({
@@ -28,7 +30,10 @@ export const metadata: Metadata = {
     template: "%s | WipeClip.co",
   },
   description:
-    "WipeClip is an online video editor for creators. Trim, cut, add transitions, text, stickers, filters and music in your browser, then export for YouTube, Shorts and Reels. Built-in AI object removal takes distractions out of footage you shot.",
+    "WipeClip is an online video editor for creators. Trim, cut, add transitions, text, stickers, filters and music in your browser, then export for YouTube, Shorts and Reels." +
+    (AI_CLEANUP_ENABLED
+      ? " Built-in AI object removal takes distractions out of footage you shot."
+      : " Auto captions and picture-in-picture included."),
   keywords: [
     "online video editor",
     "free video editor",
@@ -38,7 +43,7 @@ export const metadata: Metadata = {
     "add text to video",
     "add stickers to video",
     "video filters online",
-    "remove object from video",
+    ...(AI_CLEANUP_ENABLED ? ["remove object from video"] : ["add captions to video"]),
     "wipeclip",
   ],
   authors: [{ name: "WipeClip.co" }],
@@ -53,7 +58,9 @@ export const metadata: Metadata = {
     siteName: "WipeClip.co",
     title: "Online Video Editor for Creators | WipeClip.co",
     description:
-      "Trim, cut, add transitions, text, stickers and filters in your browser. Free forever, with AI tools to clean up your footage.",
+      AI_CLEANUP_ENABLED
+        ? "Trim, cut, add transitions, text, stickers and filters in your browser. Free forever, with AI tools to clean up your footage."
+        : "Trim, cut, add transitions, text, stickers and filters in your browser. Free forever, with AI auto captions.",
     locale: "en_US",
     images: [
       {
@@ -68,7 +75,9 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Online Video Editor for Creators | WipeClip.co",
     description:
-      "Trim, cut, add transitions, text, stickers and filters in your browser. Free forever, with AI tools to clean up your footage.",
+      AI_CLEANUP_ENABLED
+        ? "Trim, cut, add transitions, text, stickers and filters in your browser. Free forever, with AI tools to clean up your footage."
+        : "Trim, cut, add transitions, text, stickers and filters in your browser. Free forever, with AI auto captions.",
     images: ["/opengraph-image"],
   },
   robots: {
@@ -126,7 +135,9 @@ const jsonLd = {
       operatingSystem: "Web",
       url: siteUrl,
       description:
-        "Browser-based video editor for creators: trim, cut, transitions, text and stickers, plus AI object removal that rebuilds the pixels behind an unwanted object across a whole clip of footage you shot.",
+        AI_CLEANUP_ENABLED
+          ? "Browser-based video editor for creators: trim, cut, transitions, text and stickers, plus AI object removal that rebuilds the pixels behind an unwanted object across a whole clip of footage you shot."
+          : "Browser-based video editor for creators: trim, cut, transitions, text, stickers, music and auto captions.",
       offers: {
         "@type": "Offer",
         price: "0",
@@ -153,6 +164,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         />
       </head>
       <body className="min-h-full flex flex-col bg-background text-foreground font-sans">
+        <ServiceBanner />
         <ReferralCapture />
         {children}
         <Analytics />

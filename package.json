@@ -5,16 +5,27 @@
   "scripts": {
     "dev": "concurrently -n frontend,backend -c cyan,magenta \"npm:dev:frontend\" \"npm:dev:backend\"",
     "dev:frontend": "next dev",
-    "dev:backend": "backend\\.venv\\Scripts\\uvicorn.exe app.main:app --port 8002 --app-dir backend",
+    "dev:backend": "node scripts/dev-backend.mjs",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "desktop:dev": "node desktop/scripts/tauri.mjs dev",
+    "desktop:build": "node desktop/scripts/tauri.mjs build",
+    "desktop:frontend:dev": "next dev desktop --port 3100",
+    "desktop:frontend:build": "next build desktop && node desktop/scripts/check-bundle.mjs",
+    "desktop:test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "desktop:test:js": "node --experimental-strip-types --no-warnings --test \"tests/desktop/*.test.*\"",
+    "dev:setup": "node scripts/dev-setup.mjs",
+    "dev:check": "node scripts/dev-check.mjs",
+    "dev:smoke": "node scripts/dev-smoke.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.1",
     "@sentry/nextjs": "^10.70.0",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
+    "@tauri-apps/api": "^2.12.3",
+    "@tauri-apps/plugin-deep-link": "^2.6.1",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.2",
     "@vercel/analytics": "^2.0.1",
@@ -26,6 +37,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@tauri-apps/cli": "^2.12.2",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

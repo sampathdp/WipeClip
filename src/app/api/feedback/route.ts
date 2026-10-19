@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { getRequestAuth, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { preflight, withCors } from "@/lib/cors";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { escapeHtml, sendEmail } from "@/lib/email";
 
@@ -13,21 +14,27 @@ const MAX_MESSAGE = 5000;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Accepts a bug report, feature request or general feedback from the
- * /feedback page. Signed-out visitors can submit too (optionally leaving an
- * email so we can reply); signed-in submissions are tied to the account so
- * they show up under "Your requests" with their status. Written with the
- * service-role key - the feedback table has no insert policy, so the
- * browser can never write to it directly.
+ * /feedback page or the prompt under a tool's result (ToolFeedback, which
+ * the desktop app also shows - hence CORS). Signed-out visitors can submit
+ * too (optionally leaving an email so we can reply); signed-in submissions
+ * are tied to the account so they show up under "Your requests" with their
+ * status. Written with the service-role key - the feedback table has no
+ * insert policy, so the browser can never write to it directly.
  */
 export async function POST(request: NextRequest) {
+  return withCors(request, await handle(request));
+}
+
+export function OPTIONS(request: NextRequest) {
+  return preflight(request);
+}
+
+async function handle(request: NextRequest) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ error: "Feedback isn't configured yet." }, { status: 501 });
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user } = await getRequestAuth(request);
 
   // 5 submissions/hour per user (or IP when signed out) - plenty for a real
   // report plus a follow-up, tight enough to stop the form being spammed.
@@ -41,6 +48,9 @@ export async function POST(request: NextRequest) {
   const message = typeof body?.message === "string" ? body.message.trim() : "";
   const rawEmail = typeof body?.email === "string" ? body.email.trim() : "";
   const pageUrl = typeof body?.pageUrl === "string" ? body.pageUrl.slice(0, 500) : null;
+  // Set when sent from under a tool's result. Only shown in the team email -
+  // the page URL already identifies the tool in the stored row.
+  const tool = typeof body?.tool === "string" && /^[a-z0-9_]{1,40}$/.test(body.tool) ? body.tool : null;
 
   // Honeypot: a hidden field real visitors never fill in. Bots that do get
   // a fake success so they don't learn to skip it.
@@ -90,7 +100,7 @@ export async function POST(request: NextRequest) {
   // never delays or fails the user's submission - the row is already saved.
   const notifyTo = process.env.FEEDBACK_NOTIFY_EMAIL;
   if (notifyTo) {
-    after(() => notifyTeam(notifyTo, { id: data.id, kind, subject, message, contactEmail, signedIn: Boolean(user), pageUrl, userAgent }));
+    after(() => notifyTeam(notifyTo, { id: data.id, kind, subject, message, contactEmail, signedIn: Boolean(user), tool, pageUrl, userAgent }));
   }
 
   return NextResponse.json({ ok: true, item: data });
@@ -105,6 +115,7 @@ async function notifyTeam(
     message: string;
     contactEmail: string | null;
     signedIn: boolean;
+    tool: string | null;
     pageUrl: string | null;
     userAgent: string | null;
   }
@@ -113,6 +124,7 @@ async function notifyTeam(
   const rows: [string, string][] = [
     ["Type", KIND_LABEL[f.kind]],
     ["From", from],
+    ["Tool", f.tool ?? "-"],
     ["Page", f.pageUrl ?? "-"],
     ["Browser", f.userAgent ?? "-"],
     ["Feedback ID", `#${f.id}`],

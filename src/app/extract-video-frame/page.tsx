@@ -3,6 +3,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import VideoFrameGrabberDemo from "@/components/VideoFrameGrabberDemo";
 import { buildPageMetadata } from "@/lib/seo";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 const title = "Extract a Frame From Video - Free Screenshot Tool";
 const description =
@@ -27,10 +28,15 @@ const faqs = [
     q: "What resolution is the exported frame?",
     a: "The video's native resolution. The canvas is sized to the video's actual width and height before export, so you get a full-resolution PNG, not a scaled-down thumbnail.",
   },
-  {
-    q: "Why would I need WipeClip.co's paid tool instead?",
-    a: "This tool answers a different question - grabbing a clean still frame. If your own footage has an unwanted object you need removed from the whole clip, that's WipeClip.co's AI object removal tool, free to try.",
-  },
+  AI_CLEANUP_ENABLED
+    ? {
+        q: "Why would I need WipeClip.co's paid tool instead?",
+        a: "This tool answers a different question - grabbing a clean still frame. If your own footage has an unwanted object you need removed from the whole clip, that's WipeClip.co's AI object removal tool, free to try.",
+      }
+    : {
+        q: "What if I need to edit the whole clip?",
+        a: "This tool grabs a single still frame. To trim, cut, caption or rearrange the whole clip, use WipeClip.co's free online video editor.",
+      },
 ];
 
 export default function Page() {

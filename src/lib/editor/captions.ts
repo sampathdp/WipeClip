@@ -5,6 +5,7 @@
 import { DEFAULT_TEXT } from "./textRaster";
 import { newId, type Layout } from "./timeline";
 import type { AnimIn, MediaSource, Overlay, Project, TextStyle } from "./types";
+import { clippedSpans, type AudioSpan } from "./audioAnalysis";
 
 const RATE = 16000; // what Whisper works at
 const MAX_DECODE_BYTES = 400 * 1024 * 1024; // decodeAudioData holds the whole file
@@ -26,12 +27,37 @@ export async function buildSpeechAudio(
   project: Project,
   sources: Record<string, MediaSource>
 ): Promise<Float32Array | null> {
-  if (lay.total <= 0) return null;
+  return (await buildSpeechMix(lay, project, sources)).samples;
+}
+
+export interface SpeechMix {
+  /** null when nothing on the timeline has (decodable) sound. */
+  samples: Float32Array | null;
+  /** Clipping found in each source at its own rate, in timeline time
+   * (audioAnalysis.ts clippedSpans). Only when `withClipping` was asked. */
+  clipping: AudioSpan[];
+  /** Names of sources left out because they're too large to decode. */
+  skipped: string[];
+}
+
+/** buildSpeechAudio plus what the review needs: per-source clipping and
+ * the sources that couldn't be decoded. `signal` stops before the
+ * (slow) mixing step. */
+export async function buildSpeechMix(
+  lay: Layout,
+  project: Project,
+  sources: Record<string, MediaSource>,
+  opts: { withClipping?: boolean; signal?: AbortSignal } = {}
+): Promise<SpeechMix> {
+  const skipped: string[] = [];
+  const clipping: AudioSpan[] = [];
+  if (lay.total <= 0) return { samples: null, clipping, skipped };
   const ctx = new OfflineAudioContext(1, Math.ceil(lay.total * RATE), RATE);
   const decoded = new Map<string, Promise<AudioBuffer | null>>();
   const decode = (src: MediaSource) => {
     let p = decoded.get(src.id);
     if (!p) {
+      if (src.file.size > MAX_DECODE_BYTES) skipped.push(src.file.name || "a large file");
       p =
         src.file.size > MAX_DECODE_BYTES
           ? Promise.resolve(null)
@@ -55,6 +81,15 @@ export async function buildSpeechAudio(
     // offset/duration are in buffer (source) time.
     node.start(when, offset, duration);
     scheduled++;
+    if (opts.withClipping) {
+      const channels = Array.from({ length: buf.numberOfChannels }, (_, i) => buf.getChannelData(i));
+      for (const c of clippedSpans(channels, buf.sampleRate, offset, offset + duration)) {
+        clipping.push({ start: when + (c.start - offset) / rate, end: when + (Math.min(c.end, offset + duration) - offset) / rate });
+      }
+    }
+  };
+  const abort = () => {
+    if (opts.signal?.aborted) throw new DOMException("Analysis cancelled", "AbortError");
   };
 
   for (const lc of lay.clips) {
@@ -62,17 +97,41 @@ export async function buildSpeechAudio(
     const src = sources[c.sourceId];
     if (c.freeze !== null || c.reverse || c.volume === 0 || !src?.hasAudio) continue;
     const buf = await decode(src);
+    abort();
     if (buf) play(buf, lc.start, c.start, c.end - c.start, c.speed, Math.min(1, c.volume));
   }
   for (const a of project.audio) {
     const src = sources[a.sourceId];
-    if (a.muted || a.volume === 0 || !src || src.kind === "audio") continue;
+    // Audio files are music unless they came from a screen recording (its
+    // microphone or system sound - the narration).
+    const recorded = src?.recording?.trackKind === "microphone" || src?.recording?.trackKind === "system-audio";
+    if (a.muted || a.volume === 0 || !src || (src.kind === "audio" && !recorded)) continue;
     const buf = await decode(src);
+    abort();
     if (buf) play(buf, a.start, a.offset, a.duration, 1, Math.min(1, a.volume));
   }
-  if (scheduled === 0) return null;
+  if (scheduled === 0) return { samples: null, clipping, skipped };
   const mixed = await ctx.startRendering();
-  return mixed.getChannelData(0);
+  abort();
+  return { samples: mixed.getChannelData(0), clipping, skipped };
+}
+
+/** The speech model (Whisper base, quantized): about 80 MB, downloaded from
+ * Hugging Face on first use and kept in the browser/app cache. Audio never
+ * leaves the device - only the model files are downloaded. */
+export const SPEECH_MODEL = { name: "Whisper base (multilingual)", sizeMb: 80, id: "onnx-community/whisper-base_timestamped" };
+
+/** Whether the model is already on this device, so the UI asks before the
+ * first download instead of starting it silently. */
+export async function speechModelCached(): Promise<boolean> {
+  try {
+    if (typeof caches === "undefined") return false;
+    const cache = await caches.open("transformers-cache");
+    const keys = await cache.keys();
+    return keys.some((k) => k.url.includes(SPEECH_MODEL.id) && /\.onnx/.test(k.url));
+  } catch {
+    return false;
+  }
 }
 
 export interface CaptionsProgress {

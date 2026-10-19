@@ -8,21 +8,52 @@ import LimitationsSection from "@/components/LimitationsSection";
 import PrivacyProcessing from "@/components/PrivacyProcessing";
 import CtaBanner from "@/components/CtaBanner";
 import { buildPageMetadata } from "@/lib/seo";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
-export const metadata: Metadata = buildPageMetadata({
-  title: "About WipeClip - How AI Video Cleanup Works",
-  description:
-    "What WipeClip is: a browser video editor for creators, with AI object removal for footage you shot yourself. How the reconstruction works, its limitations, and how your files are handled.",
-  path: "/about",
-});
+export const metadata: Metadata = buildPageMetadata(
+  AI_CLEANUP_ENABLED
+    ? {
+        title: "About WipeClip - How AI Video Cleanup Works",
+        description:
+          "What WipeClip is: a browser video editor for creators, with AI object removal for footage you shot yourself. How the reconstruction works, its limitations, and how your files are handled.",
+        path: "/about",
+      }
+    : {
+        title: "About WipeClip - Online Video Editor for Creators",
+        description:
+          "What WipeClip is: a browser video editor for creators, with auto captions and free photo tools, and how your files are handled.",
+        path: "/about",
+      }
+);
 
-const SECTIONS = [
-  { id: "what-it-does", label: "What it does" },
-  { id: "limitations", label: "Limitations" },
-  { id: "privacy", label: "Privacy" },
+const SECTIONS = AI_CLEANUP_ENABLED
+  ? [
+      { id: "what-it-does", label: "What it does" },
+      { id: "limitations", label: "Limitations" },
+      { id: "privacy", label: "Privacy" },
+    ]
+  : [{ id: "privacy", label: "Privacy" }];
+
+const EDITOR_PRINCIPLES = [
+  {
+    title: "Edit in the browser",
+    desc: "No install. Trim, cut, caption and export right where you are, and your project stays in your browser.",
+  },
+  {
+    title: "Your own content",
+    desc: "Built for creators editing video and photos they made themselves or have the rights to edit.",
+  },
+  {
+    title: "Nothing kept",
+    desc: "Files uploaded for export or the photo tools are processed in temporary storage and deleted when the job finishes.",
+  },
+  {
+    title: "Original quality",
+    desc: "Exports keep your aspect ratio and frame rate, and nothing is upscaled.",
+  },
 ];
 
-const PRINCIPLES = [
+const CLEANUP_PRINCIPLES = [
   {
     title: "Reconstruct, don't cover up",
     desc: "A blur box or crop hides a distraction. WipeClip rebuilds the pixels behind it from the surrounding frames.",
@@ -40,6 +71,8 @@ const PRINCIPLES = [
     desc: "Reconstruction is an estimate. We say plainly what works well and what doesn't.",
   },
 ];
+
+const PRINCIPLES = AI_CLEANUP_ENABLED ? CLEANUP_PRINCIPLES : EDITOR_PRINCIPLES;
 
 const STATS = [
   { value: "0", label: "files stored" },
@@ -65,18 +98,33 @@ export default function AboutPage() {
                 About WipeClip
               </div>
               <h1 className="font-display text-4xl font-extrabold tracking-tight text-foreground text-balance sm:text-6xl">
-                Clean footage for creators, <span className="text-gradient">without the cover-up</span>
+                {AI_CLEANUP_ENABLED ? (
+                  <>
+                    Clean footage for creators, <span className="text-gradient">without the cover-up</span>
+                  </>
+                ) : (
+                  <>
+                    A video editor for creators, <span className="text-gradient">right in your browser</span>
+                  </>
+                )}
               </h1>
               <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-muted sm:text-lg">
                 WipeClip is a browser video editor for creators: trim, cut, add transitions, text, music and stickers,
-                and export for any platform. Its AI object removal takes out distractions you didn&apos;t want in your own
-                shots, like a passer-by, a stray cable or a lens smudge, by reconstructing what was behind them.
+                and export for any platform.{" "}
+                {AI_CLEANUP_ENABLED
+                  ? "Its AI object removal takes out distractions you didn't want in your own shots, like a passer-by, a stray cable or a lens smudge, by reconstructing what was behind them."
+                  : "It also generates captions from speech and comes with free photo tools: a background remover, a photo sharpener and a video frame grabber."}
               </p>
               <div className="mt-8 flex flex-wrap justify-center gap-3">
-                <Link href="/#upload" className="btn-primary rounded-full px-6 py-3 text-sm font-semibold">
-                  Remove an object free
-                </Link>
-                <Link href="/editor" className="btn-secondary rounded-full px-6 py-3 text-sm font-semibold">
+                {AI_CLEANUP_ENABLED && (
+                  <Link href="/#upload" className="btn-primary rounded-full px-6 py-3 text-sm font-semibold">
+                    Remove an object free
+                  </Link>
+                )}
+                <Link
+                  href="/editor"
+                  className={`${AI_CLEANUP_ENABLED ? "btn-secondary" : "btn-primary"} rounded-full px-6 py-3 text-sm font-semibold`}
+                >
                   Open the video editor
                 </Link>
               </div>
@@ -131,14 +179,18 @@ export default function AboutPage() {
         </nav>
 
         {/* Long-form sections, alternating bands */}
-        <Reveal>
-          <WhatWipeClipDoes />
-        </Reveal>
-        <div className="bg-surface-2/40">
-          <Reveal>
-            <LimitationsSection />
-          </Reveal>
-        </div>
+        {AI_CLEANUP_ENABLED && (
+          <>
+            <Reveal>
+              <WhatWipeClipDoes />
+            </Reveal>
+            <div className="bg-surface-2/40">
+              <Reveal>
+                <LimitationsSection />
+              </Reveal>
+            </div>
+          </>
+        )}
         <Reveal>
           <PrivacyProcessing />
         </Reveal>

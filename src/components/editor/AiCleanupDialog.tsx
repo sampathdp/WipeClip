@@ -1,5 +1,6 @@
 "use client";
 
+import { IS_DESKTOP } from "@/lib/platform";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import RegionSelector from "@/components/RegionSelector";
@@ -228,7 +229,7 @@ export default function AiCleanupDialog({
           <p className="font-mono text-xs text-muted">
             {Math.floor(elapsed / 60000)}:{String(Math.floor((elapsed % 60000) / 1000)).padStart(2, "0")}
           </p>
-          {elapsed > 45000 && <p className="text-xs text-muted">Longer or higher-resolution clips can take a few minutes. Keep this tab open.</p>}
+          {elapsed > 45000 && <p className="text-xs text-muted">Longer or higher-resolution clips can take a few minutes. {IS_DESKTOP ? "Keep WipeClip open." : "Keep this tab open."}</p>}
         </div>
       )}
 
