@@ -3,7 +3,7 @@ import type { Project } from "./types";
 
 const MAX_HISTORY = 200;
 
-interface HistoryState {
+export interface HistoryState {
   past: Project[];
   present: Project;
   future: Project[];
@@ -11,7 +11,7 @@ interface HistoryState {
   gestureBase: Project | null;
 }
 
-type Action =
+export type HistoryAction =
   | { type: "apply"; fn: (p: Project) => Project; record: boolean }
   | { type: "begin" }
   | { type: "end" }
@@ -19,7 +19,7 @@ type Action =
   | { type: "redo" }
   | { type: "reset"; project: Project };
 
-function reducer(state: HistoryState, action: Action): HistoryState {
+export function historyReducer(state: HistoryState, action: HistoryAction): HistoryState {
   switch (action.type) {
     case "apply": {
       const next = action.fn(state.present);
@@ -68,7 +68,7 @@ function reducer(state: HistoryState, action: Action): HistoryState {
  * one drag is one undo step.
  */
 export function useProjectHistory(initial: Project) {
-  const [state, dispatch] = useReducer(reducer, {
+  const [state, dispatch] = useReducer(historyReducer, {
     past: [],
     present: initial,
     future: [],

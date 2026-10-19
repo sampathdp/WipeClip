@@ -1,0 +1,6 @@
+/* The website's stylesheet, plus explicit Tailwind sources: automatic
+   source detection doesn't find the editor's components in ../src when
+   building the desktop app, which left every utility class out. */
+@import "../../src/app/globals.css";
+@source "../../src";
+@source "./";

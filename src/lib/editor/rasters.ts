@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { rasterizeSticker, type RasterSticker } from "./stickers";
+import { rasterizeShape, shapeKey } from "./shapes";
 import { rasterizeText, textKey } from "./textRaster";
 import type { MediaSource, Overlay } from "./types";
 
@@ -14,12 +15,14 @@ export function rasterKey(o: Overlay): string {
   if (o.kind === "sticker") return `s:${o.stickerId}`;
   if (o.kind === "image") return `i:${o.sourceId}`;
   if (o.kind === "video") return `v:${o.sourceId}`;
+  if (o.kind === "shape") return shapeKey(o.shape);
   return `t:${textKey(o.text)}`;
 }
 
 export function loadRaster(o: Overlay, sources: Record<string, MediaSource>): Promise<RasterSticker> {
   if (o.kind === "sticker") return rasterizeSticker(o.stickerId);
   if (o.kind === "text") return rasterizeText(o.text);
+  if (o.kind === "shape") return rasterizeShape(o.shape);
   const src = sources[o.sourceId];
   if (!src) return Promise.reject(new Error(o.kind === "video" ? "Missing video" : "Missing image"));
   return Promise.resolve({ blob: src.file, url: src.url, width: src.width, height: src.height });

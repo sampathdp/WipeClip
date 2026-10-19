@@ -3,8 +3,12 @@
 import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { trackEvent, useToolView } from "@/lib/analytics";
+import ToolFeedback from "./ToolFeedback";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
+
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import ToolFeedback from "./ToolFeedback";
+
 
 interface Capture {
   id: string;

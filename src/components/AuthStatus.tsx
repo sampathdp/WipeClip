@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { apiFetch, IS_DESKTOP } from "@/lib/platform";
+import SignInModal from "@/components/SignInModal";
 
 export default function AuthStatus() {
   const [email, setEmail] = useState<string | null | undefined>(undefined);
@@ -26,7 +28,7 @@ export default function AuthStatus() {
       if (!code) return;
       localStorage.removeItem(REF_STORAGE_KEY);
       try {
-        await fetch("/api/referrals/claim", {
+        await apiFetch("/api/referrals/claim", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ code }),
@@ -43,7 +45,7 @@ export default function AuthStatus() {
       setEmail(user?.email ?? null);
       if (!user) return;
       await claimReferralIfAny();
-      const res = await fetch("/api/credits");
+      const res = await apiFetch("/api/credits");
       if (res.ok) {
         const data = await res.json();
         setCredits(data.total);
@@ -65,6 +67,9 @@ export default function AuthStatus() {
   }
 
   if (!email) {
+    // The desktop app has no /sign-in page of its own - signing in on the
+    // website wouldn't sign the app in - so it opens the in-app modal.
+    if (IS_DESKTOP) return <DesktopSignIn />;
     return (
       <Link
         href="/sign-in"
@@ -76,6 +81,22 @@ export default function AuthStatus() {
   }
 
   return <AccountMenu email={email} credits={credits} plan={plan} />;
+}
+
+function DesktopSignIn() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="btn-primary rounded-full px-4 py-2 text-sm font-semibold inline-flex items-center gap-1.5"
+      >
+        Sign in
+      </button>
+      <SignInModal open={open} onClose={() => setOpen(false)} />
+    </>
+  );
 }
 
 const PLAN_LABEL: Record<string, string> = { free: "Free plan", starter: "Starter", pro: "Pro" };
@@ -157,11 +178,26 @@ function AccountMenu({ email, credits, plan }: { email: string; credits: number 
               Buy credits
             </Link>
           </div>
-          <form action="/auth/sign-out" method="post" className="border-t border-border pt-1">
-            <button role="menuitem" type="submit" className={item + " text-rose-600 dark:text-rose-400"}>
-              Sign out
-            </button>
-          </form>
+          {IS_DESKTOP ? (
+            // No server session to clear in the desktop app: signing out
+            // locally drops the tokens from the OS credential store.
+            <div className="border-t border-border pt-1">
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => void createClient().auth.signOut()}
+                className={item + " text-rose-600 dark:text-rose-400"}
+              >
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <form action="/auth/sign-out" method="post" className="border-t border-border pt-1">
+              <button role="menuitem" type="submit" className={item + " text-rose-600 dark:text-rose-400"}>
+                Sign out
+              </button>
+            </form>
+          )}
         </div>
       )}
     </div>

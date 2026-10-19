@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { getRequestAuth, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { preflight, withCors } from "@/lib/cors";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { escapeHtml, sendEmail } from "@/lib/email";
 
@@ -13,22 +14,35 @@ const MAX_MESSAGE = 5000;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Accepts a bug report, feature request or general feedback from the
+ * /feedback page or the prompt under a tool's result (ToolFeedback, which
+ * the desktop app also shows - hence CORS). Signed-out visitors can submit
+ * too (optionally leaving an email so we can reply); signed-in submissions
+ * are tied to the account so they show up under "Your requests" with their
+ * status. Written with the service-role key - the feedback table has no
+ * insert policy, so the browser can never write to it directly.
+=======
  * /feedback page or the prompt under a tool's result (ToolFeedback).
  * Signed-out visitors can submit too (optionally leaving an
  * email so we can reply); signed-in submissions are tied to the account so
  * they show up under "Your requests" with their status. Written with the
  * service-role key - the feedback table has no insert policy, so the
  * browser can never write to it directly.
+
  */
 export async function POST(request: NextRequest) {
+  return withCors(request, await handle(request));
+}
+
+export function OPTIONS(request: NextRequest) {
+  return preflight(request);
+}
+
+async function handle(request: NextRequest) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ error: "Feedback isn't configured yet." }, { status: 501 });
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user } = await getRequestAuth(request);
 
   // 5 submissions/hour per user (or IP when signed out) - plenty for a real
   // report plus a follow-up, tight enough to stop the form being spammed.

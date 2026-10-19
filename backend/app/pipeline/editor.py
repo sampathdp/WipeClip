@@ -20,6 +20,14 @@ is an actual operation in the exported file:
      transition), overlapping exactly like the editor's timeline math.
   3. Effects. Timed effects run on the joined video, each limited to its
      time range with ffmpeg's timeline `enable`.
+  3b. Focus zooms and pointer effects (desktop screen recordings). The
+     browser evaluates the camera window and the cursor/click-ring state
+     per output frame with the same code its preview uses
+     (src/lib/editor/focusExport.ts) and sends only the changes; here they
+     become per-frame step expressions (step_expr) that drive a per-clip
+     zoom (scale + overlay inside the clip's fitted box) and four ring
+     layers plus a cursor sprite. Nothing about easing or smoothing is re-derived here,
+     so preview and export can't drift apart.
   4. Overlays. Stickers, text and images - all PNGs rasterized by the
      browser, the same images the preview shows - and picture-in-picture
      video layers are composited bottom to top with their position, size,
@@ -41,13 +49,14 @@ client.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 from app.config import VIDEO_ENCODE_CRF, VIDEO_ENCODE_PRESET
 from app.pipeline import look as look_pipeline
@@ -216,6 +225,9 @@ class PlanClip:
     filter: str = "original"
     intensity: float = 100.0
     adjust: dict = field(default_factory=lambda: dict(_NEUTRAL_ADJUST))
+    # Focus zoom: (t, x, y, s) rows in clip time - the visible window of the
+    # (cropped) frame, top-left x/y and size s, fractions. Empty = no zoom.
+    camera: list[tuple[float, float, float, float]] = field(default_factory=list)
 
 
 _NEUTRAL_ADJUST = {
@@ -271,6 +283,39 @@ class PlanEffect:
 
 
 @dataclass
+class PlanPointer:
+    """Reconstructed cursor and click rings, positioned per frame (rows in
+    timeline time, canvas fractions; see focusExport.ts)."""
+
+    cursor_path: str | None
+    cursor_w: float  # sprite size, fractions of canvas height
+    cursor_h: float
+    hot_x: float  # hotspot, fractions of the sprite
+    hot_y: float
+    ring_paths: list[str]  # [left, right]
+    ring_sizes: list[float]  # sprite width / ring radius
+    cursor_rows: list[tuple[float, float, float]]  # (t, x, y); x < 0 hides
+    ring_rows: list[tuple[float, int, float, float, float, float]]  # (t, layer, x, y, r, alpha)
+
+
+@dataclass
+class PlanMask:
+    """A privacy mask: rows (t, x, y, w, h) of its rectangle in canvas
+    fractions per frame where it changes (src/lib/editor/masks.ts), shown
+    from start to end."""
+
+    mode: str  # blur | pixelate | solid
+    start: float
+    end: float
+    strength: float  # 0..100
+    color: str  # #rrggbb
+    rows: list[tuple[float, float, float, float, float]]
+
+
+MASK_MODES = ("blur", "pixelate", "solid")
+
+
+@dataclass
 class ExportPlan:
     width: int
     height: int
@@ -287,6 +332,40 @@ class ExportPlan:
     background_image: str | None = None
     crf: int = VIDEO_ENCODE_CRF
     audio_bitrate: str = "192k"
+    pointer: PlanPointer | None = None
+    masks: list[PlanMask] = field(default_factory=list)
+
+
+def plan_to_json(plan: ExportPlan) -> str:
+    """The whole plan as JSON for the export job (it crosses the RQ
+    boundary as a plain string). Every field goes through, so a field added
+    to ExportPlan can't be silently dropped between the API and the worker
+    - see plan_from_json and tests/test_focus_export.py."""
+    return json.dumps(asdict(plan))
+
+
+def plan_from_json(text: str) -> ExportPlan:
+    raw = json.loads(text)
+    pointer = raw.get("pointer")
+    return ExportPlan(
+        **{k: v for k, v in raw.items() if k not in ("clips", "overlays", "audio", "effects", "pointer", "masks")},
+        clips=[PlanClip(**{**c, "camera": [tuple(r) for r in c.get("camera", [])]}) for c in raw["clips"]],
+        overlays=[PlanOverlay(**o) for o in raw.get("overlays", [])],
+        audio=[PlanAudio(**a) for a in raw.get("audio", [])],
+        effects=[PlanEffect(**e) for e in raw.get("effects", [])],
+        pointer=(
+            PlanPointer(
+                **{
+                    **pointer,
+                    "cursor_rows": [tuple(r) for r in pointer["cursor_rows"]],
+                    "ring_rows": [tuple(r) for r in pointer["ring_rows"]],
+                }
+            )
+            if pointer
+            else None
+        ),
+        masks=[PlanMask(**{**m, "rows": [tuple(r) for r in m["rows"]]}) for m in raw.get("masks", [])],
+    )
 
 
 def quantize_plan(plan: ExportPlan) -> None:
@@ -346,6 +425,208 @@ class _Inputs:
         return self.count - 1
 
 
+OFFSCREEN = -100000
+RING_LAYERS = 4
+
+
+def _filter_path(path: str) -> str:
+    """A file path as a filter argument: forward slashes and an escaped
+    drive colon, so it survives graph parsing on Windows too."""
+    return path.replace("\\", "/").replace(":", "\\:")
+
+
+def _round(v: float) -> int:
+    """Half up, like JavaScript's Math.round (Python's round() is
+    half-to-even), so the browser and this side agree to the pixel."""
+    return math.floor(v + 0.5)
+
+
+def step_expr(times: list[float], values: list[float | int], var: str, fps: float) -> str:
+    """ffmpeg expression of `var` (a frame timestamp) that holds values[k]
+    from times[k] on - a balanced if(lt()) tree, so each frame costs
+    log2(n) comparisons however long the timeline is.
+
+    Every frame computes its own value from its own timestamp, so the
+    result doesn't depend on how ffmpeg schedules its threads (sendcmd,
+    which changes another filter when a frame passes, does). Boundaries
+    sit half a frame early so a row at a frame's (rounded) time always
+    applies to that frame."""
+    if not times:
+        return "0"
+    half = 0.5 / fps
+
+    def num(v: float | int) -> str:
+        return str(v) if isinstance(v, int) else _num(v)
+
+    # Drop rows that don't change the value (smaller expression).
+    t2, v2 = [times[0]], [values[0]]
+    for t, v in zip(times[1:], values[1:]):
+        if v != v2[-1]:
+            t2.append(t)
+            v2.append(v)
+
+    def build(lo: int, hi: int) -> str:
+        if lo == hi:
+            return num(v2[lo])
+        mid = (lo + hi + 1) // 2
+        return f"if(lt({var},{_num(t2[mid] - half)}),{build(lo, mid - 1)},{build(mid, hi)})"
+
+    return build(0, len(t2) - 1)
+
+
+def camera_geometry(x: float, y: float, s: float, box_w: int, box_h: int) -> tuple[int, int, int, int]:
+    """Same as windowPixels() in src/lib/editor/camera.ts (shared vectors in
+    tests/fixtures/camera_vectors.json)."""
+    s = max(0.2, min(1.0, s))
+    zw, zh = max(box_w, _round(box_w / s)), max(box_h, _round(box_h / s))
+    ox = max(box_w - zw, min(0, -_round(x * zw)))
+    oy = max(box_h - zh, min(0, -_round(y * zh)))
+    return zw, zh, ox, oy
+
+
+def _camera_chain(clip: PlanClip, i: int, src: str, box_w: int, box_h: int, fps: float) -> list[str]:
+    """[src] -> [zc{i}]: the clip zoomed per its camera rows - the frame
+    scaled by 1/s and shifted so the camera window fills the fitted box."""
+    times = [r[0] for r in clip.camera]
+    geo = [camera_geometry(x, y, s, box_w, box_h) for _, x, y, s in clip.camera]
+    zw, zh, ox, oy = (step_expr(times, [g[k] for g in geo], "t", fps) for k in range(4))
+    return [
+        f"[{src}]split[zb{i}][zs{i}]",
+        f"[zs{i}]scale=w='{zw}':h='{zh}':eval=frame:flags=bicubic[zz{i}]",
+        f"[zb{i}][zz{i}]overlay=x='{ox}':y='{oy}':eval=frame:format=auto,setsar=1[zc{i}]",
+    ]
+
+
+def _pointer_filters(plan: ExportPlan, inputs: _Inputs, base: str, total: float) -> tuple[list[str], str]:
+    """Cursor and click-ring layers over [base]; returns (graph, output
+    label). Positions, ring sizes and ring opacity are step expressions of
+    each frame's own time (see step_expr)."""
+    p = plan.pointer
+    assert p is not None
+    W, H, fps = plan.width, plan.height, plan.fps
+    graph: list[str] = []
+    acc = base
+
+    def looped(path: str) -> int:
+        return inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(total + 0.1), "-i", path)
+
+    if p.ring_rows and p.ring_paths:
+        ring_inputs = [looped(path) for path in p.ring_paths]
+        for c, idx in enumerate(ring_inputs):
+            graph.append(f"[{idx}:v]format=rgba,split=2[rc{c}a][rc{c}b]")
+        for layer in range(RING_LAYERS):
+            rows = [r for r in p.ring_rows if r[1] == layer]
+            # step_expr holds the first row's value before it starts: without
+            # a hidden row at 0 the ring would show from the first frame
+            # until its click.
+            if rows and rows[0][0] > 0:
+                rows.insert(0, (0.0, layer, 0.0, 0.0, 0.0, 0.0))
+            c = 0 if layer < 2 or len(ring_inputs) == 1 else 1
+            src = f"rc{c}{'a' if layer % 2 == 0 else 'b'}"
+            if not rows:
+                graph.append(f"[{src}]nullsink")
+                continue
+            ratio = p.ring_sizes[c]
+            times = [r[0] for r in rows]
+            on = [a > 0 and rr > 0 for (_, _, _, _, rr, a) in rows]
+            sizes = [max(2, _round(ratio * rr * H)) if v else 2 for (_, _, _, _, rr, _a), v in zip(rows, on)]
+            alpha = [round(a, 3) if v else 0.0 for (_, _, _, _, _r, a), v in zip(rows, on)]
+            # The sprite keeps one size (the ring's largest) and the ring
+            # grows inside it: geq samples the sprite at a scaled coordinate
+            # around its center. Resizing the sprite per frame instead made
+            # ffmpeg reconfigure the overlay on every size change, which
+            # dominated export time (~0.5 s per change).
+            full = max(sizes)
+            scales = [round(sz / full, 4) if v else 1.0 for sz, v in zip(sizes, on)]
+            xs = [_round(x * W - full / 2) if v else OFFSCREEN for (_, _, x, _, _, _), v in zip(rows, on)]
+            ys = [_round(y * H - full / 2) if v else OFFSCREEN for (_, _, _, y, _, _), v in zip(rows, on)]
+            # Rings are visible for a fraction of a second per click, but
+            # geq evaluates every pixel of every frame: the opacity pass and
+            # the overlay only run while the ring is on (timeline `enable`
+            # with the same per-frame schedule).
+            active = step_expr(times, [1 if v else 0 for v in on], "t", fps)
+            k = step_expr(times, scales, "T", fps)
+            u, v_ = f"(X-W/2)/({k})+W/2", f"(Y-H/2)/({k})+H/2"
+            graph.append(
+                f"[{src}]scale={full}:{full}:flags=lanczos,"
+                f"geq=r='r({u},{v_})':g='g({u},{v_})':b='b({u},{v_})':a='alpha({u},{v_})*({step_expr(times, alpha, 'T', fps)})':enable='{active}'[rl{layer}];"
+                f"[{acc}][rl{layer}]overlay=x='{step_expr(times, xs, 't', fps)}':y='{step_expr(times, ys, 't', fps)}':"
+                f"eval=frame:eof_action=pass:format=auto:enable='{active}'[pr{layer}]"
+            )
+            acc = f"pr{layer}"
+    if p.cursor_path and p.cursor_rows:
+        idx = looped(p.cursor_path)
+        cw, ch = max(2, _round(p.cursor_w * H)), max(2, _round(p.cursor_h * H))
+        times = [r[0] for r in p.cursor_rows]
+        xs = [OFFSCREEN if x < 0 else _round(x * W - p.hot_x * cw) for _, x, _ in p.cursor_rows]
+        ys = [OFFSCREEN if x < 0 else _round(y * H - p.hot_y * ch) for _, x, y in p.cursor_rows]
+        graph.append(
+            f"[{idx}:v]format=rgba,scale={cw}:{ch}:flags=lanczos[pcs];"
+            f"[{acc}][pcs]overlay=x='{step_expr(times, xs, 't', fps)}':y='{step_expr(times, ys, 't', fps)}':"
+            f"eval=frame:eof_action=pass:format=auto[pcd]"
+        )
+        acc = "pcd"
+    return graph, acc
+
+
+def mask_pixels(m: PlanMask, W: int, H: int) -> tuple[list[float], list[list[int]]]:
+    """Row times and integer boxes (x, y, w, h). A hidden row becomes a
+    2x2 box far off-screen."""
+    times, boxes = [], []
+    for t, x, y, w, h in m.rows:
+        x0, y0 = _round(x * W), _round(y * H)
+        x1, y1 = _round((x + w) * W), _round((y + h) * H)
+        if w <= 0 or h <= 0 or x1 - x0 < 2 or y1 - y0 < 2:
+            boxes.append([OFFSCREEN, OFFSCREEN, 2, 2])
+        else:
+            boxes.append([x0, y0, x1 - x0, y1 - y0])
+        times.append(t)
+    return times, boxes
+
+
+def _mask_filters(plan: ExportPlan, base: str, total: float) -> tuple[list[str], str]:
+    """Privacy masks over [base], in order; returns (graph, output label).
+
+    Each mask's rectangle is a small box source scaled per frame
+    (scale eval=frame) and placed per frame (overlay eval=frame), both
+    reading the frame's own timestamp through step_expr - deterministic,
+    unlike sendcmd, and drawbox can't change its box per frame. Solid masks
+    are that box in their color. Blur and pixelate masks use it as a white
+    matte on black: a blurred / pixelated copy of the frame shows through
+    it, so exactly the previewed area is covered."""
+    W, H, fps = plan.width, plan.height, plan.fps
+    d = _num(total + 0.1)
+    graph: list[str] = []
+    acc = base
+    for i, m in enumerate(plan.masks):
+        if not m.rows:
+            continue
+        times, boxes = mask_pixels(m, W, H)
+        x, y, w, h = (step_expr(times, [b[k] for b in boxes], "t", fps) for k in range(4))
+        en = f"enable='between(t,{_num(m.start)},{_num(m.end)})'"
+        sized = f"scale=w='{w}':h='{h}':eval=frame:flags=neighbor"
+        place = f"overlay=x='{x}':y='{y}':eval=frame:format=auto:eof_action=pass"
+        k = max(0.0, min(1.0, m.strength / 100))
+        if m.mode == "solid":
+            graph.append(f"color=c=0x{m.color.lstrip('#')}:s=16x16:r={_num(fps)}:d={d},{sized}[mbox{i}]")
+            graph.append(f"[{acc}][mbox{i}]{place}:{en}[mk{i}]")
+        else:
+            if m.mode == "blur":
+                fx = f"gblur=sigma={_num(H * (0.008 + 0.04 * k))}:steps=2:{en}"
+            else:
+                block = max(4, _round(H * (0.008 + 0.05 * k)))
+                fx = f"scale=w='max(1,trunc(iw/{block}))':h='max(1,trunc(ih/{block}))':flags=neighbor,scale={W}:{H}:flags=neighbor"
+            graph.append(f"[{acc}]split[mb{i}][ms{i}]")
+            graph.append(f"[ms{i}]{fx},format=yuva420p[mf{i}]")
+            graph.append(f"color=c=white:s=16x16:r={_num(fps)}:d={d},format=gray,{sized}[mw{i}]")
+            graph.append(f"color=c=black:s={W}x{H}:r={_num(fps)}:d={d},format=gray[mz{i}]")
+            graph.append(f"[mz{i}][mw{i}]{place},format=gray[mm{i}]")
+            graph.append(f"[mf{i}][mm{i}]alphamerge[ma{i}]")
+            graph.append(f"[mb{i}][ma{i}]overlay=format=auto:eof_action=pass:{en}[mk{i}]")
+        acc = f"mk{i}"
+    return graph, acc
+
+
 def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs: _Inputs, tmp: str) -> list[str]:
     """Filters turning clip input `idx` into a canvas-sized [v{i}]."""
     W, H, fps = plan.width, plan.height, plan.fps
@@ -372,7 +653,7 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
         look_pipeline.write_cube(cube, look_pipeline.grade_stages(clip.filter, clip.intensity, clip.adjust))
         # Forward slashes + escaped drive colon so the path survives filter
         # graph parsing on Windows too.
-        cube_arg = cube.replace("\\", "/").replace(":", "\\:")
+        cube_arg = _filter_path(cube)
         pre.append(f"lut3d=file='{cube_arg}'")
     if clip.adjust["sharpness"] > 0:
         pre.append(f"unsharp=5:5:{_num(clip.adjust['sharpness'] / 100 * 1.5)}")
@@ -405,15 +686,22 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
 
     needs_blur_bg = plan.background == "blur"
     chain = ",".join(pre)
+    head = f"[{idx}:v:0]{chain}"
+    if clip.camera:
+        # Zoomed after fitting, so the zoom works on canvas-sized frames and
+        # the blurred background (split below) follows it, like the preview.
+        graph.append(f"[{idx}:v:0]{chain}[cp{i}]")
+        graph += _camera_chain(clip, i, f"cp{i}", box_w, box_h, fps)
+        head = f"[zc{i}]null"
     if needs_blur_bg:
-        graph.append(f"[{idx}:v:0]{chain},split[c{i}][cb{i}]")
+        graph.append(f"{head},split[c{i}][cb{i}]")
         graph.append(
             f"[cb{i}]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
             f"gblur=sigma={_num(H / 30)},setsar=1[bg{i}]"
         )
         fg_in = f"c{i}"
     else:
-        graph.append(f"[{idx}:v:0]{chain}[c{i}]")
+        graph.append(f"{head}[c{i}]")
         fg_in = f"c{i}"
         if plan.background == "image" and plan.background_image:
             bg_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", d, "-i", plan.background_image)
@@ -614,6 +902,18 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
         fx = ",".join(_effect_filters(e, plan.width, plan.height) for e in plan.effects)
         graph.append(f"[{v_acc}]{fx}[vfx]")
         v_acc = "vfx"
+
+    # Privacy masks cover the video and its effects (and sit under the
+    # pointer, text and stickers - the preview's order).
+    if plan.masks:
+        mask_graph, v_acc = _mask_filters(plan, v_acc, total)
+        graph += mask_graph
+
+    # Pointer layers sit above the video and its effects, below text,
+    # stickers and images - the preview's stacking order.
+    if plan.pointer and (plan.pointer.ring_rows or plan.pointer.cursor_rows):
+        pointer_graph, v_acc = _pointer_filters(plan, inputs, v_acc, total)
+        graph += pointer_graph
 
     for n, o in enumerate(plan.overlays):
         if o.video:

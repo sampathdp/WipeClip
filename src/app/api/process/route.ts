@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { getRequestAuth, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { preflight, withCors } from "@/lib/cors";
 import { RESOLUTION_CREDIT_COST } from "@/lib/credits";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { isProUser } from "@/lib/plan";
@@ -30,6 +31,15 @@ function errorResponse(code: string, message: string, status: number) {
  * compute spigot.
  */
 export async function POST(request: NextRequest) {
+
+  return withCors(request, await handle(request));
+}
+
+export function OPTIONS(request: NextRequest) {
+  return preflight(request);
+}
+
+async function handle(request: NextRequest) {
   if (!AI_CLEANUP_ENABLED) {
     return errorResponse("not_found", "This feature isn't available.", 404);
   }
@@ -47,10 +57,7 @@ export async function POST(request: NextRequest) {
     return errorResponse("bad_request", "Invalid request.", 400);
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getRequestAuth(request);
 
   if (!user) {
     // 3 free anonymous previews/24h/IP - no account to charge or hold

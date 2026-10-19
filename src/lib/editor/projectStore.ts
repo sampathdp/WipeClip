@@ -6,13 +6,20 @@
  * re-saved as the user edits. Best-effort throughout: private browsing or a
  * full quota just means no recovery, never a broken editor.
  */
+import { IS_DESKTOP } from "@/lib/platform/env";
 import { migrateProject, type MediaSource, type Project } from "./types";
 
 const DB_NAME = "wipeclip-editor";
 const PROJECT_STORE = "project";
 const SOURCE_STORE = "sources";
 const KEY = "current";
-const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** Website only: browser storage is a convenience there. The desktop app
+ * keeps a saved project until the user discards or replaces it. */
+const MAX_AGE_MS = IS_DESKTOP ? Infinity : 7 * 24 * 60 * 60 * 1000;
+/** Version of the stored record. Records without one are version 1
+ * (everything saved before versioning); migrateProject fills any newer
+ * fields. A record from a newer app is reported, never guessed at. */
+export const PROJECT_FORMAT = 1;
 
 type SourceMeta = Omit<MediaSource, "url" | "file"> & { name: string; type: string };
 
@@ -20,6 +27,7 @@ interface StoredProject {
   project: Project;
   sources: SourceMeta[];
   savedAt: number;
+  formatVersion?: number;
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -63,17 +71,29 @@ function toMeta(s: MediaSource): SourceMeta {
   return { id, kind, duration, width, height, fps, hasAudio, name: file.name, type: file.type };
 }
 
-export async function saveSource(source: MediaSource): Promise<void> {
+/** A recorded source's capture details and interaction events, stored once
+ * beside its file (they can be a few MB - too much to re-save with every
+ * edit, which is what the project record gets). */
+const recordingKey = (id: string) => `${id}#recording`;
+
+/** Stores a source for recovery. false when it couldn't be stored (full
+ * disk/quota, private browsing): the caller tells the user, because the
+ * project then can't be reopened after closing. */
+export async function saveSource(source: MediaSource): Promise<boolean> {
   try {
-    await withDb((db) => run(db, SOURCE_STORE, "readwrite", (s) => s.put(source.file, source.id)));
+    await withDb(async (db) => {
+      await run(db, SOURCE_STORE, "readwrite", (s) => s.put(source.file, source.id));
+      if (source.recording) await run(db, SOURCE_STORE, "readwrite", (s) => s.put(source.recording, recordingKey(source.id)));
+    });
+    return true;
   } catch {
-    // best-effort, see module docstring
+    return false;
   }
 }
 
 export async function saveProject(project: Project, sources: MediaSource[]): Promise<void> {
   try {
-    const record: StoredProject = { project, sources: sources.map(toMeta), savedAt: Date.now() };
+    const record: StoredProject = { project, sources: sources.map(toMeta), savedAt: Date.now(), formatVersion: PROJECT_FORMAT };
     await withDb((db) => run(db, PROJECT_STORE, "readwrite", (s) => s.put(record, KEY)));
   } catch {
     // best-effort
@@ -86,24 +106,40 @@ export interface RestoredProject {
   savedAt: number;
 }
 
-export async function loadProject(): Promise<RestoredProject | null> {
+/** A saved project that exists but can't be offered, with the reason to
+ * show - never silently treated as "nothing saved". */
+export interface ProjectProblem {
+  problem: string;
+}
+
+export const isProjectProblem = (r: RestoredProject | ProjectProblem | null): r is ProjectProblem => !!r && "problem" in r;
+
+export async function loadProject(): Promise<RestoredProject | ProjectProblem | null> {
   try {
     return await withDb(async (db) => {
       const record = await run<StoredProject>(db, PROJECT_STORE, "readonly", (s) => s.get(KEY));
-      if (!record?.project?.clips?.length || !record.sources?.length) return null;
+      if (!record) return null;
+      if ((record.formatVersion ?? 1) > PROJECT_FORMAT) {
+        return { problem: "Your last project was saved by a newer version of WipeClip. Update the app to open it." };
+      }
+      if (!record.project?.clips?.length || !record.sources?.length) return null;
       if (Date.now() - record.savedAt > MAX_AGE_MS) return null;
       const sources: MediaSource[] = [];
       for (const meta of record.sources) {
         const blob = await run<Blob>(db, SOURCE_STORE, "readonly", (s) => s.get(meta.id));
-        if (!blob) return null; // incomplete save - don't offer a broken project
+        if (!blob) {
+          return { problem: `Your last project can't be reopened: its video "${meta.name}" wasn't saved on this device (storage may have been full). Open the video again to start over.` };
+        }
         const { name, type, ...rest } = meta;
         const file = new File([blob], name, { type });
-        sources.push({ ...rest, file, url: URL.createObjectURL(file) });
+        const recording = await run<MediaSource["recording"]>(db, SOURCE_STORE, "readonly", (s) => s.get(recordingKey(meta.id)));
+        sources.push({ ...rest, file, url: URL.createObjectURL(file), ...(recording ? { recording } : {}) });
       }
       return { project: migrateProject(record.project), sources, savedAt: record.savedAt };
     });
-  } catch {
-    return null;
+  } catch (e) {
+    console.error("[project] couldn't read the saved project", e);
+    return { problem: "Your last project couldn't be read, so it can't be reopened. Your original video files are not affected." };
   }
 }
 

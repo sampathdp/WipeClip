@@ -72,6 +72,8 @@ export interface TimelineTrack {
   tone: string; // bar color classes
   empty: string;
   items: TrackItem[];
+  /** Thin markers drawn behind the items (e.g. recorded clicks). */
+  ticks?: { t: number; className: string; title?: string }[];
 }
 
 /** Greedy lane packing so overlapping items stack instead of hiding each other. */
@@ -491,6 +493,15 @@ export default function Timeline(props: Props) {
                 <span className="pointer-events-none sticky left-1 z-20 inline-block px-1.5 text-[9px] font-bold uppercase leading-4 tracking-wider text-muted">
                   {track.label}
                 </span>
+                {track.ticks?.map((tk, i) => (
+                  <span
+                    key={i}
+                    title={tk.title}
+                    aria-hidden
+                    className={`pointer-events-none absolute bottom-1 top-4 w-px ${tk.className}`}
+                    style={{ left: xOf(tk.t) }}
+                  />
+                ))}
                 {track.items.length === 0 && (
                   <span className="pointer-events-none absolute left-20 top-6 inline-block px-2 text-[11px] text-muted/80">{track.empty}</span>
                 )}

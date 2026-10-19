@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "mini",
+  "description": "The recording mini player (src/components/recorder/MiniPlayer.tsx): receives the recorder's state, sends Pause/Stop/Marker back as recorder shortcut events, and drags its own frameless window.",
+  "windows": ["recorder-mini"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit-to",
+    "core:window:allow-start-dragging"
+  ]
+}

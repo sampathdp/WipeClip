@@ -54,3 +54,10 @@ backend/app/assets/watermark_logos/*.png
 
 # local dev logs
 dev.log
+
+# desktop app (see docs/desktop)
+/desktop/.next/
+/desktop/out/
+/src-tauri/target/
+/src-tauri/tauri.generated.conf.json
+/src-tauri/gen/

@@ -1,3 +1,5 @@
+import { apiFetch } from "@/lib/platform";
+
 export const TOOLS_API_URL =
   process.env.NEXT_PUBLIC_TOOLS_API_URL ?? "http://localhost:8001";
 
@@ -103,6 +105,8 @@ export type Resolution = "720p" | "1080p" | "4k";
  * to the backend with the ticket - see src/lib/jobTicket.ts. */
 async function getTicket(route: string, payload: unknown, fallback: string, signal?: AbortSignal) {
   assertBackendEnabled();
+  const res = await apiFetch(route, {
+
   const res = await fetch(route, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

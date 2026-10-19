@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { getRequestAuth, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { preflight, withCors } from "@/lib/cors";
 
 /** Called once, post-signup, with the ?ref= code carried through from the
  * landing page. claim_referral (supabase/schema.sql) is idempotent per
@@ -8,14 +9,19 @@ import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/s
  * or already-used code isn't something the caller needs to retry.
  */
 export async function POST(request: NextRequest) {
+  return withCors(request, await handle(request));
+}
+
+export function OPTIONS(request: NextRequest) {
+  return preflight(request);
+}
+
+async function handle(request: NextRequest) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ error: "Accounts aren't configured yet." }, { status: 501 });
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user } = await getRequestAuth(request);
 
   if (!user) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });

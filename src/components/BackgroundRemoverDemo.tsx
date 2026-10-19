@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import ImageCompareSlider from "./ImageCompareSlider";
 import ToolFeedback from "./ToolFeedback";
+import { AI_CLEANUP_ENABLED } from "@/lib/features";
+
 import SignInModal from "./SignInModal";
 import { createClient } from "@/lib/supabase/client";
 import { clearPendingResult, loadPendingResult, savePendingResult } from "@/lib/resultCache";
