@@ -20,6 +20,14 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * are tied to the account so they show up under "Your requests" with their
  * status. Written with the service-role key - the feedback table has no
  * insert policy, so the browser can never write to it directly.
+=======
+ * /feedback page or the prompt under a tool's result (ToolFeedback).
+ * Signed-out visitors can submit too (optionally leaving an
+ * email so we can reply); signed-in submissions are tied to the account so
+ * they show up under "Your requests" with their status. Written with the
+ * service-role key - the feedback table has no insert policy, so the
+ * browser can never write to it directly.
+
  */
 export async function POST(request: NextRequest) {
   return withCors(request, await handle(request));

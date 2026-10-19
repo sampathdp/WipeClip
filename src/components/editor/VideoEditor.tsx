@@ -1519,7 +1519,9 @@ export default function VideoEditor({
               </p>
             )}
             <p className="mt-6 text-center text-xs text-muted">
+
               {IS_DESKTOP ? "Editing happens on this computer." : "Editing happens in your browser."} Your video is only uploaded to check it and when you export{AI_CLEANUP_ENABLED ? " or run AI Cleanup" : ""}, and isn&apos;t stored.
+
             </p>
           </div>
         </main>

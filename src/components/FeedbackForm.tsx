@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+
 import { apiFetch } from "@/lib/platform";
+
 
 export type FeedbackKind = "bug" | "feature" | "feedback";
 export type FeedbackStatus = "open" | "in_progress" | "resolved" | "closed";
@@ -64,6 +66,9 @@ export default function FeedbackForm({
 
     try {
       const res = await apiFetch("/api/feedback", {
+
+      const res = await fetch("/api/feedback", {
+
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

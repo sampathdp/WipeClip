@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestAuth, isSupabaseConfigured } from "@/lib/supabase/server";
 import { preflight, withCors } from "@/lib/cors";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { BACKEND_DISABLED, BACKEND_DISABLED_MESSAGE, type Resolution } from "@/lib/toolsApi";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { issueTicket, sha256Hex } from "@/lib/jobTicket";
@@ -46,6 +47,7 @@ export function OPTIONS(request: NextRequest) {
 }
 
 async function handle(request: NextRequest) {
+
   if (BACKEND_DISABLED) {
     return errorResponse("service_unavailable", BACKEND_DISABLED_MESSAGE, 503);
   }

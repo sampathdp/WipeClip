@@ -31,6 +31,7 @@ function errorResponse(code: string, message: string, status: number) {
  * compute spigot.
  */
 export async function POST(request: NextRequest) {
+
   return withCors(request, await handle(request));
 }
 

@@ -106,6 +106,8 @@ export type Resolution = "720p" | "1080p" | "4k";
 async function getTicket(route: string, payload: unknown, fallback: string, signal?: AbortSignal) {
   assertBackendEnabled();
   const res = await apiFetch(route, {
+
+  const res = await fetch(route, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
