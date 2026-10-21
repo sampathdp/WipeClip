@@ -104,7 +104,7 @@ keys are set, everyone gets Payments.lk. Set `CHECKOUT_COUNTRY=US` (or
 4. The webhook only accepts deliveries from Paddle's published IPs,
    fetched from `https://sandbox-api.paddle.com/ips` or
    `https://api.paddle.com/ips` (cached for an hour, never hard-coded).
-   Behind Cloudflare, set `PADDLE_WEBHOOK_IP_HEADER=cf-connecting-ip`.
+   The real sender is found behind Cloudflare automatically (src/lib/clientIp.ts).
 5. Re-run `supabase/schema.sql` - it adds `payment_orders.provider`,
    `payment_orders.currency` and `profiles.paddle_customer_id`.
 6. Checkout -> Checkout settings: set the default payment link to your

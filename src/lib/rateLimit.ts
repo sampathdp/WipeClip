@@ -1,5 +1,6 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
+import { clientIp } from "./clientIp";
 
 /** Distributed when UPSTASH_REDIS_REST_URL/TOKEN are configured (each
  * distinct `limit`+`windowMs` pair gets its own Ratelimit instance, cached
@@ -64,7 +65,5 @@ export async function checkRateLimit(key: string, limit: number, windowMs: numbe
 
 export function rateLimitKeyFor(request: Request, userId?: string): string {
   if (userId) return `user:${userId}`;
-  const forwardedFor = request.headers.get("x-forwarded-for");
-  const ip = forwardedFor?.split(",")[0]?.trim();
-  return `ip:${ip ?? "unknown"}`;
+  return `ip:${clientIp(request.headers) ?? "unknown"}`;
 }

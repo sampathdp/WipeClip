@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { clientIp } from "@/lib/clientIp";
 import {
   constructWebhookEvent,
   isPaddleWebhookIp,
@@ -12,11 +13,12 @@ import { PLANS } from "@/lib/credits";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** The address the delivery came from. PADDLE_WEBHOOK_IP_HEADER names the
- * header holding it: Vercel sets x-real-ip; set it to cf-connecting-ip when
- * Cloudflare proxies the site, or every delivery is seen as Cloudflare's. */
+/** The address the delivery came from: the real sender even with
+ * Cloudflare in front (see src/lib/clientIp.ts). PADDLE_WEBHOOK_IP_HEADER,
+ * if set, names a header to read instead, for other proxies. */
 function sourceIp(request: NextRequest): string | null {
-  const header = process.env.PADDLE_WEBHOOK_IP_HEADER?.trim() || "x-real-ip";
+  const header = process.env.PADDLE_WEBHOOK_IP_HEADER?.trim();
+  if (!header) return clientIp(request.headers);
   return request.headers.get(header)?.split(",")[0].trim() || null;
 }
 

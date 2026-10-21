@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { isAdminEmail } from "@/lib/admin";
 import { checkRateLimit } from "@/lib/rateLimit";
+import { clientIp } from "@/lib/clientIp";
 
 function fail(error: string): never {
   redirect(`/admin/login?error=${encodeURIComponent(error)}`);
@@ -17,7 +18,7 @@ export async function adminSignIn(form: FormData) {
   if (!isSupabaseConfigured()) fail("Accounts aren't configured.");
 
   // 5 attempts per 15 minutes per IP - slows password guessing.
-  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const ip = clientIp(await headers()) ?? "unknown";
   if (!(await checkRateLimit(`ip:${ip}:admin-login`, 5, 15 * 60 * 1000))) {
     fail("Too many attempts. Try again in 15 minutes.");
   }
@@ -46,7 +47,7 @@ export async function adminSignIn(form: FormData) {
 export async function adminVerifyCode(form: FormData) {
   if (!isSupabaseConfigured()) fail("Accounts aren't configured.");
 
-  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const ip = clientIp(await headers()) ?? "unknown";
   if (!(await checkRateLimit(`ip:${ip}:admin-login`, 5, 15 * 60 * 1000))) {
     fail("Too many attempts. Try again in 15 minutes.");
   }

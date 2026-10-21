@@ -19,6 +19,18 @@ sign-in, security headers, and the policy pages.
 - [ ] Google Cloud: the upload bucket has the 1-day delete lifecycle rule
       (`gcloud storage buckets describe gs://wipeclip-uploads --format="default(lifecycle_config)"`).
 - [ ] First admin sign-in after deploy: scan the QR code with an authenticator app.
+- [ ] Remove `PADDLE_WEBHOOK_IP_HEADER` from Vercel if it was set: the webhook now
+      finds the real sender behind Cloudflare itself (`src/lib/clientIp.ts`).
+
+## Cloudflare (the site is proxied through it)
+
+- [ ] Security -> Bots: "Block AI bots" off, and AI Crawl Control allowing the
+      AI search crawlers. Cloudflare blocks them by default on newer zones,
+      which would hide the site from AI answers whatever robots.txt says.
+- [ ] "Managed robots.txt" off, so it doesn't add its own rules on top of ours.
+- [ ] SSL/TLS mode "Full (strict)".
+- [ ] Bot Fight Mode off, or `/api/webhooks/*` skipped: it can challenge the
+      payment providers' webhook deliveries.
 
 ## Legal
 
