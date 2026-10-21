@@ -43,9 +43,10 @@ export default function PrivacyPage() {
         little of your data as possible.
       </P>
       <P>
-        WipeClip.co is operated by Surage Sampath Dananjaya Peries, a sole
-        trader at 115/A Gagabada Road, Hirana, Panadura, Sri Lanka, who is
-        the controller responsible for your personal data.
+        WipeClip.co is a product of Codeplay Studios, operated by Surage
+        Sampath Dananjaya Peries trading as Codeplay Studios, 115/A Gagabada
+        Road, Hirana, Panadura, Sri Lanka, who is the controller responsible
+        for your personal data.
       </P>
 
       <H2>1. The media you upload</H2>

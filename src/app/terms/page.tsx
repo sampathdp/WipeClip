@@ -36,9 +36,10 @@ export default function TermsPage() {
       <P>
         These Terms of Service (&quot;Terms&quot;) govern your access to and
         use of WipeClip.co, including the website and the media-editing
-        service it provides (the &quot;Service&quot;). WipeClip.co is operated
-        by Surage Sampath Dananjaya Peries, a sole trader based in Sri Lanka,
-        at 115/A Gagabada Road, Hirana, Panadura, Sri Lanka
+        service it provides (the &quot;Service&quot;). WipeClip.co is a
+        product of Codeplay Studios, operated by Surage Sampath Dananjaya
+        Peries trading as Codeplay Studios, 115/A Gagabada Road, Hirana,
+        Panadura, Sri Lanka
         (&quot;WipeClip.co&quot;, &quot;we&quot;, &quot;us&quot;, or
         &quot;our&quot;). By uploading a file or
         otherwise using the Service, you agree to these Terms. If you do not
