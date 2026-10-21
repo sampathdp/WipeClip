@@ -46,9 +46,6 @@ export function OPTIONS(request: NextRequest) {
 }
 
 async function handle(request: NextRequest) {
-  if (BACKEND_DISABLED) {
-    return errorResponse("service_unavailable", BACKEND_DISABLED_MESSAGE, 503);
-  }
   if (!isSupabaseConfigured()) {
     return errorResponse("server_error", "Accounts aren't configured yet.", 501);
   }
@@ -65,11 +62,15 @@ async function handle(request: NextRequest) {
   }
   const limits = TIER_LIMITS[tier];
 
-  let body: { project?: unknown; resolution?: unknown };
+  let body: { project?: unknown; resolution?: unknown; local?: unknown };
   try {
     body = await request.json();
   } catch {
     return errorResponse("bad_project", "Invalid project data.", 400);
+  }
+  // The kill switch is for the cloud backend; a local export never reaches it.
+  if (BACKEND_DISABLED && body.local !== true) {
+    return errorResponse("service_unavailable", BACKEND_DISABLED_MESSAGE, 503);
   }
   const projectJson = typeof body.project === "string" ? body.project : "";
   const resolution = user ? String(body.resolution ?? "720p") : "720p";
@@ -117,6 +118,8 @@ async function handle(request: NextRequest) {
     branding: limits.exportBranding,
     compact: limits.compactExport,
     projectHash: sha256Hex(projectJson),
+    // The desktop app renders on its own engine; same plan rules either way.
+    ...(body.local === true ? { local: true } : {}),
   });
   return NextResponse.json({ ticket, resolution });
 }

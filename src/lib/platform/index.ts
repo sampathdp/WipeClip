@@ -64,6 +64,28 @@ export async function getDesktopCapabilities(): Promise<DesktopCapabilities> {
   return invoke<DesktopCapabilities>("desktop_capabilities");
 }
 
+export interface LocalEngine {
+  /** e.g. http://127.0.0.1:52011 */
+  url: string;
+  /** Sent as X-Local-Token on every request. */
+  token: string;
+}
+
+/** The desktop app's bundled processing engine (src-tauri/src/engine.rs),
+ * started on first use. null on the website, or when this build has no
+ * engine or it couldn't start - callers then use the cloud backend. Asked
+ * per job rather than cached: the app restarts a stopped engine on a new
+ * port, and answers instantly while it's running. */
+export async function localEngine(): Promise<LocalEngine | null> {
+  if (!IS_DESKTOP) return null;
+  try {
+    return await invoke<LocalEngine | null>("local_engine");
+  } catch (err) {
+    console.warn("[engine] local engine unavailable, using the cloud backend", err);
+    return null;
+  }
+}
+
 export type SaveResult = { status: "saved"; path: string } | { status: "cancelled" };
 
 /** Saves an exported video. Website: the usual browser download. Desktop:

@@ -1,6 +1,6 @@
 # WipeClip Desktop (Windows and macOS)
 
-The desktop app is the website's real video editor (`src/components/editor`), built as static files and wrapped in a [Tauri 2](https://tauri.app) shell. Accounts, credits, plan limits, AI cleanup and export rendering all still run on wipeclip.co and the processing backend, exactly as they do for the website. The app adds:
+The desktop app is the website's real video editor (`src/components/editor`), built as static files and wrapped in a [Tauri 2](https://tauri.app) shell. Accounts, credits and plan limits still run on wipeclip.co, exactly as they do for the website. Video processing (the import check, AI cleanup and export) runs on the user's own machine, on a bundled copy of the backend (see [Local engine](#local-engine)). The app adds:
 
 - saving exports through the OS save dialog,
 - the sign-in session kept in Windows Credential Manager or macOS Keychain,
@@ -111,11 +111,22 @@ Output goes to `src-tauri/target/release/bundle/`.
 ## Behaviour notes
 
 - **Import** uses the WebView's own file picker, which is the native OS open dialog in both WebView2 and WKWebView. The picked file stays disk-backed, so a 300 MB video isn't copied into memory just to open it. The existing type, size, codec and server checks apply unchanged. Drag and drop works as on the website.
-- **Export** renders on the backend as before. "Save MP4…" opens the save dialog (the OS asks before replacing a file), writes to a hidden temporary file beside the target, flushes, and renames it into place. Failures delete the temporary file and keep the export in the dialog so you can pick another folder. Plan and branding rules come from the server, unchanged.
-- **Offline**: editing an already-open project works. Opening a new video (server probe), AI cleanup, sign-in and export need a connection; a banner says so.
+- **Export** renders on the local engine. "Save MP4…" opens the save dialog (the OS asks before replacing a file), writes to a hidden temporary file beside the target, flushes, and renames it into place. Failures delete the temporary file and keep the export in the dialog so you can pick another folder. Plan and branding rules come from the server, unchanged.
+- **Offline**: editing an already-open project and opening a new video work. AI cleanup, sign-in and export still need a connection for the plan check (the job ticket); a banner says so.
 - **Auto captions** download the Whisper model from Hugging Face on first use, as on the website.
 - **Screen recorder**: see [RECORDER.md](RECORDER.md) for permissions, format, limitations and the manual test checklist.
-- **Not in this release**: local AI processing, offline export, auto-update, Linux packages.
+- **Not in this release**: GPU processing, offline export, auto-update, Linux packages.
+
+## Local engine
+
+The website's FastAPI backend (`backend/`), packaged with PyInstaller (`backend/desktop.spec`, `backend/requirements-desktop.txt`) and shipped in the app as `resources/engine/`. `src-tauri/src/engine.rs` starts it on first use (opening a video or the AI cleanup dialog) on a free `127.0.0.1` port, with a random per-launch token every request must carry as `X-Local-Token`. It exits with the app, also after a crash (it watches the app's process id). The page reaches it through `localEngine()` in `src/lib/platform`; `src/lib/toolsApi.ts` sends the probe, AI cleanup and export there instead of to the cloud backend.
+
+- **Plan checks stay on the site.** Jobs still need a ticket from `/api/process` or `/api/export`. The app asks with `local: true`: AI cleanup then needs a paid plan and spends no credits; free plans get `plan_required` and the app falls back to the cloud backend with credits, as on the website. Export rules (resolution, premium features, daily limit, branding) are unchanged. The cloud backend refuses `local` tickets, so they can't buy a credit-free job there. The engine runs on the user's machine, so a determined user could bypass these checks.
+- **CPU only**, all cores. Speed scales with the machine.
+- **Size**: about 300 MB unpacked, adding roughly 120–150 MB to the installer.
+- **Build it**: `cd backend && pip install -r requirements-desktop.txt && pyinstaller desktop.spec --noconfirm`, then copy `dist/wipeclip-engine` to `src-tauri/resources/engine`. `desktop.yml` does this on both runners (and signs it on macOS). Without that folder a build still works, processing on the cloud backend; CI sets `WIPECLIP_REQUIRE_ENGINE=1` so a release can't miss it.
+- **Dev**: `npm run desktop:dev` runs `backend/desktop_engine.py` from `backend/.venv` instead.
+- **Logs**: the engine's output goes to the app log under the `engine` target.
 
 ## Codec differences
 

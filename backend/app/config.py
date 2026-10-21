@@ -8,6 +8,14 @@ are also exposed as per-request overrides in the API schemas.
 import os
 from pathlib import Path
 
+# --- Desktop app engine (backend/desktop_engine.py) --------------------------
+# The desktop app runs this same backend on the user's own machine. LOCAL_MODE
+# is set only there: every request must then carry LOCAL_TOKEN (a random value
+# the app makes per launch), upload tickets are skipped, and job tickets the
+# site marked `local` are accepted - the cloud backend refuses those.
+LOCAL_MODE: bool = os.environ.get("WIPECLIP_LOCAL") == "1"
+LOCAL_TOKEN: str = os.environ.get("WIPECLIP_LOCAL_TOKEN", "")
+
 # --- Alpha classification thresholds (0-255) --------------------------------
 OPAQUE_ALPHA_THRESHOLD: int = 250
 TRANSPARENT_ALPHA_THRESHOLD: int = 4
@@ -236,6 +244,28 @@ REGION_FLOW_ESTIMATION_SCALE: float = 0.5  # the flow FIELD is estimated
                                           # pixels are always sampled from
                                           # the full-resolution buffered
                                           # frame, never downscaled
+REGION_FLOW_PROBE_SAMPLES: int = 6        # frame pairs checked across the
+                                          # clip before the pro pass: if
+                                          # none of them carries real
+                                          # content out from under the
+                                          # region (a still shot), the clip
+                                          # goes straight to the per-frame
+                                          # fill instead of paying for 12
+                                          # flow fields a frame that can't
+                                          # recover anything
+REGION_FLOW_MIN_RECOVERABLE: float = 0.02  # fraction of region pixels the
+                                          # probe must see uncovered for
+                                          # the pro pass to be worth it
+
+# Per-frame fill reuse: the fill only reads the pixels around the region,
+# so while those stay the same (a still shot) the previous result is reused
+# instead of recomputed. Compared against the frame the fill was last
+# computed on, not the previous frame, so a slow drift (fade, exposure)
+# still adds up to a recompute.
+REGION_REUSE_MAX_MEAN_DIFF: float = 1.0  # mean absolute difference (0-255)
+                                          # of the surrounding pixels; above
+                                          # compression noise, below any
+                                          # visible change
 
 # --- Output resolution selection -----------------------------------------
 # Requested output height per option; the API never upscales past the

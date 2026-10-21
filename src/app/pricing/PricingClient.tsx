@@ -5,7 +5,7 @@ import Link from "next/link";
 import { initializePaddle, type Paddle } from "@paddle/paddle-js";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import { formatLkr, FREE_DAILY_CREDITS, PLANS, type PlanKey } from "@/lib/credits";
+import { formatCleanupLimit, formatLkr, FREE_DAILY_CREDITS, MAX_CLEANUP_SECONDS, PLANS, type PlanKey } from "@/lib/credits";
 import { TIER_LIMITS, TIERS as TIER_ORDER, toTier, type Tier } from "@/lib/entitlements";
 import { createClient } from "@/lib/supabase/client";
 import { landingPagePath, trackEvent } from "@/lib/analytics";
@@ -109,6 +109,10 @@ function whatsappLink(text: string) {
 
 const res = (r: string) => (r === "4k" ? "4K" : r);
 
+/** The video cleanup length line for a card, when that tool is on. */
+const cleanupLimit = (tier: Tier) =>
+  AI_CLEANUP_ENABLED ? [`AI video cleanup up to ${formatCleanupLimit(MAX_CLEANUP_SECONDS[tier])} per clip`] : [];
+
 /** Card copy per tier. Limits come from TIER_LIMITS so the page can't
  * drift from what /api/export actually enforces. */
 const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[] }[] = [
@@ -119,8 +123,8 @@ const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[
       "Full video editor: trim, split, text, stickers, audio",
       "Basic transitions, filters and effects",
       `Exports up to ${res(TIER_LIMITS.free.maxResolution)}`,
-      `${TIER_LIMITS.free.dailyExports} exports a day`,
       `${FREE_DAILY_CREDITS} AI credits a day`,
+      ...cleanupLimit("free"),
     ],
   },
   {
@@ -130,10 +134,8 @@ const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[
       "Everything in Free",
       "All premium transitions, filters and effects",
       `Exports up to ${res(TIER_LIMITS.lite.maxResolution)}`,
-      `${TIER_LIMITS.lite.dailyExports} exports a day`,
-      AI_CLEANUP_ENABLED
-        ? "AI credits for cleanup, background removal and sharpening"
-        : "AI credits for background removal and sharpening",
+      `${PLANS.lite.credits} bonus AI credits, plus ${FREE_DAILY_CREDITS} free every day`,
+      ...cleanupLimit("lite"),
     ],
   },
   {
@@ -143,8 +145,8 @@ const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[
     features: [
       "Everything in Lite",
       `Exports up to ${res(TIER_LIMITS.starter.maxResolution)} Full HD`,
-      `${TIER_LIMITS.starter.dailyExports} exports a day`,
-      "4x more AI credits than Lite",
+      `${PLANS.starter.credits} bonus AI credits, plus ${FREE_DAILY_CREDITS} free every day`,
+      ...cleanupLimit("starter"),
     ],
   },
   {
@@ -153,8 +155,8 @@ const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[
     features: [
       "Everything in Starter",
       `Exports up to ${res(TIER_LIMITS.pro.maxResolution)} Ultra HD`,
-      `${TIER_LIMITS.pro.dailyExports} exports a day`,
-      "3x more AI credits than Starter",
+      `${PLANS.pro.credits} bonus AI credits, plus ${FREE_DAILY_CREDITS} free every day`,
+      ...cleanupLimit("pro"),
       ...(AI_CLEANUP_ENABLED ? ["Image cleanup tool", "Highest-quality AI cleanup (motion-tracked)"] : []),
       "Usage and billing history",
     ],
@@ -197,11 +199,24 @@ const COMPARISON: { label: string; values: Record<Tier, string | boolean> }[] = 
     label: "AI credits",
     values: {
       free: `${FREE_DAILY_CREDITS} / day`,
-      lite: `${PLANS.lite.credits} / 30 days`,
-      starter: `${PLANS.starter.credits} / 30 days`,
-      pro: `${PLANS.pro.credits} / 30 days`,
+      lite: `${FREE_DAILY_CREDITS} / day + ${PLANS.lite.credits} / 30 days`,
+      starter: `${FREE_DAILY_CREDITS} / day + ${PLANS.starter.credits} / 30 days`,
+      pro: `${FREE_DAILY_CREDITS} / day + ${PLANS.pro.credits} / 30 days`,
     },
   },
+  ...(AI_CLEANUP_ENABLED
+    ? [
+        {
+          label: "AI video cleanup length per clip",
+          values: {
+            free: formatCleanupLimit(MAX_CLEANUP_SECONDS.free),
+            lite: formatCleanupLimit(MAX_CLEANUP_SECONDS.lite),
+            starter: formatCleanupLimit(MAX_CLEANUP_SECONDS.starter),
+            pro: formatCleanupLimit(MAX_CLEANUP_SECONDS.pro),
+          },
+        },
+      ]
+    : []),
 ];
 
 /** `children`: server-rendered content after the plans (the pricing FAQ),
@@ -303,7 +318,9 @@ export default function PricingClient({ children }: { children?: React.ReactNode
     if (manualPayments) {
       const p = PLANS[plan];
       const text =
-        `Hi WipeClip, I'd like to buy the ${p.label} plan (${p.priceLabel} for ${p.period === "year" ? "1 year" : "30 days"}).` +
+        (p.period
+          ? `Hi WipeClip, I'd like to buy the ${p.label} plan (${p.priceLabel} for ${p.period === "year" ? "1 year" : "30 days"}).`
+          : `Hi WipeClip, I'd like to buy the ${p.label} (${p.priceLabel}, ${p.credits} AI credits).`) +
         (userEmail ? ` My account email: ${userEmail}` : "");
       window.open(whatsappLink(text), "_blank", "noopener,noreferrer");
       return;
@@ -382,7 +399,7 @@ export default function PricingClient({ children }: { children?: React.ReactNode
             Edit free. <span className="text-gradient">Upgrade when you grow.</span>
           </h1>
           <p className="mt-4 text-base sm:text-lg text-muted max-w-xl mx-auto">
-            The editor is free forever. Paid passes start at $1.99 for 30 days, with no subscription, and unlock premium transitions,
+            The editor is free forever. Paid passes start at {PLANS.lite.priceLabel} for 30 days, with no subscription, and unlock premium transitions,
             filters and effects, higher resolutions and more AI credits.
           </p>
 
@@ -397,7 +414,7 @@ export default function PricingClient({ children }: { children?: React.ReactNode
                 className={`rounded-full px-5 py-2 transition ${billing === b ? "bg-foreground text-background" : "text-muted hover:text-foreground"}`}
               >
                 {b === "month" ? "30 days" : "1 year"}
-                {b === "year" && <span className="ml-1.5 text-[11px] font-bold text-emerald-500">Save ~25%</span>}
+                {b === "year" && <span className="ml-1.5 text-[11px] font-bold text-emerald-500">Save 25%+</span>}
               </button>
             ))}
           </div>
@@ -557,10 +574,33 @@ export default function PricingClient({ children }: { children?: React.ReactNode
           })}
         </div>
 
+        <div className="glass-card mx-auto mt-6 flex max-w-7xl flex-col items-center justify-between gap-4 rounded-[2rem] border border-border/80 p-6 sm:flex-row">
+          <div className="text-center sm:text-left">
+            <h2 className="text-sm font-bold text-foreground">Only need the AI tools?</h2>
+            <p className="mt-1 text-xs text-muted">
+              {PLANS.payg.label}: {PLANS.payg.credits} AI credits for{" "}
+              <span className="font-mono font-bold text-foreground">{localPrices.payg ?? PLANS.payg.priceLabel}</span>, one-time.
+              {showLkr ? ` Charged as ${formatLkr(PLANS.payg.amountCents)}.` : ""} Works on any plan, including Free, and
+              doesn&apos;t change your plan.
+            </p>
+          </div>
+          <button
+            onClick={() => buy("payg")}
+            disabled={loading !== null}
+            className="btn-secondary shrink-0 rounded-full px-6 py-3 text-xs font-bold disabled:opacity-50"
+          >
+            {loading === "payg" ? "Opening checkout…" : manualPayments ? "Get credits via WhatsApp" : "Buy credits"}
+          </button>
+        </div>
+
         <p className="mx-auto mt-6 max-w-2xl text-center text-xs text-muted">
           Plans are prepaid for the period shown and don&apos;t renew automatically. Renewing early adds the time to
           your current plan. AI credits are used by the AI tools ({AI_CLEANUP_ENABLED ? "object cleanup, " : ""}background removal, sharpening);
-          editing and exporting never use credits. Full refund within 14 days, see our{" "}
+          editing and exporting never use credits.
+          {AI_CLEANUP_ENABLED
+            ? " Video cleanup costs 1 credit per started minute at 720p, 2 at 1080p and 4 at 4K; images cost 1 credit each."
+            : ""}{" "}
+          Full refund within 14 days, see our{" "}
           <Link href="/refund-policy" className="underline hover:text-foreground">
             refund policy
           </Link>

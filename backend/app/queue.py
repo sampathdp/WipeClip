@@ -26,9 +26,10 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
-import redis
-from rq import Queue
+if TYPE_CHECKING:
+    from rq import Queue
 
 QUEUE_NAME = "wipeclip"
 
@@ -38,4 +39,8 @@ def get_queue() -> Queue | None:
     redis_url = os.environ.get("REDIS_URL")
     if not redis_url:
         return None
+    # Imported only when configured, so the desktop engine ships without them.
+    import redis
+    from rq import Queue
+
     return Queue(QUEUE_NAME, connection=redis.from_url(redis_url))

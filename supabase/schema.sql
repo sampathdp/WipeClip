@@ -107,10 +107,15 @@ alter table payment_orders add column if not exists promo_code text;
 -- without anyone getting the same campaign twice.
 create table if not exists newsletter_sends (
   campaign text not null,
-  user_id uuid not null references profiles (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
   sent_at timestamptz not null default now(),
   primary key (campaign, user_id)
 );
+-- Recipients come from auth.users, and older accounts can lack a profiles
+-- row, so the key points at the account itself (it used to be profiles).
+alter table newsletter_sends drop constraint if exists newsletter_sends_user_id_fkey;
+alter table newsletter_sends add constraint newsletter_sends_user_id_fkey
+  foreign key (user_id) references auth.users (id) on delete cascade;
 alter table newsletter_sends enable row level security;
 
 -- The live promotion (src/lib/promo.ts), edited at /admin/promotion. A

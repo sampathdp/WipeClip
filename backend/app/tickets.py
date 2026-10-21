@@ -29,6 +29,8 @@ import urllib.request
 
 from fastapi import HTTPException
 
+from app.config import LOCAL_MODE
+
 
 def _b64url_decode(text: str) -> bytes:
     return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
@@ -54,6 +56,10 @@ def verify(token: str, kind: str) -> dict:
         if not hmac.compare_digest(expected, sig):
             raise HTTPException(status_code=403, detail="Invalid job ticket.")
     if payload.get("kind") != kind:
+        raise HTTPException(status_code=403, detail="Invalid job ticket.")
+    # Local tickets cost no credits because the user's own machine does the
+    # work, so they must never buy a job on this server.
+    if payload.get("local") and not LOCAL_MODE:
         raise HTTPException(status_code=403, detail="Invalid job ticket.")
     if float(payload.get("exp", 0)) < time.time() * 1000:
         raise HTTPException(status_code=403, detail="This request has expired. Please try again.")

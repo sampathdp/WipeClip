@@ -1,10 +1,10 @@
 "use client";
 
-import { IS_DESKTOP } from "@/lib/platform";
+import { apiFetch, IS_DESKTOP, localEngine } from "@/lib/platform";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import RegionSelector from "@/components/RegionSelector";
-import { RESOLUTION_CREDIT_COST } from "@/lib/credits";
+import { videoCreditCost } from "@/lib/credits";
 import { trackEvent } from "@/lib/analytics";
 import { grabFrame, loadVideoMeta } from "@/lib/editor/media";
 import { formatTime, newId } from "@/lib/editor/timeline";
@@ -58,6 +58,22 @@ export default function AiCleanupDialog({
     : "720p";
   const [resolution, setResolution] = useState<Resolution>(defaultTier);
   const [error, setError] = useState<string | null>(null);
+  // Desktop app on a paid plan: cleanup runs on this computer for no
+  // credits (see processVideo). Read from the same plan the site checks.
+  const [runsLocally, setRunsLocally] = useState(false);
+  useEffect(() => {
+    if (!IS_DESKTOP || !isSignedIn) return;
+    let cancelled = false;
+    // Also warms the engine up while the user marks the region.
+    Promise.all([apiFetch("/api/credits").then((r) => (r.ok ? r.json() : null)), localEngine()])
+      .then(([d, engine]: [{ plan?: string } | null, unknown]) => {
+        if (!cancelled && engine && d?.plan && d.plan !== "free") setRunsLocally(true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn]);
   const [elapsed, setElapsed] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -96,7 +112,7 @@ export default function AiCleanupDialog({
     const hardStop = setTimeout(() => controller.abort(), 20 * 60 * 1000);
     trackEvent("processing_started", { tool: TOOL, mode: "remove", resolution });
     try {
-      const blob = await processVideo(source.file, region, resolution, controller.signal, {
+      const blob = await processVideo(source.file, region, resolution, source.duration, controller.signal, {
         start: clip.start,
         end: clip.end,
       });
@@ -164,6 +180,7 @@ export default function AiCleanupDialog({
             <div className="flex flex-wrap gap-2">
               {TIERS.map((t, i) => {
                 const disabled = (!isSignedIn && t.key !== "720p") || (i > 0 && source.height <= TIERS[i - 1].height);
+                const cost = videoCreditCost(t.key, clip.end - clip.start);
                 return (
                   <button
                     key={t.key}
@@ -174,11 +191,16 @@ export default function AiCleanupDialog({
                       resolution === t.key ? "border-accent-2 bg-accent-2/10 text-foreground" : "border-border bg-surface text-muted"
                     }`}
                   >
-                    {t.label} · {RESOLUTION_CREDIT_COST[t.key]} credit{RESOLUTION_CREDIT_COST[t.key] > 1 ? "s" : ""}
+                    {runsLocally
+                      ? t.label
+                      : `${t.label} · ${cost} credit${cost > 1 ? "s" : ""}`}
                   </button>
                 );
               })}
             </div>
+            {runsLocally && (
+              <p className="mt-2 text-xs text-muted">Runs on this computer with your plan. No credits used, and the video stays on your device.</p>
+            )}
             {!isSignedIn && (
               <p className="mt-2 text-xs text-muted">
                 Free preview at 720p.{" "}

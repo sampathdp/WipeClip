@@ -61,3 +61,4 @@ dev.log
 
 # newsletter send logs and previews (contain account ids)
 /newsletter-logs/
+/src-tauri/resources/engine/

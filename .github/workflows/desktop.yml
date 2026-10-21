@@ -15,6 +15,7 @@ on:
       - "src/lib/platform/**"
       - "src/lib/cors.ts"
       - "tests/desktop/**"
+      - "backend/**"
       - ".github/workflows/desktop.yml"
 
 jobs:
@@ -83,7 +84,36 @@ jobs:
             echo "::warning::No Apple signing secrets - the macOS build is unsigned and Gatekeeper will block it."
           fi
 
+      # The local processing engine (backend/desktop.spec): the website's own
+      # backend, bundled so the app processes video on the user's machine.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements-desktop.txt
+
+      # PyInstaller signs every binary it collects when given an identity,
+      # which notarization needs; the certificate must be in a keychain first.
+      - name: Import signing certificate for the engine
+        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Build the engine
+        working-directory: backend
+        shell: bash
+        run: |
+          pip install -r requirements-desktop.txt
+          pyinstaller desktop.spec --noconfirm
+          mkdir -p ../src-tauri/resources
+          rm -rf ../src-tauri/resources/engine
+          cp -R dist/wipeclip-engine ../src-tauri/resources/engine
+
       - name: Build
+        env:
+          WIPECLIP_REQUIRE_ENGINE: "1"
         run: npm run desktop:build -- --bundles ${{ matrix.bundles }}
 
       - uses: actions/upload-artifact@v4

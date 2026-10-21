@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { canExportAt, premiumFeaturesUsed, TIER_LABELS, TIER_LIMITS, tierForResolution, type Tier } from "@/lib/entitlements";
 import { trackEvent } from "@/lib/analytics";
+import { PLANS } from "@/lib/credits";
 import { exportProject } from "@/lib/editor/exportProject";
 import { saveLastExport } from "@/lib/editor/projectStore";
 import { canvasSize, formatTime } from "@/lib/editor/timeline";
@@ -215,7 +216,7 @@ export default function ExportDialog({
                   <li key={f}>{f}</li>
                 ))}
               </ul>
-              <p className="mt-2 text-muted">Any paid plan (from Lite, $1.99 for 30 days) exports them. Or swap them for free ones.</p>
+              <p className="mt-2 text-muted">Any paid plan (from Lite, {PLANS.lite.priceLabel} for 30 days) exports them. Or swap them for free ones.</p>
             </div>
           )}
           {premium.length > 0 ? (

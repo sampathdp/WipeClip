@@ -10,6 +10,7 @@ import SignInModal from "./SignInModal";
 import { createClient } from "@/lib/supabase/client";
 import { clearPendingResult, loadPendingResult, savePendingResult } from "@/lib/resultCache";
 import { trackEvent, useToolView } from "@/lib/analytics";
+import { formatCleanupLimit, MAX_CLEANUP_SECONDS, videoCreditCost } from "@/lib/credits";
 import {
   BACKEND_DISABLED,
   BACKEND_DISABLED_MESSAGE,
@@ -28,10 +29,10 @@ type BlockReason = "content" | "credits";
 const MAX_BYTES = 300 * 1024 * 1024;
 const TOOL = "video_object_remover";
 
-const RESOLUTION_OPTIONS: { key: Resolution; label: string; minHeight: number; credits: number }[] = [
-  { key: "720p", label: "720p HD", minHeight: 720, credits: 1 },
-  { key: "1080p", label: "1080p FHD", minHeight: 1080, credits: 2 },
-  { key: "4k", label: "4K Ultra", minHeight: 2160, credits: 4 },
+const RESOLUTION_OPTIONS: { key: Resolution; label: string; minHeight: number }[] = [
+  { key: "720p", label: "720p HD", minHeight: 720 },
+  { key: "1080p", label: "1080p FHD", minHeight: 1080 },
+  { key: "4k", label: "4K Ultra", minHeight: 2160 },
 ];
 
 // Editing tools offered alongside cleanup; each links to the desktop app
@@ -282,7 +283,7 @@ export default function UploadDemo() {
     const abortTimer = setTimeout(() => controller.abort(), 20 * 60 * 1000);
 
     try {
-      const blob = await processVideo(file, region, resolution, controller.signal);
+      const blob = await processVideo(file, region, resolution, videoInfo?.duration ?? 0, controller.signal);
       clearTimeout(abortTimer);
       if (timerRef.current) clearInterval(timerRef.current);
       setProgress(100);
@@ -325,7 +326,7 @@ export default function UploadDemo() {
       setStep("error");
       trackEvent("processing_failed", { tool: TOOL, error_category: "processing_error" });
     }
-  }, [file, region, resolution, isSignedIn]);
+  }, [file, region, resolution, isSignedIn, videoInfo]);
 
   const editorTools = (heading: string) => (
     <div className="mt-6 rounded-2xl border border-border bg-surface-2/50 p-4">
@@ -551,6 +552,7 @@ export default function UploadDemo() {
                   const tooSmall = !!videoInfo && videoInfo.height < opt.minHeight;
                   const disabled = needsSignIn || tooSmall;
                   const active = resolution === opt.key;
+                  const credits = videoCreditCost(opt.key, videoInfo.duration);
                   return (
                     <button
                       key={opt.key}
@@ -574,7 +576,7 @@ export default function UploadDemo() {
                         {opt.label}
                       </span>
                       <span className="block text-[11px] text-muted mt-0.5 font-mono">
-                        {needsSignIn ? "sign in" : `${opt.credits} credit${opt.credits > 1 ? "s" : ""}`}
+                        {needsSignIn ? "sign in" : `${credits} credit${credits > 1 ? "s" : ""}`}
                       </span>
                     </button>
                   );
@@ -582,7 +584,7 @@ export default function UploadDemo() {
               </div>
               {!isSignedIn && (
                 <p className="mt-2.5 text-xs text-muted">
-                  Free preview at 720p, no account needed.{" "}
+                  Free preview at 720p for clips up to {formatCleanupLimit(MAX_CLEANUP_SECONDS.anon)}, no account needed.{" "}
                   <button
                     type="button"
                     onClick={() => setShowSignInModal(true)}

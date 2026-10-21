@@ -1,13 +1,15 @@
 //! WipeClip desktop shell. The UI is the website's editor, built as static
-//! files (desktop/) and bundled into the app; everything account-, billing-
-//! and processing-related still happens on wipeclip.co and the processing
-//! backend. This crate only adds what a browser can't do safely on its own:
+//! files (desktop/) and bundled into the app; everything account- and
+//! billing-related still happens on wipeclip.co, while video processing runs
+//! on a bundled copy of the backend (engine.rs). This crate only adds what a
+//! browser can't do safely on its own:
 //! saving exports to a folder the user picks, keeping the sign-in session in
 //! the OS credential store, opening links in the system browser, the
 //! wipeclip:// sign-in return link, and the screen recorder's native half
 //! (recording files, interaction metadata, hotkeys - see docs/desktop/RECORDER.md).
 
 mod capture;
+mod engine;
 mod export;
 mod input;
 mod links;
@@ -277,7 +279,9 @@ pub fn run() {
         .manage(recording::RecordingState::default())
         .manage(input::InputState::default())
         .manage(capture::CaptureState::default())
+        .manage(engine::EngineState::default())
         .invoke_handler(tauri::generate_handler![
+            engine::local_engine,
             desktop_capabilities,
             show_error,
             confirm_action,
@@ -350,6 +354,7 @@ pub fn run() {
             handle.state::<input::InputState>().shutdown();
             handle.state::<capture::CaptureState>().shutdown();
             handle.state::<recording::RecordingState>().close_all();
+            handle.state::<engine::EngineState>().shutdown();
         }
     });
 }

@@ -27,6 +27,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
 import cv2
@@ -39,12 +41,15 @@ from app.config import (
     VIDEO_ENCODE_PRESET,
     REGION_FLOW_CONTEXT_PAD_PX,
     REGION_FLOW_ESTIMATION_SCALE,
+    REGION_FLOW_MIN_RECOVERABLE,
+    REGION_FLOW_PROBE_SAMPLES,
     REGION_FLOW_SEARCH_RADIUS_FRAMES,
     REGION_FSR_CONTEXT_PAD_PX,
     REGION_FSR_SCALE,
     REGION_INPAINT_FSR_MAX_REGION_PX,
     REGION_PATCH_SHARPEN_AMOUNT,
     REGION_PATCH_SHARPEN_KSIZE,
+    REGION_REUSE_MAX_MEAN_DIFF,
 )
 
 
@@ -310,29 +315,8 @@ def _flow_assisted_inpaint_region(
         n_crop = neighbor[cy0:cy1, cx0:cx1]
         if n_crop.shape != center_crop.shape:
             continue  # defensive - every frame in this video shares one resolution
-        n_gray = cv2.cvtColor(n_crop, cv2.COLOR_BGR2GRAY)
-        small_n_gray = cv2.resize(n_gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-
-        # Flow FROM center TO neighbor: for each center-crop pixel, where
-        # that scene point ended up in the neighbor frame - exactly what's
-        # needed to sample the neighbor for a center-frame pixel.
-        flow_small = cv2.calcOpticalFlowFarneback(
-            small_center_gray, small_n_gray, None, 0.5, 3, 15, 3, 5, 1.2, 0
-        )
-        flow = cv2.resize(flow_small, (crop_w, crop_h), interpolation=cv2.INTER_LINEAR) / scale
-
-        map_x = grid_x + flow[..., 0]
-        map_y = grid_y + flow[..., 1]
-        sampled = cv2.remap(n_crop, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
-
-        # Only trust a region pixel's sample if the neighbor location it
-        # maps to is (a) inside the crop, and (b) itself NOT inside the
-        # region - i.e. genuinely uncovered content there, not more
-        # covered content. cv2.BORDER_CONSTANT would otherwise make an
-        # out-of-bounds map look like a valid (black) sample.
-        in_bounds = (map_x >= 0) & (map_x < crop_w) & (map_y >= 0) & (map_y < crop_h)
-        outside_region = ~((map_x >= rx0) & (map_x < rx1) & (map_y >= ry0) & (map_y < ry1))
-        trust = in_bounds & outside_region & ~filled
+        sampled, uncovered = _flow_sample(small_center_gray, n_crop, grid_x, grid_y, (rx0, ry0, rx1, ry1))
+        trust = uncovered & ~filled
 
         recovered[trust] = sampled[trust]
         filled |= trust
@@ -351,6 +335,138 @@ def _flow_assisted_inpaint_region(
     out = center_frame.copy()
     out[y : y + h, x : x + w] = recovered_region
     return out
+
+
+def _flow_sample(
+    small_center_gray: np.ndarray,
+    n_crop: np.ndarray,
+    grid_x: np.ndarray,
+    grid_y: np.ndarray,
+    region: tuple[int, int, int, int],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Warps the neighbor crop onto the center crop with dense optical flow.
+    Returns the warped neighbor and which center pixels it really shows -
+    `region` is (x0, y0, x1, y1) in crop space."""
+    crop_h, crop_w = n_crop.shape[:2]
+    rx0, ry0, rx1, ry1 = region
+    scale = REGION_FLOW_ESTIMATION_SCALE
+    n_gray = cv2.cvtColor(n_crop, cv2.COLOR_BGR2GRAY)
+    small_n_gray = cv2.resize(n_gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+
+    # Flow FROM center TO neighbor: for each center-crop pixel, where
+    # that scene point ended up in the neighbor frame - exactly what's
+    # needed to sample the neighbor for a center-frame pixel.
+    flow_small = cv2.calcOpticalFlowFarneback(
+        small_center_gray, small_n_gray, None, 0.5, 3, 15, 3, 5, 1.2, 0
+    )
+    flow = cv2.resize(flow_small, (crop_w, crop_h), interpolation=cv2.INTER_LINEAR) / scale
+
+    map_x = grid_x + flow[..., 0]
+    map_y = grid_y + flow[..., 1]
+    sampled = cv2.remap(n_crop, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+
+    # Only trust a region pixel's sample if the neighbor location it
+    # maps to is (a) inside the crop, and (b) itself NOT inside the
+    # region - i.e. genuinely uncovered content there, not more
+    # covered content. cv2.BORDER_CONSTANT would otherwise make an
+    # out-of-bounds map look like a valid (black) sample.
+    in_bounds = (map_x >= 0) & (map_x < crop_w) & (map_y >= 0) & (map_y < crop_h)
+    outside_region = ~((map_x >= rx0) & (map_x < rx1) & (map_y >= ry0) & (map_y < ry1))
+    return sampled, in_bounds & outside_region
+
+
+def _flow_can_recover(input_path: str, x: int, y: int, w: int, h: int) -> bool:
+    """Whether the pro pass would recover anything: checks
+    REGION_FLOW_PROBE_SAMPLES frame pairs, the search radius apart and
+    spread across the clip, for motion that uncovers the region. A still
+    shot never does, and then every frame would pay for the full neighbor
+    search only to fall back to the plain fill anyway. Errs towards True
+    when it can't tell, so the pro pass still runs."""
+    radius = REGION_FLOW_SEARCH_RADIUS_FRAMES
+    pad = REGION_FLOW_CONTEXT_PAD_PX
+    scale = REGION_FLOW_ESTIMATION_SCALE
+    cap = cv2.VideoCapture(input_path)
+    try:
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if cap.isOpened() else 0
+        if frame_count <= radius:
+            return True
+        last_start = frame_count - radius - 1
+        samples = max(1, REGION_FLOW_PROBE_SAMPLES)
+        starts = sorted({last_start * i // max(1, samples - 1) for i in range(samples)})
+
+        checked = 0
+        for start in starts:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start)
+            ok_a, a = cap.read()
+            for _ in range(radius - 1):
+                cap.grab()
+            ok_b, b = cap.read()
+            if not (ok_a and ok_b):
+                continue
+            fh, fw = a.shape[:2]
+            cx0, cy0 = max(0, x - pad), max(0, y - pad)
+            cx1, cy1 = min(fw, x + w + pad), min(fh, y + h + pad)
+            a_crop, b_crop = a[cy0:cy1, cx0:cx1], b[cy0:cy1, cx0:cx1]
+            crop_h, crop_w = a_crop.shape[:2]
+            small_a = cv2.resize(
+                cv2.cvtColor(a_crop, cv2.COLOR_BGR2GRAY), None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA
+            )
+            grid_y, grid_x = np.mgrid[0:crop_h, 0:crop_w].astype(np.float32)
+            rx0, ry0 = x - cx0, y - cy0
+            _, uncovered = _flow_sample(small_a, b_crop, grid_x, grid_y, (rx0, ry0, rx0 + w, ry0 + h))
+            checked += 1
+            if uncovered[ry0 : ry0 + h, rx0 : rx0 + w].mean() >= REGION_FLOW_MIN_RECOVERABLE:
+                return True
+        return checked == 0
+    finally:
+        cap.release()
+
+
+def _context_changed(key: np.ndarray, frame: np.ndarray, x: int, y: int, w: int, h: int) -> bool:
+    """Whether the pixels the fill reads (the padded crop around the region,
+    not the region itself) differ between `key` and `frame` by more than
+    REGION_REUSE_MAX_MEAN_DIFF on average."""
+    fh, fw = frame.shape[:2]
+    pad = REGION_FSR_CONTEXT_PAD_PX
+    cx0, cy0 = max(0, x - pad), max(0, y - pad)
+    cx1, cy1 = min(fw, x + w + pad), min(fh, y + h + pad)
+    diff = cv2.absdiff(key[cy0:cy1, cx0:cx1], frame[cy0:cy1, cx0:cx1])
+    diff[y - cy0 : y - cy0 + h, x - cx0 : x - cx0 + w] = 0
+    context_values = (diff.shape[0] * diff.shape[1] - w * h) * diff.shape[2]
+    if context_values <= 0:
+        return True
+    return float(diff.sum(dtype=np.int64)) / context_values > REGION_REUSE_MAX_MEAN_DIFF
+
+
+def _inpaint_patch(frame: np.ndarray, x: int, y: int, w: int, h: int) -> np.ndarray:
+    return _inpaint_region(frame, x, y, w, h)[y : y + h, x : x + w]
+
+
+class _OrderedPatchWriter:
+    """Writes patches in frame order while up to JOB_THREADS frames are
+    reconstructed in parallel. OpenCV releases the GIL inside its calls, so
+    threads are enough - no frames get copied to other processes. A bounded
+    queue keeps memory flat however long the clip is."""
+
+    def __init__(self, writer: cv2.VideoWriter, pool: ThreadPoolExecutor):
+        self._writer = writer
+        self._pool = pool
+        self._pending: deque[Future] = deque()
+        self._max_pending = JOB_THREADS * 2
+
+    def submit(self, fn, *args) -> Future:
+        future = self._pool.submit(fn, *args)
+        self.add(future)
+        return future
+
+    def add(self, future: Future) -> None:
+        self._pending.append(future)
+        while len(self._pending) > self._max_pending:
+            self._writer.write(self._pending.popleft().result())
+
+    def flush(self) -> None:
+        while self._pending:
+            self._writer.write(self._pending.popleft().result())
 
 
 def _inpaint_region_to_temp_video(input_path: str, x: int, y: int, w: int, h: int) -> str:
@@ -384,11 +500,24 @@ def _inpaint_region_to_temp_video(input_path: str, x: int, y: int, w: int, h: in
     os.close(fd)
     writer = cv2.VideoWriter(tmp_path, cv2.VideoWriter_fourcc(*"FFV1"), fps, (w, h))
     try:
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            writer.write(_inpaint_region(frame, x, y, w, h)[y : y + h, x : x + w])
+        with ThreadPoolExecutor(max_workers=JOB_THREADS) as pool:
+            out = _OrderedPatchWriter(writer, pool)
+            # The fill only reads the pixels around the region, so a frame
+            # whose surroundings match the last computed one reuses its
+            # result (see REGION_REUSE_MAX_MEAN_DIFF) - on a still shot that
+            # is almost every frame.
+            key_frame: np.ndarray | None = None
+            key_patch: Future | None = None
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                if key_frame is None or key_patch is None or _context_changed(key_frame, frame, x, y, w, h):
+                    key_frame = frame
+                    key_patch = out.submit(_inpaint_patch, frame, x, y, w, h)
+                else:
+                    out.add(key_patch)
+            out.flush()
     finally:
         cap.release()
         writer.release()
@@ -430,15 +559,20 @@ def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, 
     next_emit = 0  # global frame index of the next frame to finalize
     cur_idx = -1  # global frame index of the most recently read frame; -1 if none read yet
 
+    pool = ThreadPoolExecutor(max_workers=JOB_THREADS)
+    out = _OrderedPatchWriter(writer, pool)
+
+    def _flow_patch(center: np.ndarray, neighbors: list[np.ndarray]) -> np.ndarray:
+        return _flow_assisted_inpaint_region(center, neighbors, x, y, w, h)[y : y + h, x : x + w]
+
     def _emit_center() -> None:
         center_pos = next_emit - window_start
         neighbors = sorted(
             (i for i in range(len(window)) if i != center_pos), key=lambda i: abs(i - center_pos)
         )
-        patch = _flow_assisted_inpaint_region(
-            window[center_pos], [window[i] for i in neighbors], x, y, w, h
-        )
-        writer.write(patch[y : y + h, x : x + w])
+        # The task holds its own list of frame references, so trimming the
+        # window afterwards doesn't pull frames out from under it.
+        out.submit(_flow_patch, window[center_pos], [window[i] for i in neighbors])
 
     try:
         while True:
@@ -471,7 +605,9 @@ def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, 
             while window_start < next_emit - radius:
                 window.pop(0)
                 window_start += 1
+        out.flush()
     finally:
+        pool.shutdown(wait=True)
         cap.release()
         writer.release()
     return tmp_path
@@ -514,7 +650,11 @@ async def reconstruct_region(
     Callers are responsible for never passing a height taller than the
     source (this function does not upscale).
     """
-    inpaint_fn = _inpaint_region_to_temp_video_flow if quality == "pro" else _inpaint_region_to_temp_video
+    inpaint_fn = _inpaint_region_to_temp_video
+    # On a still shot the pro pass can't uncover anything and only costs
+    # time, so it runs only when a quick probe sees motion it can use.
+    if quality == "pro" and await asyncio.to_thread(_flow_can_recover, input_path, x, y, w, h):
+        inpaint_fn = _inpaint_region_to_temp_video_flow
     tmp_path = await asyncio.to_thread(inpaint_fn, input_path, x, y, w, h)
     try:
         # tmp_path is the reconstructed region only (input 1). Sharpen it -

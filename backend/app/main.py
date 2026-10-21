@@ -94,6 +94,8 @@ from app.config import (
     EDITOR_MAX_STICKERS,
     EDITOR_MAX_TOTAL_UPLOAD_BYTES,
     EDITOR_MAX_TRANSITION_SECONDS,
+    LOCAL_MODE,
+    LOCAL_TOKEN,
     MAX_CONCURRENT_JOBS,
     MAX_VIDEO_DURATION_SECONDS,
     MAX_VIDEO_UPLOAD_BYTES,
@@ -123,6 +125,10 @@ if (os.environ.get("K_SERVICE") or os.environ.get("REQUIRE_INTERNAL_SECRET") == 
     "INTERNAL_API_SECRET"
 ):
     raise RuntimeError("INTERNAL_API_SECRET must be set in production.")
+# The desktop engine listens on localhost, where any other program or web page
+# could reach it; the per-launch token is what keeps it to the app.
+if LOCAL_MODE and len(LOCAL_TOKEN) < 32:
+    raise RuntimeError("WIPECLIP_LOCAL_TOKEN must be set (at least 32 characters) in local mode.")
 
 _docs_enabled = os.environ.get("ENABLE_API_DOCS") == "1"
 app = FastAPI(
@@ -132,6 +138,19 @@ app = FastAPI(
     redoc_url="/redoc" if _docs_enabled else None,
     openapi_url="/openapi.json" if _docs_enabled else None,
 )
+
+if LOCAL_MODE:
+    # Registered before CORS so CORS wraps it: preflights (which can't carry
+    # the header) get through, and a refusal still has CORS headers the app
+    # can read.
+    @app.middleware("http")
+    async def _require_local_token(request: Request, call_next):
+        if request.method != "OPTIONS":
+            given = request.headers.get("X-Local-Token", "")
+            if not hmac.compare_digest(given.encode(), LOCAL_TOKEN.encode()):
+                return Response(status_code=403, content='{"detail":"Forbidden"}', media_type="application/json")
+        return await call_next(request)
+
 
 _origins = os.environ.get("ALLOWED_ORIGINS", "*")
 app.add_middleware(
@@ -303,7 +322,7 @@ async def _receive_video(
 
 @app.post("/api/video/probe")
 async def api_video_probe(
-    ticket: str = Form(...),
+    ticket: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     upload_id: Optional[str] = Form(None),
 ):
@@ -313,9 +332,13 @@ async def api_video_probe(
     Takes the video as `file`, or as the `upload_id` of a direct upload.
 
     Needs the same upload ticket as /api/video/upload-url (not claimed here:
-    the upload already claimed it, and probing reuses it).
+    the upload already claimed it, and probing reuses it). The desktop engine
+    takes none: the file is already on the user's machine and nothing is billed.
     """
-    limit = _upload_limit(tickets.verify(ticket, "upload"))
+    if LOCAL_MODE:
+        limit = MAX_VIDEO_UPLOAD_BYTES
+    else:
+        limit = _upload_limit(tickets.verify(ticket or "", "upload"))
     with tempfile.TemporaryDirectory() as tmp:
         in_path = await _receive_video(file, upload_id, tmp, limit)
         try:
@@ -384,9 +407,18 @@ async def api_video_process(
     resolution, quality = job.get("resolution"), job.get("quality")
     if resolution not in RESOLUTION_HEIGHTS or quality not in ("standard", "pro"):
         raise HTTPException(status_code=403, detail="Invalid job ticket.")
+    # The seconds of video the ticket paid for (credits are per started
+    # minute); local tickets carry none and get the server-wide ceiling.
+    paid_seconds = job.get("maxSeconds")
+    if paid_seconds is None:
+        max_seconds = MAX_VIDEO_DURATION_SECONDS
+    elif isinstance(paid_seconds, (int, float)) and paid_seconds > 0:
+        max_seconds = min(float(paid_seconds), MAX_VIDEO_DURATION_SECONDS)
+    else:
+        raise HTTPException(status_code=403, detail="Invalid job ticket.")
     await tickets.claim(ticket)
     try:
-        result = await _video_process(file, upload_id, x, y, w, h, start, end, resolution, quality)
+        result = await _video_process(file, upload_id, x, y, w, h, start, end, resolution, quality, max_seconds)
     except (Exception, asyncio.CancelledError):
         # Any failure, rejection (moderation, bad region) or disconnect: no
         # usable result, so the credits go back.
@@ -410,6 +442,7 @@ async def _video_process(
     end: Optional[float],
     resolution: str,
     quality: str,
+    max_seconds: float = MAX_VIDEO_DURATION_SECONDS,
 ):
     if w < MIN_REGION_PX or h < MIN_REGION_PX:
         raise HTTPException(status_code=400, detail=f"Region too small; minimum {MIN_REGION_PX}px per side")
@@ -445,6 +478,13 @@ async def _video_process(
             raise HTTPException(
                 status_code=400,
                 detail=f"Video too long ({info.duration:.0f}s); max supported is {MAX_VIDEO_DURATION_SECONDS:.0f}s",
+            )
+        # A second of slack for container vs decoder duration differences.
+        # Raising here refunds the ticket (see api_video_process).
+        if info.duration > max_seconds + 1.0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"This video is longer ({info.duration:.0f}s) than the length it was charged for. Please try again.",
             )
         # The region is drawn in the browser against a scaled-up preview, so
         # rounding on the way back to source pixels can push an edge-flush box

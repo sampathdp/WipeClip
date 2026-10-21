@@ -5,6 +5,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import ImageEditorDemo from "@/components/ImageEditorDemo";
 import { buildPageMetadata } from "@/lib/seo";
+import { PLANS } from "@/lib/credits";
 
 const title = "AI Object Removal for Photos - Pro Tool";
 const description =
@@ -19,7 +20,7 @@ export const metadata: Metadata = buildPageMetadata({
 const faqs = [
   {
     q: "Why is this a Pro-only feature when the video tool has a free tier?",
-    a: "The video tool's free preview covers casual, occasional use. Image object removal shares the same reconstruction engine but is bundled into the Pro plan ($23.99 for 30 days) alongside 4K video, unattended auto-enhance, and batch upload.",
+    a: `The video tool's free preview covers casual, occasional use. Image object removal shares the same reconstruction engine but is bundled into the Pro plan (${PLANS.pro.priceLabel} for 30 days) alongside 4K video, unattended auto-enhance, and batch upload.`,
   },
   {
     q: "How is this different from WipeClip.co's free background remover or sharpener?",

@@ -22,6 +22,8 @@ export interface ExportTicket {
   compact: boolean;
   /** sha256 hex of the exact project JSON string that was checked. */
   projectHash: string;
+  /** For the desktop app's own engine; the cloud backend refuses it. */
+  local?: boolean;
 }
 
 export interface ProcessTicket {
@@ -31,6 +33,13 @@ export interface ProcessTicket {
   /** Who to refund if the job fails; null for anonymous (free) previews. */
   userId: string | null;
   cost: number;
+  /** Longest video (seconds, after any range cut) this ticket paid for; the
+   * backend refuses a longer one. Unset on local tickets, where only the
+   * backend's own ceiling applies. */
+  maxSeconds?: number;
+  /** Runs on the desktop app's own engine, so it costs no credits (cost 0)
+   * and the cloud backend refuses it (backend/app/tickets.py). */
+  local?: boolean;
 }
 
 /** Permission to upload one video to the backend and probe it (see

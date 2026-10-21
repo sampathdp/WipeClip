@@ -5,7 +5,7 @@
 //   node desktop/scripts/tauri.mjs dev            -> tauri dev
 //   node desktop/scripts/tauri.mjs build [args]   -> tauri build [args]
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,6 +68,8 @@ const connect = [
   "https://*.huggingface.co",
   "https://*.hf.co",
   "https://cdn.jsdelivr.net",
+  // The bundled processing engine (src-tauri/src/engine.rs) on a free port.
+  "http://127.0.0.1:*",
 ];
 const script = ["'self'", "'wasm-unsafe-eval'"];
 if (dev) {
@@ -95,6 +97,21 @@ const config = {
     },
   },
 };
+// The packaged engine (backend/desktop.spec, copied here by CI). Without it
+// the app still works, with processing on the cloud backend; CI sets
+// WIPECLIP_REQUIRE_ENGINE=1 so a release can't ship without it by accident.
+const engineDir = path.join(root, "src-tauri", "resources", "engine");
+if (!dev) {
+  if (existsSync(engineDir)) {
+    config.bundle = { resources: { "resources/engine/": "engine/" } };
+  } else if (process.env.WIPECLIP_REQUIRE_ENGINE === "1") {
+    console.error(`No engine at ${engineDir} - build it with backend/desktop.spec first.`);
+    process.exit(1);
+  } else {
+    console.warn("No local engine bundled: this build processes video on the cloud backend.");
+  }
+}
+
 const generated = path.join(root, "src-tauri", "tauri.generated.conf.json");
 writeFileSync(generated, JSON.stringify(config, null, 2) + "\n");
 console.log(`CSP connect-src: ${config.app.security.csp["connect-src"]}`);

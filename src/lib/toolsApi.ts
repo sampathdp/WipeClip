@@ -1,4 +1,4 @@
-import { apiFetch } from "@/lib/platform";
+import { apiFetch, localEngine, type LocalEngine } from "@/lib/platform";
 
 export const TOOLS_API_URL =
   process.env.NEXT_PUBLIC_TOOLS_API_URL ?? "http://localhost:8001";
@@ -20,6 +20,12 @@ export class ApiError extends Error {
 
 function assertBackendEnabled(): void {
   if (BACKEND_DISABLED) throw new ApiError(BACKEND_DISABLED_MESSAGE, "service_unavailable");
+}
+
+/** The desktop app's own engine (see localEngine) takes the same requests
+ * as the cloud backend, plus its per-launch token. */
+function engineHeaders(engine: LocalEngine): Record<string, string> {
+  return { "X-Local-Token": engine.token };
 }
 
 export class ContentBlockedError extends ApiError {}
@@ -148,15 +154,23 @@ function forgetExpiredUpload(file: File, res: Response): void {
 export async function probeVideo(
   file: File
 ): Promise<{ info: VideoInfo; previewUrl: string }> {
-  assertBackendEnabled();
-  const body = new FormData();
-  await appendVideo(body, file);
-  body.append("ticket", await uploadTicket(file));
-
-  const res = await fetch(`${TOOLS_API_URL}/api/video/probe`, {
-    method: "POST",
-    body,
-  });
+  const engine = await localEngine();
+  let res: Response;
+  if (engine) {
+    // Desktop app: checked on this machine - no upload, no ticket.
+    const body = new FormData();
+    body.append("file", file);
+    res = await fetch(`${engine.url}/api/video/probe`, { method: "POST", body, headers: engineHeaders(engine) });
+  } else {
+    assertBackendEnabled();
+    const body = new FormData();
+    await appendVideo(body, file);
+    body.append("ticket", await uploadTicket(file));
+    res = await fetch(`${TOOLS_API_URL}/api/video/probe`, {
+      method: "POST",
+      body,
+    });
+  }
 
   forgetExpiredUpload(file, res);
   if (res.status === 403) uploadTickets.delete(file);
@@ -188,8 +202,9 @@ export type Resolution = "720p" | "1080p" | "4k";
 /** Asks one of our own routes (/api/process, /api/export) for a job ticket.
  * That route does every plan and credit check; the files then go straight
  * to the backend with the ticket - see src/lib/jobTicket.ts. */
-async function getTicket(route: string, payload: unknown, fallback: string, signal?: AbortSignal) {
-  assertBackendEnabled();
+async function getTicket(route: string, payload: Record<string, unknown> & { local?: boolean }, fallback: string, signal?: AbortSignal) {
+  // A local job never touches the cloud backend, so its kill switch doesn't apply.
+  if (!payload.local) assertBackendEnabled();
   const res = await apiFetch(route, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -203,20 +218,46 @@ async function getTicket(route: string, payload: unknown, fallback: string, sign
 /** Object removal: /api/process checks and spends credits and hands back a
  * ticket, then the video goes to the backend with it. A failed job is
  * refunded by the backend. See src/app/api/process/route.ts.
+ *
+ * `duration` is the whole file's length in seconds; with a `range`, the
+ * range's length is billed instead.
  */
 export async function processVideo(
   file: File,
   region: Region,
   resolution: Resolution,
+  duration: number,
   signal?: AbortSignal,
   range?: { start: number; end: number }
 ): Promise<Blob> {
-  // Upload before the ticket spends any credits (usually already done by
-  // probeVideo for this same File).
-  assertBackendEnabled();
+  const failed = "Processing failed. Try again.";
+  const seconds = range ? Math.min(range.end, duration) - range.start : duration;
   const body = new FormData();
-  await appendVideo(body, file, signal);
-  const { ticket } = await getTicket("/api/process", { resolution, filename: file.name }, "Processing failed. Try again.", signal);
+  let target = TOOLS_API_URL;
+  let headers: Record<string, string> = {};
+  let ticket: string | null = null;
+
+  // Desktop app on a paid plan: runs on this machine, no credits spent. A
+  // free plan is refused the local ticket (plan_required) and uses the cloud
+  // backend and credits, as on the website.
+  const engine = await localEngine();
+  if (engine) {
+    try {
+      ({ ticket } = await getTicket("/api/process", { resolution, filename: file.name, duration: seconds, local: true }, failed, signal));
+      target = engine.url;
+      headers = engineHeaders(engine);
+      body.append("file", file);
+    } catch (e) {
+      if (!(e instanceof PlanRequiredError)) throw e;
+    }
+  }
+  if (!ticket) {
+    // Upload before the ticket spends any credits (usually already done by
+    // probeVideo for this same File).
+    assertBackendEnabled();
+    await appendVideo(body, file, signal);
+    ({ ticket } = await getTicket("/api/process", { resolution, filename: file.name, duration: seconds }, failed, signal));
+  }
   body.append("ticket", ticket);
   body.append("x", String(region.x));
   body.append("y", String(region.y));
@@ -232,9 +273,10 @@ export async function processVideo(
   // clip is done - minutes for a long or high-resolution video - so this
   // request has no natural timeout. `signal` lets the caller impose a hard
   // ceiling (see UploadDemo) rather than spinning forever if it wedges.
-  const res = await fetch(`${TOOLS_API_URL}/api/video/process`, {
+  const res = await fetch(`${target}/api/video/process`, {
     method: "POST",
     body,
+    headers,
     signal,
   });
 
@@ -242,7 +284,7 @@ export async function processVideo(
   if (res.ok) directUploads.delete(file);
   forgetExpiredUpload(file, res);
   if (!res.ok) {
-    await throwApiError(res, "Processing failed. Try again.");
+    await throwApiError(res, failed);
   }
 
   return res.blob();
@@ -266,7 +308,9 @@ export async function exportEditorProject(
 ): Promise<Blob> {
   const projectJson = JSON.stringify(project);
   const exportFailed = "Export failed. Your original video is safe. Please try exporting again.";
-  const { ticket } = await getTicket("/api/export", { project: projectJson, resolution }, exportFailed, signal);
+  // Desktop app: rendered on this machine (same plan rules, from the ticket).
+  const engine = await localEngine();
+  const { ticket } = await getTicket("/api/export", { project: projectJson, resolution, local: Boolean(engine) }, exportFailed, signal);
   const body = new FormData();
   body.append("ticket", ticket);
   // Byte-for-byte the string the ticket was issued for (it carries its hash).
@@ -276,7 +320,9 @@ export async function exportEditorProject(
   for (const audio of audios) body.append("audios", audio, audio.name);
   if (background) body.append("background", background, background.name);
 
-  const res = await fetch(`${TOOLS_API_URL}/api/video/export`, { method: "POST", body, signal });
+  const res = engine
+    ? await fetch(`${engine.url}/api/video/export`, { method: "POST", body, headers: engineHeaders(engine), signal })
+    : await fetch(`${TOOLS_API_URL}/api/video/export`, { method: "POST", body, signal });
   if (!res.ok) await throwApiError(res, exportFailed);
   return res.blob();
 }
