@@ -12,7 +12,11 @@ const faqs = [
   },
   {
     q: "How much do the paid plans cost?",
-    a: `For 30 days: Lite ${pass("lite")}, Starter ${pass("starter")}, Pro ${pass("pro")}. For 1 year: Lite ${pass("lite_yearly")}, Starter ${pass("starter_yearly")}, Pro ${pass("pro_yearly")}. Prices are shown in US dollars; checkout shows the final price, including any local tax.`,
+    a: `For 30 days: Lite ${pass("lite")}, Starter ${pass("starter")}, Pro ${pass("pro")}. For 1 year: Lite ${pass("lite_yearly")}, Starter ${pass("starter_yearly")}, Pro ${pass("pro_yearly")}. These are the US dollar list prices; the cards above and checkout show your price in your local currency, such as euros or pounds, with any local tax included.`,
+  },
+  {
+    q: "Do prices include VAT?",
+    a: "Yes. If you're in the UK or the EU, the price you see at checkout already includes VAT for your country, so there's nothing extra to pay. You get a receipt by email after every purchase.",
   },
   {
     q: "Is this a subscription?",

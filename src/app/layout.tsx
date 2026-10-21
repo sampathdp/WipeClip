@@ -61,6 +61,8 @@ export const metadata: Metadata = {
         ? "Record your screen, trim, cut, add transitions, text, stickers and filters on Windows and Mac. Free forever, with AI tools to clean up your footage."
         : "Record your screen, trim, cut, add transitions, text, stickers and filters on Windows and Mac. Free forever, with AI auto captions.",
     locale: "en_US",
+    // Same English pages, offered to UK, Irish and EU visitors too.
+    alternateLocale: ["en_GB", "en_IE", "en_DE", "en_FR", "en_NL"],
     images: [
       {
         url: "/opengraph-image",
@@ -123,6 +125,7 @@ const jsonLd = {
       logo: `${siteUrl}/logo.webp`,
       email: SUPPORT_EMAIL,
       address: { "@type": "PostalAddress", addressCountry: "LK" },
+      areaServed: ["Europe", "United Kingdom", "North America", "Asia", "Oceania"],
       contactPoint: {
         "@type": "ContactPoint",
         contactType: "customer support",
