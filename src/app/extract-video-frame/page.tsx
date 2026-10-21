@@ -8,7 +8,7 @@ import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 const title = "Extract a Frame From Video - Free Screenshot Tool";
 const description =
-  "Grab any frame from a video as a PNG screenshot or thumbnail. Runs entirely in your browser: no upload, no account, no limit on how many frames you capture.";
+  "Grab any frame from a video as a PNG screenshot or thumbnail. Runs entirely in your browser: no upload. One free low-resolution download a day, full resolution for 1 credit.";
 
 export const metadata: Metadata = buildPageMetadata({
   title,
@@ -23,11 +23,11 @@ const faqs = [
   },
   {
     q: "Is there a limit on how many frames I can grab?",
-    a: "No. Capture as many frames from the same video as you want, each one's a fresh canvas export, at no cost to you or to us.",
+    a: "Capture and preview as many frames as you like. Downloading is where the limit is: one free low-resolution frame a day, and each full-resolution frame costs 1 credit. Every account gets 2 free credits a day.",
   },
   {
     q: "What resolution is the exported frame?",
-    a: "The video's native resolution. The canvas is sized to the video's actual width and height before export, so you get a full-resolution PNG, not a scaled-down thumbnail.",
+    a: "A full-resolution download is a PNG at the video's native resolution: the canvas is sized to the video's actual width and height before export. The free daily download is scaled down to about 0.25 megapixels.",
   },
   AI_CLEANUP_ENABLED
     ? {
@@ -64,7 +64,7 @@ export default function Page() {
               Extract a <span className="text-gradient">frame</span> from any video
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
-              Scrub to the moment you want and capture it as a full-resolution PNG. Runs entirely
+              Scrub to the moment you want and capture it as a PNG, up to full resolution. Runs entirely
               in your browser. Your video is never uploaded.
             </p>
           </div>
@@ -82,14 +82,14 @@ export default function Page() {
             "Open a video your browser can play (MP4 or WebM, up to 500MB). It stays on your device.",
             "Scrub to the moment you want, or pick one of the suggested cover frames WipeClip finds by scanning the video.",
             "Capture the frame. Grab as many as you like.",
-            "Download each frame as a full-resolution PNG, ready for a thumbnail, slide or post.",
+            "Download a frame free at a reduced size once a day, or at full resolution for 1 credit.",
           ]}
           facts={[
-            { label: "Output", value: "PNG at the video's own resolution" },
+            { label: "Output", value: "PNG, up to the video's own resolution" },
             { label: "Max video size", value: "500MB" },
             { label: "Upload", value: "None, runs in your browser" },
-            { label: "Account", value: "Not needed" },
-            { label: "Price", value: "Free, no frame limit" },
+            { label: "Free", value: "1 low-resolution download a day" },
+            { label: "Full resolution", value: "1 credit per frame, sign-in needed" },
           ]}
         />
 

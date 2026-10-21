@@ -7,7 +7,7 @@ import { buildPageMetadata, faqJsonLd, jsonLdString } from "@/lib/seo";
 
 const title = "Sharpen a Blurry Photo - Free";
 const description =
-  "Restore crisp detail to a soft or slightly blurry photo in seconds. Free, no account required to preview. Pick light, standard, or strong strength.";
+  "Restore crisp detail to a soft or slightly blurry photo in seconds. One free result a day, no account needed. Pick light, standard, or strong strength.";
 
 export const metadata: Metadata = buildPageMetadata({
   title,
@@ -30,7 +30,7 @@ const faqs = [
   },
   {
     q: "Is this free?",
-    a: "Yes. Every visitor gets free preview passes with no account, and every signed-in account gets 2 free credits a day, which covers typical everyday use of this tool.",
+    a: "Yes. Everyone gets one free sharpened photo a day at a reduced size, no account needed. For the full-resolution result, sign in: it costs 1 credit, and every account gets 2 free credits a day.",
   },
   {
     q: "Do you keep my photo?",
@@ -85,9 +85,8 @@ export default function Page() {
           facts={[
             { label: "Strengths", value: "Light, Standard, Strong" },
             { label: "Max upload", value: "25MB per image" },
-            { label: "Resolution", value: "Same as your upload" },
-            { label: "Without an account", value: "5 free photos a day" },
-            { label: "Signed in", value: "1 credit per photo, 2 free a day" },
+            { label: "Free", value: "1 photo a day, reduced size" },
+            { label: "Full resolution", value: "1 credit per photo, 2 free credits a day" },
           ]}
         />
 

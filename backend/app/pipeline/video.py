@@ -469,6 +469,58 @@ class _OrderedPatchWriter:
             self._writer.write(self._pending.popleft().result())
 
 
+def _crop_box(input_path: str, x: int, y: int, w: int, h: int, pad: int) -> tuple[int, int, int, int, float]:
+    """The region padded by `pad` on each side, clamped to the frame, as
+    (x0, y0, x1, y1), plus the frame rate.
+
+    Raises:
+        ValueError: if the file can't be opened as a video.
+    """
+    cap = cv2.VideoCapture(input_path)
+    try:
+        if not cap.isOpened():
+            raise ValueError("Could not open this file as a video")
+        fw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        fh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+    finally:
+        cap.release()
+    return max(0, x - pad), max(0, y - pad), min(fw, x + w + pad), min(fh, y + h + pad), fps
+
+
+def _cropped_frames(input_path: str, box: tuple[int, int, int, int]):
+    """Yields every frame's `box` (x0, y0, x1, y1) as a read-only BGR array.
+
+    ffmpeg decodes (multi-threaded, in C) and crops before anything reaches
+    Python, so the fill pass only ever handles the small box it needs, not
+    whole 1080p/4K frames - that full-frame decode and copy was most of a
+    still shot's processing time. -noautorotate keeps the same storage
+    orientation the final composite uses, so the region lines up.
+    """
+    x0, y0, x1, y1 = box
+    cw, ch = x1 - x0, y1 - y0
+    proc = subprocess.Popen(
+        [
+            get_ffmpeg_path(), "-v", "error", "-noautorotate", "-threads", str(JOB_THREADS),
+            "-i", input_path, "-map", "0:v:0", "-vf", f"crop={cw}:{ch}:{x0}:{y0}",
+            "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "bgr24", "-",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    size = cw * ch * 3
+    try:
+        while True:
+            buf = proc.stdout.read(size)
+            if len(buf) < size:
+                break
+            yield np.frombuffer(buf, np.uint8).reshape(ch, cw, 3)
+    finally:
+        proc.kill()
+        proc.wait()
+
+
 def _inpaint_region_to_temp_video(input_path: str, x: int, y: int, w: int, h: int) -> str:
     """Decodes every frame, reconstructs the fixed region at (x, y, w, h)
     with _inpaint_region(), and writes just that reconstructed w*h
@@ -489,16 +541,17 @@ def _inpaint_region_to_temp_video(input_path: str, x: int, y: int, w: int, h: in
         ValueError: if the file can't be opened as a video (mirrors
             probe_video/sample_frames).
     """
-    cap = cv2.VideoCapture(input_path)
-    if not cap.isOpened():
-        cap.release()
-        raise ValueError("Could not open this file as a video")
-
-    fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+    # The fill reads only the region plus REGION_FSR_CONTEXT_PAD_PX around
+    # it, so that box is all that gets decoded; the region's position is
+    # then relative to the box.
+    box = _crop_box(input_path, x, y, w, h, REGION_FSR_CONTEXT_PAD_PX)
+    fps = box[4]
+    rx, ry = x - box[0], y - box[1]
 
     fd, tmp_path = tempfile.mkstemp(suffix=".mkv")
     os.close(fd)
     writer = cv2.VideoWriter(tmp_path, cv2.VideoWriter_fourcc(*"FFV1"), fps, (w, h))
+    frames = _cropped_frames(input_path, box[:4])
     try:
         with ThreadPoolExecutor(max_workers=JOB_THREADS) as pool:
             out = _OrderedPatchWriter(writer, pool)
@@ -508,18 +561,15 @@ def _inpaint_region_to_temp_video(input_path: str, x: int, y: int, w: int, h: in
             # is almost every frame.
             key_frame: np.ndarray | None = None
             key_patch: Future | None = None
-            while True:
-                ok, frame = cap.read()
-                if not ok:
-                    break
-                if key_frame is None or key_patch is None or _context_changed(key_frame, frame, x, y, w, h):
-                    key_frame = frame
-                    key_patch = out.submit(_inpaint_patch, frame, x, y, w, h)
+            for crop in frames:
+                if key_frame is None or key_patch is None or _context_changed(key_frame, crop, rx, ry, w, h):
+                    key_frame = crop
+                    key_patch = out.submit(_inpaint_patch, crop, rx, ry, w, h)
                 else:
                     out.add(key_patch)
             out.flush()
     finally:
-        cap.release()
+        frames.close()  # stops ffmpeg if the pass ended early
         writer.release()
     return tmp_path
 
@@ -543,12 +593,12 @@ def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, 
     """
     radius = REGION_FLOW_SEARCH_RADIUS_FRAMES
 
-    cap = cv2.VideoCapture(input_path)
-    if not cap.isOpened():
-        cap.release()
-        raise ValueError("Could not open this file as a video")
-
-    fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+    # Same box decode as _inpaint_region_to_temp_video, with the flow
+    # search's wider padding (which also covers the fill's fallback).
+    box = _crop_box(input_path, x, y, w, h, max(REGION_FLOW_CONTEXT_PAD_PX, REGION_FSR_CONTEXT_PAD_PX))
+    fps = box[4]
+    frames = _cropped_frames(input_path, box[:4])
+    x, y = x - box[0], y - box[1]
 
     fd, tmp_path = tempfile.mkstemp(suffix=".mkv")
     os.close(fd)
@@ -575,10 +625,7 @@ def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, 
         out.submit(_flow_patch, window[center_pos], [window[i] for i in neighbors])
 
     try:
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
+        for frame in frames:
             window.append(frame)
             cur_idx = window_start + len(window) - 1
 
@@ -608,7 +655,7 @@ def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, 
         out.flush()
     finally:
         pool.shutdown(wait=True)
-        cap.release()
+        frames.close()
         writer.release()
     return tmp_path
 

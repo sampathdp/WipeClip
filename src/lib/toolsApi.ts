@@ -30,6 +30,8 @@ function engineHeaders(engine: LocalEngine): Record<string, string> {
 
 export class ContentBlockedError extends ApiError {}
 export class InsufficientCreditsError extends ApiError {}
+/** Today's free preview for this tool is used up (see src/lib/imageTool.ts). */
+export class PreviewLimitError extends ApiError {}
 export class AuthRequiredError extends ApiError {}
 export class ProRequiredError extends ApiError {}
 /** The export needs a higher plan (resolution or premium features). */
@@ -53,6 +55,7 @@ async function throwApiError(res: Response, fallback: string): Promise<never> {
   const msg = message || fallback;
   if (code === "content_blocked") throw new ContentBlockedError(msg, code);
   if (code === "insufficient_credits") throw new InsufficientCreditsError(msg, code);
+  if (code === "preview_limit") throw new PreviewLimitError(msg, code);
   if (code === "auth_required") throw new AuthRequiredError(msg, code);
   if (code === "pro_required") throw new ProRequiredError(msg, code);
   if (code === "plan_required") throw new PlanRequiredError(msg, code);
@@ -358,10 +361,14 @@ export async function processImage(file: File, region: Region): Promise<Blob> {
  * output is a transparent PNG (full_pipeline.auto_enhance), not a
  * region-marked reconstruction, so unlike processImage this takes no
  * Region - the whole point of this tool is zero-click background removal.
+ *
+ * "preview" is the free daily low-resolution result; "full" needs sign-in
+ * and a credit (see src/lib/imageTool.ts).
  */
-export async function removeBackground(file: File): Promise<Blob> {
+export async function removeBackground(file: File, quality: ToolQuality): Promise<Blob> {
   const body = new FormData();
   body.append("file", file);
+  body.append("quality", quality);
 
   assertBackendEnabled();
 
@@ -377,15 +384,18 @@ export async function removeBackground(file: File): Promise<Blob> {
   return res.blob();
 }
 
+export type ToolQuality = "preview" | "full";
+
 export type SharpenStrength = "light" | "standard" | "strong";
 
 /** Goes through /api/sharpen-image - same free, non-Pro gate as
  * removeBackground above.
  */
-export async function sharpenImage(file: File, strength: SharpenStrength): Promise<Blob> {
+export async function sharpenImage(file: File, strength: SharpenStrength, quality: ToolQuality): Promise<Blob> {
   const body = new FormData();
   body.append("file", file);
   body.append("strength", strength);
+  body.append("quality", quality);
 
   assertBackendEnabled();
 
@@ -399,4 +409,17 @@ export async function sharpenImage(file: File, strength: SharpenStrength): Promi
   }
 
   return res.blob();
+}
+
+/** The frame grabber runs in the browser; this asks /api/frame-grab whether
+ * the next capture may be taken, spending today's free preview or a credit
+ * for full resolution. Resolves to whether it must be downscaled. */
+export async function allowFrameGrab(quality: ToolQuality): Promise<{ preview: boolean }> {
+  const res = await apiFetch("/api/frame-grab", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quality }),
+  });
+  if (!res.ok) await throwApiError(res, "Couldn't capture the frame. Try again.");
+  return res.json();
 }

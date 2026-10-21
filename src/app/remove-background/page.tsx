@@ -8,7 +8,7 @@ import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 const title = "Remove Background From Image - Free";
 const description =
-  "Upload a photo and get a transparent-background PNG back in seconds. Free, no account required to preview." +
+  "Upload a photo and get a transparent-background PNG back in seconds. One free result a day, no account needed." +
   (AI_CLEANUP_ENABLED ? " Powered by the same engine behind WipeClip.co's AI cleanup tools." : "");
 
 export const metadata: Metadata = buildPageMetadata({
@@ -20,7 +20,7 @@ export const metadata: Metadata = buildPageMetadata({
 const faqs = [
   {
     q: "Is this actually free?",
-    a: "Yes. Every visitor gets free preview passes with no account, and every signed-in account gets 2 free credits a day at no cost, which covers typical everyday use of this tool.",
+    a: "Yes. Everyone gets one free cutout a day at a reduced size, no account needed. For the full-resolution result, sign in: it costs 1 credit, and every account gets 2 free credits a day.",
   },
   {
     q: "What file types come out?",
@@ -40,7 +40,7 @@ const faqs = [
   },
   {
     q: "Do I need to sign in to get a full-resolution PNG?",
-    a: "Without an account you get up to 5 free previews a day at a reduced size. Signed in, every image comes back at its original resolution and uses 1 credit, and every account gets 2 free credits a day.",
+    a: "Yes. The free daily cutout comes back at a reduced size. Signed in, you can get any image at its original resolution for 1 credit, and every account gets 2 free credits a day.",
   },
   {
     q: "Do you keep my photo?",
@@ -95,7 +95,7 @@ export default function Page() {
           facts={[
             { label: "Output", value: "PNG with transparency" },
             { label: "Max upload", value: "25MB per image" },
-            { label: "Without an account", value: "5 free previews a day, reduced size" },
+            { label: "Free", value: "1 cutout a day, reduced size" },
             { label: "Signed in", value: "Full resolution, 1 credit per image" },
             { label: "Free credits", value: "2 a day, every account" },
           ]}

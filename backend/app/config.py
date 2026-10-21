@@ -60,13 +60,13 @@ MAX_INPAINT_MASK_RADIUS: int = 40  # hard cap so a runaway brush stroke can't
 # --- ML background removal ----------------------------------------------------
 REMBG_MODEL_NAME: str = "isnet-general-use"  # good general-purpose quality/speed balance
 
-# --- Free-tier preview cap for /api/image/auto-enhance (api_image_auto_enhance) ---
-# Anonymous callers get downscaled to this before processing (matches
-# a common free/anonymous preview cap - see api_image_auto_enhance's
-# `preview` flag in main.py for who actually gets capped). Downscaling
-# BEFORE the pipeline runs, not after, is also just cheaper: rembg's
-# segmentation cost scales with pixel count.
-BG_REMOVE_PREVIEW_MAX_MEGAPIXELS: float = 0.25
+# --- Free preview cap for the free image tools (auto-enhance, sharpen) ---
+# The daily free result is downscaled to this before processing; the
+# Next.js routes set the `preview` form flag (see src/lib/imageTool.ts) and
+# full resolution costs a credit. Downscaling BEFORE the pipeline runs, not
+# after, is also just cheaper: rembg's segmentation cost scales with pixel
+# count.
+IMAGE_PREVIEW_MAX_MEGAPIXELS: float = 0.25
 
 # --- Artifact candidate detection (suggest-only, never auto-applies) ---
 # Tuned deliberately conservative: it is far better to miss a real artifact

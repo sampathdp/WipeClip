@@ -73,7 +73,7 @@ from starlette.background import BackgroundTask
 
 from app import jobs, tickets, uploads
 from app.config import (
-    BG_REMOVE_PREVIEW_MAX_MEGAPIXELS,
+    IMAGE_PREVIEW_MAX_MEGAPIXELS,
     EDITOR_COMPACT_AUDIO_BITRATE,
     EDITOR_COMPACT_CRF,
     EDITOR_MAX_AUDIO,
@@ -1182,10 +1182,14 @@ async def api_image_sharpen(
     request: Request,
     file: UploadFile = File(...),
     strength: str = Form("standard"),  # "light" | "standard" | "strong"
+    preview: bool = Form(False),
 ):
     """Standalone selective-unsharp-mask pass (sharpen.sharpen), independent
     of auto-enhance's full bg-removal/decontam pipeline - just clarity/detail
     enhancement on the image as uploaded.
+
+    `preview=true` downscales to IMAGE_PREVIEW_MAX_MEGAPIXELS first, the same
+    server-set free tier cap as /api/image/auto-enhance.
     """
     _assert_internal_caller(request)
     if strength not in SHARPEN_AMOUNT_PRESETS:
@@ -1209,7 +1213,12 @@ async def api_image_sharpen(
 
         try:
             await _run_pipeline_job(
-                jobs.image_sharpen_job, in_path, out_path, SHARPEN_AMOUNT_PRESETS[strength], timeout=60.0
+                jobs.image_sharpen_job,
+                in_path,
+                out_path,
+                SHARPEN_AMOUNT_PRESETS[strength],
+                IMAGE_PREVIEW_MAX_MEGAPIXELS if preview else None,
+                timeout=60.0,
             )
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
@@ -1229,11 +1238,11 @@ async def api_image_auto_enhance(
     """Runs the full background-removal + halo-decontamination + alpha
     cleanup + sharpen pipeline (full_pipeline.auto_enhance) at its defaults.
 
-    `preview=true` downscales to BG_REMOVE_PREVIEW_MAX_MEGAPIXELS before
-    processing - the Next.js /api/remove-background route hard-sets this
-    for anonymous callers only (never trusts the client's own value, same
-    "server decides, client can't override" pattern api_video_process uses
-    for output resolution), matching a common free-tier resolution cap.
+    `preview=true` downscales to IMAGE_PREVIEW_MAX_MEGAPIXELS before
+    processing - the Next.js /api/remove-background route sets this for the
+    free daily result (never trusts the client's own value, same "server
+    decides, client can't override" pattern api_video_process uses for
+    output resolution); full resolution costs a credit there.
     """
     _assert_internal_caller(request)
 
@@ -1251,7 +1260,7 @@ async def api_image_auto_enhance(
         with open(in_path, "wb") as f:
             f.write(data)
 
-        preview_max_megapixels = BG_REMOVE_PREVIEW_MAX_MEGAPIXELS if preview else None
+        preview_max_megapixels = IMAGE_PREVIEW_MAX_MEGAPIXELS if preview else None
         try:
             await _run_pipeline_job(
                 jobs.image_auto_enhance_job, in_path, out_path, preview_max_megapixels, timeout=60.0

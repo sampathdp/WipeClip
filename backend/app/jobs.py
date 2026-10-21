@@ -57,7 +57,11 @@ def image_auto_enhance_job(in_path: str, out_path: str, preview_max_megapixels: 
     Path(out_path).write_bytes(io_utils.encode_bgra_to_png(result, icc_profile))
 
 
-def image_sharpen_job(in_path: str, out_path: str, amount: float) -> None:
+def image_sharpen_job(
+    in_path: str, out_path: str, amount: float, preview_max_megapixels: float | None = None
+) -> None:
     bgra, icc_profile = io_utils.decode_upload_to_bgra(Path(in_path).read_bytes())
+    if preview_max_megapixels is not None:
+        bgra = io_utils.downscale_to_max_megapixels(bgra, preview_max_megapixels)
     result = sharpen_pipeline.sharpen(bgra, DEFAULT_SHARPEN_RADIUS, amount)
     Path(out_path).write_bytes(io_utils.encode_bgra_to_png(result, icc_profile))

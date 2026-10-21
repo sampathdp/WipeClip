@@ -9,8 +9,12 @@ import SignInModal from "./SignInModal";
 import { createClient } from "@/lib/supabase/client";
 import { clearPendingResult, loadPendingResult, savePendingResult } from "@/lib/resultCache";
 import { trackEvent, useToolView } from "@/lib/analytics";
+import { FREE_DAILY_CREDITS, IMAGE_CREDIT_COST } from "@/lib/credits";
 import {
   ApiError,
+  AuthRequiredError,
+  PreviewLimitError,
+  type ToolQuality,
   ContentBlockedError,
   InsufficientCreditsError,
   removeBackground,
@@ -34,6 +38,10 @@ export default function BackgroundRemoverDemo() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [showSignInModal, setShowSignInModal] = useState(false);
+  // "preview" is the free daily reduced-size result, "full" costs a credit
+  // (see src/lib/imageTool.ts).
+  const [resultQuality, setResultQuality] = useState<ToolQuality>("preview");
+  const [lastQuality, setLastQuality] = useState<ToolQuality>("preview");
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Same "process now, gate the download on sign-in" split as UploadDemo -
@@ -98,14 +106,26 @@ export default function BackgroundRemoverDemo() {
     setStep("select");
   }, []);
 
-  const process = useCallback(async () => {
+  const process = useCallback(async (quality: ToolQuality) => {
     if (!file) return;
+    if (quality === "full" && !isSignedIn) {
+      setShowSignInModal(true);
+      return;
+    }
+    // Where a refused request (limit, sign-in) leaves the user: on the
+    // result they already have, or back at the start.
+    const backTo = step === "done" ? "done" : "select";
+    setLastQuality(quality);
     setStep("processing");
     setError(null);
-    trackEvent("processing_started", { tool: TOOL });
+    trackEvent("processing_started", { tool: TOOL, quality });
     try {
-      const blob = await removeBackground(file);
-      setResultUrl(URL.createObjectURL(blob));
+      const blob = await removeBackground(file, quality);
+      setResultUrl((old) => {
+        if (old) URL.revokeObjectURL(old);
+        return URL.createObjectURL(blob);
+      });
+      setResultQuality(quality);
       setStep("done");
       trackEvent("processing_completed", { tool: TOOL });
       window.dispatchEvent(new Event("credits:refresh"));
@@ -113,6 +133,12 @@ export default function BackgroundRemoverDemo() {
         void savePendingResult({ filename: file.name, originalBlob: file, resultBlob: blob });
       }
     } catch (e) {
+      if (e instanceof PreviewLimitError || e instanceof AuthRequiredError) {
+        setError(e.message);
+        setStep(backTo);
+        if (e instanceof AuthRequiredError) setShowSignInModal(true);
+        return;
+      }
       if (e instanceof ContentBlockedError) {
         setError(e.message);
         setBlockReason("content");
@@ -131,7 +157,7 @@ export default function BackgroundRemoverDemo() {
       setStep("error");
       trackEvent("processing_failed", { tool: TOOL, error_category: "processing_error" });
     }
-  }, [file, isSignedIn]);
+  }, [file, isSignedIn, step]);
 
   return (
     <div
@@ -280,13 +306,26 @@ export default function BackgroundRemoverDemo() {
                 </span>
               </label>
 
-              <button
-                onClick={process}
-                disabled={!consent}
-                className="btn-primary mt-6 w-full rounded-full py-3.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Remove Background Now
-              </button>
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                <button
+                  onClick={() => process("preview")}
+                  disabled={!consent}
+                  className="btn-secondary flex-1 rounded-full py-3.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Free preview (reduced size)
+                </button>
+                <button
+                  onClick={() => process("full")}
+                  disabled={!consent}
+                  className="btn-primary flex-1 rounded-full py-3.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Full resolution · {IMAGE_CREDIT_COST} credit
+                </button>
+              </div>
+              <p className="mt-2 text-center text-xs text-muted">
+                One free preview a day. Full resolution needs an account, and every account gets {FREE_DAILY_CREDITS} free
+                credits a day.
+              </p>
             </div>
           )}
 
@@ -302,6 +341,16 @@ export default function BackgroundRemoverDemo() {
               {previewUrl && (
                 <div className="mb-6">
                   <ImageCompareSlider beforeSrc={previewUrl} afterSrc={resultUrl} transparentResult />
+                </div>
+              )}
+              {resultQuality === "preview" && (
+                <div className="mb-4 flex flex-col items-center justify-between gap-3 rounded-2xl border border-cyan-500/20 bg-cyan-50/70 p-4 sm:flex-row">
+                  <p className="text-xs sm:text-sm text-muted">
+                    This free preview is reduced in size. Get the full-resolution PNG for {IMAGE_CREDIT_COST} credit.
+                  </p>
+                  <button onClick={() => process("full")} className="btn-primary shrink-0 rounded-full px-5 py-2.5 text-xs font-bold">
+                    Get full resolution
+                  </button>
                 </div>
               )}
               <div className="flex flex-col gap-3 sm:flex-row">
@@ -351,7 +400,7 @@ export default function BackgroundRemoverDemo() {
 
           {step === "error" && (
             <button
-              onClick={process}
+              onClick={() => process(lastQuality)}
               className="mt-6 w-full rounded-full bg-rose-500/20 border border-rose-500/40 px-5 py-3 text-sm font-semibold text-rose-600 hover:bg-rose-500/30 transition-all"
             >
               Retry

@@ -5,6 +5,9 @@ import Link from "next/link";
 import { trackEvent, useToolView } from "@/lib/analytics";
 import ToolFeedback from "./ToolFeedback";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
+import { IMAGE_CREDIT_COST } from "@/lib/credits";
+import { allowFrameGrab, ApiError, AuthRequiredError, type ToolQuality } from "@/lib/toolsApi";
+import SignInModal from "./SignInModal";
 
 interface Capture {
   id: string;
@@ -17,6 +20,9 @@ const TOOL = "video_frame_grabber";
 const SUGGEST_SAMPLE_COUNT = 24;
 const SUGGEST_RESULT_COUNT = 5;
 const SEEK_TIMEOUT_MS = 1500;
+// Same cap as the backend's IMAGE_PREVIEW_MAX_MEGAPIXELS for the other
+// free tools' daily low-resolution result.
+const PREVIEW_MAX_PIXELS = 250_000;
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -144,10 +150,35 @@ async function suggestCoverFrames(
   return results;
 }
 
-/** Entirely client-side: the video file is never uploaded anywhere, a
- * frame is drawn straight from the <video> element into a <canvas> and
- * exported as a PNG blob. No backend call, no credit/rate-limit gate -
- * there's no per-use cost to gate, unlike every other tool on this site.
+/** The PNG at `url`, scaled down to at most PREVIEW_MAX_PIXELS. */
+async function downscaled(url: string): Promise<Blob> {
+  const img = new Image();
+  img.src = url;
+  await img.decode();
+  const scale = Math.min(1, Math.sqrt(PREVIEW_MAX_PIXELS / (img.naturalWidth * img.naturalHeight)));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+  canvas.getContext("2d")?.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("Couldn't prepare the image.");
+  return blob;
+}
+
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Client-side: the video file is never uploaded anywhere, a frame is
+ * drawn straight from the <video> element into a <canvas> and exported as
+ * a PNG blob. Downloads go through the same allowance as the other free
+ * tools (/api/frame-grab): one free low-resolution frame a day, full
+ * resolution for a credit.
  */
 export default function VideoFrameGrabberDemo() {
   useToolView(TOOL);
@@ -161,6 +192,8 @@ export default function VideoFrameGrabberDemo() {
   const [suggestProgress, setSuggestProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const [showSignInModal, setShowSignInModal] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -255,6 +288,46 @@ export default function VideoFrameGrabberDemo() {
       setIsSuggesting(false);
     }
   }, [isSuggesting, suggestions]);
+
+  const download = useCallback(
+    async (c: Capture, quality: ToolQuality, filename: string, source: "capture" | "suggestion") => {
+      setError(null);
+      setDownloading(`${c.id}:${quality}`);
+      try {
+        const { preview } = await allowFrameGrab(quality);
+        saveBlob(preview ? await downscaled(c.url) : await (await fetch(c.url)).blob(), filename);
+        trackEvent("download_clicked", { tool: TOOL, source, quality });
+        if (!preview) window.dispatchEvent(new Event("credits:refresh"));
+      } catch (e) {
+        if (e instanceof AuthRequiredError) setShowSignInModal(true);
+        else setError(e instanceof ApiError || e instanceof Error ? e.message : "Couldn't download the frame. Try again.");
+      } finally {
+        setDownloading(null);
+      }
+    },
+    []
+  );
+
+  const downloadButtons = (c: Capture, filename: string, source: "capture" | "suggestion") => (
+    <>
+      <button
+        onClick={() => download(c, "preview", filename, source)}
+        disabled={downloading !== null}
+        title="Free low-resolution download, once a day"
+        className="text-[10px] font-semibold text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+      >
+        {downloading === `${c.id}:preview` ? "…" : "Free"}
+      </button>
+      <button
+        onClick={() => download(c, "full", filename, source)}
+        disabled={downloading !== null}
+        title={`Full-resolution download for ${IMAGE_CREDIT_COST} credit`}
+        className="text-[10px] font-semibold text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+      >
+        {downloading === `${c.id}:full` ? "…" : `HD · ${IMAGE_CREDIT_COST} cr`}
+      </button>
+    </>
+  );
 
   const applySuggestion = useCallback((suggestion: Capture) => {
     setCaptures((prev) => [suggestion, ...prev]);
@@ -383,7 +456,8 @@ export default function VideoFrameGrabberDemo() {
             </div>
             <p className="mt-2 text-center text-xs text-muted">
               Play, pause, or scrub the video above to the moment you want, then capture, or let us scan the clip
-              for a few sharp, well-lit frames that work well as a cover image.
+              for a few sharp, well-lit frames that work well as a cover image. One free low-resolution download a
+              day; full resolution costs {IMAGE_CREDIT_COST} credit.
             </p>
           </div>
 
@@ -422,14 +496,7 @@ export default function VideoFrameGrabberDemo() {
                       <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-black/70 px-2 py-1.5 backdrop-blur-sm">
                         <span className="font-mono text-[10px] text-white">{formatTime(s.time)}</span>
                         <div className="flex items-center gap-2">
-                          <a
-                            href={s.url}
-                            download={`cover-${formatTime(s.time).replace(":", "m")}s.png`}
-                            onClick={() => trackEvent("download_clicked", { tool: TOOL, source: "suggestion" })}
-                            className="text-[10px] font-semibold text-emerald-600 hover:text-emerald-700"
-                          >
-                            Download
-                          </a>
+                          {downloadButtons(s, `cover-${formatTime(s.time).replace(":", "m")}s.png`, "suggestion")}
                           <button
                             onClick={() => applySuggestion(s)}
                             className="text-[10px] font-semibold text-cyan-600 hover:text-cyan-700"
@@ -458,14 +525,7 @@ export default function VideoFrameGrabberDemo() {
                     <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-black/70 px-2 py-1.5 backdrop-blur-sm">
                       <span className="font-mono text-[10px] text-white">{formatTime(c.time)}</span>
                       <div className="flex items-center gap-2">
-                        <a
-                          href={c.url}
-                          download={`frame-${formatTime(c.time).replace(":", "m")}s.png`}
-                          onClick={() => trackEvent("download_clicked", { tool: TOOL, source: "capture" })}
-                          className="text-[10px] font-semibold text-emerald-600 hover:text-emerald-700"
-                        >
-                          Download
-                        </a>
+                        {downloadButtons(c, `frame-${formatTime(c.time).replace(":", "m")}s.png`, "capture")}
                         <button
                           onClick={() => removeCapture(c.id)}
                           className="text-[10px] font-semibold text-rose-600 hover:text-rose-700"
@@ -496,6 +556,8 @@ export default function VideoFrameGrabberDemo() {
       )}
 
       {error && <p className="mt-4 text-center text-xs sm:text-sm font-medium text-rose-600">{error}</p>}
+
+      <SignInModal open={showSignInModal} onClose={() => setShowSignInModal(false)} />
     </div>
   );
 }
