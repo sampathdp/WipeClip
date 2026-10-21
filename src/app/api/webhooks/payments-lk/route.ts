@@ -42,10 +42,10 @@ export async function POST(request: NextRequest) {
     if (!order) {
       return NextResponse.json({ ok: true, skipped: "unknown order" });
     }
-    if (payment.amountCents < order.amount_cents) {
+    if (payment.currency !== "LKR" || payment.amountCents < order.amount_cents) {
       // The amount is set server side at checkout creation, so this should
       // never happen - refuse to grant rather than under-charge silently.
-      return NextResponse.json({ error: "Paid amount is below the order amount." }, { status: 422 });
+      return NextResponse.json({ error: "Paid amount or currency doesn't match the order." }, { status: 422 });
     }
 
     // Subscriptions are sold as monthly or yearly passes: Payments.lk has no
@@ -71,6 +71,31 @@ export async function POST(request: NextRequest) {
       .from("payment_orders")
       .update({ status: "paid", payment_id: payment.id, paid_at: new Date().toISOString() })
       .eq("id", order.id);
+  } else if (event.data.object === "payment" && (event.data.status === "refunded" || event.data.status === "disputed")) {
+    // A full refund or a dispute: take back what the purchase granted. Read
+    // from the payment's status rather than the event name, so any event
+    // carrying the payment in that state counts. Partial refunds are left to
+    // the admin panel's "Remove credits", as they carry no refunded amount.
+    const payment = event.data;
+    const { data: order } = await supabase
+      .from("payment_orders")
+      .select("id, user_id, credits")
+      .eq("provider", "payments_lk")
+      .eq("payment_id", payment.id)
+      .single();
+    if (order) {
+      const { error } = await supabase.rpc("revoke_paid_credits", {
+        p_user_id: order.user_id,
+        p_amount: order.credits,
+        p_event_id: `payments_lk_revoke:${payment.id}`,
+        p_end_plan: true,
+      });
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      await supabase
+        .from("payment_orders")
+        .update({ status: payment.status === "disputed" ? "charged_back" : "refunded" })
+        .eq("id", order.id);
+    }
   } else if (event.type === "payment.failed") {
     const reference = event.data.reference;
     if (reference && UUID_RE.test(reference)) {

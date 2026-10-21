@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import PhotoSharpenerDemo from "@/components/PhotoSharpenerDemo";
-import { buildPageMetadata } from "@/lib/seo";
+import ToolGuide from "@/components/ToolGuide";
+import { buildPageMetadata, faqJsonLd, jsonLdString } from "@/lib/seo";
 
 const title = "Sharpen a Blurry Photo - Free";
 const description =
@@ -31,24 +32,20 @@ const faqs = [
     q: "Is this free?",
     a: "Yes. Every visitor gets free preview passes with no account, and every signed-in account gets 2 free credits a day, which covers typical everyday use of this tool.",
   },
+  {
+    q: "Do you keep my photo?",
+    a: "No. The photo is processed to make your result and then deleted. It is never used to train any model.",
+  },
 ];
 
 export default function Page() {
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: faqs.map((f) => ({
-      "@type": "Question",
-      name: f.q,
-      acceptedAnswer: { "@type": "Answer", text: f.a },
-    })),
-  };
+  const jsonLd = { "@context": "https://schema.org", ...faqJsonLd(faqs) };
 
   return (
     <div className="flex flex-1 flex-col">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
+        dangerouslySetInnerHTML={{ __html: jsonLdString(jsonLd) }}
       />
       <Navbar />
       <main className="flex-1">
@@ -76,6 +73,23 @@ export default function Page() {
             <PhotoSharpenerDemo />
           </div>
         </section>
+
+        <ToolGuide
+          title="How to sharpen a soft photo"
+          steps={[
+            "Drop a JPG, PNG or WebP photo (up to 25MB) onto the upload box, or click it to pick a file.",
+            "Pick a strength: Light for skin and sky, Standard for most photos, Strong for photos that still look soft.",
+            "Compare the result with the original side by side.",
+            "Download the sharpened photo. It keeps the same pixel dimensions as your upload.",
+          ]}
+          facts={[
+            { label: "Strengths", value: "Light, Standard, Strong" },
+            { label: "Max upload", value: "25MB per image" },
+            { label: "Resolution", value: "Same as your upload" },
+            { label: "Without an account", value: "5 free photos a day" },
+            { label: "Signed in", value: "1 credit per photo, 2 free a day" },
+          ]}
+        />
 
         <section className="py-16">
           <div className="mx-auto max-w-3xl px-6">

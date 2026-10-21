@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import PricingClient from "./PricingClient";
+import PricingFaq from "./PricingFaq";
 import { buildPageMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = buildPageMetadata({
-  title: "Pricing",
+  title: "Pricing: Free Video Editor, Passes From $1.99",
   description:
-    "WipeClip's video editor is free forever. Paid passes from $1.99 for 30 days unlock premium transitions, filters and effects, up to 4K resolution and more AI credits. One-time payments, 30 days or 1 year, no subscription.",
+    "WipeClip is free forever. Optional one-time passes from $1.99 for 30 days add premium effects, 4K exports and more AI credits. No subscription.",
   path: "/pricing",
   ogTitle: "WipeClip.co Pricing: Free & Paid Plans",
   ogDescription:
@@ -13,5 +14,9 @@ export const metadata: Metadata = buildPageMetadata({
 });
 
 export default function PricingPage() {
-  return <PricingClient />;
+  return (
+    <PricingClient>
+      <PricingFaq />
+    </PricingClient>
+  );
 }

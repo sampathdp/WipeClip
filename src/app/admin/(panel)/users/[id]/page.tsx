@@ -3,7 +3,7 @@ import { requireAdmin } from "@/lib/admin";
 import { effectivePlan } from "@/lib/plan";
 import { PLANS, type PlanKey } from "@/lib/credits";
 import { TIERS, TIER_LABELS } from "@/lib/entitlements";
-import { addCredits, grantPlan, setMarketing, setPlan } from "@/app/admin/actions";
+import { addCredits, grantPlan, removeCredits, setMarketing, setPlan } from "@/app/admin/actions";
 import {
   Badge,
   Card,
@@ -116,6 +116,14 @@ export default async function AdminUser({
                 <input type="hidden" name="userId" value={id} />
                 <input name="amount" type="number" min={1} max={10000} required placeholder="e.g. 50" className={`${input} min-w-0 flex-1`} />
                 <button className={button}>Add</button>
+              </form>
+            </Card>
+
+            <Card title="Remove credits" description="Takes paid credits back, e.g. after a refund. Stops at 0.">
+              <form action={removeCredits} className="flex gap-2">
+                <input type="hidden" name="userId" value={id} />
+                <input name="amount" type="number" min={1} max={10000} required placeholder="e.g. 50" className={`${input} min-w-0 flex-1`} />
+                <button className={buttonSecondary}>Remove</button>
               </form>
             </Card>
 

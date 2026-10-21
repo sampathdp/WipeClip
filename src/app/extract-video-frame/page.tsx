@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import VideoFrameGrabberDemo from "@/components/VideoFrameGrabberDemo";
-import { buildPageMetadata } from "@/lib/seo";
+import ToolGuide from "@/components/ToolGuide";
+import { buildPageMetadata, faqJsonLd, jsonLdString } from "@/lib/seo";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 const title = "Extract a Frame From Video - Free Screenshot Tool";
@@ -18,7 +19,7 @@ export const metadata: Metadata = buildPageMetadata({
 const faqs = [
   {
     q: "Does this upload my video anywhere?",
-    a: "No. The video is decoded and drawn to a canvas entirely inside your browser tab using standard HTML5 video/canvas APIs. It's never sent to WipeClip.co's servers, so there's no upload wait and no size-driven processing limit beyond what your browser can play.",
+    a: "No. The video is decoded and drawn to a canvas entirely inside your browser tab using standard HTML5 video/canvas APIs. It's never sent to WipeClip.co's servers, so there's no upload wait. Videos up to 500MB in a format your browser can play (usually MP4 or WebM) work.",
   },
   {
     q: "Is there a limit on how many frames I can grab?",
@@ -40,21 +41,13 @@ const faqs = [
 ];
 
 export default function Page() {
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: faqs.map((f) => ({
-      "@type": "Question",
-      name: f.q,
-      acceptedAnswer: { "@type": "Answer", text: f.a },
-    })),
-  };
+  const jsonLd = { "@context": "https://schema.org", ...faqJsonLd(faqs) };
 
   return (
     <div className="flex flex-1 flex-col">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
+        dangerouslySetInnerHTML={{ __html: jsonLdString(jsonLd) }}
       />
       <Navbar />
       <main className="flex-1">
@@ -82,6 +75,23 @@ export default function Page() {
             <VideoFrameGrabberDemo />
           </div>
         </section>
+
+        <ToolGuide
+          title="How to save a frame from a video"
+          steps={[
+            "Open a video your browser can play (MP4 or WebM, up to 500MB). It stays on your device.",
+            "Scrub to the moment you want, or pick one of the suggested cover frames WipeClip finds by scanning the video.",
+            "Capture the frame. Grab as many as you like.",
+            "Download each frame as a full-resolution PNG, ready for a thumbnail, slide or post.",
+          ]}
+          facts={[
+            { label: "Output", value: "PNG at the video's own resolution" },
+            { label: "Max video size", value: "500MB" },
+            { label: "Upload", value: "None, runs in your browser" },
+            { label: "Account", value: "Not needed" },
+            { label: "Price", value: "Free, no frame limit" },
+          ]}
+        />
 
         <section className="py-16">
           <div className="mx-auto max-w-3xl px-6">

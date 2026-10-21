@@ -3,7 +3,7 @@ import { requireAdmin } from "@/lib/admin";
 import { Card, PageHeader, Pagination, StatusBadge, Table, fmtDate, fmtMoney, link, one, td, tr, type SearchParams } from "@/app/admin/ui";
 
 const PAGE_SIZE = 50;
-const STATUSES = ["open", "paid", "failed", "expired"];
+const STATUSES = ["open", "paid", "failed", "expired", "refunded", "charged_back"];
 
 export default async function AdminOrders({ searchParams }: { searchParams: SearchParams }) {
   const { admin } = await requireAdmin();

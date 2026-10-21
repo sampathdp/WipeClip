@@ -1,20 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
+
+const noSubscribe = () => () => {};
+
+function storedTheme(): "light" | "dark" {
+  try {
+    return localStorage.getItem("theme") === "light" ? "light" : "dark";
+  } catch {
+    return "dark";
+  }
+}
 
 export default function ThemeToggle() {
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
-
-  useEffect(() => {
-    const stored = localStorage.getItem("theme");
-    if (stored === "light") setTheme("light");
-  }, []);
+  // The server render assumes dark; the client then reads the saved choice.
+  const saved = useSyncExternalStore(noSubscribe, storedTheme, () => "dark" as const);
+  const [picked, setTheme] = useState<"light" | "dark" | null>(null);
+  const theme = picked ?? saved;
 
   const toggle = () => {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
     document.documentElement.setAttribute("data-theme", next);
-    localStorage.setItem("theme", next);
+    try {
+      localStorage.setItem("theme", next);
+    } catch {}
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute("content", next === "dark" ? "#05060a" : "#ffffff");
   };

@@ -5,7 +5,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import ReferralCapture from "@/components/ReferralCapture";
 import ServiceBanner from "@/components/ServiceBanner";
 import InlineScript from "@/components/InlineScript";
-import { SITE_URL } from "@/lib/seo";
+import { SITE_URL, SUPPORT_EMAIL } from "@/lib/seo";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import "./globals.css";
 
@@ -30,11 +30,9 @@ export const metadata: Metadata = {
     default: "Video Editor & Screen Recorder for Windows and Mac | WipeClip.co",
     template: "%s | WipeClip.co",
   },
+  // Kept under ~160 characters so search results show it whole.
   description:
-    "WipeClip is a free video editor and screen recorder for Windows and Mac. Record your screen, trim, cut, add transitions, text, stickers, filters and music, then export for any platform in landscape, vertical or square." +
-    (AI_CLEANUP_ENABLED
-      ? " Built-in AI object removal takes distractions out of footage you shot."
-      : " Auto captions and picture-in-picture included."),
+    "WipeClip is a free video editor and screen recorder for Windows and Mac. Record your screen, cut pauses, add zooms, captions, text and music, then export.",
   keywords: [
     "video editor for windows",
     "video editor for mac",
@@ -119,8 +117,18 @@ const jsonLd = {
       "@type": "Organization",
       "@id": `${siteUrl}/#organization`,
       name: "WipeClip.co",
+      alternateName: "WipeClip",
+      legalName: "Codeplay Studios",
       url: siteUrl,
       logo: `${siteUrl}/logo.webp`,
+      email: SUPPORT_EMAIL,
+      address: { "@type": "PostalAddress", addressCountry: "LK" },
+      contactPoint: {
+        "@type": "ContactPoint",
+        contactType: "customer support",
+        email: SUPPORT_EMAIL,
+        availableLanguage: ["English"],
+      },
     },
     {
       "@type": "WebSite",
@@ -128,22 +136,6 @@ const jsonLd = {
       url: siteUrl,
       name: "WipeClip.co",
       publisher: { "@id": `${siteUrl}/#organization` },
-    },
-    {
-      "@type": "SoftwareApplication",
-      name: "WipeClip.co",
-      applicationCategory: "MultimediaApplication",
-      operatingSystem: "Windows 10, Windows 11, macOS 11+",
-      url: `${siteUrl}/download`,
-      description:
-        AI_CLEANUP_ENABLED
-          ? "Desktop video editor and screen recorder for Windows and Mac: trim, cut, transitions, text and stickers, plus AI object removal that rebuilds the pixels behind an unwanted object across a whole clip of footage you shot."
-          : "Desktop video editor and screen recorder for Windows and Mac: trim, cut, transitions, text, stickers, music and auto captions.",
-      offers: {
-        "@type": "Offer",
-        price: "0",
-        priceCurrency: "USD",
-      },
     },
   ],
 };

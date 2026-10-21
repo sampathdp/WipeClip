@@ -1,8 +1,25 @@
 import Link from "next/link";
 import Reveal from "./Reveal";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
+import { PLANS } from "@/lib/credits";
+import { DESKTOP_DOWNLOADS } from "@/lib/download";
+import { faqJsonLd, softwareAppJsonLd } from "@/lib/seo";
+
+const lowestPass = Object.values(PLANS).reduce((a, b) => (b.usdCents < a.usdCents ? b : a));
 
 const editorFaqs = [
+  {
+    q: "What is WipeClip?",
+    a: "WipeClip is a free screen recorder and video editor for Windows and Mac. It records your screen, system audio, microphone and webcam as separate tracks, zooms in on your clicks automatically, finds pauses to cut, writes captions on your own computer, and exports at your original quality.",
+  },
+  {
+    q: "Is WipeClip free?",
+    a: `Yes. Recording and editing are free, with free credits that renew every day. Optional one-time passes, from ${lowestPass.priceLabel} for ${lowestPass.days} days, add premium transitions, filters and effects, exports up to 4K and more credits. Passes don't renew automatically.`,
+  },
+  {
+    q: "Which computers does WipeClip run on?",
+    a: DESKTOP_DOWNLOADS.map((d) => `${d.label}: ${d.requirements}.`).join(" "),
+  },
   {
     q: "What can I do in the editor?",
     a: "The WipeClip desktop app for Windows and Mac lets you record your screen, trim, split and remove sections, reorder clips, add transitions, text, stickers, music and auto captions, and layer clips picture-in-picture, then export at your original aspect ratio and frame rate.",
@@ -62,14 +79,10 @@ const cleanupFaqs = [
 
 const faqs = AI_CLEANUP_ENABLED ? cleanupFaqs : editorFaqs;
 
+// Shown only on the homepage, so it also carries the app's own node.
 const jsonLd = {
   "@context": "https://schema.org",
-  "@type": "FAQPage",
-  mainEntity: faqs.map((f) => ({
-    "@type": "Question",
-    name: f.q,
-    acceptedAnswer: { "@type": "Answer", text: f.a },
-  })),
+  "@graph": [softwareAppJsonLd(), faqJsonLd(faqs)],
 };
 
 export default function Faq() {

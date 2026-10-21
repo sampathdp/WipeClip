@@ -97,7 +97,9 @@ keys are set, everyone gets Payments.lk. Set `CHECKOUT_COUNTRY=US` (or
    and must match both key prefixes, or the app errors instead of guessing.
 3. Developer tools -> Notifications: add a destination for
    `https://<your-domain>/api/webhooks/paddle` with the
-   `transaction.completed` event. Copy its secret key into
+   `transaction.completed`, `adjustment.created` and `adjustment.updated`
+   events (the adjustment events take back credits on refunds and
+   chargebacks). Copy its secret key into
    `PADDLE_WEBHOOK_SECRET`.
 4. The webhook only accepts deliveries from Paddle's published IPs,
    fetched from `https://sandbox-api.paddle.com/ips` or
@@ -125,8 +127,12 @@ domain and a default payment link on that domain.
 
 Paddle prices are one-time, matching the Payments.lk passes, so
 `usdCents`, `priceLabel` and the Paddle catalog price must agree. Refunds
-are issued in the Paddle dashboard; like Payments.lk refunds, they don't
-yet remove the plan or credits automatically.
+are issued in the Paddle dashboard. An approved full refund or any
+chargeback takes back the order's credits and ends its pass (stopping at 0
+credits, since spent credits can't be recovered); a partial refund takes
+back its share of the credits. A Payments.lk payment that becomes
+`refunded` or `disputed` does the same in full; for a partial Payments.lk
+refund use "Remove credits" on the account's admin page.
 
 ## How a purchase actually grants credits
 

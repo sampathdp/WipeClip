@@ -114,6 +114,8 @@ const STATUS_TONES: Record<string, Tone> = {
   in_progress: "warning",
   incomplete: "warning",
   failed: "danger",
+  refunded: "warning",
+  charged_back: "danger",
   ended: "neutral",
   expired: "neutral",
   closed: "neutral",

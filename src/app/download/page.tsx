@@ -5,14 +5,14 @@ import Footer from "@/components/Footer";
 import Reveal from "@/components/Reveal";
 import DownloadButtons from "@/components/DownloadButtons";
 import { EditorWindowMock, FocusMock, RecorderMock, ReviewMock, TutorialFrameMock } from "@/components/download/Mockups";
-import { buildPageMetadata, SITE_URL } from "@/lib/seo";
+import { buildPageMetadata, softwareAppJsonLd } from "@/lib/seo";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import { DESKTOP_DOWNLOADS, DOWNLOAD_PATH } from "@/lib/download";
 
 export const metadata: Metadata = buildPageMetadata({
-  title: "Download WipeClip - Screen Recorder & Video Editor for Windows and Mac",
+  title: "Download WipeClip: Free Screen Recorder & Video Editor",
   description:
-    "Free desktop app for Windows and macOS: record your screen with separate audio, mic and webcam tracks, get automatic zooms on every click, cut pauses and dead time in one pass, add on-device captions, privacy blur and annotations, then export at your original quality.",
+    "Free screen recorder and video editor for Windows and macOS. Automatic zooms on every click, one-pass pause cutting, on-device captions and full-quality export.",
   path: DOWNLOAD_PATH,
   ogTitle: "WipeClip for Windows & Mac",
   ogDescription:
@@ -147,13 +147,7 @@ const FAQS = [
 const jsonLd = {
   "@context": "https://schema.org",
   "@graph": [
-    {
-      "@type": "SoftwareApplication",
-      name: "WipeClip",
-      url: `${SITE_URL}${DOWNLOAD_PATH}`,
-      applicationCategory: "MultimediaApplication",
-      operatingSystem: "Windows 10, Windows 11, macOS 11+",
-      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    softwareAppJsonLd({
       description:
         "Desktop screen recorder and video editor: record screen, system audio, microphone and webcam as separate tracks, add automatic focus zooms and click highlights, cut pauses and dead time, add on-device captions, privacy masks and annotations, and export at the original quality.",
       featureList: [
@@ -168,8 +162,7 @@ const jsonLd = {
         "Chapters and annotations",
         "Trim, split, transitions, text, stickers, music and filters",
       ],
-      publisher: { "@id": `${SITE_URL}/#organization` },
-    },
+    }),
     {
       "@type": "FAQPage",
       mainEntity: FAQS.map((f) => ({

@@ -34,6 +34,35 @@ export async function adminSignIn(form: FormData) {
     await supabase.auth.signOut();
     fail("This account has no admin access.");
   }
+  // The login page takes it from here: the authenticator code step, or
+  // straight on to /admin when that isn't required.
+  redirect("/admin/login");
+}
+
+/** Second step of the admin sign-in: checks a 6-digit authenticator code
+ * against the account's TOTP factor, which raises the session to aal2.
+ * The same form finishes enrolling a new factor (its first code verifies
+ * it). Shares the password form's rate limit, so codes can't be guessed. */
+export async function adminVerifyCode(form: FormData) {
+  if (!isSupabaseConfigured()) fail("Accounts aren't configured.");
+
+  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  if (!(await checkRateLimit(`ip:${ip}:admin-login`, 5, 15 * 60 * 1000))) {
+    fail("Too many attempts. Try again in 15 minutes.");
+  }
+
+  const factorId = String(form.get("factorId") ?? "");
+  const code = String(form.get("code") ?? "").replace(/\s+/g, "");
+  if (!factorId || !/^[0-9]{6}$/.test(code)) fail("Enter the 6-digit code from your authenticator app.");
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user || !user.email_confirmed_at || !isAdminEmail(user.email)) fail("This account has no admin access.");
+
+  const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code });
+  if (error) fail("That code didn't work. Check your authenticator app's time and try again.");
   redirect("/admin");
 }
 

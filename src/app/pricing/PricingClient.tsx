@@ -204,7 +204,9 @@ const COMPARISON: { label: string; values: Record<Tier, string | boolean> }[] = 
   },
 ];
 
-export default function PricingClient() {
+/** `children`: server-rendered content after the plans (the pricing FAQ),
+ * kept out of this client bundle and in the page's HTML for crawlers. */
+export default function PricingClient({ children }: { children?: React.ReactNode }) {
   const [billing, setBilling] = useState<Billing>("month");
   const [loading, setLoading] = useState<PlanKey | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -606,6 +608,7 @@ export default function PricingClient() {
             </table>
           </div>
         </section>
+        {children}
       </main>
       <Footer />
     </div>

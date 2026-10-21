@@ -60,6 +60,23 @@ export async function addCredits(form: FormData) {
   back(`/admin/users/${userId}`, error ? `Failed: ${error.message}` : `Added ${amount} credits.`);
 }
 
+/** Takes paid credits back, e.g. after a refund issued by hand in the
+ * Payments.lk dashboard. Stops at 0; the plan is left to setPlan. */
+export async function removeCredits(form: FormData) {
+  const { admin, user } = await requireAdmin();
+  const userId = str(form, "userId");
+  const amount = Number(str(form, "amount"));
+  if (!UUID_RE.test(userId) || !Number.isInteger(amount) || amount < 1 || amount > 10000) {
+    back(`/admin/users/${userId}`, "Credits must be a whole number from 1 to 10000.");
+  }
+  const { error } = await admin.rpc("revoke_paid_credits", {
+    p_user_id: userId,
+    p_amount: amount,
+    p_event_id: `admin:${user.email}:${randomUUID()}`,
+  });
+  back(`/admin/users/${userId}`, error ? `Failed: ${error.message}` : `Removed up to ${amount} credits.`);
+}
+
 /** Direct correction of the tier and its end date, without touching credits. */
 export async function setPlan(form: FormData) {
   const { admin } = await requireAdmin();

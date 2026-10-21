@@ -15,6 +15,17 @@ const securityHeaders = [
   // compromised third-party script embedded here could reach for.
   // `payment` is left to Paddle's checkout frame only, which needs it for
   // Apple Pay and Google Pay.
+  // Browsers that have seen the site once refuse plain-HTTP connections to
+  // it for two years, so a network attacker can't downgrade a visit and
+  // read session cookies. Vercel serves every subdomain over HTTPS.
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+  // Only the directives that can't break the page's scripts or styles:
+  // no plugins, no <base> hijacking, and frames only from this site (the
+  // modern form of X-Frame-Options above).
+  {
+    key: "Content-Security-Policy",
+    value: "object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+  },
   {
     key: "Permissions-Policy",
     value:

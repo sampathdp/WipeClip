@@ -7,7 +7,10 @@ import WhatWipeClipDoes from "@/components/WhatWipeClipDoes";
 import LimitationsSection from "@/components/LimitationsSection";
 import PrivacyProcessing from "@/components/PrivacyProcessing";
 import CtaBanner from "@/components/CtaBanner";
-import { buildPageMetadata } from "@/lib/seo";
+import ToolGuide from "@/components/ToolGuide";
+import { buildPageMetadata, jsonLdString, SITE_URL, SUPPORT_EMAIL } from "@/lib/seo";
+import { DESKTOP_DOWNLOADS } from "@/lib/download";
+import { PLANS } from "@/lib/credits";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 export const metadata: Metadata = buildPageMetadata(
@@ -81,10 +84,31 @@ const STATS = [
   { value: "Win + Mac", label: "desktop app" },
 ];
 
+const lowestPass = Object.values(PLANS).reduce((a, b) => (b.usdCents < a.usdCents ? b : a));
+
+// Plain facts about who makes WipeClip and what it is - what search engines
+// and AI answers need to describe it correctly.
+const FACTS = [
+  { label: "What it is", value: "Screen recorder and video editor" },
+  { label: "Runs on", value: DESKTOP_DOWNLOADS.map((d) => d.requirements).join("; ") },
+  { label: "Price", value: `Free; optional passes from ${lowestPass.priceLabel}` },
+  { label: "Made by", value: "Codeplay Studios, Sri Lanka" },
+  { label: "Contact", value: SUPPORT_EMAIL },
+];
+
+const aboutJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "AboutPage",
+  url: `${SITE_URL}/about`,
+  mainEntity: { "@id": `${SITE_URL}/#organization` },
+  about: { "@id": `${SITE_URL}/#app` },
+};
+
 export default function AboutPage() {
   return (
     <div className="flex flex-1 flex-col">
       <Navbar />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdString(aboutJsonLd) }} />
       <main className="flex-1">
         {/* Hero */}
         <section className="relative overflow-hidden pt-36 pb-16 md:pt-44">
@@ -195,6 +219,16 @@ export default function AboutPage() {
           <PrivacyProcessing />
         </Reveal>
 
+        <ToolGuide
+          title="How WipeClip works"
+          steps={[
+            "Download the free app for Windows or Mac and record your screen, or open a video you already have.",
+            "WipeClip suggests zooms on your clicks, finds pauses and retakes to cut, and writes captions on your computer.",
+            "Finish the edit with transitions, text, stickers, music and filters.",
+            "Export at your original quality in landscape, vertical or square.",
+          ]}
+          facts={FACTS}
+        />
         <CtaBanner />
       </main>
       <Footer />

@@ -57,7 +57,10 @@ Point the frontend at this backend via `NEXT_PUBLIC_TOOLS_API_URL` in
 - `passenger_wsgi.py` — cPanel/Passenger shared-hosting entry point.
 
 Set `ALLOWED_ORIGINS` to your production frontend origin(s) in either case
-(defaults to `*`, fine for local dev only).
+(defaults to `*`, fine for local dev only). Production also needs
+`INTERNAL_API_SECRET` (the app refuses to start on Cloud Run without it; set
+`REQUIRE_INTERNAL_SECRET=1` to get the same check on other hosts, such as
+Passenger) and `SITE_URL`, without which job tickets aren't single-use.
 
 ### Direct uploads
 

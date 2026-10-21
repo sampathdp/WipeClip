@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import BackgroundRemoverDemo from "@/components/BackgroundRemoverDemo";
-import { buildPageMetadata } from "@/lib/seo";
+import ToolGuide from "@/components/ToolGuide";
+import { buildPageMetadata, faqJsonLd, jsonLdString } from "@/lib/seo";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 const title = "Remove Background From Image - Free";
@@ -37,24 +38,24 @@ const faqs = [
     q: "Will edges look rough on hair or fine detail?",
     a: "The pipeline runs edge decontamination and alpha smoothing after the initial cut specifically to clean up halos and rough edges around fine detail, not just a flat cutout mask.",
   },
+  {
+    q: "Do I need to sign in to get a full-resolution PNG?",
+    a: "Without an account you get up to 5 free previews a day at a reduced size. Signed in, every image comes back at its original resolution and uses 1 credit, and every account gets 2 free credits a day.",
+  },
+  {
+    q: "Do you keep my photo?",
+    a: "No. The photo is processed to make your PNG and then deleted. It is never used to train any model.",
+  },
 ];
 
 export default function Page() {
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: faqs.map((f) => ({
-      "@type": "Question",
-      name: f.q,
-      acceptedAnswer: { "@type": "Answer", text: f.a },
-    })),
-  };
+  const jsonLd = { "@context": "https://schema.org", ...faqJsonLd(faqs) };
 
   return (
     <div className="flex flex-1 flex-col">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
+        dangerouslySetInnerHTML={{ __html: jsonLdString(jsonLd) }}
       />
       <Navbar />
       <main className="flex-1">
@@ -82,6 +83,23 @@ export default function Page() {
             <BackgroundRemoverDemo />
           </div>
         </section>
+
+        <ToolGuide
+          title="How to remove a background from a photo"
+          steps={[
+            "Drop a JPG, PNG or WebP photo (up to 25MB) onto the upload box, or click it to pick a file.",
+            "WipeClip finds the subject automatically. There is nothing to trace or mark.",
+            "Check the cut-out preview against the transparent checkerboard.",
+            "Download the result as a PNG with a transparent background and place it on any new background.",
+          ]}
+          facts={[
+            { label: "Output", value: "PNG with transparency" },
+            { label: "Max upload", value: "25MB per image" },
+            { label: "Without an account", value: "5 free previews a day, reduced size" },
+            { label: "Signed in", value: "Full resolution, 1 credit per image" },
+            { label: "Free credits", value: "2 a day, every account" },
+          ]}
+        />
 
         <section className="py-16">
           <div className="mx-auto max-w-3xl px-6">

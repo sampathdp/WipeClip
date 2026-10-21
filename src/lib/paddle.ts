@@ -26,6 +26,17 @@ export interface PaddleTransaction {
   items: { price?: { id: string } | null; price_id?: string; quantity: number }[];
 }
 
+/** The data of an adjustment.created / adjustment.updated event. */
+export interface PaddleAdjustment {
+  id: string;
+  action: "refund" | "chargeback" | "chargeback_reverse" | "chargeback_warning" | "credit" | "credit_reverse";
+  type?: "full" | "partial";
+  status: "pending_approval" | "approved" | "rejected" | "reversed";
+  transaction_id: string;
+  currency_code?: string;
+  totals?: { total?: string } | null;
+}
+
 export interface PaddleEvent {
   event_id: string;
   event_type: string;

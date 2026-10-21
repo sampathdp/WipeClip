@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { constructWebhookEvent, isPaddleWebhookIp, paddleEnvironment, priceIdFor, transactionPriceIds } from "@/lib/paddle";
+import {
+  constructWebhookEvent,
+  isPaddleWebhookIp,
+  paddleEnvironment,
+  priceIdFor,
+  transactionPriceIds,
+  type PaddleAdjustment,
+} from "@/lib/paddle";
 import { PLANS } from "@/lib/credits";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -37,6 +44,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: verified.error }, { status: 400 });
   }
   const { event } = verified;
+
+  if (event.event_type === "adjustment.created" || event.event_type === "adjustment.updated") {
+    return handleAdjustment(event.data as unknown as PaddleAdjustment);
+  }
 
   if (event.event_type !== "transaction.completed") {
     // Only completed transactions grant anything; acknowledge the rest so
@@ -109,5 +120,58 @@ export async function POST(request: NextRequest) {
       .is("paddle_customer_id", null);
   }
 
+  return NextResponse.json({ ok: true });
+}
+
+/** A refund or chargeback on a purchase: takes back what it granted, so a
+ * buyer can't pay, spend the credits, then get the money back and keep
+ * them. Refunds arrive as adjustment.created (pending_approval) and then
+ * adjustment.updated (approved); chargebacks arrive already approved. Only
+ * an approved adjustment revokes anything, once per adjustment id. */
+async function handleAdjustment(adj: PaddleAdjustment) {
+  if (adj.action !== "refund" && adj.action !== "chargeback") {
+    return NextResponse.json({ ok: true, skipped: `adjustment ${adj.action}` });
+  }
+  if (adj.status !== "approved") {
+    return NextResponse.json({ ok: true, skipped: `adjustment ${adj.status}` });
+  }
+
+  const supabase = createServiceClient();
+  const { data: order } = await supabase
+    .from("payment_orders")
+    .select("id, user_id, credits, amount_cents")
+    .eq("provider", "paddle")
+    .eq("payment_id", adj.transaction_id)
+    .single();
+  if (!order) {
+    return NextResponse.json({ ok: true, skipped: "unknown transaction" });
+  }
+
+  // A partial refund takes back its share of the credits and leaves the
+  // pass running; a full refund or any chargeback takes everything back.
+  const full = adj.type !== "partial" || adj.action === "chargeback";
+  const refunded = Number(adj.totals?.total);
+  const credits =
+    full || !Number.isFinite(refunded) || order.amount_cents <= 0
+      ? order.credits
+      : Math.min(order.credits, Math.ceil((order.credits * refunded) / order.amount_cents));
+
+  const { error } = await supabase.rpc("revoke_paid_credits", {
+    p_user_id: order.user_id,
+    p_amount: credits,
+    p_event_id: `paddle_adjustment:${adj.id}`,
+    p_end_plan: full,
+  });
+  if (error) {
+    // Non-2xx makes Paddle retry; the revoke is idempotent on the id.
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  if (full) {
+    await supabase
+      .from("payment_orders")
+      .update({ status: adj.action === "chargeback" ? "charged_back" : "refunded" })
+      .eq("id", order.id);
+  }
   return NextResponse.json({ ok: true });
 }

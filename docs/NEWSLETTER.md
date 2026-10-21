@@ -47,7 +47,9 @@ accounts with `scripts/send-newsletter.ts`, and applies the discount at checkout
 
 ## Sending
 
-Easiest: sign in with an account listed in `ADMIN_EMAILS` and open **/admin/newsletter**. It shows
+Easiest: sign in with an account listed in `ADMIN_EMAILS` and open **/admin/newsletter** (admin
+sign-in also asks for an authenticator-app code; the first sign-in sets one up with a QR code. If
+the authenticator is lost, set `ADMIN_MFA_DISABLED=true`, sign in, then remove it again). It shows
 the setup status and counts, sends a test to your own address, and sends to the next N accounts
 (up to 500 per click; type SEND to confirm). The same from the command line:
 

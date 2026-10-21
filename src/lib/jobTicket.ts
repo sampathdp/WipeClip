@@ -33,12 +33,24 @@ export interface ProcessTicket {
   cost: number;
 }
 
-export type TicketBody = ExportTicket | ProcessTicket;
+/** Permission to upload one video to the backend and probe it (see
+ * /api/upload-ticket). Without it, /api/video/upload-url and
+ * /api/video/probe would be open to anyone who finds the backend's URL. */
+export interface UploadTicket {
+  kind: "upload";
+  /** The largest file the backend may sign an upload URL for. */
+  maxBytes: number;
+}
+
+export type TicketBody = ExportTicket | ProcessTicket | UploadTicket;
 export type Ticket = TicketBody & { id: string; exp: number };
 
 // Long enough for a slow upload of a big video: the backend verifies the
 // ticket only after the whole request body has arrived.
 const TICKET_TTL_MS = 60 * 60 * 1000;
+// Upload tickets cover a single file's upload and probe, asked for right
+// before them, so they can be shorter lived.
+const UPLOAD_TICKET_TTL_MS = 30 * 60 * 1000;
 
 function secret(): string {
   // Unset in local dev - the backend skips the signature check then too,
@@ -51,7 +63,8 @@ function sign(payload: string): string {
 }
 
 export function issueTicket(body: TicketBody): string {
-  const ticket: Ticket = { ...body, id: randomUUID(), exp: Date.now() + TICKET_TTL_MS };
+  const ttl = body.kind === "upload" ? UPLOAD_TICKET_TTL_MS : TICKET_TTL_MS;
+  const ticket: Ticket = { ...body, id: randomUUID(), exp: Date.now() + ttl };
   const payload = Buffer.from(JSON.stringify(ticket)).toString("base64url");
   return `${payload}.${sign(payload)}`;
 }

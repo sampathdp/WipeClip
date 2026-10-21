@@ -22,6 +22,13 @@ env:
   # Direct video uploads (backend/app/uploads.py). Create it first - see
   # backend/README.md "Direct uploads".
   UPLOAD_BUCKET: wipeclip-uploads
+  # The site, for claiming job tickets once and refunding failed jobs
+  # (backend/app/tickets.py). Without it a ticket could run many jobs.
+  SITE_URL: https://www.wipeclip.co
+  # Browsers allowed to call the backend: the site and the desktop app
+  # (src/lib/cors.ts). Passed with gcloud's ^@^ delimiter so the commas
+  # stay inside the value.
+  ALLOWED_ORIGINS: https://www.wipeclip.co,https://wipeclip.co,tauri://localhost,http://tauri.localhost,https://tauri.localhost
 
 jobs:
   deploy:
@@ -52,7 +59,8 @@ jobs:
             --min-instances 0 \
             --max-instances 3 \
             --timeout 1800 \
-            --set-env-vars "ALLOWED_ORIGINS=*" \
+            --set-env-vars "^@^ALLOWED_ORIGINS=$ALLOWED_ORIGINS" \
+            --set-env-vars "SITE_URL=$SITE_URL" \
             --set-env-vars "GCS_UPLOAD_BUCKET=$UPLOAD_BUCKET" \
             --set-env-vars "INTERNAL_API_SECRET=${{ secrets.INTERNAL_API_SECRET }}" \
             --project "$PROJECT_ID"

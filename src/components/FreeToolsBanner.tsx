@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 
 const FREE_TOOLS = [
@@ -46,14 +46,23 @@ function GiftIcon() {
   );
 }
 
+const noSubscribe = () => () => {};
+
+function wasDismissed(): boolean {
+  try {
+    return localStorage.getItem(DISMISS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export default function FreeToolsBanner() {
+  // The server render shows the banner; the client then hides it if it was
+  // dismissed before.
+  const dismissedBefore = useSyncExternalStore(noSubscribe, wasDismissed, () => false);
   const [dismissed, setDismissed] = useState(false);
 
-  useEffect(() => {
-    if (localStorage.getItem(DISMISS_KEY) === "1") setDismissed(true);
-  }, []);
-
-  if (dismissed) return null;
+  if (dismissed || dismissedBefore) return null;
 
   const dismiss = () => {
     localStorage.setItem(DISMISS_KEY, "1");

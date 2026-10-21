@@ -256,7 +256,7 @@ export default function VideoFrameGrabberDemo() {
     }
   }, [isSuggesting, suggestions]);
 
-  const useSuggestion = useCallback((suggestion: Capture) => {
+  const applySuggestion = useCallback((suggestion: Capture) => {
     setCaptures((prev) => [suggestion, ...prev]);
     setSuggestions((prev) => prev.filter((s) => s.id !== suggestion.id));
   }, []);
@@ -431,7 +431,7 @@ export default function VideoFrameGrabberDemo() {
                             Download
                           </a>
                           <button
-                            onClick={() => useSuggestion(s)}
+                            onClick={() => applySuggestion(s)}
                             className="text-[10px] font-semibold text-cyan-600 hover:text-cyan-700"
                           >
                             Use this

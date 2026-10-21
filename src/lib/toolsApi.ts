@@ -71,12 +71,40 @@ export interface VideoInfo {
  * configured, so the file itself gets posted like before. */
 const directUploads = new WeakMap<File, Promise<string | null>>();
 
+/** Upload tickets (see src/app/api/upload-ticket/route.ts): the backend's
+ * upload-url and probe routes refuse calls without one. One per File,
+ * dropped when it fails or expires so the next try asks again. */
+const uploadTickets = new WeakMap<File, Promise<string>>();
+
+async function requestUploadTicket(file: File, signal?: AbortSignal): Promise<string> {
+  const res = await apiFetch("/api/upload-ticket", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ size: file.size }),
+    signal,
+  });
+  if (!res.ok) await throwApiError(res, "Upload failed. Try again.");
+  return ((await res.json()) as { ticket: string }).ticket;
+}
+
+function uploadTicket(file: File, signal?: AbortSignal): Promise<string> {
+  let ticket = uploadTickets.get(file);
+  if (!ticket) {
+    ticket = requestUploadTicket(file, signal);
+    uploadTickets.set(file, ticket);
+    ticket.catch(() => uploadTickets.delete(file));
+  }
+  return ticket;
+}
+
 async function uploadDirect(file: File, signal?: AbortSignal): Promise<string | null> {
   const body = new FormData();
+  body.append("ticket", await uploadTicket(file, signal));
   body.append("size", String(file.size));
   const dot = file.name.lastIndexOf(".");
   body.append("extension", dot >= 0 ? file.name.slice(dot) : "");
   const res = await fetch(`${TOOLS_API_URL}/api/video/upload-url`, { method: "POST", body, signal });
+  if (res.status === 403) uploadTickets.delete(file);
   if (res.status === 404) return null;
   if (!res.ok) await throwApiError(res, "Upload failed. Try again.");
   const { uploadId, url, headers } = (await res.json()) as {
@@ -96,16 +124,25 @@ async function appendVideo(body: FormData, file: File, signal?: AbortSignal): Pr
   if (!upload) {
     upload = uploadDirect(file, signal);
     directUploads.set(file, upload);
-    upload.catch(() => directUploads.delete(file));
+    // The backend claims the ticket when it signs the upload URL, so a
+    // failed upload needs a fresh ticket for its retry too.
+    upload.catch(() => {
+      directUploads.delete(file);
+      uploadTickets.delete(file);
+    });
   }
   const uploadId = await upload;
   if (uploadId) body.append("upload_id", uploadId);
   else body.append("file", file);
 }
 
-/** 410: the direct upload is gone (expired) - the next try uploads again. */
+/** 410: the direct upload is gone (expired) - the next try uploads again,
+ * with a fresh ticket. */
 function forgetExpiredUpload(file: File, res: Response): void {
-  if (res.status === 410) directUploads.delete(file);
+  if (res.status === 410) {
+    directUploads.delete(file);
+    uploadTickets.delete(file);
+  }
 }
 
 export async function probeVideo(
@@ -114,6 +151,7 @@ export async function probeVideo(
   assertBackendEnabled();
   const body = new FormData();
   await appendVideo(body, file);
+  body.append("ticket", await uploadTicket(file));
 
   const res = await fetch(`${TOOLS_API_URL}/api/video/probe`, {
     method: "POST",
@@ -121,6 +159,7 @@ export async function probeVideo(
   });
 
   forgetExpiredUpload(file, res);
+  if (res.status === 403) uploadTickets.delete(file);
   if (!res.ok) {
     await throwApiError(res, "Could not read that video.");
   }

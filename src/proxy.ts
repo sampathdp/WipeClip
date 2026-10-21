@@ -3,11 +3,28 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const GATE_COOKIE = "wc_bypass";
 
+/** What the bypass cookie holds: a hash of the secret, so the secret itself
+ * never sits in a browser's cookie store. */
+async function gateToken(secret: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`wc-bypass:${secret}`));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function setGateCookie(response: NextResponse, token: string) {
+  response.cookies.set(GATE_COOKIE, token, {
+    maxAge: 60 * 60 * 24 * 30,
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+  });
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
   const secret = process.env.SITE_BYPASS_SECRET;
+  const token = secret ? await gateToken(secret) : null;
   const paramBypass = Boolean(secret && searchParams.get("bypass") === secret);
-  const cookieBypass = Boolean(secret && request.cookies.get(GATE_COOKIE)?.value === secret);
+  const cookieBypass = Boolean(token && request.cookies.get(GATE_COOKIE)?.value === token);
   // /unsubscribe stays reachable even while the site is gated: an
   // unsubscribe link in an email that was already sent must keep working.
   const exempt =
@@ -45,7 +62,7 @@ export async function proxy(request: NextRequest) {
     !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   ) {
     if (paramBypass && !cookieBypass) {
-      response.cookies.set(GATE_COOKIE, secret!, { maxAge: 60 * 60 * 24 * 30, httpOnly: true });
+      setGateCookie(response, token!);
     }
     return response;
   }
@@ -81,7 +98,7 @@ export async function proxy(request: NextRequest) {
   // Set last: `response` may have been reassigned above by Supabase's own
   // cookie sync, so setting this any earlier would get silently dropped.
   if (paramBypass && !cookieBypass) {
-    response.cookies.set(GATE_COOKIE, secret!, { maxAge: 60 * 60 * 24 * 30, httpOnly: true });
+    setGateCookie(response, token!);
   }
 
   return response;

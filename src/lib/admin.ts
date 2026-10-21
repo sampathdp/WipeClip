@@ -13,13 +13,38 @@ export function isAdminEmail(email: string | null | undefined): boolean {
   return admins.includes(email.toLowerCase());
 }
 
-/** The signed-in user if they are a confirmed admin, else null. */
-export async function getAdminUser(): Promise<User | null> {
-  const supabase = await createClient();
+/** Admins must sign in with a second factor (an authenticator-app code)
+ * unless ADMIN_MFA_DISABLED=true - an escape hatch for a lost
+ * authenticator, to be removed again once a new one is enrolled. */
+export function adminMfaRequired(): boolean {
+  return process.env.ADMIN_MFA_DISABLED !== "true";
+}
+
+/** Where a signed-in account stands on the way into the admin panel:
+ * - "none": not signed in, or not an admin;
+ * - "enroll": an admin who has no authenticator yet;
+ * - "verify": an admin who has one but hasn't entered a code this session;
+ * - "ok": through. */
+export type AdminStep = "none" | "enroll" | "verify" | "ok";
+
+export async function adminStep(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<{ user: User | null; step: AdminStep }> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  return user && user.email_confirmed_at && isAdminEmail(user.email) ? user : null;
+  if (!user || !user.email_confirmed_at || !isAdminEmail(user.email)) return { user, step: "none" };
+  if (!adminMfaRequired()) return { user, step: "ok" };
+  const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (data?.currentLevel === "aal2") return { user, step: "ok" };
+  return { user, step: data?.nextLevel === "aal2" ? "verify" : "enroll" };
+}
+
+/** The signed-in user if they are a confirmed admin who has passed the
+ * second-factor check this session, else null. */
+export async function getAdminUser(): Promise<User | null> {
+  const { user, step } = await adminStep(await createClient());
+  return step === "ok" ? user : null;
 }
 
 /** For every admin page and server action: the admin user and a

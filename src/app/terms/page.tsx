@@ -133,7 +133,9 @@ export default function TermsPage() {
       <P>
         Files you upload are processed to generate your output and are then
         deleted; we do not retain a copy of your input or output files after
-        your processing request completes. See our{" "}
+        your processing request completes. A video uploaded to our temporary
+        storage but never processed is deleted automatically within 24
+        hours. See our{" "}
         <Link href="/privacy" className="underline hover:text-foreground">
           Privacy Policy
         </Link>{" "}

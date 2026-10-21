@@ -18,7 +18,10 @@ Environment variables:
                          is what stops the credit and plan checks from being
                          bypassable by calling this backend directly. Unset
                          by default so local dev works with no extra config,
-                         same as ALLOWED_ORIGINS.
+                         same as ALLOWED_ORIGINS. Required on Cloud Run (or
+                         with REQUIRE_INTERNAL_SECRET=1): startup fails
+                         without it. Upload tickets signed with it also
+                         gate /api/video/upload-url and /api/video/probe.
     SITE_URL             the Next.js site, for claiming job tickets and
                          refunding failed paid jobs (app/tickets.py). Unset:
                          neither happens (local dev).
@@ -50,6 +53,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import math
 import os
@@ -111,6 +115,15 @@ if _sentry_dsn:
 
     sentry_sdk.init(dsn=_sentry_dsn, traces_sample_rate=0.1)
 
+# INTERNAL_API_SECRET is optional only so local dev needs no setup. Deployed
+# (Cloud Run sets K_SERVICE; REQUIRE_INTERNAL_SECRET=1 covers other hosts),
+# a missing secret would turn off every ticket and caller check, so refuse
+# to start instead of serving an open API.
+if (os.environ.get("K_SERVICE") or os.environ.get("REQUIRE_INTERNAL_SECRET") == "1") and not os.environ.get(
+    "INTERNAL_API_SECRET"
+):
+    raise RuntimeError("INTERNAL_API_SECRET must be set in production.")
+
 _docs_enabled = os.environ.get("ENABLE_API_DOCS") == "1"
 app = FastAPI(
     title="WipeClip.co API",
@@ -141,7 +154,8 @@ def _assert_internal_caller(request: Request) -> None:
     expected = os.environ.get("INTERNAL_API_SECRET")
     if not expected:
         return
-    if request.headers.get("X-Internal-Process-Secret") != expected:
+    given = request.headers.get("X-Internal-Process-Secret", "")
+    if not hmac.compare_digest(given.encode(), expected.encode()):
         raise HTTPException(status_code=403, detail="Direct calls to this endpoint aren't permitted.")
 
 
@@ -239,46 +253,71 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+def _upload_limit(ticket: dict) -> int:
+    """The most bytes an upload ticket (see src/app/api/upload-ticket) lets
+    one video be."""
+    try:
+        return max(0, min(int(ticket.get("maxBytes", 0)), MAX_VIDEO_UPLOAD_BYTES))
+    except (TypeError, ValueError):
+        return 0
+
+
 @app.post("/api/video/upload-url")
-async def api_video_upload_url(size: int = Form(...), extension: str = Form("")):
+async def api_video_upload_url(ticket: str = Form(...), size: int = Form(...), extension: str = Form("")):
     """A signed URL the browser uploads a video to directly, plus the
     upload id to send to /api/video/probe and /api/video/process in place of
     the file - see app/uploads.py. 404 while GCS_UPLOAD_BUCKET is unset, which
     tells the frontend to post the file itself.
+
+    Needs an upload ticket, claimed here so each one signs a single upload
+    URL - otherwise anyone could fill the bucket. Its size is the cap the
+    signed URL enforces.
     """
+    limit = _upload_limit(tickets.verify(ticket, "upload"))
     if not uploads.enabled():
         raise HTTPException(status_code=404, detail="Direct uploads aren't configured.")
-    if size > MAX_VIDEO_UPLOAD_BYTES:
+    if size > limit:
         raise HTTPException(
             status_code=400, detail=f"File too large (max {MAX_VIDEO_UPLOAD_BYTES // (1024 * 1024)}MB)"
         )
-    return await asyncio.to_thread(uploads.create_upload_url, extension, MAX_VIDEO_UPLOAD_BYTES)
+    await tickets.claim(ticket)
+    return await asyncio.to_thread(uploads.create_upload_url, extension, limit)
 
 
-async def _receive_video(file: Optional[UploadFile], upload_id: Optional[str], tmp: str) -> str:
+async def _receive_video(
+    file: Optional[UploadFile], upload_id: Optional[str], tmp: str, max_bytes: int = MAX_VIDEO_UPLOAD_BYTES
+) -> str:
     """Puts the job's video in `tmp` - from the bucket when the browser
     uploaded it there (`upload_id`), else from the request body - and
     returns its path."""
     if upload_id:
         in_path = os.path.join(tmp, f"input{uploads.suffix(upload_id)}")
-        await asyncio.to_thread(uploads.download, upload_id, in_path, MAX_VIDEO_UPLOAD_BYTES)
+        await asyncio.to_thread(uploads.download, upload_id, in_path, max_bytes)
         return in_path
     if file is None:
         raise HTTPException(status_code=400, detail="No video was uploaded.")
     in_path = os.path.join(tmp, f"input{Path(file.filename or '').suffix or '.mp4'}")
-    _save_upload(file, in_path, MAX_VIDEO_UPLOAD_BYTES)
+    _save_upload(file, in_path, max_bytes)
     return in_path
 
 
 @app.post("/api/video/probe")
-async def api_video_probe(file: Optional[UploadFile] = File(None), upload_id: Optional[str] = Form(None)):
+async def api_video_probe(
+    ticket: str = Form(...),
+    file: Optional[UploadFile] = File(None),
+    upload_id: Optional[str] = Form(None),
+):
     """Returns a representative preview frame (PNG) plus video metadata as
     response headers, so the frontend can let the user draw a cleanup
     region against real pixel coordinates before committing to a full encode.
     Takes the video as `file`, or as the `upload_id` of a direct upload.
+
+    Needs the same upload ticket as /api/video/upload-url (not claimed here:
+    the upload already claimed it, and probing reuses it).
     """
+    limit = _upload_limit(tickets.verify(ticket, "upload"))
     with tempfile.TemporaryDirectory() as tmp:
-        in_path = await _receive_video(file, upload_id, tmp)
+        in_path = await _receive_video(file, upload_id, tmp, limit)
         try:
             info, frame_png = video_pipeline.probe_video(in_path)
         except ValueError as exc:

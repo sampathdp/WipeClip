@@ -75,7 +75,7 @@ create table if not exists payment_orders (
   plan text not null,
   credits int not null,
   amount_cents int not null, -- whole cents of `currency`
-  status text not null default 'open', -- 'open' | 'paid' | 'failed' | 'expired'
+  status text not null default 'open', -- 'open' | 'paid' | 'failed' | 'expired' | 'refunded' | 'charged_back'
   checkout_id text unique, -- Payments.lk checkout id, or Paddle transaction id (txn_...)
   payment_id text,
   created_at timestamptz not null default now(),
@@ -286,6 +286,35 @@ begin
 end;
 $$;
 
+-- Takes back what a purchase granted when it is refunded or charged back.
+-- Idempotent on p_event_id, like grant_paid_credits. Credits already spent
+-- can't be recovered, so the balance stops at 0 rather than going negative.
+-- p_end_plan ends the pass now (a full refund or chargeback); a partial
+-- refund only takes back its share of the credits.
+create or replace function revoke_paid_credits(p_user_id uuid, p_amount int, p_event_id text, p_end_plan boolean default false)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into processed_webhook_events (id) values (p_event_id)
+  on conflict (id) do nothing;
+
+  if not found then
+    return; -- already processed this exact event
+  end if;
+
+  update profiles
+  set paid_credits = greatest(paid_credits - p_amount, 0),
+      plan = case when p_end_plan then 'free' else plan end,
+      plan_expires_at = case when p_end_plan then now() else plan_expires_at end
+  where id = p_user_id;
+
+  insert into credit_transactions (user_id, kind, amount, ls_event_id)
+  values (p_user_id, 'revoke_purchase', -p_amount, p_event_id);
+end;
+$$;
+
 -- Returns the caller's own referral code, generating one on first call
 -- (retrying on the rare collision - referral_code has a unique constraint).
 -- Idempotent: a user who already has a code just gets it back unchanged.
@@ -385,6 +414,8 @@ alter table credit_transactions enable row level security;
 -- No policies: only the service-role key (checkout route, webhook) touches it.
 alter table payment_orders enable row level security;
 alter table feedback enable row level security;
+-- No policies: only the SECURITY DEFINER grant/revoke functions touch it.
+alter table processed_webhook_events enable row level security;
 
 drop policy if exists "read own profile" on profiles;
 create policy "read own profile" on profiles
@@ -415,6 +446,7 @@ revoke execute on function ensure_daily_reset(uuid) from public, anon, authentic
 revoke execute on function consume_credits(uuid, int, text) from public, anon, authenticated;
 revoke execute on function refund_credits(uuid, int, text) from public, anon, authenticated;
 revoke execute on function grant_paid_credits(uuid, int, text, text, int) from public, anon, authenticated;
+revoke execute on function revoke_paid_credits(uuid, int, text, boolean) from public, anon, authenticated;
 revoke execute on function tag_last_transaction(uuid, text, text) from public, anon, authenticated;
 revoke execute on function ensure_referral_code(uuid) from public, anon, authenticated;
 revoke execute on function claim_referral(uuid, text) from public, anon, authenticated;
@@ -423,6 +455,7 @@ grant execute on function ensure_daily_reset(uuid) to service_role;
 grant execute on function consume_credits(uuid, int, text) to service_role;
 grant execute on function refund_credits(uuid, int, text) to service_role;
 grant execute on function grant_paid_credits(uuid, int, text, text, int) to service_role;
+grant execute on function revoke_paid_credits(uuid, int, text, boolean) to service_role;
 grant execute on function tag_last_transaction(uuid, text, text) to service_role;
 grant execute on function ensure_referral_code(uuid) to service_role;
 grant execute on function claim_referral(uuid, text) to service_role;

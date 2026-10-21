@@ -15,25 +15,25 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const entries: MetadataRoute.Sitemap = [
     {
       url: siteUrl,
-      lastModified: "2026-10-01",
+      lastModified: "2026-10-21",
       changeFrequency: "weekly",
       priority: 1,
     },
     {
       url: `${siteUrl}/pricing`,
-      lastModified: "2026-08-20",
+      lastModified: "2026-10-21",
       changeFrequency: "weekly",
       priority: 0.9,
     },
     {
       url: `${siteUrl}/about`,
-      lastModified: "2026-10-01",
+      lastModified: "2026-10-21",
       changeFrequency: "monthly",
       priority: 0.8,
     },
     {
       url: `${siteUrl}/download`,
-      lastModified: "2026-10-01",
+      lastModified: "2026-10-21",
       changeFrequency: "weekly",
       priority: 0.9,
     },
@@ -45,19 +45,19 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
     {
       url: `${siteUrl}/remove-background`,
-      lastModified: "2026-08-22",
+      lastModified: "2026-10-21",
       changeFrequency: "weekly",
       priority: 0.8,
     },
     {
       url: `${siteUrl}/extract-video-frame`,
-      lastModified: "2026-08-22",
+      lastModified: "2026-10-21",
       changeFrequency: "weekly",
       priority: 0.8,
     },
     {
       url: `${siteUrl}/sharpen-image`,
-      lastModified: "2026-08-22",
+      lastModified: "2026-10-21",
       changeFrequency: "weekly",
       priority: 0.8,
     },
@@ -81,7 +81,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
     {
       url: `${siteUrl}/terms`,
-      lastModified: "2026-08-19",
+      lastModified: "2026-10-21",
       changeFrequency: "yearly",
       priority: 0.3,
     },
@@ -93,7 +93,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
     {
       url: `${siteUrl}/privacy`,
-      lastModified: "2026-08-19",
+      lastModified: "2026-10-21",
       changeFrequency: "yearly",
       priority: 0.3,
     },

@@ -55,10 +55,18 @@ export default function PrivacyPage() {
         an export), your video or image is sent to our processing backend,
         held only for the duration of your request, and deleted once the
         result is returned to your browser; any temporary result is removed
-        automatically within minutes. We do not keep a copy, we do not use
-        your media to train any model, and we do not view it manually except
-        when strictly necessary to investigate a bug you&apos;ve reported or
-        abuse of the Service.
+        automatically within minutes. A video uploaded to our temporary
+        storage but never processed (for example, if you close the page) is
+        deleted automatically within 24 hours. We do not keep a copy, we do
+        not use your media to train any model, and we do not view it
+        manually except when strictly necessary to investigate a bug
+        you&apos;ve reported or abuse of the Service.
+      </P>
+      <P>
+        Uploads are screened automatically for explicit content, and content
+        that is blocked is not processed. Where the law requires it, we
+        report illegal content, such as child sexual abuse material, to the
+        relevant authorities.
       </P>
       <P>
         Your editor project is saved only in your own browser (on your
@@ -156,7 +164,10 @@ export default function PrivacyPage() {
       </UL>
       <P>
         The payment providers&apos; checkouts may set their own cookies when
-        you open them, under their own policies.
+        you open them, under their own policies. On the pricing page, our
+        payment provider&apos;s script also loads to prepare the checkout and,
+        for existing customers, to help recover failed payments; it may set
+        cookies for fraud prevention and those purposes.
       </P>
 
       <H2>6. Who we share data with</H2>
