@@ -1,16 +1,17 @@
-import { BACKEND_DISABLED, BACKEND_DISABLED_MESSAGE } from "@/lib/toolsApi";
+import Link from "next/link";
 
-/** Site-wide notice shown while the AI backend is switched off
- * (NEXT_PUBLIC_BACKEND_DISABLED=true). Renders nothing otherwise. */
+/** Site-wide teaser for the upcoming desktop editor. */
 export default function ServiceBanner() {
-  if (!BACKEND_DISABLED) return null;
   return (
     <div
       role="status"
       className="w-full bg-accent px-4 py-2 text-center text-sm font-medium text-accent-foreground"
     >
-      <span aria-hidden>🚧 </span>
-      Service under construction. {BACKEND_DISABLED_MESSAGE}
+      <span aria-hidden>✨ </span>
+      The WipeClip editor is coming soon, packed with crazy new features.{" "}
+      <Link href="/download" className="font-semibold underline underline-offset-2">
+        Get notified
+      </Link>
     </div>
   );
 }

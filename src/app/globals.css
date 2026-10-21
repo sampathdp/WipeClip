@@ -345,6 +345,25 @@ body {
   animation: float-slow 7s ease-in-out infinite;
 }
 
+/* /download hero mockup: an auto focus zoom easing in on a click and back */
+@keyframes focus-zoom {
+  0%,
+  20% {
+    transform: scale(1);
+  }
+  40%,
+  75% {
+    transform: scale(1.8);
+  }
+  95%,
+  100% {
+    transform: scale(1);
+  }
+}
+.animate-focus-zoom {
+  animation: focus-zoom 6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
 /* Animated gradient border used on featured cards */
 @keyframes border-spin {
   to {
@@ -371,6 +390,7 @@ body {
     transition: none;
   }
   .animate-float-slow,
+  .animate-focus-zoom,
   .border-glow {
     animation: none;
   }
