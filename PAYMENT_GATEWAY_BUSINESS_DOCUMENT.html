@@ -265,13 +265,14 @@
 
   <h2>1. Executive Summary &amp; Company Profile</h2>
   <p>
-    <strong>WipeClip.co</strong> is a specialized, web-based digital media processing SaaS (Software as a Service) platform designed for content creators, videographers, editors, and digital agencies. The platform provides automated computer vision and inpainting tools that allow users to retouch, restore, and clean up digital video footage and still images that they own or are legally authorized to edit.
+    <strong>WipeClip.co</strong> is a web-based video editing SaaS (Software as a Service) platform for content creators, videographers, editors, and digital agencies. Users edit video they shot themselves or are authorized to edit, directly in the browser, and export it at their original quality. The platform also includes a small set of AI-assisted photo utilities.
   </p>
   <p>Common professional use cases include:</p>
   <ul>
-    <li>Restoring archival or legacy footage where original raw project files were lost.</li>
-    <li>Removing unwanted incidental timestamps, microphone logos, broadcast bugs, captions, and export badges from personal or client-authorized media.</li>
-    <li>Cleaning up artifacts from digital recordings and social reel drafts prior to multi-platform syndication.</li>
+    <li>Trimming, cutting, and assembling raw footage into finished videos.</li>
+    <li>Adding text, captions, music, transitions, and filters to the user's own recordings.</li>
+    <li>Resizing one video into landscape, vertical, square, and portrait formats for publishing.</li>
+    <li>Preparing product photos and creative assets with background removal and sharpening.</li>
   </ul>
   <p>
     The service is delivered 100% digitally through modern cloud infrastructure with zero physical shipping, providing immediate automated fulfillment upon payment.
@@ -280,18 +281,19 @@
   <h2>2. Nature of the Business &amp; Core Purpose</h2>
   <h3>2.1 The Problem It Solves</h3>
   <p>
-    Creators and video editors frequently lose access to pristine project assets or face situations where an unwanted on-screen graphic (such as a timestamp from a recording device, an editing software export badge, or an incidental overlay) obscures their original content. Traditional manual removal methods (like cropping or adding an unsightly blur box) degrade composition and visual quality.
+    Creators and small teams need to edit and publish video quickly, but professional desktop editing suites are expensive, heavy to install, and slow to learn. Many simple editing tasks (trimming, captioning, resizing for different formats) do not justify that overhead.
   </p>
 
   <h3>2.2 WipeClip's Solution</h3>
   <p>
-    WipeClip provides an intuitive, non-destructive web tool where a user highlights an unwanted bounding region on a video frame. The platform's processing pipeline analyzes spatial and temporal pixel data from adjacent frames and reconstructs the underlying pixels using advanced image/video inpainting algorithms. The result is a clean, natural restoration without composition cropping or distortion.
+    WipeClip provides an intuitive browser-based editor with a timeline, where users import their own clips, arrange and edit them, and export the result without installing software. AI-assisted features (such as automatic captions from speech) speed up repetitive work. Media is processed only to deliver the user's own export.
   </p>
 
   <h3>2.3 Product Capabilities &amp; Tool Suite</h3>
   <ul>
-    <li><strong>Video Watermark &amp; Overlay Inpainting:</strong> Automated pixel reconstruction across video frames.</li>
-    <li><strong>Still Image Cleanup:</strong> Rapid removal of unwanted marks and blemishes on static graphics.</li>
+    <li><strong>Video Editor:</strong> Trim, split, reorder, transitions, text, stickers, filters, music, picture-in-picture, and canvas presets for landscape, vertical, square, and portrait output.</li>
+    <li><strong>Auto Captions:</strong> Speech-to-text captions generated from the user's own audio.</li>
+    <li><strong>Screen Recorder (desktop app):</strong> Record the user's own screen and microphone for tutorials, then edit in the same app.</li>
     <li><strong>Complementary Creator Utilities:</strong> Background Remover, Video Frame Grabber, Photo Sharpener.</li>
   </ul>
 
@@ -307,23 +309,28 @@
     <tbody>
       <tr>
         <td><strong>Independent Creators &amp; Vloggers</strong></td>
-        <td>Cleaning up timestamps or export tags on their own video footage before syndication.</td>
-        <td>Saves hours of re-rendering or having to re-shoot original footage.</td>
+        <td>Editing and captioning their own footage before publishing.</td>
+        <td>Fast, free-to-start editing with no software install.</td>
       </tr>
       <tr>
         <td><strong>Freelance Editors &amp; Agencies</strong></td>
-        <td>Restoring client-provided footage when the client lost original master assets.</td>
-        <td>Professional-grade retouching without visible blur artifacts.</td>
+        <td>Producing client videos from client-supplied footage.</td>
+        <td>Professional exports at original quality from any computer.</td>
       </tr>
       <tr>
         <td><strong>Social Media Managers</strong></td>
-        <td>Repurposing archived promotional clips and reels across brand channels.</td>
-        <td>Fast turnaround time for high-engagement short-form video.</td>
+        <td>Resizing their own promotional clips for different channels and formats.</td>
+        <td>One edit, exported in every aspect ratio.</td>
+      </tr>
+      <tr>
+        <td><strong>Educators &amp; Tutorial Makers</strong></td>
+        <td>Recording and editing screen tutorials.</td>
+        <td>Recorder and editor in one workflow.</td>
       </tr>
       <tr>
         <td><strong>Digital Photographers</strong></td>
-        <td>Retouching static images and product photos to eliminate incidental distractions.</td>
-        <td>Single-click cleanup with no heavy desktop software required.</td>
+        <td>Cutting out backgrounds and sharpening product photos.</td>
+        <td>Single-click utilities with no heavy desktop software required.</td>
       </tr>
     </tbody>
   </table>
@@ -431,7 +438,7 @@
     <li>Compliant with 17 U.S.C. § 512(c)(3) (DMCA notice &amp; takedown framework).</li>
     <li>Dedicated Designated Agent: <code>dmca@wipeclip.co</code> / <code>legal@wipeclip.co</code>.</li>
     <li>Repeat Infringer Policy: Prompt account suspension and permanent banning of any user flagged for repeat infringement.</li>
-    <li>Clear disclaimer of non-affiliation with third-party software brands (TikTok, CapCut, Canva, Instagram, etc.).</li>
+    <li>Clear disclaimer of non-affiliation with any third-party video platform, software vendor or AI model provider.</li>
   </ul>
 
   <h2>7. Data Privacy, Storage &amp; Security Architecture</h2>
@@ -459,7 +466,7 @@
   <h2>9. Technical Stack &amp; Infrastructure Overview</h2>
   <ul>
     <li><strong>Frontend:</strong> Next.js 15 (React 19, TypeScript, Tailwind CSS), deployed on Vercel high-availability global edge CDN.</li>
-    <li><strong>Backend Pipeline:</strong> Python FastAPI, FFmpeg video processing framework, computer vision inpainting engines, hosted in isolated container environments.</li>
+    <li><strong>Backend Pipeline:</strong> Python FastAPI, FFmpeg video processing framework, image-processing engines, hosted in isolated container environments.</li>
     <li><strong>Database &amp; Auth:</strong> Supabase (Enterprise PostgreSQL) with Row-Level Security (RLS) policies and encrypted session authentication.</li>
     <li><strong>Payment Integration:</strong> Direct server-to-server webhook ingestion with HMAC-SHA256 signature verification and replay attack mitigation (5-minute timestamp tolerance window).</li>
   </ul>

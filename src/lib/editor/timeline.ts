@@ -75,10 +75,10 @@ export const EFFECT_LABELS: Record<EffectType, string> = {
 
 export const CANVAS_PRESETS: { label: string; hint: string; aspect: CanvasAspect }[] = [
   { label: "Original", hint: "Same as your video", aspect: "original" },
-  { label: "16:9", hint: "YouTube · landscape", aspect: "16:9" },
-  { label: "9:16", hint: "Shorts · TikTok · Reels", aspect: "9:16" },
+  { label: "16:9", hint: "Landscape · widescreen", aspect: "16:9" },
+  { label: "9:16", hint: "Vertical · short-form", aspect: "9:16" },
   { label: "1:1", hint: "Square post", aspect: "1:1" },
-  { label: "4:5", hint: "Instagram post", aspect: "4:5" },
+  { label: "4:5", hint: "Portrait post", aspect: "4:5" },
   { label: "4:3", hint: "Classic", aspect: "4:3" },
 ];
 

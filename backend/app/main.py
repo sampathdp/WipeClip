@@ -1,4 +1,4 @@
-"""FastAPI backend for WipeClip.co's video watermark/object removal.
+"""FastAPI backend for WipeClip.co's video editing and object cleanup.
 
 Run locally:
     uvicorn app.main:app --reload --port 8000
@@ -238,7 +238,7 @@ def health() -> dict:
 @app.post("/api/video/probe")
 async def api_video_probe(file: UploadFile = File(...)):
     """Returns a representative preview frame (PNG) plus video metadata as
-    response headers, so the frontend can let the user draw a watermark
+    response headers, so the frontend can let the user draw a cleanup
     region against real pixel coordinates before committing to a full encode.
     """
     with tempfile.TemporaryDirectory() as tmp:
@@ -368,7 +368,7 @@ async def _video_process(
             )
         # The region is drawn in the browser against a scaled-up preview, so
         # rounding on the way back to source pixels can push an edge-flush box
-        # a pixel past the frame - and ffmpeg's crop/overlay (and delogo
+        # a pixel past the frame - and ffmpeg's crop/overlay (and the inpainting
         # before it) reject a region that isn't fully inside. Clamp into
         # bounds rather than 400-ing: a box the user deliberately dragged to
         # the very corner is a valid request. Only a region with no real
@@ -389,16 +389,16 @@ async def _video_process(
         requested_height = RESOLUTION_HEIGHTS[resolution]
         output_height = requested_height if requested_height < info.height else None
 
-        # Generous bound relative to remove_logo's own measured ~6.5x
-        # realtime FSR pass (see WATERMARK_FSR_* in config.py), so a queued
+        # Generous bound relative to reconstruct_region's own measured ~6.5x
+        # realtime FSR pass (see REGION_FSR_* in config.py), so a queued
         # job gets real headroom before _run_pipeline_job gives up on it.
         # quality="pro" does extra per-frame optical-flow work on top of
-        # that (see WATERMARK_FLOW_* in config.py), so it gets a wider bound.
+        # that (see REGION_FLOW_* in config.py), so it gets a wider bound.
         job_timeout = max(180.0, info.duration * (16 if quality == "pro" else 10))
 
         try:
             await _run_pipeline_job(
-                jobs.remove_logo_job,
+                jobs.reconstruct_region_job,
                 in_path,
                 out_path,
                 x,
@@ -1113,7 +1113,7 @@ async def api_image_auto_enhance(
     processing - the Next.js /api/remove-background route hard-sets this
     for anonymous callers only (never trusts the client's own value, same
     "server decides, client can't override" pattern api_video_process uses
-    for output resolution), matching remove.bg's free-tier resolution cap.
+    for output resolution), matching a common free-tier resolution cap.
     """
     _assert_internal_caller(request)
 

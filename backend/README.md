@@ -1,7 +1,7 @@
 # WipeClip.io backend
 
-FastAPI service that does the actual video watermark removal (ffmpeg
-`delogo`/`overlay`), plus the image-cleanup endpoints it was originally
+FastAPI service that does the actual video object cleanup (ffmpeg
++ OpenCV inpainting), plus the image-cleanup endpoints it was originally
 built with. Copied from the standalone Sprite Cleaner tool — pipeline code
 under `app/pipeline/` is unchanged except for the addition of
 `app/pipeline/moderation.py`.

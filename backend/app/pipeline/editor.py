@@ -162,7 +162,7 @@ def probe_audio(path: str) -> float:
 
 async def cut_range(input_path: str, output_path: str, start: float, end: float) -> None:
     """Re-encodes source-time [start, end) of `input_path` to a standalone
-    clip - used to run the existing AI cleanup (video.remove_logo) on only
+    clip - used to run the existing AI cleanup (video.reconstruct_region) on only
     the timeline segment the user selected. Re-encoded rather than stream-
     copied so the cut is frame-accurate instead of snapping to keyframes,
     at a CRF below the normal output's so this intermediate generation

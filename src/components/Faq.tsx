@@ -40,7 +40,7 @@ const cleanupFaqs = [
   },
   {
     q: "What can I remove?",
-    a: "Unwanted physical objects in your own shots, like a passer-by, a stray cable, a boom mic or a lens smudge. You mark the region yourself on the preview frame. WipeClip.co does not remove watermarks, logos, or other ownership or copyright marks.",
+    a: "Unwanted physical objects in your own shots, like a passer-by, a stray cable, a boom mic or a lens smudge. You mark the region yourself on the preview frame. Only use it on content you created or have the rights to edit.",
   },
   {
     q: "Will the output lose resolution or quality?",

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { initializePaddle, type Paddle } from "@paddle/paddle-js";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { formatLkr, FREE_DAILY_CREDITS, PLANS, type PlanKey } from "@/lib/credits";
@@ -16,55 +17,57 @@ type Billing = "month" | "year";
  * side by country) and, for Paddle, what Paddle.js needs. */
 type CheckoutConfig = {
   gateway: "payments_lk" | "paddle" | null;
-  paddle: { clientToken: string; environment: "sandbox" | "production"; customerId: string | null } | null;
+  paddle: {
+    clientToken: string;
+    environment: "sandbox" | "production";
+    customerId: string | null;
+    /** ISO country from the edge's geo header; null lets Paddle detect it from the IP. */
+    country: string | null;
+    priceIds: Partial<Record<PlanKey, string>>;
+  } | null;
 };
 
-type PaddleJs = {
-  Environment: { set(env: "sandbox"): void };
-  Initialize(options: { token: string; pwCustomer?: { id: string } }): void;
-  Checkout: {
-    open(options: {
-      transactionId: string;
-      customer?: { email: string };
-      settings?: { displayMode?: "overlay"; successUrl?: string };
-    }): void;
-  };
-};
+let paddleLoad: Promise<Paddle> | null = null;
 
-declare global {
-  interface Window {
-    Paddle?: PaddleJs;
-  }
+/** Loads and initializes Paddle.js once per page, in the environment the
+ * server names (never defaulted here). pwCustomer is the signed-in user's
+ * Paddle customer ID (ctm_...), for Paddle Retain - never our own user id
+ * or email. */
+function loadPaddle(config: NonNullable<CheckoutConfig["paddle"]>): Promise<Paddle> {
+  paddleLoad ??= initializePaddle({
+    environment: config.environment,
+    token: config.clientToken,
+    ...(config.customerId ? { pwCustomer: { id: config.customerId } } : {}),
+  }).then(
+    (paddle) => {
+      if (!paddle) throw new Error("Paddle.js did not load.");
+      return paddle;
+    },
+    () => {
+      throw new Error("Could not load the checkout. Check your connection or ad blocker and try again.");
+    }
+  );
+  paddleLoad.catch(() => (paddleLoad = null));
+  return paddleLoad;
 }
 
-let paddleLoad: Promise<PaddleJs> | null = null;
-
-/** Loads and initializes Paddle.js once per page. Sandbox is set only for a
- * sandbox token; live is Paddle.js's default. pwCustomer is the signed-in
- * user's Paddle customer ID (ctm_...), for Paddle Retain - never our own
- * user id or email. */
-function loadPaddle(config: NonNullable<CheckoutConfig["paddle"]>): Promise<PaddleJs> {
-  paddleLoad ??= new Promise<PaddleJs>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://cdn.paddle.com/paddle/v2/paddle.js";
-    script.async = true;
-    script.onload = () => {
-      const paddle = window.Paddle;
-      if (!paddle) return reject(new Error("Paddle.js did not load."));
-      if (config.environment === "sandbox") paddle.Environment.set("sandbox");
-      paddle.Initialize({
-        token: config.clientToken,
-        ...(config.customerId ? { pwCustomer: { id: config.customerId } } : {}),
-      });
-      resolve(paddle);
-    };
-    script.onerror = () => {
-      paddleLoad = null;
-      reject(new Error("Could not load the checkout. Check your connection or ad blocker and try again."));
-    };
-    document.head.appendChild(script);
+/** Each plan's price as Paddle shows it in the visitor's country (local
+ * currency and tax), keyed by plan. Paddle's own formatted strings, shown
+ * as is - no price math or reformatting here. */
+async function localizedPrices(config: NonNullable<CheckoutConfig["paddle"]>): Promise<Partial<Record<PlanKey, string>>> {
+  const byPrice = Object.entries(config.priceIds) as [PlanKey, string][];
+  if (byPrice.length === 0) return {};
+  const paddle = await loadPaddle(config);
+  const preview = await paddle.PricePreview({
+    items: byPrice.map(([, priceId]) => ({ priceId, quantity: 1 })),
+    ...(config.country ? { address: { countryCode: config.country } } : {}),
   });
-  return paddleLoad;
+  const totals: Partial<Record<PlanKey, string>> = {};
+  for (const item of preview.data.details.lineItems) {
+    const plan = byPrice.find(([, id]) => id === item.price.id)?.[0];
+    if (plan) totals[plan] = item.formattedTotals.total;
+  }
+  return totals;
 }
 
 /** While online checkout is being set up, buyers message us on WhatsApp
@@ -143,7 +146,7 @@ const CREDIT_PACKS: PlanKey[] = ["creator", "payg"];
 const COMPARISON: { label: string; values: Record<Tier, string | boolean> }[] = [
   { label: "Trim, split, reorder, speed", values: { free: true, lite: true, starter: true, pro: true } },
   { label: "Text, stickers, images, audio tracks", values: { free: true, lite: true, starter: true, pro: true } },
-  { label: "Canvas sizes for YouTube, Shorts, Reels", values: { free: true, lite: true, starter: true, pro: true } },
+  { label: "Landscape, vertical and square canvas sizes", values: { free: true, lite: true, starter: true, pro: true } },
   { label: "Fade, Crossfade, Dip to Black transitions", values: { free: true, lite: true, starter: true, pro: true } },
   { label: "Slide, Zoom, Blur, Dip to White transitions", values: { free: false, lite: true, starter: true, pro: true } },
   { label: "Filters", values: { free: "4 basic", lite: "All 10", starter: "All 10", pro: "All 10" } },
@@ -186,6 +189,7 @@ export default function PricingClient() {
   const [currentTier, setCurrentTier] = useState<Tier | null>(null);
   const [checkoutConfig, setCheckoutConfig] = useState<CheckoutConfig | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [localPrices, setLocalPrices] = useState<Partial<Record<PlanKey, string>>>({});
   const showLkr = checkoutConfig?.gateway !== "paddle";
   const manualPayments = MANUAL_PAYMENTS_FLAG || checkoutConfig?.gateway === null;
 
@@ -209,7 +213,8 @@ export default function PricingClient() {
         .then((c: CheckoutConfig | null) => {
           if (!c) return;
           setCheckoutConfig(c);
-          if (c.paddle) loadPaddle(c.paddle).catch(() => {});
+          // Until the preview answers (or if it fails), cards show the USD list price.
+          if (c.paddle) localizedPrices(c.paddle).then(setLocalPrices).catch(() => {});
         })
         .catch(() => {});
       if (signedIn) {
@@ -221,18 +226,10 @@ export default function PricingClient() {
     });
   }, []);
 
-  // Payments.lk (and Paddle's successUrl) bounces back here with ?success=1&plan=<key> after a
-  // completed hosted checkout (see successUrl in /api/checkout). The
-  // webhook is still the source of truth for actually granting credits -
-  // this only marks the funnel's purchase step and never touches billing
-  // state. The query string is stripped right after so a refresh/bookmark
-  // of this URL can't re-fire it.
+  // A canceled Payments.lk checkout bounces back here with ?canceled=1
+  // (successful ones land on /welcome). Stripped so a bookmark stays clean.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("success") === "1") {
-      trackEvent("purchase_completed", { plan: params.get("plan") ?? undefined });
-      window.history.replaceState(null, "", window.location.pathname);
-    } else if (params.get("canceled") === "1") {
+    if (new URLSearchParams(window.location.search).get("canceled") === "1") {
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, []);
@@ -271,7 +268,7 @@ export default function PricingClient() {
         paddle.Checkout.open({
           transactionId: data.paddle.transactionId,
           ...(data.paddle.email ? { customer: { email: data.paddle.email } } : {}),
-          settings: { displayMode: "overlay", successUrl: data.paddle.successUrl },
+          settings: { displayMode: "overlay", variant: "one-page", successUrl: data.paddle.successUrl },
         });
         setLoading(null);
         return;
@@ -378,7 +375,9 @@ export default function PricingClient() {
                   </div>
 
                   <div className="mt-4">
-                    <span className="font-mono text-3xl font-extrabold text-foreground">{plan ? plan.priceLabel : "$0"}</span>
+                    <span className="font-mono text-3xl font-extrabold text-foreground">
+                      {key && plan ? (localPrices[key] ?? plan.priceLabel) : "$0"}
+                    </span>
                     <span className="text-xs text-muted"> / {plan ? plan.period : "forever"}</span>
                     {plan && (
                       <p className="mt-1 text-[11px] text-muted">
@@ -493,7 +492,7 @@ export default function PricingClient() {
                   <div>
                     <p className="text-sm font-bold text-foreground">{pack.label}</p>
                     <p className="mt-0.5 text-xs text-muted">
-                      {pack.credits} AI credits · {pack.priceLabel}
+                      {pack.credits} AI credits · {localPrices[key] ?? pack.priceLabel}
                       {showLkr && ` (${formatLkr(pack.amountCents)})`}
                     </p>
                   </div>

@@ -39,7 +39,7 @@ const features = [
   },
   {
     title: "Any aspect ratio",
-    desc: "Turn one video into 16:9, 9:16 for Shorts, TikTok and Reels, 1:1 or 4:5, with fit or fill and a color, gradient, blurred or image background.",
+    desc: "Turn one video into 16:9, 9:16 vertical, 1:1 or 4:5, with fit or fill and a color, gradient, blurred or image background.",
   },
   ...(AI_CLEANUP_ENABLED
     ? [
@@ -113,7 +113,7 @@ const jsonLd = {
         "Stickers and image overlays with position, size, rotation, opacity, timing and layer order",
         "Music and audio tracks with volume, fades and audio extraction",
         "Filters, color adjustments and timed effects",
-        "Canvas presets for YouTube, Shorts, TikTok, Reels and Instagram",
+        "Canvas presets for landscape, vertical, square and portrait video",
         ...(AI_CLEANUP_ENABLED ? ["AI removal of unwanted objects on a selected clip"] : []),
         "Export MP4 at the original aspect ratio and frame rate",
       ],

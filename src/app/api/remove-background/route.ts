@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
 
     const formData = await request.formData();
     // Hard-set, ignoring whatever the client sent - anonymous callers only
-    // ever get the downscaled preview (matches remove.bg's free-tier
+    // ever get the downscaled preview (a common free-tier
     // resolution cap; see BG_REMOVE_PREVIEW_MAX_MEGAPIXELS in the backend's
     // config.py). Signed-in callers below never set this, so they always
     // get full resolution regardless of plan - same "sign in unlocks it"

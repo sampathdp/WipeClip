@@ -197,8 +197,8 @@ export default function AiCleanupDialog({
               className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
             />
             <span>
-              I shot this video or have the rights to edit it, and the area I mark is not a watermark, logo or other
-              ownership or copyright mark.{" "}
+              I shot this video or have the rights to edit it, and I&apos;m not using this to alter anyone else&apos;s
+              ownership or copyright marks.{" "}
               <Link href="/terms" className="underline" target="_blank">
                 Terms
               </Link>

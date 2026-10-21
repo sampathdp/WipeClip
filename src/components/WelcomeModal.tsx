@@ -9,7 +9,7 @@ const OPEN_DELAY_MS = 1200;
 
 const highlights = [
   {
-    title: "Free editor, no watermark",
+    title: "Free editor, clean exports",
     desc: "Trim, split, transitions, text, stickers and music. Free exports carry no WipeClip mark.",
     icon: <path d="M4 7V4h3M17 4h3v3M20 17v3h-3M7 20H4v-3M9 12l2 2 4-4" />,
   },

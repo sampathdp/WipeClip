@@ -92,7 +92,9 @@ keys are set, everyone gets Payments.lk. Set `CHECKOUT_COUNTRY=US` (or
    in `PADDLE_PRICE_<PLAN>` (e.g. `PADDLE_PRICE_STARTER_YEARLY`).
 2. Developer tools -> Authentication: create an API key
    (`pdl_sdbx_apikey_...`, needs transaction write) into `PADDLE_API_KEY`,
-   and a client-side token (`test_...`) into `PADDLE_CLIENT_TOKEN`.
+   and a client-side token (`test_...`) into `PADDLE_CLIENT_TOKEN`. Set
+   `PADDLE_ENVIRONMENT=sandbox`; it is required once any Paddle key is set
+   and must match both key prefixes, or the app errors instead of guessing.
 3. Developer tools -> Notifications: add a destination for
    `https://<your-domain>/api/webhooks/paddle` with the
    `transaction.completed` event. Copy its secret key into
@@ -106,15 +108,19 @@ keys are set, everyone gets Payments.lk. Set `CHECKOUT_COUNTRY=US` (or
 6. Checkout -> Checkout settings: set the default payment link to your
    pricing page (sandbox accepts localhost).
 7. Test: with `CHECKOUT_COUNTRY=US`, sign in, open `/pricing`, buy a plan.
-   Paddle's overlay opens; pay with card `4242 4242 4242 4242`, any future
-   expiry, CVC `100`. The webhook should credit the account, set the order
-   to `paid` and record `profiles.paddle_customer_id`.
+   The cards show Paddle's localized prices (`Paddle.PricePreview`), and
+   Paddle's one-page overlay opens; pay with card `4242 4242 4242 4242`,
+   any future expiry, CVC `100`. It redirects to `/welcome`. The webhook
+   should credit the account, set the order to `paid` (recording the
+   currency and total actually charged) and record
+   `profiles.paddle_customer_id`.
 
 Going live: once sandbox passes, create the same products and prices in
 the live account and swap every `PADDLE_*` value for its live counterpart
-(`pdl_live_apikey_...`, `live_...`, the live destination's secret, live
-`pri_...` IDs). The key prefixes switch the API base and Paddle.js
-environment, so no code changes. Live checkout also needs an approved
+(`PADDLE_ENVIRONMENT=production`, `pdl_live_apikey_...`, `live_...`, the
+live destination's secret, live `pri_...` IDs) - no code changes. Country
+price overrides added to a price in Paddle appear on `/pricing`
+automatically. Live checkout also needs an approved
 domain and a default payment link on that domain.
 
 Paddle prices are one-time, matching the Payments.lk passes, so

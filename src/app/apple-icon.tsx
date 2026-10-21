@@ -47,7 +47,7 @@ export default function AppleIcon() {
             marginTop: -8,
           }}
         >
-          U
+          W
         </div>
 
         {/* Star Sparkle */}

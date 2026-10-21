@@ -3,9 +3,10 @@ import type { PlanKey } from "./credits";
 
 // Minimal Paddle Billing REST client (https://developer.paddle.com/api-reference).
 // Plain fetch, like src/lib/paymentsLk.ts. The keys pick the environment:
-// a `pdl_sdbx_` API key talks to sandbox-api.paddle.com and a `test_` client
-// token runs Paddle.js in sandbox; `pdl_live_` / `live_` are live. Going live
-// is swapping env vars (keys, webhook secret, price IDs) - no code changes.
+// PADDLE_ENVIRONMENT picks the environment (sandbox-api.paddle.com or
+// api.paddle.com) and must agree with the keys: `pdl_sdbx_` / `test_` are
+// sandbox, `pdl_live_` / `live_` are live. Going live is swapping env vars
+// (environment, keys, webhook secret, price IDs) - no code changes.
 
 /** Rejects a webhook whose timestamp is further than this from now (replay guard). */
 const WEBHOOK_TOLERANCE_SECONDS = 300;
@@ -19,6 +20,8 @@ export interface PaddleTransaction {
   id: string;
   status: "draft" | "ready" | "billed" | "paid" | "completed" | "canceled" | "past_due";
   customer_id: string | null;
+  currency_code?: string;
+  details?: { totals?: { grand_total?: string } } | null;
   custom_data: Record<string, unknown> | null;
   items: { price?: { id: string } | null; price_id?: string; quantity: number }[];
 }
@@ -64,20 +67,26 @@ function clientTokenEnvironment(token: string): PaddleEnvironment {
   return token.startsWith("test_") ? "sandbox" : "production";
 }
 
-/** The environment Paddle runs in, or null if Paddle isn't (correctly)
- * configured. A sandbox API key with a live client token (or the reverse)
- * would create transactions Paddle.js can't open, so that counts as not
- * configured rather than failing at the customer's checkout. */
+/** The environment Paddle runs in, or null if Paddle isn't configured (no
+ * keys at all - everyone gets Payments.lk). PADDLE_ENVIRONMENT must name it
+ * explicitly and match both key prefixes: once any key is set, a missing or
+ * mismatched value throws instead of guessing, so the site can never run
+ * against the wrong Paddle account. */
 export function paddleEnvironment(): PaddleEnvironment | null {
   const apiKey = getApiKey();
   const token = getClientToken();
-  if (!apiKey || !token || !getWebhookSecret()) return null;
-  const server = apiKeyEnvironment(apiKey);
-  if (server !== clientTokenEnvironment(token)) {
-    console.error(`Paddle misconfigured: PADDLE_API_KEY is ${server} but PADDLE_CLIENT_TOKEN is not.`);
-    return null;
+  if (!apiKey && !token) return null;
+  const declared = env("PADDLE_ENVIRONMENT");
+  if (declared !== "sandbox" && declared !== "production") {
+    throw new Error(`PADDLE_ENVIRONMENT must be "sandbox" or "production" (got ${declared ? `"${declared}"` : "nothing"}).`);
   }
-  return server;
+  if (!apiKey || !token || !getWebhookSecret()) {
+    throw new Error("Paddle is half configured: set PADDLE_API_KEY, PADDLE_CLIENT_TOKEN and PADDLE_WEBHOOK_SECRET together.");
+  }
+  if (apiKeyEnvironment(apiKey) !== declared || clientTokenEnvironment(token) !== declared) {
+    throw new Error(`PADDLE_ENVIRONMENT is ${declared} but PADDLE_API_KEY or PADDLE_CLIENT_TOKEN belongs to the other environment.`);
+  }
+  return declared;
 }
 
 function apiBase(environment: PaddleEnvironment): string {

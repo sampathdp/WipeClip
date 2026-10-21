@@ -1,14 +1,13 @@
-"""Video watermark removal/replacement via ffmpeg (+ OpenCV for removal).
+"""Video region reconstruction via ffmpeg (+ OpenCV for the inpainting).
 
 Unlike the image pipeline (which works on decoded pixel arrays throughout),
 most of this module keeps video out-of-process: OpenCV reads a probe frame
 + metadata, ffmpeg does the actual re-encode. Frame-by-frame decode/
-process/encode in Python doesn't scale to minutes-long video, so
-replace_logo() (a straight overlay compositing job) stays a single native
-ffmpeg pass, same as this file always did.
+process/encode in Python doesn't scale to minutes-long video, so ffmpeg
+does every pass it can natively.
 
-remove_logo() is the exception: reconstructing the covered region well
-enough (see WATERMARK_FSR_* in config.py) needs OpenCV-contrib's
+reconstruct_region() is the exception: reconstructing the covered region
+well enough (see REGION_FSR_* in config.py) needs OpenCV-contrib's
 exemplar-based FSR inpainting run per-frame, which ffmpeg has no
 equivalent for. That part does pay the frame-by-frame Python cost -
 measured at roughly 6.5x realtime end-to-end - which is real but still a
@@ -17,15 +16,8 @@ tried first and visibly smeared or blurred, which is exactly the defect
 this exists to avoid. "Far too slow" would describe doing this for
 everything, not for one small region on one video endpoint.
 
-The watermark region is user-confirmed, not user-required: there's no
-per-platform "Gemini icon" template (Google doesn't publish a reference
-asset, and its position/scale isn't guaranteed constant across
-resolutions), but detect_watermark_candidates() below suggests a region
-via temporal-static-region detection - reliable for *any* fixed corner/
-overlay logo, not just a specific one - and the frontend prefills
-RegionSelector with the top suggestion. The user can still drag to
-relocate/resize or ignore it entirely; nothing is ever auto-applied
-without that confirmation.
+The region is always marked by the user on their own footage; nothing is
+detected or applied automatically.
 """
 
 from __future__ import annotations
@@ -45,23 +37,14 @@ from app.config import (
     JOB_THREADS,
     VIDEO_ENCODE_CRF,
     VIDEO_ENCODE_PRESET,
-    WATERMARK_DETECT_BAR_FLATNESS_THRESHOLD,
-    WATERMARK_DETECT_BOX_PADDING_PX,
-    WATERMARK_DETECT_LOW_VAR_FRACTION,
-    WATERMARK_DETECT_MAX_BLOB_AREA_FRACTION,
-    WATERMARK_DETECT_MAX_CANDIDATES,
-    WATERMARK_DETECT_MIN_BLOB_AREA_FRACTION,
-    WATERMARK_DETECT_MIN_MOTION,
-    WATERMARK_DETECT_MIN_SOLIDITY,
-    WATERMARK_DETECT_SAMPLE_FRAMES,
-    WATERMARK_FLOW_CONTEXT_PAD_PX,
-    WATERMARK_FLOW_ESTIMATION_SCALE,
-    WATERMARK_FLOW_SEARCH_RADIUS_FRAMES,
-    WATERMARK_FSR_CONTEXT_PAD_PX,
-    WATERMARK_FSR_SCALE,
-    WATERMARK_INPAINT_FSR_MAX_REGION_PX,
-    WATERMARK_PATCH_SHARPEN_AMOUNT,
-    WATERMARK_PATCH_SHARPEN_KSIZE,
+    REGION_FLOW_CONTEXT_PAD_PX,
+    REGION_FLOW_ESTIMATION_SCALE,
+    REGION_FLOW_SEARCH_RADIUS_FRAMES,
+    REGION_FSR_CONTEXT_PAD_PX,
+    REGION_FSR_SCALE,
+    REGION_INPAINT_FSR_MAX_REGION_PX,
+    REGION_PATCH_SHARPEN_AMOUNT,
+    REGION_PATCH_SHARPEN_KSIZE,
 )
 
 
@@ -177,177 +160,6 @@ def sample_frames(path: str, count: int) -> list[np.ndarray]:
     return frames
 
 
-@dataclass
-class WatermarkCandidate:
-    x: int
-    y: int
-    w: int
-    h: int
-    confidence: float  # 0..1, how strongly static this region is relative
-                        # to the rest of the frame - not relative to other
-                        # candidates, so it stays meaningful even when only
-                        # one candidate comes back.
-
-
-def _iou(a, b) -> float:
-    """Intersection-over-union of two x/y/w/h boxes."""
-    ax0, ay0, ax1, ay1 = a.x, a.y, a.x + a.w, a.y + a.h
-    bx0, by0, bx1, by1 = b.x, b.y, b.x + b.w, b.y + b.h
-    iw = max(0, min(ax1, bx1) - max(ax0, bx0))
-    ih = max(0, min(ay1, by1) - max(ay0, by0))
-    inter = iw * ih
-    if inter <= 0:
-        return 0.0
-    union = a.w * a.h + b.w * b.h - inter
-    return inter / union if union > 0 else 0.0
-
-
-def _edge_attached_run(is_flat: np.ndarray) -> np.ndarray:
-    """Marks the leading run from index 0 and the trailing run from the end
-    of `is_flat` (1-D bool) that are contiguously True - used to find
-    letterbox/pillarbox bars, which always start at a frame edge and run
-    inward until real content breaks the uniformity. A flat row/column in
-    the *middle* of the frame (plain sky, a wall) is left alone; only bars
-    actually touching an edge count.
-    """
-    mask = np.zeros_like(is_flat)
-    n = len(is_flat)
-    i = 0
-    while i < n and is_flat[i]:
-        mask[i] = True
-        i += 1
-    j = n - 1
-    while j >= 0 and is_flat[j]:
-        mask[j] = True
-        j -= 1
-    return mask
-
-
-def detect_watermark_candidates(path: str) -> tuple[list[WatermarkCandidate], int, int]:
-    """Suggests likely watermark/logo region(s) by finding areas that stay
-    pixel-static across sampled frames while the rest of the frame moves -
-    the same signature a fixed corner/overlay logo has, regardless of what
-    it actually looks like. Unlike a template matcher this needs no
-    reference asset per platform, and unlike the "just check the corners"
-    heuristic it also catches centered or non-corner overlays.
-
-    This is a *suggestion* for the frontend to prefill RegionSelector with -
-    it never runs delogo/overlay itself. Same suggest-only contract as the
-    image editor's detect_artifact_candidates(): numbers only, human
-    confirms or redraws before anything is applied.
-
-    Deliberately conservative: a genuinely static-camera clip (talking
-    head, tripod shot) has low motion *everywhere*, which would make the
-    whole frame look like "the watermark" if compared to nothing. So the
-    temporal side of this only fires when the clip has a clear split
-    between a small low-variance region and a higher-variance rest (gated
-    by WATERMARK_DETECT_MIN_MOTION on the frame's median motion) - no clear
-    split means no *temporal* candidates, rather than a bogus full-frame
-    box the user could accidentally accept over real content. Letterbox/pillarbox bars are
-    excluded explicitly from the temporal side: they're just as
-    pixel-static as a logo but span nearly the full width or height, which
-    no actual corner/overlay logo does.
-
-    Returns:
-        (candidates, width, height) - width/height are the sampled frames'
-        dimensions, 0 if fewer than 3 frames could be read.
-
-    Raises:
-        ValueError: if no frames could be read (mirrors probe_video).
-    """
-    frames = sample_frames(path, WATERMARK_DETECT_SAMPLE_FRAMES)
-    if len(frames) < 3:
-        return [], 0, 0
-
-    h, w = frames[0].shape[:2]
-    gray_stack = np.stack(
-        [cv2.cvtColor(cv2.resize(f, (w, h)), cv2.COLOR_BGR2GRAY).astype(np.float32) for f in frames]
-    )
-    pixel_std = gray_stack.std(axis=0)
-
-    median_motion = float(np.median(pixel_std))
-
-    # Below WATERMARK_DETECT_MIN_MOTION there isn't enough motion anywhere
-    # to trust "this patch is more static than normal" - but that only
-    # disables the *temporal* candidates below, not logo template matching
-    # further down, which works off a single frame and needs no motion
-    # signal at all. Gating both on this check was a real bug: a clip
-    # that's mostly-static everywhere (title card, screen recording, a
-    # test pattern) would skip logo matching too and return nothing even
-    # when a known logo was sitting right there in the one frame checked.
-    temporal_candidates: list[WatermarkCandidate] = []
-    if median_motion >= WATERMARK_DETECT_MIN_MOTION:
-        low_variance = pixel_std < median_motion * WATERMARK_DETECT_LOW_VAR_FRACTION
-
-        # Exclude letterbox/pillarbox bars *before* connected-components, not
-        # after: a corner logo is often placed inside such a bar, so if left in,
-        # the logo's low-variance blob merges with the bar's into one blob that
-        # then looks exactly like a bar and gets discarded along with it. A
-        # bar is spatially uniform (flat) across its full width/height and
-        # touches a frame edge; a logo breaks that flatness, which breaks the
-        # edge-attached run right where the logo starts - so this only strips
-        # the actual bar pixels, the logo itself stays a candidate.
-        mean_frame = gray_stack.mean(axis=0)
-        row_is_flat = mean_frame.std(axis=1) < WATERMARK_DETECT_BAR_FLATNESS_THRESHOLD
-        col_is_flat = mean_frame.std(axis=0) < WATERMARK_DETECT_BAR_FLATNESS_THRESHOLD
-        bar_rows = _edge_attached_run(row_is_flat)
-        bar_cols = _edge_attached_run(col_is_flat)
-        low_variance &= ~(bar_rows[:, None] | bar_cols[None, :])
-
-        low_variance = low_variance.astype(np.uint8)
-        # Morphological cleanup before connected-components, same purpose as
-        # the image detector's top-hat: strip single-pixel compression-noise
-        # specks, then bridge small gaps within one logo's own glyphs/edges.
-        low_variance = cv2.morphologyEx(low_variance, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-        low_variance = cv2.morphologyEx(low_variance, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
-
-        frame_area = h * w
-        min_area = frame_area * WATERMARK_DETECT_MIN_BLOB_AREA_FRACTION
-        max_area = frame_area * WATERMARK_DETECT_MAX_BLOB_AREA_FRACTION
-
-        n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(low_variance, connectivity=8)
-
-        scored: list[WatermarkCandidate] = []
-        for label in range(1, n_labels):
-            area = stats[label, cv2.CC_STAT_AREA]
-            if area < min_area or area > max_area:
-                continue
-            bx = stats[label, cv2.CC_STAT_LEFT]
-            by = stats[label, cv2.CC_STAT_TOP]
-            bw = stats[label, cv2.CC_STAT_WIDTH]
-            bh = stats[label, cv2.CC_STAT_HEIGHT]
-
-            # Letterbox/pillarbox bars are pixel-static too, but span nearly
-            # the full width or height - no real overlay logo does that.
-            if bw > 0.9 * w and bh < 0.2 * h:
-                continue
-            if bh > 0.9 * h and bw < 0.2 * w:
-                continue
-
-            solidity = area / float(bw * bh)
-            if solidity < WATERMARK_DETECT_MIN_SOLIDITY:
-                continue
-
-            blob_mask = labels == label
-            mean_std = float(pixel_std[blob_mask].mean())
-            # How much more static this region is than the frame's typical
-            # motion - near 1.0 means near-perfectly static against real
-            # motion elsewhere, near 0.0 means barely distinguishable from it.
-            confidence = round(float(np.clip((median_motion - mean_std) / median_motion, 0.0, 1.0)), 3)
-
-            px0 = int(max(0, bx - WATERMARK_DETECT_BOX_PADDING_PX))
-            py0 = int(max(0, by - WATERMARK_DETECT_BOX_PADDING_PX))
-            px1 = int(min(w, bx + bw + WATERMARK_DETECT_BOX_PADDING_PX))
-            py1 = int(min(h, by + bh + WATERMARK_DETECT_BOX_PADDING_PX))
-
-            scored.append(WatermarkCandidate(x=px0, y=py0, w=px1 - px0, h=py1 - py0, confidence=confidence))
-
-        scored.sort(key=lambda c: -c.confidence)
-        temporal_candidates = scored[:WATERMARK_DETECT_MAX_CANDIDATES]
-
-    return temporal_candidates, w, h
-
-
 async def _run_ffmpeg(args: list[str]) -> None:
     # Deliberately NOT asyncio.create_subprocess_exec: on Windows that
     # requires the ProactorEventLoop, and uvicorn's --reload supervisor
@@ -380,21 +192,21 @@ async def _run_ffmpeg(args: list[str]) -> None:
 def _fsr_inpaint_region(frame: np.ndarray, x: int, y: int, w: int, h: int) -> np.ndarray:
     """Reconstructs frame[y:y+h, x:x+w] with xphoto's FSR inpainting,
     restricted to a small padded crop around the region (all the context
-    it actually needs - see WATERMARK_FSR_CONTEXT_PAD_PX) and run at a
-    reduced working resolution (WATERMARK_FSR_SCALE) for speed, then
+    it actually needs - see REGION_FSR_CONTEXT_PAD_PX) and run at a
+    reduced working resolution (REGION_FSR_SCALE) for speed, then
     upscaled back for the composite. Only the exact (x, y, w, h) pixels in
     the returned frame differ from the input - everything else, including
     the rest of the padded crop, is untouched.
 
     FSR cost climbs steeply with region area; _inpaint_region() sends a box
-    past WATERMARK_INPAINT_FSR_MAX_REGION_PX to _telea_inpaint_region()
-    instead, so this only ever runs on watermark-sized regions.
+    past REGION_INPAINT_FSR_MAX_REGION_PX to _telea_inpaint_region()
+    instead, so this only ever runs on small regions.
     """
     fh, fw = frame.shape[:2]
-    cx0 = max(0, x - WATERMARK_FSR_CONTEXT_PAD_PX)
-    cy0 = max(0, y - WATERMARK_FSR_CONTEXT_PAD_PX)
-    cx1 = min(fw, x + w + WATERMARK_FSR_CONTEXT_PAD_PX)
-    cy1 = min(fh, y + h + WATERMARK_FSR_CONTEXT_PAD_PX)
+    cx0 = max(0, x - REGION_FSR_CONTEXT_PAD_PX)
+    cy0 = max(0, y - REGION_FSR_CONTEXT_PAD_PX)
+    cx1 = min(fw, x + w + REGION_FSR_CONTEXT_PAD_PX)
+    cy1 = min(fh, y + h + REGION_FSR_CONTEXT_PAD_PX)
     crop = frame[cy0:cy1, cx0:cx1]
 
     # xphoto's mask convention is inverted from cv2.inpaint's: non-zero
@@ -402,7 +214,7 @@ def _fsr_inpaint_region(frame: np.ndarray, x: int, y: int, w: int, h: int) -> np
     mask = np.full(crop.shape[:2], 255, np.uint8)
     mask[y - cy0 : y - cy0 + h, x - cx0 : x - cx0 + w] = 0
 
-    small = cv2.resize(crop, None, fx=WATERMARK_FSR_SCALE, fy=WATERMARK_FSR_SCALE, interpolation=cv2.INTER_AREA)
+    small = cv2.resize(crop, None, fx=REGION_FSR_SCALE, fy=REGION_FSR_SCALE, interpolation=cv2.INTER_AREA)
     small_mask = cv2.resize(mask, (small.shape[1], small.shape[0]), interpolation=cv2.INTER_NEAREST)
     reconstructed_small = np.zeros_like(small)
     cv2.xphoto.inpaint(small, small_mask, reconstructed_small, cv2.xphoto.INPAINT_FSR_FAST)
@@ -419,14 +231,14 @@ def _telea_inpaint_region(frame: np.ndarray, x: int, y: int, w: int, h: int) -> 
     """Diffusion (Telea) fill for the region, on the same padded crop as
     _fsr_inpaint_region. Softer than FSR but near-instant - used only for
     boxes too large for FSR to finish in reasonable time or to fill any
-    sharper (see _inpaint_region / WATERMARK_INPAINT_FSR_MAX_REGION_PX).
+    sharper (see _inpaint_region / REGION_INPAINT_FSR_MAX_REGION_PX).
     Same contract: only the (x, y, w, h) pixels of the returned frame differ.
     """
     fh, fw = frame.shape[:2]
-    cx0 = max(0, x - WATERMARK_FSR_CONTEXT_PAD_PX)
-    cy0 = max(0, y - WATERMARK_FSR_CONTEXT_PAD_PX)
-    cx1 = min(fw, x + w + WATERMARK_FSR_CONTEXT_PAD_PX)
-    cy1 = min(fh, y + h + WATERMARK_FSR_CONTEXT_PAD_PX)
+    cx0 = max(0, x - REGION_FSR_CONTEXT_PAD_PX)
+    cy0 = max(0, y - REGION_FSR_CONTEXT_PAD_PX)
+    cx1 = min(fw, x + w + REGION_FSR_CONTEXT_PAD_PX)
+    cy1 = min(fh, y + h + REGION_FSR_CONTEXT_PAD_PX)
     crop = frame[cy0:cy1, cx0:cx1]
 
     # cv2.inpaint's mask convention: non-zero means "reconstruct this".
@@ -442,11 +254,11 @@ def _telea_inpaint_region(frame: np.ndarray, x: int, y: int, w: int, h: int) -> 
 def _inpaint_region(frame: np.ndarray, x: int, y: int, w: int, h: int) -> np.ndarray:
     """Reconstructs frame[y:y+h, x:x+w], picking the method by region size:
     FSR (exemplar-based, sharp, cost climbs steeply with area) for a
-    watermark-sized box, Telea (diffusion, soft but near-instant) once the
-    box is larger than WATERMARK_INPAINT_FSR_MAX_REGION_PX - where FSR would
+    small box, Telea (diffusion, soft but near-instant) once the
+    box is larger than REGION_INPAINT_FSR_MAX_REGION_PX - where FSR would
     cost minutes per clip without looking any sharper.
     """
-    if w * h > WATERMARK_INPAINT_FSR_MAX_REGION_PX:
+    if w * h > REGION_INPAINT_FSR_MAX_REGION_PX:
         return _telea_inpaint_region(frame, x, y, w, h)
     return _fsr_inpaint_region(frame, x, y, w, h)
 
@@ -457,9 +269,9 @@ def _flow_assisted_inpaint_region(
     """Reconstructs frame[y:y+h, x:x+w] by recovering real pixels from
     `neighbor_frames` wherever dense optical flow shows the region's
     underlying content was visible there (camera pan/scroll moved it out
-    from under the fixed watermark position at some nearby point in time),
+    from under the fixed object position at some nearby point in time),
     falling back to _inpaint_region for whatever pixels no neighbor
-    ever uncovers. See WATERMARK_FLOW_* in config.py for the full
+    ever uncovers. See REGION_FLOW_* in config.py for the full
     rationale and tuning knobs.
 
     `neighbor_frames` is searched in the order given and stops early once
@@ -469,7 +281,7 @@ def _flow_assisted_inpaint_region(
     reliable) and are more likely to match the center frame's lighting.
     """
     fh, fw = center_frame.shape[:2]
-    pad = WATERMARK_FLOW_CONTEXT_PAD_PX
+    pad = REGION_FLOW_CONTEXT_PAD_PX
     cx0 = max(0, x - pad)
     cy0 = max(0, y - pad)
     cx1 = min(fw, x + w + pad)
@@ -486,7 +298,7 @@ def _flow_assisted_inpaint_region(
     recovered = np.zeros_like(center_crop)
     filled = np.zeros((crop_h, crop_w), dtype=bool)
 
-    scale = WATERMARK_FLOW_ESTIMATION_SCALE
+    scale = REGION_FLOW_ESTIMATION_SCALE
     small_center_gray = cv2.resize(center_gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
 
     grid_y, grid_x = np.mgrid[0:crop_h, 0:crop_w].astype(np.float32)
@@ -516,7 +328,7 @@ def _flow_assisted_inpaint_region(
         # Only trust a region pixel's sample if the neighbor location it
         # maps to is (a) inside the crop, and (b) itself NOT inside the
         # region - i.e. genuinely uncovered content there, not more
-        # watermark. cv2.BORDER_CONSTANT would otherwise make an
+        # covered content. cv2.BORDER_CONSTANT would otherwise make an
         # out-of-bounds map look like a valid (black) sample.
         in_bounds = (map_x >= 0) & (map_x < crop_w) & (map_y >= 0) & (map_y < crop_h)
         outside_region = ~((map_x >= rx0) & (map_x < rx1) & (map_y >= ry0) & (map_y < ry1))
@@ -545,7 +357,7 @@ def _inpaint_region_to_temp_video(input_path: str, x: int, y: int, w: int, h: in
     """Decodes every frame, reconstructs the fixed region at (x, y, w, h)
     with _inpaint_region(), and writes just that reconstructed w*h
     patch - not the whole frame - to a new silent, lossless (FFV1) temp
-    video. remove_logo() composites the patch straight back onto the
+    video. reconstruct_region() composites the patch straight back onto the
     untouched original on the final pass, so:
       - nothing outside the box is ever decoded and re-encoded here (that
         was softening the entire picture, not only the region), and
@@ -586,11 +398,11 @@ def _inpaint_region_to_temp_video(input_path: str, x: int, y: int, w: int, h: in
 def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, h: int) -> str:
     """quality="pro" counterpart to _inpaint_region_to_temp_video(): same
     contract (silent lossless w*h patch video out, composited back onto the
-    original by remove_logo), but reconstructs each frame with
+    original by reconstruct_region), but reconstructs each frame with
     _flow_assisted_inpaint_region() instead of plain per-frame FSR.
 
     Streams through the video once, keeping a sliding buffer of at most
-    2*WATERMARK_FLOW_SEARCH_RADIUS_FRAMES+1 full decoded frames - bounded
+    2*REGION_FLOW_SEARCH_RADIUS_FRAMES+1 full decoded frames - bounded
     regardless of clip length, since a center frame is only finalized (and
     the oldest buffered frame dropped) once enough lookahead exists for it.
     A frame near either end of the clip simply gets fewer neighbors on
@@ -600,7 +412,7 @@ def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, 
         ValueError: if the file can't be opened as a video (mirrors
             probe_video/sample_frames).
     """
-    radius = WATERMARK_FLOW_SEARCH_RADIUS_FRAMES
+    radius = REGION_FLOW_SEARCH_RADIUS_FRAMES
 
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -665,7 +477,7 @@ def _inpaint_region_to_temp_video_flow(input_path: str, x: int, y: int, w: int, 
     return tmp_path
 
 
-async def remove_logo(
+async def reconstruct_region(
     input_path: str,
     output_path: str,
     x: int,
@@ -676,14 +488,14 @@ async def remove_logo(
     quality: str = "standard",
 ) -> None:
     """Reconstructs the given region with OpenCV-contrib's FSR inpainting,
-    run per-frame in Python (see WATERMARK_FSR_* in config.py for the full
+    run per-frame in Python (see REGION_FSR_* in config.py for the full
     story - in short, an exemplar/frequency-based method that finds
     well-matching real content instead of diffusing a smooth gradient,
-    which is what made ffmpeg's `delogo` and then plain Telea inpainting
+    which is what made ffmpeg's boundary interpolation and then plain Telea inpainting
     both still look soft on anything with real color texture). The
     per-frame pass writes only the reconstructed region to a lossless
     intermediate; a final ffmpeg pass sharpens that patch (see
-    WATERMARK_PATCH_SHARPEN_* - cosmetic contrast restoration) and
+    REGION_PATCH_SHARPEN_* - cosmetic contrast restoration) and
     composites it straight onto the untouched original, taking the
     original's audio and - crucially - its exact frame timing, so the
     result is the same length as the source and every pixel outside the
@@ -691,7 +503,7 @@ async def remove_logo(
 
     `quality="pro"` swaps the per-frame FSR pass for
     _inpaint_region_to_temp_video_flow's optical-flow-assisted
-    reconstruction (see WATERMARK_FLOW_* in config.py) - recovers real
+    reconstruction (see REGION_FLOW_* in config.py) - recovers real
     pixels where camera motion allows it, still falls back to plain FSR
     per-pixel wherever it can't.
 
@@ -715,9 +527,9 @@ async def remove_logo(
         # holds for the tail rather than the video ending early.
         overlay_label = "outv" if output_height is None else "ov"
         filter_complex = (
-            f"[1:v]unsharp=luma_msize_x={WATERMARK_PATCH_SHARPEN_KSIZE}:"
-            f"luma_msize_y={WATERMARK_PATCH_SHARPEN_KSIZE}:"
-            f"luma_amount={WATERMARK_PATCH_SHARPEN_AMOUNT}[patch];"
+            f"[1:v]unsharp=luma_msize_x={REGION_PATCH_SHARPEN_KSIZE}:"
+            f"luma_msize_y={REGION_PATCH_SHARPEN_KSIZE}:"
+            f"luma_amount={REGION_PATCH_SHARPEN_AMOUNT}[patch];"
             f"[0:v][patch]overlay=x={x}:y={y}:eof_action=repeat[{overlay_label}]"
         )
         if output_height is not None:
@@ -751,65 +563,3 @@ async def remove_logo(
         )
     finally:
         os.remove(tmp_path)
-
-
-async def replace_logo(
-    input_path: str,
-    output_path: str,
-    logo_path: str,
-    x: int,
-    y: int,
-    w: int,
-    h: int,
-    output_height: int | None = None,
-) -> None:
-    """Overlays `logo_path` into the given region for the full video
-    duration, scaled to fit inside (w, h) preserving its aspect ratio and
-    centered (never stretched/distorted).
-
-    Deliberately avoids the `pad` filter: padding the scaled logo out to an
-    exact (w, h) canvas before overlaying is the "obvious" way to center it,
-    but `scale ... force_original_aspect_ratio=decrease` can round its
-    output a pixel larger than the requested box for some aspect ratios
-    (most reliably reproduced with a square target), which makes a
-    fixed-size `pad` immediately downstream fail with "Padded dimensions
-    cannot be smaller than input dimensions". Centering via overlay's own
-    `overlay_w`/`overlay_h` expressions sidesteps the whole class of bug -
-    there's no second fixed-size target for the scaled output to mismatch.
-
-    `output_height` behaves as in `remove_logo`: applied after the overlay,
-    at the source resolution, never an upscale.
-    """
-    overlay_label = "outv" if output_height is None else "ov"
-    filter_complex = (
-        f"[1:v]format=rgba,scale=w={w}:h={h}:force_original_aspect_ratio=decrease[logo];"
-        f"[0:v][logo]overlay=x={x}+({w}-overlay_w)/2:y={y}+({h}-overlay_h)/2[{overlay_label}]"
-    )
-    if output_height is not None:
-        filter_complex += f";[{overlay_label}]scale=-2:{output_height}[outv]"
-    await _run_ffmpeg(
-        [
-            "-y",
-            "-i",
-            input_path,
-            "-i",
-            logo_path,
-            "-filter_complex",
-            filter_complex,
-            "-map",
-            "[outv]",
-            "-map",
-            "0:a?",
-            "-c:v",
-            "libx264",
-            "-preset",
-            VIDEO_ENCODE_PRESET,
-            "-crf",
-            str(VIDEO_ENCODE_CRF),
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "copy",
-            output_path,
-        ]
-    )

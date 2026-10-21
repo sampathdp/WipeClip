@@ -70,29 +70,22 @@ export default function Logo({
           opacity="0.45"
         />
 
-        {/* Central Geometric 'U' */}
+        {/* Central Geometric 'W' */}
         <path
-          d="M 21 21
-             L 27 21
-             L 27 37
-             C 27 41, 29 43, 32 43
-             C 35 43, 37 41, 37 37
-             L 37 25
-             L 43 25
-             L 43 37
-             C 43 45, 38 49, 32 49
-             C 26 49, 21 45, 21 37
-             Z"
-          fill="url(#logo-comp-brand)"
+          d="M 17 24 L 24 46 L 32 31 L 40 46 L 47 24"
+          stroke="url(#logo-comp-brand)"
+          strokeWidth="5.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
 
         {/* AI Sparkle */}
         <path
-          d="M 43 17
-             C 43.5 21, 44.5 22, 48 22.5
-             C 44.5 23, 43.5 24, 43 28
-             C 42.5 24, 41.5 23, 38 22.5
-             C 41.5 22, 42.5 21, 43 17
+          d="M 50 9.5
+             C 50.5 13.5, 51.5 14.5, 55 15
+             C 51.5 15.5, 50.5 16.5, 50 20.5
+             C 49.5 16.5, 48.5 15.5, 45 15
+             C 48.5 14.5, 49.5 13.5, 50 9.5
              Z"
           fill="#ffffff"
           className="animate-pulse"

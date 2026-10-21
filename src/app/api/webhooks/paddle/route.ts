@@ -86,9 +86,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  // The order was recorded in USD, but a buyer in a country with a local
+  // price override pays in that currency - keep what was actually charged.
+  const grandTotal = Number(txn.details?.totals?.grand_total);
   await supabase
     .from("payment_orders")
-    .update({ status: "paid", payment_id: txn.id, paid_at: new Date().toISOString() })
+    .update({
+      status: "paid",
+      payment_id: txn.id,
+      paid_at: new Date().toISOString(),
+      ...(txn.currency_code && Number.isInteger(grandTotal) ? { currency: txn.currency_code, amount_cents: grandTotal } : {}),
+    })
     .eq("id", order.id);
 
   // Remembered so later checkouts reuse the same Paddle customer and

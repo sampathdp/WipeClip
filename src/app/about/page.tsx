@@ -60,7 +60,7 @@ const CLEANUP_PRINCIPLES = [
   },
   {
     title: "Your own footage only",
-    desc: "Built for creators editing video they shot themselves. WipeClip does not remove watermarks, logos or copyright marks, and you confirm that before every job.",
+    desc: "Built for creators editing video they shot themselves. You confirm you own or have the rights to edit your footage before every job.",
   },
   {
     title: "Nothing kept",

@@ -62,44 +62,17 @@
     <circle cx="256" cy="256" r="145" stroke-dasharray="14 18" />
   </g>
 
-  <!-- Central Hero Geometric 'U' Monogram -->
-  <g filter="url(#glow-purple)">
-    <!-- Main U Body -->
-    <path
-      d="M 184 175
-         L 220 175
-         L 220 285
-         C 220 310, 235 325, 256 325
-         C 277 325, 292 310, 292 285
-         L 292 205
-         L 328 205
-         L 328 285
-         C 328 335, 296 365, 256 365
-         C 216 365, 184 335, 184 285
-         Z"
-      fill="url(#brand-grad)"
-    />
+  <!-- Central Hero Geometric 'W' Monogram -->
+  <g filter="url(#glow-purple)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Main W Body -->
+    <path d="M 160 200 L 210 370 L 256 255 L 302 370 L 352 200" stroke="url(#brand-grad)" stroke-width="40" />
 
-    <!-- Inner Angular Bevel Prism Cut -->
-    <path
-      d="M 198 190
-         L 214 190
-         L 214 282
-         C 214 306, 230 318, 256 318
-         C 282 318, 298 306, 298 282
-         L 298 215
-         L 314 215
-         L 314 282
-         C 314 322, 288 348, 256 348
-         C 224 348, 198 322, 198 282
-         Z"
-      fill="#ffffff"
-      opacity="0.28"
-    />
+    <!-- Inner Bevel Highlight -->
+    <path d="M 160 200 L 210 370 L 256 255 L 302 370 L 352 200" stroke="#ffffff" stroke-width="10" opacity="0.28" />
   </g>
 
-  <!-- Futuristic AI 4-Point Star Sparkle on the Right Tip -->
-  <g transform="translate(328, 190)" filter="url(#glow-cyan)">
+  <!-- Futuristic AI 4-Point Star Sparkle above the Right Tip -->
+  <g transform="translate(386, 140)" filter="url(#glow-cyan)">
     <!-- Star Glow Backing -->
     <circle cx="0" cy="0" r="14" fill="#22d3ee" opacity="0.4" filter="url(#glow-cyan)" />
     <!-- 4-Point Diamond Flare -->
@@ -116,7 +89,7 @@
   </g>
 
   <!-- Secondary Tiny Micro-Sparkle -->
-  <g transform="translate(180, 330)">
+  <g transform="translate(126, 372)">
     <path
       d="M 0 -14
          C 0.5 -4, 4 -0.5, 14 0

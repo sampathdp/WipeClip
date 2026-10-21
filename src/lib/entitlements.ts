@@ -3,7 +3,7 @@ import type { EffectType, FilterId, TransitionType } from "./editor/types";
 import { EFFECT_LABELS, TRANSITION_LABELS } from "./editor/timeline";
 import { FILTERS } from "./editor/look";
 
-/** What each subscription tier unlocks. Works like CapCut: every tool is
+/** What each subscription tier unlocks. Every tool is
  * usable in the editor on any tier, premium ones carry a badge, and the
  * export is where the plan is enforced (see /api/export) - so a free user
  * can try a Pro transition, then upgrade or swap it out before exporting.

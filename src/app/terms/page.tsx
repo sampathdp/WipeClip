@@ -49,15 +49,15 @@ export default function TermsPage() {
           You mark an unwanted object in a file you provide (for example a
           passer-by, a stray cable, or a lens smudge) and the Service
           reconstructs that region using automated image/video processing.
-          You choose the region; the Service does not detect, target, or
-          remove watermarks, logos, or other ownership marks.
+          You choose the region; the Service is intended only for content you
+          own or have permission to edit.
         </P>
       ) : (
         <P>
           WipeClip.co is a browser-based video editor with automated captions
           and photo tools (background removal, sharpening and frame capture).
-          The Service does not detect, target, or remove watermarks, logos, or
-          other ownership marks.
+          The Service is intended only for content you own or have permission
+          to edit.
         </P>
       )}
 
@@ -86,7 +86,7 @@ export default function TermsPage() {
         </li>
         <li>
           you will not use the Service to remove, obscure, or alter any
-          watermark, logo, copyright notice, copyright management
+          ownership mark, copyright notice, copyright management
           information, provenance metadata, or required disclosure mark; and
         </li>
         <li>
@@ -110,7 +110,7 @@ export default function TermsPage() {
       <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-muted">
         <li>process content you do not own and do not have permission to edit;</li>
         <li>infringe or facilitate infringement of any intellectual property right;</li>
-        <li>remove or obscure a watermark, logo, or other mark identifying the owner or source of content;</li>
+        <li>remove or obscure any mark identifying the owner or source of content;</li>
         <li>violate any applicable law, including copyright, trademark, or AI-disclosure law;</li>
         <li>upload unlawful, defamatory, or content depicting a real person without their consent (including non-consensual intimate imagery);</li>
         <li>upload sexually explicit or adult content;</li>
@@ -195,8 +195,8 @@ export default function TermsPage() {
         the Service to you.
       </P>
       <P>
-        All third-party product names, logos, and trademarks mentioned on the
-        website are the property of their respective owners. Their
+        Any third-party names or trademarks referenced on the website are the
+        property of their respective owners. Their
         mention does not imply any affiliation, sponsorship, or endorsement.
       </P>
 

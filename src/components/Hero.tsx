@@ -25,7 +25,7 @@ const MARQUEE_ITEMS = AI_CLEANUP_ENABLED
       "PICTURE-IN-PICTURE",
       "TEXT · STICKERS · MUSIC",
       "FILTERS",
-      "YOUTUBE · SHORTS · REELS",
+      "LANDSCAPE · VERTICAL · SQUARE",
     ];
 
 // Illustrative timeline under the hero video when the before/after cleanup
@@ -110,7 +110,7 @@ export default function Hero() {
             {/* Subtitle */}
             <p className="mx-auto mt-7 max-w-md text-base leading-relaxed text-muted sm:text-lg lg:mx-0 lg:border-l-2 lg:border-accent/40 lg:pl-5">
               Trim, cut and arrange clips, add transitions, text, stickers,
-              filters and music, then export for YouTube, Shorts and Reels, all
+              filters and music, then export in landscape, vertical or square, all
               in your browser.
               {AI_CLEANUP_ENABLED
                 ? " Built-in AI object removal takes out passers-by, cables and other distractions from footage you shot."

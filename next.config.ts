@@ -29,18 +29,6 @@ const nextConfig: NextConfig = {
     // compiled out of the website instead of shipped and skipped.
     NEXT_PUBLIC_WIPECLIP_DESKTOP: "0",
   },
-  async redirects() {
-    return [
-      // Retired pages: the old watermark-removal landing pages, research
-      // section and method-comparison guide are intentionally left to 404
-      // so search engines drop them.
-      {
-        source: "/guides/does-watermark-removal-reduce-video-quality",
-        destination: "/guides/does-ai-cleanup-reduce-video-quality",
-        permanent: true,
-      },
-    ];
-  },
   async headers() {
     return [
       {

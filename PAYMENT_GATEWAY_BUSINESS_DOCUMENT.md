@@ -18,12 +18,13 @@
 
 ## 1. Executive Summary & Company Profile
 
-**WipeClip.co** is a specialized, web-based digital media processing SaaS (Software as a Service) platform designed for content creators, videographers, editors, and digital agencies. The platform provides automated computer vision and inpainting tools that allow users to retouch, restore, and clean up digital video footage and still images that they own or are legally authorized to edit.
+**WipeClip.co** is a web-based video editing SaaS (Software as a Service) platform for content creators, videographers, editors, and digital agencies. Users edit video they shot themselves or are authorized to edit, directly in the browser, and export it at their original quality. The platform also includes a small set of AI-assisted photo utilities.
 
 Common professional use cases include:
-* Restoring archival or legacy footage where original raw project files were lost.
-* Removing unwanted incidental timestamps, microphone logos, broadcast bugs, captions, and export badges from personal or client-authorized media.
-* Cleaning up artifacts from digital recordings and social reel drafts prior to multi-platform syndication.
+* Trimming, cutting, and assembling raw footage into finished videos.
+* Adding text, captions, music, transitions, and filters to the user's own recordings.
+* Resizing one video into landscape, vertical, square, and portrait formats for publishing.
+* Preparing product photos and creative assets with background removal and sharpening.
 
 The service is delivered 100% digitally through modern cloud infrastructure with zero physical shipping, providing immediate automated fulfillment upon payment.
 
@@ -32,14 +33,15 @@ The service is delivered 100% digitally through modern cloud infrastructure with
 ## 2. Nature of the Business & Core Purpose
 
 ### 2.1 The Problem It Solves
-Creators and video editors frequently lose access to pristine project project assets or face situations where an unwanted on-screen graphic (such as a timestamp from a recording device, an editing software export badge, or an incidental overlay) obscures their original content. Traditional manual removal methods (like cropping or adding an ugly blur box) degrade composition and video quality.
+Creators and small teams need to edit and publish video quickly, but professional desktop editing suites are expensive, heavy to install, and slow to learn. Many simple editing tasks (trimming, captioning, resizing for different formats) do not justify that overhead.
 
 ### 2.2 WipeClip's Solution
-WipeClip provides an intuitive, non-destructive web tool where a user highlights an unwanted bounding region on a video frame. The platform's processing pipeline analyzes spatial and temporal pixel data from adjacent frames and reconstructs the underlying pixels using advanced image/video inpainting algorithms. The result is a clean, natural restoration without composition cropping or distortion.
+WipeClip provides an intuitive browser-based editor with a timeline, where users import their own clips, arrange and edit them, and export the result without installing software. AI-assisted features (such as automatic captions from speech) speed up repetitive work. Media is processed only to deliver the user's own export.
 
 ### 2.3 Product Capabilities & Tool Suite
-* **Video Watermark & Overlay Inpainting:** Automated pixel reconstruction across video frames.
-* **Still Image Cleanup:** Rapid removal of unwanted marks and blemishes on static graphics.
+* **Video Editor:** Trim, split, reorder, transitions, text, stickers, filters, music, picture-in-picture, and canvas presets for landscape, vertical, square, and portrait output.
+* **Auto Captions:** Speech-to-text captions generated from the user's own audio.
+* **Screen Recorder (desktop app):** Record the user's own screen and microphone for tutorials, then edit in the same app.
 * **Complementary Creator Utilities:**
   * Background Remover (AI-powered subject isolation).
   * Video Frame Grabber (lossless frame extraction).
@@ -51,10 +53,11 @@ WipeClip provides an intuitive, non-destructive web tool where a user highlights
 
 | User Persona | Typical Use Case | Value Proposition |
 | :--- | :--- | :--- |
-| **Independent Content Creators & Vloggers** | Cleaning up timestamps or export tags on their own video footage before syndication. | Saves hours of re-rendering or having to re-shoot original footage. |
-| **Freelance Video Editors & Agencies** | Restoring client-provided footage when the client lost original master assets. | Professional-grade retouching without visible blur artifacts. |
-| **Social Media Managers & Marketers** | Repurposing archived promotional clips and reels across brand channels. | Fast turnaround time for high-engagement short-form video. |
-| **Digital Photographers & Graphic Artists** | Retouching static images and product photos to eliminate incidental distractions. | Single-click cleanup with no heavy desktop software required. |
+| **Independent Content Creators & Vloggers** | Editing and captioning their own footage before publishing. | Fast, free-to-start editing with no software install. |
+| **Freelance Video Editors & Agencies** | Producing client videos from client-supplied footage. | Professional exports at original quality from any computer. |
+| **Social Media Managers & Marketers** | Resizing their own promotional clips for different channels and formats. | One edit, exported in every aspect ratio. |
+| **Educators & Tutorial Makers** | Recording and editing screen tutorials. | Recorder and editor in one workflow. |
+| **Digital Photographers & Graphic Artists** | Cutting out backgrounds and sharpening product photos. | Single-click utilities with no heavy desktop software required. |
 
 ---
 
@@ -134,7 +137,7 @@ Under Section 3 of the [Terms of Service](https://wipeclip.co/terms), every user
 * Compliant with 17 U.S.C. § 512(c)(3) (DMCA notice & takedown framework).
 * Dedicated Designated Agent: `dmca@wipeclip.co` / `legal@wipeclip.co`.
 * Repeat Infringer Policy: Prompt account suspension and permanent banning of any user flagged for repeat infringement.
-* Clear disclaimer of non-affiliation with third-party software brands (TikTok, CapCut, Canva, Instagram, etc.).
+* Clear disclaimer of non-affiliation with any third-party video platform, software vendor or AI model provider.
 
 ---
 
@@ -169,7 +172,7 @@ As published in Section 6 of our Terms of Service:
 ## 9. Technical Stack & Infrastructure Overview
 
 * **Frontend:** Next.js 15 (React 19, TypeScript, Tailwind CSS), deployed on Vercel high-availability global edge CDN.
-* **Backend Pipeline:** Python FastAPI, FFmpeg video processing framework, computer vision inpainting engines, hosted in isolated container environments.
+* **Backend Pipeline:** Python FastAPI, FFmpeg video processing framework, image-processing engines, hosted in isolated container environments.
 * **Database & Auth:** Supabase (Enterprise PostgreSQL) with Row-Level Security (RLS) policies and encrypted session authentication.
 * **Payment Integration:** Direct server-to-server webhook ingestion with HMAC-SHA256 signature verification and replay attack mitigation (5-minute timestamp tolerance window).
 

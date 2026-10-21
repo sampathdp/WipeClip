@@ -54,13 +54,13 @@ REMBG_MODEL_NAME: str = "isnet-general-use"  # good general-purpose quality/spee
 
 # --- Free-tier preview cap for /api/image/auto-enhance (api_image_auto_enhance) ---
 # Anonymous callers get downscaled to this before processing (matches
-# remove.bg's known free/anonymous preview cap - see api_image_auto_enhance's
+# a common free/anonymous preview cap - see api_image_auto_enhance's
 # `preview` flag in main.py for who actually gets capped). Downscaling
 # BEFORE the pipeline runs, not after, is also just cheaper: rembg's
 # segmentation cost scales with pixel count.
 BG_REMOVE_PREVIEW_MAX_MEGAPIXELS: float = 0.25
 
-# --- Watermark/artifact candidate detection (suggest-only, never auto-applies) ---
+# --- Artifact candidate detection (suggest-only, never auto-applies) ---
 # Tuned deliberately conservative: it is far better to miss a real artifact
 # (the user falls back to manual painting) than to flag legitimate artwork
 # and risk it being accepted and damaged. Every candidate is a *suggestion*
@@ -111,7 +111,7 @@ JOB_THREADS: int = max(
 # onnxruntime (via rembg/NudeNet) reads this when a session is created.
 os.environ.setdefault("OMP_NUM_THREADS", str(JOB_THREADS))
 
-# --- Video watermark removal (ffmpeg-based) -----------------------------------
+# --- Video region cleanup (ffmpeg-based) ---- -----------------------------------
 # Synchronous request/response (no job queue) - these caps keep a single
 # ffmpeg encode within a request/response cycle a browser will actually wait
 # out, rather than silently hanging on a multi-hundred-MB or hour-long upload.
@@ -119,16 +119,16 @@ MAX_VIDEO_UPLOAD_BYTES: int = 300 * 1024 * 1024  # 300 MB
 MAX_VIDEO_DURATION_SECONDS: float = 600.0  # 10 minutes
 VIDEO_ENCODE_PRESET: str = "veryfast"  # libx264 preset - speed/size tradeoff
 VIDEO_ENCODE_CRF: int = 20  # lower = higher quality/bigger file; 20 is visually near-lossless
-MIN_REGION_PX: int = 4  # smallest allowed watermark-region edge length
+MIN_REGION_PX: int = 4  # smallest allowed region edge length
 
-# --- Watermark region reconstruction (remove_logo) --------------------------
-# remove_logo() went through two reconstructions before this one:
-#   1. ffmpeg's `delogo` filter - fast, but a crude smooth boundary
+# --- Region reconstruction (reconstruct_region) ------------------------------------
+# reconstruct_region() went through two reconstructions before this one:
+#   1. ffmpeg's boundary-interpolation filter - fast, but a crude smooth boundary
 #      interpolation with no texture awareness. Visibly *smeared* any
 #      strong nearby color (e.g. text) clear across the box instead of
 #      containing it.
 #   2. OpenCV's Telea inpainting (per-frame, PDE-based edge propagation) -
-#      contained bleeding far better than delogo, but Telea/NS-family
+#      contained bleeding far better than that, but Telea/NS-family
 #      methods still only propagate smooth gradients inward. They don't
 #      copy real texture/pattern from elsewhere in the frame, so any
 #      region with actual color texture (not a flat/near-flat surface)
@@ -154,34 +154,34 @@ MIN_REGION_PX: int = 4  # smallest allowed watermark-region edge length
 # search has little real content to draw on once the hole is large, so a
 # big marked box is both very slow AND not visibly sharper than plain
 # diffusion. _inpaint_region() therefore routes any box past
-# WATERMARK_INPAINT_FSR_MAX_REGION_PX to Telea (cv2.inpaint) instead -
-# seconds, not minutes, for the whole clip. Watermark-sized boxes (the
+# REGION_INPAINT_FSR_MAX_REGION_PX to Telea (cv2.inpaint) instead -
+# seconds, not minutes, for the whole clip. Small boxes (the
 # overwhelmingly common case) still get FSR at full resolution, unchanged.
-# At WATERMARK_FSR_SCALE = 1.0 the FSR path runs ~6.5x realtime end-to-end
+# At REGION_FSR_SCALE = 1.0 the FSR path runs ~6.5x realtime end-to-end
 # for a normal box; a clip near MAX_VIDEO_DURATION_SECONDS is still tens of
 # minutes on the FSR path in a synchronous request with no job queue -
 # reconsider MAX_VIDEO_DURATION_SECONDS or a background job queue first.
 #
-# None of this - not delogo, not Telea, not FSR - can *recover* content
-# that's 100% covered by the watermark in every single frame; that
+# None of this - not boundary interpolation, not Telea, not FSR - can *recover* content
+# that's 100% covered by the object in every single frame; that
 # information is simply gone from the source. FSR just produces a much
 # more plausible fill than diffusion-based inpainting did, not the real
 # original pixels. Actual recovery is only possible when the covered
-# content shifts relative to the fixed watermark at some point in the
+# content shifts relative to the fixed object at some point in the
 # clip (camera pan, scrolling caption, etc.) - that needs motion-aware
 # multi-frame reconstruction (optical-flow-guided video inpainting), which
 # is a materially bigger feature than this.
-WATERMARK_FSR_CONTEXT_PAD_PX: int = 100  # how much surrounding context
+REGION_FSR_CONTEXT_PAD_PX: int = 100  # how much surrounding context
                                           # (beyond the region itself) FSR
                                           # gets to work with
-WATERMARK_FSR_SCALE: float = 1.0         # working resolution for the FSR
+REGION_FSR_SCALE: float = 1.0         # working resolution for the FSR
                                           # pass, relative to the padded
                                           # crop - the speed/quality lever
                                           # (below 1.0 is faster but brings
                                           # back a bleed/smear artifact
                                           # next to sharp nearby content -
                                           # see the block comment above)
-WATERMARK_INPAINT_FSR_MAX_REGION_PX: int = 130_000  # ~360x360. A marked
+REGION_INPAINT_FSR_MAX_REGION_PX: int = 130_000  # ~360x360. A marked
                                           # box with more pixels than this
                                           # is reconstructed with Telea
                                           # (cv2.inpaint) instead of FSR:
@@ -189,88 +189,53 @@ WATERMARK_INPAINT_FSR_MAX_REGION_PX: int = 130_000  # ~360x360. A marked
                                           # very slow (minutes per clip) and
                                           # no sharper in practice - too
                                           # little real content around it to
-                                          # exemplar from. Watermark-sized
+                                          # exemplar from. Small
                                           # boxes stay on the FSR path.
 
 # The reconstructed patch is then re-sharpened in the final ffmpeg pass -
 # still somewhat soft after any inpainting method - to restore local
 # contrast on top of it. Cosmetic only, same caveat as above.
-WATERMARK_PATCH_SHARPEN_KSIZE: int = 7      # unsharp luma_msize_x/y (odd, 3-23)
-WATERMARK_PATCH_SHARPEN_AMOUNT: float = 2.5  # unsharp luma_amount
+REGION_PATCH_SHARPEN_KSIZE: int = 7      # unsharp luma_msize_x/y (odd, 3-23)
+REGION_PATCH_SHARPEN_AMOUNT: float = 2.5  # unsharp luma_amount
 
 # --- Optical-flow-assisted reconstruction (Pro-tier quality="pro") ----------
-# CPU-only motion-aware fill: the WATERMARK_FSR_* block above ends by
+# CPU-only motion-aware fill: the REGION_FSR_* block above ends by
 # naming the real fix for FSR's fundamental limit (it can only plausibly
 # fill a fully-covered region, never recover it) as "motion-aware
 # multi-frame reconstruction (optical-flow-guided video inpainting)". This
-# is that upgrade, gated behind quality="pro" (see remove_logo()) - free/
+# is that upgrade, gated behind quality="pro" (see reconstruct_region()) - free/
 # starter traffic keeps the plain FSR path unchanged.
 #
 # For each covered frame, dense optical flow (Farneback, CPU) checks a
 # window of nearby frames for camera pan/scroll that carried the region's
-# real underlying content to a screen position outside the watermark at
+# real underlying content to a screen position outside the marked region at
 # some point nearby in time - if so, those are the actual original pixels,
 # not a plausible fill. Any pixel no neighbor frame ever uncovers (a
 # genuinely static/tripod shot, or motion too large for the padded search
 # window below) falls back to _fsr_inpaint_region exactly as quality=
 # "standard" already does.
-WATERMARK_FLOW_SEARCH_RADIUS_FRAMES: int = 6  # neighbor frames searched each
+REGION_FLOW_SEARCH_RADIUS_FRAMES: int = 6  # neighbor frames searched each
                                           # direction - also bounds the
                                           # sliding buffer's memory (at most
                                           # 2*radius+1 full frames held at
                                           # once, see
                                           # _inpaint_region_to_temp_video_flow)
-WATERMARK_FLOW_CONTEXT_PAD_PX: int = 220  # padding beyond the region flow
+REGION_FLOW_CONTEXT_PAD_PX: int = 220  # padding beyond the region flow
                                           # is allowed to search within -
-                                          # larger than WATERMARK_FSR_
+                                          # larger than REGION_FSR_
                                           # CONTEXT_PAD_PX since this needs
                                           # room for real motion to have
                                           # carried content out from under
                                           # the region, not just enough
                                           # context to blend a seam
-WATERMARK_FLOW_ESTIMATION_SCALE: float = 0.5  # the flow FIELD is estimated
+REGION_FLOW_ESTIMATION_SCALE: float = 0.5  # the flow FIELD is estimated
                                           # on a downscaled crop (cheap -
                                           # flow is smooth/low-frequency,
                                           # same principle as
-                                          # WATERMARK_FSR_SCALE); recovered
+                                          # REGION_FSR_SCALE); recovered
                                           # pixels are always sampled from
                                           # the full-resolution buffered
                                           # frame, never downscaled
-
-# --- Video watermark auto-detection (suggest-only, never auto-applies) ------
-# Finds a region that stays pixel-static across sampled frames while the
-# rest of the frame moves - the signature a fixed corner/overlay logo has
-# regardless of what it actually looks like. Same suggest-only contract as
-# DETECT_* above: returns a candidate box for the frontend to prefill
-# RegionSelector with, user can drag/accept/ignore before anything runs.
-# See detect_watermark_candidates() in app/pipeline/video.py.
-WATERMARK_DETECT_SAMPLE_FRAMES: int = 10
-WATERMARK_DETECT_MIN_MOTION: float = 5.0     # median per-pixel stddev (0-255)
-                                              # the *whole* frame must clear
-                                              # before trusting any "low
-                                              # variance" region as a logo
-                                              # rather than just a static shot
-WATERMARK_DETECT_LOW_VAR_FRACTION: float = 0.25  # candidate pixels' stddev
-                                              # must be under this fraction
-                                              # of the frame's median stddev
-WATERMARK_DETECT_MIN_BLOB_AREA_FRACTION: float = 0.0006  # of frame area
-WATERMARK_DETECT_MAX_BLOB_AREA_FRACTION: float = 0.15    # of frame area
-WATERMARK_DETECT_MIN_SOLIDITY: float = 0.35
-WATERMARK_DETECT_MAX_CANDIDATES: int = 5
-WATERMARK_DETECT_BOX_PADDING_PX: int = 4
-
-WATERMARK_DETECT_BAR_FLATNESS_THRESHOLD: float = 6.0  # a row/column this
-                                              # spatially uniform (0-255
-                                              # stddev), and part of an
-                                              # unbroken run from a frame
-                                              # edge, is treated as a
-                                              # letterbox/pillarbox bar
-                                              # rather than logo content -
-                                              # a real logo breaks the run
-                                              # by being spatially detailed,
-                                              # so this doesn't exclude a
-                                              # logo that merely sits inside
-                                              # the bar band
 
 # --- Output resolution selection -----------------------------------------
 # Requested output height per option; the API never upscales past the

@@ -354,8 +354,8 @@ export default function ImageEditorDemo() {
                   className="mt-0.5 h-4 w-4 shrink-0 rounded border-border bg-surface-3 accent-cyan-400 cursor-pointer"
                 />
                 <span>
-                  I created this image or have the rights to edit it, and the area I marked
-                  is not a watermark, logo or other ownership or copyright mark.{" "}
+                  I created this image or have the rights to edit it, and I&apos;m not using
+                  this to alter anyone else&apos;s ownership or copyright marks.{" "}
                   <Link href="/terms" className="underline hover:text-foreground text-cyan-600">
                     Terms of Service
                   </Link>

@@ -27,7 +27,7 @@ All events go through one helper, `trackEvent()` in `src/lib/analytics.ts` (new 
 | `upload_clicked` | Same 5 components | Click on the drag-and-drop zone, right before the native file picker opens |
 | `file_selected` | Same 5 components | A file is picked or dropped (fires once per pick, covers both the click-to-browse and drag-and-drop paths) |
 | `mask_started` | `UploadDemo.tsx`, `ImageEditorDemo.tsx` (the two tools with a region-marking step) | The marking UI (`RegionSelector`) becomes visible, right after the probe/detect step succeeds |
-| `mask_completed` | `UploadDemo.tsx`, `ImageEditorDemo.tsx` | "Remove Watermark Now" is clicked, at the top of `process()`, right before the processing request is sent |
+| `mask_completed` | `UploadDemo.tsx`, `ImageEditorDemo.tsx` | "Remove Object Now" is clicked, at the top of `process()`, right before the processing request is sent |
 | `processing_started` | All 4 tools with a server processing step (`UploadDemo`, `BackgroundRemoverDemo`, `PhotoSharpenerDemo`, `ImageEditorDemo`) | Top of `process()`, right before the API call |
 | `processing_completed` | Same 4 | On a successful response, right after `setStep("done")` |
 | `processing_failed` | Same 4 | Every `catch` branch in `process()` — content-policy block, insufficient credits, auth/Pro-required (image tool only), and a generic processing-error fallback |
@@ -46,9 +46,9 @@ All properties are drawn from the allowed list in the brief. None of them are co
 
 | Property | Used on | Value |
 |---|---|---|
-| `tool` | every tool event | A fixed, hardcoded identifier per component: `video_watermark_remover`, `background_remover`, `photo_sharpener`, `image_watermark_remover`, `video_frame_grabber` |
+| `tool` | every tool event | A fixed, hardcoded identifier per component: `video_object_remover`, `background_remover`, `photo_sharpener`, `image_object_remover`, `video_frame_grabber` |
 | `route` | `tool_view` | `window.location.pathname` at mount |
-| `landing_page` | `tool_view`, `pricing_viewed` | Same-origin referrer **path only** (e.g. `/remove-tiktok-watermark`); cross-origin referrers and query strings are dropped by `landingPagePath()` in `src/lib/analytics.ts` |
+| `landing_page` | `tool_view`, `pricing_viewed` | Same-origin referrer **path only** (e.g. `/remove-background`); cross-origin referrers and query strings are dropped by `landingPagePath()` in `src/lib/analytics.ts` |
 | `mode` | video-tool processing events | `"remove"` or `"replace"` — a UI toggle, not user content |
 | `resolution` | video-tool processing events | `"720p"` / `"1080p"` / `"4k"` — a UI setting |
 | `strength` | photo-sharpener processing events | `"light"` / `"standard"` / `"strong"` — a UI setting |

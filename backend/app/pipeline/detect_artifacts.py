@@ -1,4 +1,4 @@
-"""Conservative watermark/glare/blemish *candidate* detection.
+"""Conservative dust/glare/blemish *candidate* detection.
 
 This module NEVER removes anything. It returns a list of suggested regions
 for the frontend to render as review boxes - the user must explicitly
@@ -27,9 +27,9 @@ borders and numeral glyphs occasionally get suggested too, and a real
 artifact sitting on dense detail can rank below those false positives or be
 missed entirely. This is a fundamental limit of a classical (non-ML)
 per-pixel color heuristic, not a tuning oversight - a training-based
-watermark detector would do meaningfully better, but that's out of scope
+artifact detector would do meaningfully better, but that's out of scope
 here. Given that, treat this purely as "things worth a look," not "the
-watermark". The false positives are harmless (a human takes one glance and
+artifact". The false positives are harmless (a human takes one glance and
 skips them) precisely because nothing is removed without review - that
 review step is doing the real correctness work, not the detector.
 
@@ -94,7 +94,7 @@ def detect_artifact_candidates(bgra: np.ndarray) -> list[ArtifactCandidate]:
     # entire interior, flagging almost the whole sprite as "anomalous"
     # (confirmed: it happened, ~65% of the image was flagged). A kernel
     # sized off min(h, w) instead stays comfortably smaller than any
-    # individual sprite while still exceeding typical watermark/glare size.
+    # individual sprite while still exceeding typical dust/glare size.
     kernel_radius = int(np.clip(min(h, w) * 0.025, 12, 45))
     kernel_size = kernel_radius * 2 + 1
     tophat_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))

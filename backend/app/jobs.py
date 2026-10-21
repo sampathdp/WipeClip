@@ -24,23 +24,10 @@ from app.pipeline import full_pipeline, io_utils, manual_inpaint, sharpen as sha
 from app.pipeline import video as video_pipeline
 
 
-def remove_logo_job(
+def reconstruct_region_job(
     in_path: str, out_path: str, x: int, y: int, w: int, h: int, output_height: int | None, quality: str
 ) -> None:
-    asyncio.run(video_pipeline.remove_logo(in_path, out_path, x, y, w, h, output_height, quality))
-
-
-def replace_logo_job(
-    in_path: str,
-    out_path: str,
-    logo_path: str,
-    x: int,
-    y: int,
-    w: int,
-    h: int,
-    output_height: int | None,
-) -> None:
-    asyncio.run(video_pipeline.replace_logo(in_path, out_path, logo_path, x, y, w, h, output_height))
+    asyncio.run(video_pipeline.reconstruct_region(in_path, out_path, x, y, w, h, output_height, quality))
 
 
 def editor_export_job(plan_json: str, out_path: str) -> None:

@@ -4,7 +4,7 @@ Unlike the automatic halo decontamination (which is mathematically confined
 to a thin edge band), this operates wherever the user paints - so it must
 never run without an explicit user-supplied mask. There is no auto-detection
 here by design: earlier attempts at automatically detecting arbitrary
-interior artifacts (glare, watermarks, blemishes) produced false positives
+interior artifacts (glare, dust, blemishes) produced false positives
 that damaged legitimate artwork. A user-drawn mask is unambiguous and safe.
 
 RGB is reconstructed via Telea inpainting; alpha is left untouched so

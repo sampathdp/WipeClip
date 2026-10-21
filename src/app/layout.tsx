@@ -30,7 +30,7 @@ export const metadata: Metadata = {
     template: "%s | WipeClip.co",
   },
   description:
-    "WipeClip is an online video editor for creators. Trim, cut, add transitions, text, stickers, filters and music in your browser, then export for YouTube, Shorts and Reels." +
+    "WipeClip is an online video editor for creators. Trim, cut, add transitions, text, stickers, filters and music in your browser, then export for any platform in landscape, vertical or square." +
     (AI_CLEANUP_ENABLED
       ? " Built-in AI object removal takes distractions out of footage you shot."
       : " Auto captions and picture-in-picture included."),

@@ -6,7 +6,7 @@ import { effectivePlan } from "@/lib/plan";
 import { TIER_LABELS, TIERS, toTier } from "@/lib/entitlements";
 import { createCheckout, PaymentsLkError } from "@/lib/paymentsLk";
 import { createTransaction, getClientToken, PaddleError, paddleEnvironment, priceIdFor } from "@/lib/paddle";
-import { gatewayFor } from "@/lib/checkoutGateway";
+import { gatewayFor, visitorCountry } from "@/lib/checkoutGateway";
 
 // Payments.lk requires customer.name (2 to 80 characters) whenever a
 // customer object is sent, and refuses the whole checkout otherwise. Send
@@ -20,12 +20,20 @@ function checkoutCustomer(email: string | undefined, metadata: Record<string, un
 }
 
 /** Which checkout this visitor gets, and what Paddle.js needs to run it:
- * the public client token, the environment, and - for Paddle Retain - the
- * signed-in user's Paddle customer ID (ctm_...), once a purchase has
- * recorded it. */
+ * the public client token, the environment, the price ID of each plan (for
+ * Paddle.PricePreview's localized prices), the visitor's country from the
+ * edge's geo header - null when there is none, so Paddle detects it from the
+ * IP instead - and, for Paddle Retain, the signed-in user's Paddle customer
+ * ID (ctm_...), once a purchase has recorded it. */
 export async function GET(request: NextRequest) {
   const gateway = gatewayFor(request);
   if (gateway !== "paddle") return NextResponse.json({ gateway, paddle: null });
+
+  const priceIds: Partial<Record<PlanKey, string>> = {};
+  for (const plan of Object.keys(PLANS) as PlanKey[]) {
+    const id = priceIdFor(plan);
+    if (id) priceIds[plan] = id;
+  }
 
   let customerId: string | null = null;
   if (isSupabaseConfigured()) {
@@ -41,7 +49,13 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     gateway,
-    paddle: { clientToken: getClientToken(), environment: paddleEnvironment(), customerId },
+    paddle: {
+      clientToken: getClientToken(),
+      environment: paddleEnvironment(),
+      customerId,
+      country: visitorCountry(request),
+      priceIds,
+    },
   });
 }
 
@@ -142,7 +156,7 @@ export async function POST(request: NextRequest) {
         paddle: {
           transactionId: txn.id,
           email: profile?.paddle_customer_id ? null : (user.email ?? null),
-          successUrl: `${siteUrl}/pricing?success=1&plan=${plan}`,
+          successUrl: `${siteUrl}/welcome?plan=${plan}`,
         },
       });
     } catch (e) {
@@ -165,7 +179,7 @@ export async function POST(request: NextRequest) {
           : `WipeClip ${label} - ${credits} AI credits`,
         reference: order.id,
         customer: checkoutCustomer(user.email, user.user_metadata),
-        successUrl: `${siteUrl}/pricing?success=1&plan=${plan}`,
+        successUrl: `${siteUrl}/welcome?plan=${plan}`,
         cancelUrl: `${siteUrl}/pricing?canceled=1`,
       },
       `order-${order.id}`
