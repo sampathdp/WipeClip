@@ -141,8 +141,6 @@ const SUBSCRIPTION_KEYS: Record<Exclude<Tier, "free">, Record<Billing, PlanKey>>
   pro: { month: "pro", year: "pro_yearly" },
 };
 
-const CREDIT_PACKS: PlanKey[] = ["creator", "payg"];
-
 const COMPARISON: { label: string; values: Record<Tier, string | boolean> }[] = [
   { label: "Trim, split, reorder, speed", values: { free: true, lite: true, starter: true, pro: true } },
   { label: "Text, stickers, images, audio tracks", values: { free: true, lite: true, starter: true, pro: true } },
@@ -173,9 +171,9 @@ const COMPARISON: { label: string; values: Record<Tier, string | boolean> }[] = 
     label: "AI credits",
     values: {
       free: `${FREE_DAILY_CREDITS} / day`,
-      lite: `${PLANS.lite.credits} / month`,
-      starter: `${PLANS.starter.credits} / month`,
-      pro: `${PLANS.pro.credits} / month`,
+      lite: `${PLANS.lite.credits} / 30 days`,
+      starter: `${PLANS.starter.credits} / 30 days`,
+      pro: `${PLANS.pro.credits} / 30 days`,
     },
   },
 ];
@@ -239,7 +237,7 @@ export default function PricingClient() {
     if (manualPayments) {
       const p = PLANS[plan];
       const text =
-        `Hi WipeClip, I'd like to buy the ${p.label} plan (${p.priceLabel} / ${p.period}).` +
+        `Hi WipeClip, I'd like to buy the ${p.label} plan (${p.priceLabel} for ${p.period === "year" ? "1 year" : "30 days"}).` +
         (userEmail ? ` My account email: ${userEmail}` : "");
       window.open(whatsappLink(text), "_blank", "noopener,noreferrer");
       return;
@@ -303,7 +301,7 @@ export default function PricingClient() {
             Edit free. <span className="text-gradient">Upgrade when you grow.</span>
           </h1>
           <p className="mt-4 text-base sm:text-lg text-muted max-w-xl mx-auto">
-            The editor is free forever. Paid plans start at $1.99 a month and unlock premium transitions,
+            The editor is free forever. Paid passes start at $1.99 for 30 days, with no subscription, and unlock premium transitions,
             filters and effects, higher resolutions and more AI credits.
           </p>
 
@@ -317,7 +315,7 @@ export default function PricingClient() {
                 onClick={() => setBilling(b)}
                 className={`rounded-full px-5 py-2 transition ${billing === b ? "bg-foreground text-background" : "text-muted hover:text-foreground"}`}
               >
-                {b === "month" ? "Monthly" : "Yearly"}
+                {b === "month" ? "30 days" : "1 year"}
                 {b === "year" && <span className="ml-1.5 text-[11px] font-bold text-emerald-500">Save ~25%</span>}
               </button>
             ))}
@@ -378,11 +376,11 @@ export default function PricingClient() {
                     <span className="font-mono text-3xl font-extrabold text-foreground">
                       {key && plan ? (localPrices[key] ?? plan.priceLabel) : "$0"}
                     </span>
-                    <span className="text-xs text-muted"> / {plan ? plan.period : "forever"}</span>
+                    <span className="text-xs text-muted"> {plan ? (plan.period === "year" ? "for 1 year" : "for 30 days") : "/ forever"}</span>
                     {plan && (
                       <p className="mt-1 text-[11px] text-muted">
                         {showLkr ? `Charged as ${formatLkr(plan.amountCents)} · ` : ""}
-                        {plan.credits} AI credits included
+                        One-time payment, no auto-renewal · {plan.credits} AI credits included
                       </p>
                     )}
                   </div>
@@ -476,36 +474,6 @@ export default function PricingClient() {
                 ))}
               </tbody>
             </table>
-          </div>
-        </section>
-
-        <section className="mx-auto mt-20 max-w-3xl" aria-labelledby="packs-heading">
-          <h2 id="packs-heading" className="text-center font-display text-2xl font-extrabold tracking-tight text-foreground">
-            Need more AI credits?
-          </h2>
-          <p className="mt-2 text-center text-sm text-muted">One-time packs on any plan. Credits never expire.</p>
-          <div className="mt-8 grid gap-4 sm:grid-cols-2">
-            {CREDIT_PACKS.map((key) => {
-              const pack = PLANS[key];
-              return (
-                <div key={key} className="glass-card flex items-center justify-between gap-4 rounded-2xl border border-border/80 p-5">
-                  <div>
-                    <p className="text-sm font-bold text-foreground">{pack.label}</p>
-                    <p className="mt-0.5 text-xs text-muted">
-                      {pack.credits} AI credits · {localPrices[key] ?? pack.priceLabel}
-                      {showLkr && ` (${formatLkr(pack.amountCents)})`}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => buy(key)}
-                    disabled={loading !== null}
-                    className="btn-secondary shrink-0 rounded-full px-4 py-2 text-xs font-bold disabled:opacity-50"
-                  >
-                    {loading === key ? "Opening…" : manualPayments ? "Buy via WhatsApp" : "Buy"}
-                  </button>
-                </div>
-              );
-            })}
           </div>
         </section>
       </main>

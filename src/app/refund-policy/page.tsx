@@ -6,11 +6,11 @@ import Footer from "@/components/Footer";
 export const metadata: Metadata = {
   title: "Refund Policy",
   description:
-    "WipeClip.co refund policy: a full refund of any plan or credit pack within 14 days of purchase, for any reason.",
+    "WipeClip.co refund policy: a full refund of any paid plan within 14 days of purchase, for any reason.",
   alternates: { canonical: "/refund-policy" },
 };
 
-const updated = "October 1, 2026";
+const updated = "October 21, 2026";
 
 function H2({ children }: { children: React.ReactNode }) {
   return <h2 className="mt-10 font-display text-xl font-bold tracking-tight">{children}</h2>;
@@ -29,8 +29,8 @@ export default function RefundPolicyPage() {
         <p className="mt-2 text-sm text-muted">Last updated: {updated}</p>
 
         <P>
-          This policy covers every paid purchase on WipeClip.co: the Lite, Starter and Pro plans (monthly or
-          yearly) and one-time AI credit packs. It forms part of our{" "}
+          This policy covers every paid purchase on WipeClip.co: the Lite, Starter and Pro plans, sold as one-time
+          payments for 30 days or 1 year. It forms part of our{" "}
           <Link href="/terms" className="underline hover:text-foreground">
             Terms of Service
           </Link>
@@ -39,7 +39,7 @@ export default function RefundPolicyPage() {
 
         <H2>1. 14-day refund, no questions asked</H2>
         <P>
-          You can request a full refund of any plan or credit pack within 14 days of purchase, for any reason. We
+          You can request a full refund of any paid purchase within 14 days of purchase, for any reason. We
           refund the full amount you paid, to the original payment method.
         </P>
 
@@ -59,7 +59,7 @@ export default function RefundPolicyPage() {
 
         <H2>4. Plans don&apos;t renew automatically</H2>
         <P>
-          Paid plans are prepaid for 30 days (monthly) or 365 days (yearly) and end on their own. You are never
+          Paid plans are prepaid for 30 days or 365 days and end on their own. You are never
           charged again unless you choose to buy another period, so there is nothing to cancel.
         </P>
 
@@ -75,9 +75,21 @@ export default function RefundPolicyPage() {
           <a href="mailto:support@wipeclip.co" className="underline hover:text-foreground">
             support@wipeclip.co
           </a>{" "}
-          from the address on your account, with the date of purchase and the plan or pack you bought. We reply
+          from the address on your account, with the date of purchase and the plan you bought. We reply
           within 2 business days, and approved refunds are processed within 5 business days. Your bank may take
           a few more days to show the refund.
+        </P>
+        <P>
+          Purchases made outside Sri Lanka are sold by our reseller Paddle.com, the Merchant of Record for those
+          orders, and refunds for them are issued through Paddle to your original payment method. You can also
+          contact Paddle directly using the link in your purchase receipt. Purchases made in Sri Lanka through
+          Payments.lk are refunded in Sri Lankan rupees (LKR) to the original payment method.
+        </P>
+
+        <H2>7. Your legal rights</H2>
+        <P>
+          This policy is in addition to, and does not limit, any rights you have under the consumer protection
+          laws of the country where you live.
         </P>
       </main>
       <Footer />

@@ -192,7 +192,7 @@ export default function ImageEditorDemo() {
         </h2>
         <p className="mx-auto mt-3 max-w-md text-sm sm:text-base text-muted">
           Object removal for images, and unattended access to auto-enhance, is included
-          on the $23.99/mo Pro plan.
+          on the $23.99 Pro plan (30 days).
         </p>
         <Link href="/pricing" className="btn-primary mt-6 inline-flex rounded-full px-6 py-3 text-sm font-semibold">
           Upgrade to Pro

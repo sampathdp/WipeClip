@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/terms" },
 };
 
-const updated = "October 1, 2026";
+const updated = "October 21, 2026";
 
 function H2({ children }: { children: React.ReactNode }) {
   return (
@@ -35,9 +35,12 @@ export default function TermsPage() {
 
       <P>
         These Terms of Service (&quot;Terms&quot;) govern your access to and
-        use of WipeClip.co (&quot;WipeClip.co&quot;, &quot;we&quot;, &quot;us&quot;,
-        or &quot;our&quot;), including the website and the media-editing
-        service it provides (the &quot;Service&quot;). By uploading a file or
+        use of WipeClip.co, including the website and the media-editing
+        service it provides (the &quot;Service&quot;). WipeClip.co is operated
+        by Surage Sampath Dananjaya Peries, a sole trader based in Sri Lanka,
+        at 115/A Gagabada Road, Hirana, Panadura, Sri Lanka
+        (&quot;WipeClip.co&quot;, &quot;we&quot;, &quot;us&quot;, or
+        &quot;our&quot;). By uploading a file or
         otherwise using the Service, you agree to these Terms. If you do not
         agree, do not use the Service.
       </P>
@@ -136,15 +139,30 @@ export default function TermsPage() {
         for details.
       </P>
 
-      <H2>6. Paid Plans, Credits & Refund Policy</H2>
+      <H2>6. Accounts</H2>
       <P>
-        WipeClip.co offers a free plan and paid plans (Lite, Starter and Pro,
-        each available monthly or yearly), plus one-time AI credit packs. What
-        each plan includes is listed on the{" "}
+        Some features need an account. You are responsible for keeping access
+        to your account (including the email or sign-in method you use)
+        secure and for all activity under it. Tell us promptly at{" "}
+        <a href="mailto:support@wipeclip.co" className="underline hover:text-foreground">
+          support@wipeclip.co
+        </a>{" "}
+        if you believe your account has been used without your permission.
+        One person may not create multiple accounts to obtain extra free
+        credits or referral rewards.
+      </P>
+
+      <H2>7. Paid Plans, Credits & Refund Policy</H2>
+      <P>
+        WipeClip.co offers a free plan and paid plans (Lite, Starter and Pro),
+        each sold as a one-time payment for 30 days or for 1 year. What each
+        plan includes and costs is listed on the{" "}
         <Link href="/pricing" className="underline hover:text-foreground">
           pricing page
         </Link>
-        .
+        . The price shown at checkout, including any applicable taxes, is the
+        price you pay. We may change prices or plan contents for future
+        purchases; a change never affects a period you have already paid for.
       </P>
       <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-muted">
         <li>
@@ -158,22 +176,26 @@ export default function TermsPage() {
         </li>
         <li>
           <strong>Plans &amp; Renewal:</strong> Paid plans are prepaid for 30
-          days (monthly) or 365 days (yearly) and do not renew automatically.
-          Buying the same plan again before it ends adds the new period to the
-          time left. When a plan ends, your account returns to the free plan;
-          your projects and purchased credits are kept.
+          days or 365 days and do not renew automatically. You are never
+          charged again unless you choose to buy another period, so there is
+          no subscription to cancel. Buying the same plan again before it ends
+          adds the new period to the time left. When a plan ends, your account
+          returns to the free plan; your projects and remaining AI credits are
+          kept.
         </li>
         <li>
           <strong>Credits:</strong> AI credits are used by the AI tools (
           {AI_CLEANUP_ENABLED ? "object cleanup, " : ""}background removal, sharpening); editing and exporting in
           the video editor never use credits. Credits included with a plan are
-          added when you buy it; purchased credits never expire and have no
-          cash value. If an AI job fails due to an internal server error, the
-          credits it used are returned to your balance automatically.
+          added when you buy it and do not expire. Credits have no cash value
+          and cannot be transferred, sold or exchanged for money, except as
+          part of a refund under the Refund Policy. If an AI job fails due to
+          an internal server error, the credits it used are returned to your
+          balance automatically.
         </li>
         <li>
           <strong>Refund Policy:</strong> You can request a full refund of any
-          plan or credit pack within 14 days of purchase, for any reason. After
+          paid purchase within 14 days of purchase, for any reason. After
           14 days, refunds are at our discretion. A refunded plan ends and its
           remaining credits are removed. See the full{" "}
           <Link href="/refund-policy" className="underline hover:text-foreground">
@@ -187,7 +209,7 @@ export default function TermsPage() {
         </li>
       </ul>
 
-      <H2>7. Intellectual property &amp; Trademarks</H2>
+      <H2>8. Intellectual property &amp; Trademarks</H2>
       <P>
         We retain all rights in the Service itself, including its software,
         design, and branding. You retain all rights in the content you
@@ -200,7 +222,7 @@ export default function TermsPage() {
         mention does not imply any affiliation, sponsorship, or endorsement.
       </P>
 
-      <H2>8. Copyright complaints</H2>
+      <H2>9. Copyright complaints</H2>
       <P>
         If you believe content processed through the Service infringes your
         copyright, see our{" "}
@@ -210,16 +232,35 @@ export default function TermsPage() {
         .
       </P>
 
-      <H2>9. Disclaimer of warranties</H2>
+      <H2>10. Availability and changes to the Service</H2>
       <P>
-        The Service is provided &quot;as is&quot; and &quot;as available&quot;
-        without warranties of any kind, express or implied, including
-        merchantability, fitness for a particular purpose, and
-        non-infringement. We do not warrant that processing results will be
-        error-free or meet your expectations.
+        We work to keep the Service available and reliable, but we do not
+        guarantee that it will be uninterrupted or error-free. We may change,
+        add or remove features, and may carry out maintenance that makes the
+        Service temporarily unavailable. Your editor project is saved only in
+        your browser on your device, for recovery after a refresh, and on the
+        website is kept there for up to 7 days. Clearing your browser data
+        removes it, so export and keep your own copies of anything important.
       </P>
 
-      <H2>10. Limitation of liability</H2>
+      <H2>11. AI-generated results</H2>
+      <P>
+        The AI tools produce results automatically, and those results can be
+        imperfect or differ from what you expect. Review every result before
+        you publish or rely on it. You are responsible for how you use the
+        output.
+      </P>
+
+      <H2>12. Disclaimer of warranties</H2>
+      <P>
+        To the maximum extent permitted by law, the Service is provided
+        &quot;as is&quot; and &quot;as available&quot; without warranties of
+        any kind, express or implied, including merchantability, fitness for
+        a particular purpose, and non-infringement. We do not warrant that
+        processing results will be error-free or meet your expectations.
+      </P>
+
+      <H2>13. Limitation of liability</H2>
       <P>
         To the maximum extent permitted by law, WipeClip.co will not be liable
         for any indirect, incidental, special, consequential, or punitive
@@ -228,40 +269,68 @@ export default function TermsPage() {
         the Service will not exceed the amount you paid us, if any, in the
         twelve months before the claim arose.
       </P>
-
-      <H2>11. Indemnification</H2>
       <P>
-        You agree to indemnify and hold WipeClip.co harmless from any claim,
-        loss, liability, or expense (including reasonable legal fees) arising
-        from your content, your use of the Service, or your violation of
+        Nothing in these Terms excludes or limits any liability that cannot
+        be excluded or limited by law, or any rights you have as a consumer
+        under the mandatory laws of the country where you live.
+      </P>
+
+      <H2>14. Indemnification</H2>
+      <P>
+        To the extent permitted by law, you agree to indemnify and hold
+        WipeClip.co harmless from any claim, loss, liability, or expense
+        (including reasonable legal fees) brought by a third party and arising
+        from your content, your misuse of the Service, or your violation of
         these Terms.
       </P>
 
-      <H2>12. Termination</H2>
+      <H2>15. Termination</H2>
       <P>
-        We may suspend or terminate your access to the Service at any time,
-        with or without notice, for conduct that violates these Terms or is
-        otherwise harmful to us, other users, or third parties.
+        You can stop using the Service at any time, and ask us to delete your
+        account as described in our Privacy Policy. We may suspend or
+        terminate your access to the Service for conduct that violates these
+        Terms or is otherwise harmful to us, other users, or third parties.
+        Where we terminate an account that has a paid plan without a breach
+        of these Terms on your part, we will refund the unused part of that
+        plan.
       </P>
 
-      <H2>13. Changes to these Terms</H2>
+      <H2>16. Changes to these Terms</H2>
       <P>
-        We may update these Terms from time to time. Continued use of the
-        Service after a change becomes effective constitutes acceptance of
-        the revised Terms.
+        We may update these Terms from time to time, and will change the
+        &quot;Last updated&quot; date above when we do. For material changes
+        we will give reasonable notice on the website or by email before they
+        take effect. Continued use of the Service after a change becomes
+        effective constitutes acceptance of the revised Terms.
       </P>
 
-      <H2>14. Governing law &amp; Dispute resolution</H2>
+      <H2>17. Governing law &amp; Dispute resolution</H2>
       <P>
-        These Terms and any dispute arising out of or related to them shall be
-        governed by and construed in accordance with the laws applicable in your
-        country of residence or operation, without giving effect to any conflict
-        of law principles. Any legal action or proceeding arising under these
-        Terms will be brought exclusively in the courts of competent
-        jurisdiction.
+        These Terms and any dispute arising out of or related to them are
+        governed by the laws of Sri Lanka, without giving effect to any
+        conflict of law principles. The courts of Sri Lanka have jurisdiction
+        over any such dispute. If you are a consumer, this does not take away
+        the protection of the mandatory laws of the country where you live, or
+        your right to bring a claim in its courts.
+      </P>
+      <P>
+        Before starting any formal proceedings, please contact us at{" "}
+        <a href="mailto:legal@wipeclip.co" className="underline hover:text-foreground">
+          legal@wipeclip.co
+        </a>{" "}
+        so we can try to resolve the issue informally.
       </P>
 
-      <H2>15. Contact</H2>
+      <H2>18. General</H2>
+      <P>
+        These Terms, together with the Privacy Policy, Refund Policy and
+        Copyright / DMCA Policy they refer to, are the entire agreement
+        between you and us about the Service. If any part of these Terms is
+        found unenforceable, the rest remains in effect. If we do not enforce
+        a provision right away, we have not waived it.
+      </P>
+
+      <H2>19. Contact</H2>
       <P>
         Questions about these Terms can be sent to{" "}
         <a href="mailto:legal@wipeclip.co" className="underline hover:text-foreground">

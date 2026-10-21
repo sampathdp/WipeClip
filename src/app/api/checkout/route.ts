@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
     if (TIERS.indexOf(current) > TIERS.indexOf(tier)) {
       const name = TIER_LABELS[current];
       return NextResponse.json(
-        { error: `You already have ${name}, which includes everything in ${TIER_LABELS[tier]}. Renew ${name} or buy a credit pack instead.` },
+        { error: `You already have ${name}, which includes everything in ${TIER_LABELS[tier]}. Renew ${name} instead.` },
         { status: 409 }
       );
     }

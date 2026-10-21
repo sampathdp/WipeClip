@@ -5,7 +5,7 @@ import { buildPageMetadata } from "@/lib/seo";
 export const metadata: Metadata = buildPageMetadata({
   title: "Pricing",
   description:
-    "WipeClip's video editor is free forever. Paid plans from $1.99 a month unlock premium transitions, filters and effects, up to 4K resolution and more AI credits. Monthly or yearly.",
+    "WipeClip's video editor is free forever. Paid passes from $1.99 for 30 days unlock premium transitions, filters and effects, up to 4K resolution and more AI credits. One-time payments, 30 days or 1 year, no subscription.",
   path: "/pricing",
   ogTitle: "WipeClip.co Pricing: Free & Paid Plans",
   ogDescription:
