@@ -3,6 +3,7 @@ import { PLANS } from "./credits.ts";
 import type { Promo } from "./promo.ts";
 import { unsubscribeApiUrl, unsubscribePageUrl } from "./unsubscribe.ts";
 import { renderPromoNewsletter } from "./emails/promoNewsletter.ts";
+import { senderAddress } from "./email.ts";
 
 // Sending the promotion newsletter, shared by the admin panel
 // (src/app/admin/newsletter) and scripts/send-newsletter.ts. Who has been
@@ -25,7 +26,7 @@ export type NewsletterConfig = {
 /** The sending config from env, or the reason it isn't ready. */
 export function newsletterConfig(): NewsletterConfig | { error: string } {
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "");
-  const from = process.env.EMAIL_FROM?.trim();
+  const from = senderAddress();
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!siteUrl) return { error: "NEXT_PUBLIC_SITE_URL is not set." };
   if (!apiKey) return { error: "RESEND_API_KEY is not set." };
@@ -134,7 +135,7 @@ export function previewMessage(promo: Promo, campaign: string, r: Recipient) {
     // EMAIL_UNSUBSCRIBE_SECRET not set yet - the unsigned link is fine for a preview.
   }
   return {
-    from: process.env.EMAIL_FROM?.trim() || "(EMAIL_FROM not set)",
+    from: senderAddress() || "(EMAIL_FROM not set)",
     replyTo: process.env.EMAIL_REPLY_TO?.trim() || "support@wipeclip.co",
     ...renderFor(siteUrl, unsubscribeUrl, promo, campaign, r),
   };

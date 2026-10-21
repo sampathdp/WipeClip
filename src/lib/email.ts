@@ -8,6 +8,14 @@ export function isEmailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY);
 }
 
+/** EMAIL_FROM with a display name: a bare "hello@wipeclip.co" shows in
+ * inboxes as "hello", so it goes out as "WipeClip <hello@wipeclip.co>". */
+export function senderAddress(): string | undefined {
+  const from = process.env.EMAIL_FROM?.trim();
+  if (!from) return undefined;
+  return from.includes("<") ? from : `WipeClip <${from}>`;
+}
+
 export async function sendEmail({
   to,
   subject,
@@ -37,7 +45,7 @@ export async function sendEmail({
         // onboarding@resend.dev works without verifying a domain, but only
         // delivers to the Resend account owner's own address - fine for
         // admin notifications. Set EMAIL_FROM once a domain is verified.
-        from: process.env.EMAIL_FROM || "WipeClip <onboarding@resend.dev>",
+        from: senderAddress() || "WipeClip <onboarding@resend.dev>",
         to: [to],
         subject,
         text,
