@@ -30,8 +30,8 @@ export default function WelcomePage() {
           its way to your email.
         </p>
         <div className="mt-8 flex flex-wrap justify-center gap-3">
-          <Link href="/editor" className="btn-primary rounded-full px-6 py-3 text-sm font-bold">
-            Open the editor
+          <Link href="/download" className="btn-primary rounded-full px-6 py-3 text-sm font-bold">
+            Download the app
           </Link>
           <Link href="/profile" className="btn-secondary rounded-full px-6 py-3 text-sm font-semibold">
             View your plan

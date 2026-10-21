@@ -12,8 +12,8 @@ export default function Footer() {
             <span className="text-xs text-muted">&copy; {new Date().getFullYear()}</span>
           </div>
           <nav className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted">
-            <Link href="/editor" className="transition-colors hover:text-foreground">
-              Video Editor
+            <Link href="/download" className="transition-colors hover:text-foreground">
+              Download
             </Link>
             <Link href="/about" className="transition-colors hover:text-foreground">
               About

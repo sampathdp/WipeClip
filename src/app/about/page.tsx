@@ -15,13 +15,13 @@ export const metadata: Metadata = buildPageMetadata(
     ? {
         title: "About WipeClip - How AI Video Cleanup Works",
         description:
-          "What WipeClip is: a browser video editor for creators, with AI object removal for footage you shot yourself. How the reconstruction works, its limitations, and how your files are handled.",
+          "What WipeClip is: a desktop video editor for creators on Windows and Mac, with AI object removal for footage you shot yourself. How the reconstruction works, its limitations, and how your files are handled.",
         path: "/about",
       }
     : {
-        title: "About WipeClip - Online Video Editor for Creators",
+        title: "About WipeClip - Video Editor for Windows and Mac",
         description:
-          "What WipeClip is: a browser video editor for creators, with auto captions and free photo tools, and how your files are handled.",
+          "What WipeClip is: a desktop video editor and screen recorder for Windows and Mac, with auto captions and free photo tools, and how your files are handled.",
         path: "/about",
       }
 );
@@ -36,8 +36,8 @@ const SECTIONS = AI_CLEANUP_ENABLED
 
 const EDITOR_PRINCIPLES = [
   {
-    title: "Edit in the browser",
-    desc: "No install. Trim, cut, caption and export right where you are, and your project stays in your browser.",
+    title: "Edit on your desktop",
+    desc: "A free app for Windows and Mac. Record, trim, cut, caption and export, and your projects stay on your computer.",
   },
   {
     title: "Your own content",
@@ -64,7 +64,7 @@ const CLEANUP_PRINCIPLES = [
   },
   {
     title: "Nothing kept",
-    desc: "Files are processed in temporary storage and deleted when the job finishes. Editor projects stay in your browser.",
+    desc: "Files are processed in temporary storage and deleted when the job finishes. Editor projects stay on your computer.",
   },
   {
     title: "Honest about limits",
@@ -78,7 +78,7 @@ const STATS = [
   { value: "0", label: "files stored" },
   { value: "300MB", label: "per upload" },
   { value: "Full", label: "source resolution kept" },
-  { value: "100%", label: "in-browser editor" },
+  { value: "Win + Mac", label: "desktop app" },
 ];
 
 export default function AboutPage() {
@@ -104,12 +104,12 @@ export default function AboutPage() {
                   </>
                 ) : (
                   <>
-                    A video editor for creators, <span className="text-gradient">right in your browser</span>
+                    A video editor for creators, <span className="text-gradient">on Windows and Mac</span>
                   </>
                 )}
               </h1>
               <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-muted sm:text-lg">
-                WipeClip is a browser video editor for creators: trim, cut, add transitions, text, music and stickers,
+                WipeClip is a desktop video editor for creators: trim, cut, add transitions, text, music and stickers,
                 and export for any platform.{" "}
                 {AI_CLEANUP_ENABLED
                   ? "Its AI object removal takes out distractions you didn't want in your own shots, like a passer-by, a stray cable or a lens smudge, by reconstructing what was behind them."
@@ -122,10 +122,10 @@ export default function AboutPage() {
                   </Link>
                 )}
                 <Link
-                  href="/editor"
+                  href="/download"
                   className={`${AI_CLEANUP_ENABLED ? "btn-secondary" : "btn-primary"} rounded-full px-6 py-3 text-sm font-semibold`}
                 >
-                  Open the video editor
+                  Download the app
                 </Link>
               </div>
             </Reveal>

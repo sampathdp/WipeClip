@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { handOffToEditor } from "@/lib/editor/handoff";
 import RegionSelector from "./RegionSelector";
 import VideoCompareSlider from "./VideoCompareSlider";
 import ToolFeedback from "./ToolFeedback";
@@ -33,8 +32,8 @@ const RESOLUTION_OPTIONS: { key: Resolution; label: string; minHeight: number; c
   { key: "4k", label: "4K Ultra", minHeight: 2160, credits: 4 },
 ];
 
-// Editing tools offered alongside cleanup; each opens /editor (with the
-// current file, when one is already loaded here).
+// Editing tools offered alongside cleanup; each links to the desktop app
+// download (the editor ships only as the Windows and macOS app).
 const EDITOR_TOOLS: { label: string; icon: React.ReactNode }[] = [
   { label: "Trim", icon: <path d="M6 3v12a3 3 0 0 0 3 3h12M18 21V9a3 3 0 0 0-3-3H3" /> },
   {
@@ -245,9 +244,8 @@ export default function UploadDemo() {
   }, [queue, pickFile]);
 
   const openEditor = useCallback(() => {
-    if (file) handOffToEditor(file);
-    router.push("/editor");
-  }, [file, router]);
+    router.push("/download");
+  }, [router]);
 
   const process = useCallback(async () => {
     if (!file || !region) return;
@@ -331,7 +329,7 @@ export default function UploadDemo() {
           onClick={openEditor}
           className="text-xs font-semibold text-cyan-600 underline-offset-2 hover:underline"
         >
-          {file ? "Open this video in the Editor →" : "Open the Editor →"}
+          Get the desktop editor →
         </button>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
@@ -340,7 +338,7 @@ export default function UploadDemo() {
             key={tool.label}
             type="button"
             onClick={openEditor}
-            title={`${tool.label} in the Editor`}
+            title={`${tool.label} in the desktop app`}
             className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-2 text-xs font-semibold text-foreground transition hover:border-cyan-500/50 hover:text-cyan-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
           >
             <svg

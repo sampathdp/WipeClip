@@ -100,7 +100,7 @@ export default function Hero() {
 
             {/* Core Headline - stacked, oversized, mixed weight */}
             <h1 className="font-display text-6xl tracking-tighter leading-[0.92] text-foreground sm:text-7xl lg:text-6xl xl:text-7xl">
-              <span className="block font-semibold text-foreground/90">Online Video </span>
+              <span className="block font-semibold text-foreground/90">Desktop Video </span>
               <span className="block italic font-extrabold text-gradient drop-shadow-[0_0_35px_rgba(124,92,255,0.35)]">
                 Editor{" "}
               </span>
@@ -110,8 +110,8 @@ export default function Hero() {
             {/* Subtitle */}
             <p className="mx-auto mt-7 max-w-md text-base leading-relaxed text-muted sm:text-lg lg:mx-0 lg:border-l-2 lg:border-accent/40 lg:pl-5">
               Trim, cut and arrange clips, add transitions, text, stickers,
-              filters and music, then export in landscape, vertical or square, all
-              in your browser.
+              filters and music, then export in landscape, vertical or square. Free
+              for Windows and Mac, with a built-in screen recorder.
               {AI_CLEANUP_ENABLED
                 ? " Built-in AI object removal takes out passers-by, cables and other distractions from footage you shot."
                 : " Auto captions and picture-in-picture included."}
@@ -120,10 +120,10 @@ export default function Hero() {
             {/* Action CTAs */}
             <div className="mt-9 flex flex-wrap items-center justify-center gap-4 lg:justify-start">
               <Link
-                href="/editor"
+                href="/download"
                 className="btn-primary rounded-full px-8 py-4 text-sm sm:text-base font-bold inline-flex items-center justify-center gap-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_0_35px_rgba(124,92,255,0.45)] transition-all hover:scale-[1.02]"
               >
-<span>Start editing free</span>
+<span>Download free</span>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>
@@ -147,7 +147,7 @@ export default function Hero() {
 
             {/* Trust Highlights */}
             <div className="mt-8 flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-              {["Free forever plan", "No account to start", "Runs in your browser"].map((label) => (
+              {["Free forever plan", "No account to start", "Windows & Mac"].map((label) => (
                 <span
                   key={label}
                   className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-surface-2/60 px-3 py-1 text-[11px] font-medium text-muted"

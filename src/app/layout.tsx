@@ -26,19 +26,19 @@ const siteUrl = SITE_URL;
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "Online Video Editor for Creators | WipeClip.co",
+    default: "Video Editor & Screen Recorder for Windows and Mac | WipeClip.co",
     template: "%s | WipeClip.co",
   },
   description:
-    "WipeClip is an online video editor for creators. Trim, cut, add transitions, text, stickers, filters and music in your browser, then export for any platform in landscape, vertical or square." +
+    "WipeClip is a free video editor and screen recorder for Windows and Mac. Record your screen, trim, cut, add transitions, text, stickers, filters and music, then export for any platform in landscape, vertical or square." +
     (AI_CLEANUP_ENABLED
       ? " Built-in AI object removal takes distractions out of footage you shot."
       : " Auto captions and picture-in-picture included."),
   keywords: [
-    "online video editor",
+    "video editor for windows",
+    "video editor for mac",
     "free video editor",
-    "trim video online",
-    "cut video online",
+    "screen recorder",
     "add transitions to video",
     "add text to video",
     "add stickers to video",
@@ -56,28 +56,28 @@ export const metadata: Metadata = {
     type: "website",
     url: siteUrl,
     siteName: "WipeClip.co",
-    title: "Online Video Editor for Creators | WipeClip.co",
+    title: "Video Editor & Screen Recorder for Windows and Mac | WipeClip.co",
     description:
       AI_CLEANUP_ENABLED
-        ? "Trim, cut, add transitions, text, stickers and filters in your browser. Free forever, with AI tools to clean up your footage."
-        : "Trim, cut, add transitions, text, stickers and filters in your browser. Free forever, with AI auto captions.",
+        ? "Record your screen, trim, cut, add transitions, text, stickers and filters on Windows and Mac. Free forever, with AI tools to clean up your footage."
+        : "Record your screen, trim, cut, add transitions, text, stickers and filters on Windows and Mac. Free forever, with AI auto captions.",
     locale: "en_US",
     images: [
       {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "WipeClip.co online video editor",
+        alt: "WipeClip.co video editor for Windows and Mac",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Online Video Editor for Creators | WipeClip.co",
+    title: "Video Editor & Screen Recorder for Windows and Mac | WipeClip.co",
     description:
       AI_CLEANUP_ENABLED
-        ? "Trim, cut, add transitions, text, stickers and filters in your browser. Free forever, with AI tools to clean up your footage."
-        : "Trim, cut, add transitions, text, stickers and filters in your browser. Free forever, with AI auto captions.",
+        ? "Record your screen, trim, cut, add transitions, text, stickers and filters on Windows and Mac. Free forever, with AI tools to clean up your footage."
+        : "Record your screen, trim, cut, add transitions, text, stickers and filters on Windows and Mac. Free forever, with AI auto captions.",
     images: ["/opengraph-image"],
   },
   robots: {
@@ -132,12 +132,12 @@ const jsonLd = {
       "@type": "SoftwareApplication",
       name: "WipeClip.co",
       applicationCategory: "MultimediaApplication",
-      operatingSystem: "Web",
-      url: siteUrl,
+      operatingSystem: "Windows 10, Windows 11, macOS 11+",
+      url: `${siteUrl}/download`,
       description:
         AI_CLEANUP_ENABLED
-          ? "Browser-based video editor for creators: trim, cut, transitions, text and stickers, plus AI object removal that rebuilds the pixels behind an unwanted object across a whole clip of footage you shot."
-          : "Browser-based video editor for creators: trim, cut, transitions, text, stickers, music and auto captions.",
+          ? "Desktop video editor and screen recorder for Windows and Mac: trim, cut, transitions, text and stickers, plus AI object removal that rebuilds the pixels behind an unwanted object across a whole clip of footage you shot."
+          : "Desktop video editor and screen recorder for Windows and Mac: trim, cut, transitions, text, stickers, music and auto captions.",
       offers: {
         "@type": "Offer",
         price: "0",

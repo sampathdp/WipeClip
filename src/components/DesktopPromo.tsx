@@ -1,14 +1,14 @@
-import Link from "next/link";
 import Reveal from "./Reveal";
+import DownloadButtons from "./DownloadButtons";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 const highlights = [
-  "Trim the start and end",
-  "Split and cut out unwanted parts",
-  "Drag clips into a new order",
-  "Fade, slide, zoom and blur transitions",
-  "Emoji, arrow and label stickers",
-  AI_CLEANUP_ENABLED ? "AI Cleanup on just one clip" : "Auto captions from speech",
+  "Record screen, audio and webcam",
+  "Automatic zooms on clicks",
+  "Trim, split and reorder clips",
+  "Transitions, text and stickers",
+  "Auto captions from speech",
+  AI_CLEANUP_ENABLED ? "AI Cleanup on just one clip" : "Export at original quality",
 ];
 
 // Illustrative timeline: three clips, two transitions, one sticker bar.
@@ -18,25 +18,23 @@ const CLIPS = [
   { w: "26%", from: "from-fuchsia-500/60", to: "to-fuchsia-500/30" },
 ];
 
-/** Homepage section introducing the browser editor (/editor). */
-export default function EditorPromo() {
+/** Homepage section promoting the Windows and macOS app (/download). */
+export default function DesktopPromo() {
   return (
-    <section id="editor" className="scroll-mt-28 py-24 relative">
+    <section id="download" className="scroll-mt-28 py-24 relative">
       <div className="mx-auto max-w-6xl px-6">
         <Reveal className="glass-card grid gap-10 rounded-[2rem] p-8 sm:p-12 lg:grid-cols-2 lg:items-center">
           <div>
             <div className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-50 px-3.5 py-1 text-xs font-semibold text-cyan-600 dark:bg-cyan-500/10">
-              New: Video Editor
+              Free for Windows &amp; Mac
             </div>
             <h2 className="font-display text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl">
-              {AI_CLEANUP_ENABLED ? "Clean it up, then " : "Cut it down, then "}
-              <span className="text-gradient">finish the edit</span>
+              Record it, then <span className="text-gradient">finish the edit</span>
             </h2>
             <p className="mt-4 text-base leading-relaxed text-muted">
-              {AI_CLEANUP_ENABLED
-                ? "WipeClip now includes a lightweight online video editor. Cut your clip down, rearrange it, add transitions and stickers, and run AI Cleanup on the parts that need it, all in your browser."
-                : "WipeClip is a lightweight online video editor. Cut your clip down, rearrange it, add transitions, stickers and captions, all in your browser."}{" "}
-              The export keeps your original aspect ratio and frame rate.
+              The WipeClip desktop app puts a screen recorder and a lightweight video editor in one place. Capture your
+              screen, cut it down, add zooms, captions, transitions and stickers, and export at your original aspect
+              ratio and frame rate.
             </p>
             <ul className="mt-6 grid gap-2.5 sm:grid-cols-2">
               {highlights.map((h) => (
@@ -46,15 +44,8 @@ export default function EditorPromo() {
                 </li>
               ))}
             </ul>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Link href="/editor" className="btn-primary rounded-full px-6 py-3 text-sm font-semibold">
-                Open the video editor
-              </Link>
-              {AI_CLEANUP_ENABLED && (
-                <a href="#upload" className="btn-secondary rounded-full px-6 py-3 text-sm font-semibold">
-                  Just clean up a clip
-                </a>
-              )}
+            <div className="mt-8">
+              <DownloadButtons compact />
             </div>
           </div>
 

@@ -4,12 +4,12 @@ import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 const allTools = [
   {
-    href: "/editor",
+    href: "/download",
     badge: "New",
-    title: "Online Video Editor",
+    title: "Desktop Video Editor",
     desc: AI_CLEANUP_ENABLED
-      ? "Trim, split and cut out sections, reorder clips, add transitions and stickers, and AI-clean any clip. Right in your browser."
-      : "Trim, split and cut out sections, reorder clips, add transitions, stickers and auto captions. Right in your browser.",
+      ? "Trim, split and cut out sections, reorder clips, add transitions and stickers, and AI-clean any clip. Free for Windows and Mac."
+      : "Trim, split and cut out sections, reorder clips, add transitions, stickers and auto captions. Free for Windows and Mac.",
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="6" cy="6" r="3" />
@@ -88,7 +88,7 @@ export default function FreeTools() {
             More than <span className="text-gradient">{AI_CLEANUP_ENABLED ? "video cleanup" : "video editing"}</span>
           </h2>
           <p className="mt-4 text-muted text-base leading-relaxed">
-            Everything else you need for the same footage and photos: a full video editor, plus
+            Everything else you need for the same footage and photos: a full desktop video editor, plus
             three free tools with no account required to try.
           </p>
         </div>

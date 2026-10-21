@@ -49,7 +49,7 @@ export default function TermsPage() {
       <H2>1. What the Service does</H2>
       {AI_CLEANUP_ENABLED ? (
         <P>
-          WipeClip.co is a browser-based video editor with AI object removal.
+          WipeClip.co is a desktop video editor for Windows and macOS with AI object removal.
           You mark an unwanted object in a file you provide (for example a
           passer-by, a stray cable, or a lens smudge) and the Service
           reconstructs that region using automated image/video processing.
@@ -58,7 +58,7 @@ export default function TermsPage() {
         </P>
       ) : (
         <P>
-          WipeClip.co is a browser-based video editor with automated captions
+          WipeClip.co is a desktop video editor for Windows and macOS with automated captions
           and photo tools (background removal, sharpening and frame capture).
           The Service is intended only for content you own or have permission
           to edit.

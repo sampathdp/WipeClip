@@ -5,9 +5,8 @@ import VideoEditor, { type IncomingRecording } from "@/components/editor/VideoEd
 import ScreenRecorder from "@/components/recorder/ScreenRecorder";
 import type { RecordingBundle } from "@/lib/recorder/bundle";
 
-/** The desktop app opens straight into the real WipeClip editor. The
- * website's /editor page also renders EditorLanding (marketing copy) under
- * the upload card; that's left out here.
+/** The desktop app opens straight into the WipeClip editor, which ships
+ * only here (the website just links to the download).
  *
  * The screen recorder (desktop only) opens over the editor, which stays
  * mounted underneath so an open project isn't lost; a finished recording

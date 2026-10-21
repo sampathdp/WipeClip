@@ -10,7 +10,6 @@ import { trackEvent, useToolView } from "@/lib/analytics";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch, confirmAction, IS_DESKTOP } from "@/lib/platform";
 import { createClock, useClockTime, type Clock } from "@/lib/editor/clock";
-import { takeHandedOffFile } from "@/lib/editor/handoff";
 import { useProjectHistory } from "@/lib/editor/history";
 import {
   generateThumbnails,
@@ -157,10 +156,7 @@ export interface IncomingRecording {
   bundle: RecordingBundle;
 }
 
-/** `children` is shown under the upload card until a video is loaded -
- * /editor passes its server-rendered landing content (EditorLanding) here.
- *
- * Desktop-only props (the website passes none of them):
+/** Desktop-only props:
  *  - `onRecord` adds "Record screen" buttons that open the recorder,
  *  - `incomingRecording` opens a recording as a new project and reports
  *    the outcome through `onRecordingImported`,
@@ -169,14 +165,12 @@ export interface IncomingRecording {
  *  - `onProjectOpen` reports whether a project is open.
  */
 export default function VideoEditor({
-  children,
   onRecord,
   incomingRecording,
   onRecordingImported,
   suspended = false,
   onProjectOpen,
 }: {
-  children?: React.ReactNode;
   onRecord?: () => void;
   incomingRecording?: IncomingRecording | null;
   onRecordingImported?: (key: number, error: string | null) => void;
@@ -434,16 +428,6 @@ export default function VideoEditor({
     },
     [startProject, confirmReplace, keepForRecovery]
   );
-
-  // A file handed over from the homepage tool ("Edit this video") opens
-  // straight into a new project once recovery has been checked.
-  const handOffChecked = useRef(false);
-  useEffect(() => {
-    if (phase !== "import" || handOffChecked.current) return;
-    handOffChecked.current = true;
-    const file = takeHandedOffFile();
-    if (file) queueMicrotask(() => void importFile(file));
-  }, [phase, importFile]);
 
   /** Opens a screen recording as a new project, entirely locally: the
    * recording is the user's own capture, already on their disk, so unlike
@@ -1523,7 +1507,6 @@ export default function VideoEditor({
             </p>
           </div>
         </main>
-        {children}
       </div>
     );
   }

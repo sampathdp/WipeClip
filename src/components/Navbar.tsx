@@ -8,7 +8,7 @@ import ThemeToggle from "./ThemeToggle";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 const links = [
-  { href: "/editor", label: "Editor" },
+  { href: "/download", label: "Download" },
   ...(AI_CLEANUP_ENABLED ? [{ href: "/#how-it-works", label: "How It Works" }] : []),
   { href: "/about", label: "About" },
   { href: "/pricing", label: "Pricing" },

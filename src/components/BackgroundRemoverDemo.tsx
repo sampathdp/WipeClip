@@ -341,8 +341,8 @@ export default function BackgroundRemoverDemo() {
                   {AI_CLEANUP_ENABLED
                     ? "Also need to remove an unwanted object from your own photo or video? "
                     : "Making a video with this image? "}
-                  <Link href={AI_CLEANUP_ENABLED ? "/" : "/editor"} className="font-semibold text-cyan-600 underline hover:text-cyan-700">
-                    {AI_CLEANUP_ENABLED ? "Try WipeClip.co's AI object removal free" : "Try WipeClip.co's free video editor"}
+                  <Link href={AI_CLEANUP_ENABLED ? "/" : "/download"} className="font-semibold text-cyan-600 underline hover:text-cyan-700">
+                    {AI_CLEANUP_ENABLED ? "Try WipeClip.co's AI object removal free" : "Get WipeClip.co's free video editor for Windows and Mac"}
                   </Link>
                 </p>
               </div>

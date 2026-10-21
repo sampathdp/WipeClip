@@ -4,7 +4,7 @@ import Hero from "@/components/Hero";
 import UploadDemo from "@/components/UploadDemo";
 import HowItWorks from "@/components/HowItWorks";
 import WhyWipeClip from "@/components/WhyWipeClip";
-import EditorPromo from "@/components/EditorPromo";
+import DesktopPromo from "@/components/DesktopPromo";
 import FreeTools from "@/components/FreeTools";
 import Faq from "@/components/Faq";
 import CtaBanner from "@/components/CtaBanner";
@@ -22,7 +22,7 @@ export default function Home() {
       <FreeToolsBanner />
       <main className="flex-1">
         <Hero />
-        <EditorPromo />
+        <DesktopPromo />
         {AI_CLEANUP_ENABLED && (
           <>
             <section className="px-6">

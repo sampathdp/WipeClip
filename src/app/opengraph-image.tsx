@@ -3,7 +3,7 @@ import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 export const alt = AI_CLEANUP_ENABLED
   ? "WipeClip.co: AI video cleanup for creators"
-  : "WipeClip.co: online video editor for creators";
+  : "WipeClip.co: video editor for Windows and Mac";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -97,7 +97,7 @@ export default function Image() {
             letterSpacing: -0.5,
           }}
         >
-          {AI_CLEANUP_ENABLED ? "AI Video Cleanup for Creators" : "Online Video Editor for Creators"}
+          {AI_CLEANUP_ENABLED ? "AI Video Cleanup for Creators" : "Video Editor for Windows & Mac"}
         </div>
       </div>
     ),

@@ -28,7 +28,7 @@ const tiles = [
     icon: <path d="M5 12h14M12 5l7 7-7 7" />,
   },
   {
-    title: "Edit it all in your browser",
+    title: "Edit it all on your desktop",
     desc: "Trim, cut, reorder, add transitions and stickers, then AI-clean just the clips that need it.",
     span: "lg:col-span-2",
     icon: (
@@ -38,7 +38,7 @@ const tiles = [
         <path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12" />
       </>
     ),
-    href: "/editor",
+    href: "/download",
   },
 ];
 

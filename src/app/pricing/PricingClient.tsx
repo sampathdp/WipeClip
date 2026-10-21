@@ -415,8 +415,8 @@ export default function PricingClient() {
                             : `Get ${plan.label}`}
                     </button>
                   ) : (
-                    <Link href="/editor" className="btn-secondary block w-full rounded-full py-3 text-center text-xs font-semibold">
-                      Start editing free
+                    <Link href="/download" className="btn-secondary block w-full rounded-full py-3 text-center text-xs font-semibold">
+                      Download free
                     </Link>
                   )}
                 </div>

@@ -29,6 +29,11 @@ const nextConfig: NextConfig = {
     // compiled out of the website instead of shipped and skipped.
     NEXT_PUBLIC_WIPECLIP_DESKTOP: "0",
   },
+  // The online editor was retired: the editor ships only as the Windows and
+  // macOS app, so old links and search results land on its download page.
+  async redirects() {
+    return [{ source: "/editor", destination: "/download", permanent: true }];
+  },
   async headers() {
     return [
       {

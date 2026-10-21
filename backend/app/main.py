@@ -38,6 +38,10 @@ Environment variables:
     MAX_CONCURRENT_JOBS  jobs run at once in inline mode (default 1); more
                          requests wait their turn - see app/config.py.
     JOB_THREADS          CPU threads per job (default cores / jobs).
+    GCS_UPLOAD_BUCKET    optional. When set, the browser uploads videos for
+                         /api/video/probe and /api/video/process straight to
+                         this Cloud Storage bucket instead of to this server
+                         - see app/uploads.py.
     EDITOR_MAX_REVERSE_BUFFER_MB  RAM budget for one reversed clip's frame
                          buffer (default 1024).
 """
@@ -63,7 +67,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, ValidationError
 from starlette.background import BackgroundTask
 
-from app import jobs, tickets
+from app import jobs, tickets, uploads
 from app.config import (
     BG_REMOVE_PREVIEW_MAX_MEGAPIXELS,
     EDITOR_COMPACT_AUDIO_BITRATE,
@@ -235,15 +239,46 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.post("/api/video/upload-url")
+async def api_video_upload_url(size: int = Form(...), extension: str = Form("")):
+    """A signed URL the browser uploads a video to directly, plus the
+    upload id to send to /api/video/probe and /api/video/process in place of
+    the file - see app/uploads.py. 404 while GCS_UPLOAD_BUCKET is unset, which
+    tells the frontend to post the file itself.
+    """
+    if not uploads.enabled():
+        raise HTTPException(status_code=404, detail="Direct uploads aren't configured.")
+    if size > MAX_VIDEO_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=400, detail=f"File too large (max {MAX_VIDEO_UPLOAD_BYTES // (1024 * 1024)}MB)"
+        )
+    return await asyncio.to_thread(uploads.create_upload_url, extension, MAX_VIDEO_UPLOAD_BYTES)
+
+
+async def _receive_video(file: Optional[UploadFile], upload_id: Optional[str], tmp: str) -> str:
+    """Puts the job's video in `tmp` - from the bucket when the browser
+    uploaded it there (`upload_id`), else from the request body - and
+    returns its path."""
+    if upload_id:
+        in_path = os.path.join(tmp, f"input{uploads.suffix(upload_id)}")
+        await asyncio.to_thread(uploads.download, upload_id, in_path, MAX_VIDEO_UPLOAD_BYTES)
+        return in_path
+    if file is None:
+        raise HTTPException(status_code=400, detail="No video was uploaded.")
+    in_path = os.path.join(tmp, f"input{Path(file.filename or '').suffix or '.mp4'}")
+    _save_upload(file, in_path, MAX_VIDEO_UPLOAD_BYTES)
+    return in_path
+
+
 @app.post("/api/video/probe")
-async def api_video_probe(file: UploadFile = File(...)):
+async def api_video_probe(file: Optional[UploadFile] = File(None), upload_id: Optional[str] = Form(None)):
     """Returns a representative preview frame (PNG) plus video metadata as
     response headers, so the frontend can let the user draw a cleanup
     region against real pixel coordinates before committing to a full encode.
+    Takes the video as `file`, or as the `upload_id` of a direct upload.
     """
     with tempfile.TemporaryDirectory() as tmp:
-        in_path = os.path.join(tmp, f"input{Path(file.filename or '').suffix or '.mp4'}")
-        _save_upload(file, in_path, MAX_VIDEO_UPLOAD_BYTES)
+        in_path = await _receive_video(file, upload_id, tmp)
         try:
             info, frame_png = video_pipeline.probe_video(in_path)
         except ValueError as exc:
@@ -281,7 +316,8 @@ async def api_video_probe(file: UploadFile = File(...)):
 @app.post("/api/video/process")
 async def api_video_process(
     ticket: str = Form(...),
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    upload_id: Optional[str] = Form(None),  # a direct upload, in place of `file`
     x: int = Form(...),
     y: int = Form(...),
     w: int = Form(...),
@@ -311,16 +347,22 @@ async def api_video_process(
         raise HTTPException(status_code=403, detail="Invalid job ticket.")
     await tickets.claim(ticket)
     try:
-        return await _video_process(file, x, y, w, h, start, end, resolution, quality)
+        result = await _video_process(file, upload_id, x, y, w, h, start, end, resolution, quality)
     except (Exception, asyncio.CancelledError):
         # Any failure, rejection (moderation, bad region) or disconnect: no
         # usable result, so the credits go back.
         await tickets.refund(ticket)
         raise
+    # Done with the direct upload. Kept on failure, so a retry doesn't
+    # re-upload; the bucket's lifecycle rule removes it either way.
+    if upload_id:
+        await asyncio.to_thread(uploads.delete, upload_id)
+    return result
 
 
 async def _video_process(
-    file: UploadFile,
+    file: Optional[UploadFile],
+    upload_id: Optional[str],
     x: int,
     y: int,
     w: int,
@@ -334,9 +376,8 @@ async def _video_process(
         raise HTTPException(status_code=400, detail=f"Region too small; minimum {MIN_REGION_PX}px per side")
 
     with tempfile.TemporaryDirectory() as tmp:
-        in_path = os.path.join(tmp, f"input{Path(file.filename or '').suffix or '.mp4'}")
+        in_path = await _receive_video(file, upload_id, tmp)
         out_path = os.path.join(tmp, "output.mp4")
-        _save_upload(file, in_path, MAX_VIDEO_UPLOAD_BYTES)
 
         try:
             info, _ = video_pipeline.probe_video(in_path)

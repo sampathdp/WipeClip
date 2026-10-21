@@ -12,5 +12,6 @@ imageio-ffmpeg>=0.5.1
 a2wsgi>=1.10.0
 redis>=5.0.0        # RQ job queue - see app/queue.py (opt-in via REDIS_URL)
 rq>=1.16.0
+google-cloud-storage>=2.14.0  # direct-to-bucket uploads - see app/uploads.py (opt-in via GCS_UPLOAD_BUCKET)
 sentry-sdk[fastapi]>=2.0.0  # error tracking - inert unless SENTRY_DSN is set, see main.py
 pip-system-certs>=4.0; sys_platform == "win32"

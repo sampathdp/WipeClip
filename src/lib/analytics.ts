@@ -16,6 +16,7 @@ export type FunnelEvent =
   | "processing_completed"
   | "processing_failed"
   | "download_clicked"
+  | "desktop_download_clicked"
   | "signup_started"
   | "signup_completed"
   | "pricing_viewed"

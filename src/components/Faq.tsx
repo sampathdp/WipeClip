@@ -5,11 +5,11 @@ import { AI_CLEANUP_ENABLED } from "@/lib/features";
 const editorFaqs = [
   {
     q: "What can I do in the editor?",
-    a: "The WipeClip video editor (wipeclip.co/editor) lets you trim, split and remove sections, reorder clips, add transitions, text, stickers, music and auto captions, and layer clips picture-in-picture, then export at your original aspect ratio and frame rate.",
+    a: "The WipeClip desktop app for Windows and Mac lets you record your screen, trim, split and remove sections, reorder clips, add transitions, text, stickers, music and auto captions, and layer clips picture-in-picture, then export at your original aspect ratio and frame rate.",
   },
   {
     q: "Do I need to install anything?",
-    a: "No. The editor runs in your browser. Your project is saved in your own browser so you can pick up where you left off.",
+    a: "Yes. The editor is a free desktop app for Windows and Mac. Download it from wipeclip.co/download. Your projects are saved on your own computer so you can pick up where you left off.",
   },
   {
     q: "What is the maximum file size?",
@@ -17,7 +17,7 @@ const editorFaqs = [
   },
   {
     q: "Do you store or use my video files?",
-    a: "No. Editing happens in your browser. Files uploaded for export are processed in temporary storage and deleted once your result is ready.",
+    a: "No. Editing happens on your computer. Files uploaded for export are processed in temporary storage and deleted once your result is ready.",
   },
   {
     q: "Will you process explicit or adult content?",
@@ -28,7 +28,7 @@ const editorFaqs = [
 const cleanupFaqs = [
   {
     q: "Can I also trim, cut, or edit my video?",
-    a: "Yes. The WipeClip video editor (wipeclip.co/editor) lets you trim, split and remove sections, reorder clips, add transitions and stickers, and run AI object removal on a single clip, then export at your original aspect ratio and frame rate.",
+    a: "Yes. The WipeClip desktop app for Windows and Mac lets you trim, split and remove sections, reorder clips, add transitions and stickers, and run AI object removal on a single clip, then export at your original aspect ratio and frame rate.",
   },
   {
     q: "Can I use this on any video I find online?",

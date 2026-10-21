@@ -35,7 +35,7 @@ const faqs = [
       }
     : {
         q: "What if I need to edit the whole clip?",
-        a: "This tool grabs a single still frame. To trim, cut, caption or rearrange the whole clip, use WipeClip.co's free online video editor.",
+        a: "This tool grabs a single still frame. To trim, cut, caption or rearrange the whole clip, use WipeClip.co's free video editor for Windows and Mac.",
       },
 ];
 

@@ -112,7 +112,7 @@ export default function WelcomeModal() {
           Welcome to WipeClip
         </div>
         <h2 id="welcome-modal-heading" className="font-display text-2xl font-extrabold tracking-tight text-foreground pr-6">
-          Edit in your browser,{" "}
+          Edit on your desktop,{" "}
           <span className="text-gradient">{AI_CLEANUP_ENABLED ? "clean up with AI" : "caption with AI"}</span>
         </h2>
         <p className="mt-1.5 text-sm text-muted">Here&apos;s what you get, free.</p>
@@ -142,11 +142,11 @@ export default function WelcomeModal() {
             Look around
           </button>
           <Link
-            href="/editor"
+            href="/download"
             onClick={close}
             className="rounded-full bg-gradient-to-r from-accent to-cyan-500 px-5 py-2.5 text-center text-sm font-semibold text-white shadow-[0_10px_30px_-10px_rgba(124,92,255,0.7)] hover:opacity-95"
           >
-            Open the editor
+            Download the app
           </Link>
         </div>
       </div>

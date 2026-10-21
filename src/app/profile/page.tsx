@@ -49,7 +49,7 @@ export default async function ProfilePage() {
   const initial = email.charAt(0).toUpperCase() || "?";
 
   const links = [
-    { href: "/editor", title: "Video Editor", desc: "Trim, cut, add transitions and stickers." },
+    { href: "/download", title: "Desktop App", desc: "Record, edit and export on Windows or Mac." },
     ...(AI_CLEANUP_ENABLED
       ? [{ href: "/#upload", title: "Remove an object", desc: "Take a distraction out of your own clip." }]
       : []),

@@ -63,18 +63,64 @@ export interface VideoInfo {
   hasAudio?: boolean;
 }
 
+/** Direct uploads (see backend/app/uploads.py): rather than posting the
+ * video to the backend - which bills for every second of the upload - the
+ * browser PUTs it straight to a storage bucket with a signed URL and then
+ * sends the backend only its upload id. One upload per File serves both
+ * probeVideo and processVideo. null means the backend has no bucket
+ * configured, so the file itself gets posted like before. */
+const directUploads = new WeakMap<File, Promise<string | null>>();
+
+async function uploadDirect(file: File, signal?: AbortSignal): Promise<string | null> {
+  const body = new FormData();
+  body.append("size", String(file.size));
+  const dot = file.name.lastIndexOf(".");
+  body.append("extension", dot >= 0 ? file.name.slice(dot) : "");
+  const res = await fetch(`${TOOLS_API_URL}/api/video/upload-url`, { method: "POST", body, signal });
+  if (res.status === 404) return null;
+  if (!res.ok) await throwApiError(res, "Upload failed. Try again.");
+  const { uploadId, url, headers } = (await res.json()) as {
+    uploadId: string;
+    url: string;
+    headers: Record<string, string>;
+  };
+  const put = await fetch(url, { method: "PUT", headers, body: file, signal });
+  if (!put.ok) throw new ApiError("Upload failed. Try again.");
+  return uploadId;
+}
+
+/** Appends the video to `body`: its direct-upload id, uploading it first
+ * if this File hasn't been yet, or the file itself. */
+async function appendVideo(body: FormData, file: File, signal?: AbortSignal): Promise<void> {
+  let upload = directUploads.get(file);
+  if (!upload) {
+    upload = uploadDirect(file, signal);
+    directUploads.set(file, upload);
+    upload.catch(() => directUploads.delete(file));
+  }
+  const uploadId = await upload;
+  if (uploadId) body.append("upload_id", uploadId);
+  else body.append("file", file);
+}
+
+/** 410: the direct upload is gone (expired) - the next try uploads again. */
+function forgetExpiredUpload(file: File, res: Response): void {
+  if (res.status === 410) directUploads.delete(file);
+}
+
 export async function probeVideo(
   file: File
 ): Promise<{ info: VideoInfo; previewUrl: string }> {
   assertBackendEnabled();
   const body = new FormData();
-  body.append("file", file);
+  await appendVideo(body, file);
 
   const res = await fetch(`${TOOLS_API_URL}/api/video/probe`, {
     method: "POST",
     body,
   });
 
+  forgetExpiredUpload(file, res);
   if (!res.ok) {
     await throwApiError(res, "Could not read that video.");
   }
@@ -126,10 +172,13 @@ export async function processVideo(
   signal?: AbortSignal,
   range?: { start: number; end: number }
 ): Promise<Blob> {
-  const { ticket } = await getTicket("/api/process", { resolution, filename: file.name }, "Processing failed. Try again.", signal);
+  // Upload before the ticket spends any credits (usually already done by
+  // probeVideo for this same File).
+  assertBackendEnabled();
   const body = new FormData();
+  await appendVideo(body, file, signal);
+  const { ticket } = await getTicket("/api/process", { resolution, filename: file.name }, "Processing failed. Try again.", signal);
   body.append("ticket", ticket);
-  body.append("file", file);
   body.append("x", String(region.x));
   body.append("y", String(region.y));
   body.append("w", String(region.w));
@@ -150,6 +199,9 @@ export async function processVideo(
     signal,
   });
 
+  // The backend deletes a direct upload once a job on it succeeds.
+  if (res.ok) directUploads.delete(file);
+  forgetExpiredUpload(file, res);
   if (!res.ok) {
     await throwApiError(res, "Processing failed. Try again.");
   }

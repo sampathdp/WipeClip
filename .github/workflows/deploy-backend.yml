@@ -13,9 +13,15 @@ permissions:
   id-token: write # required for Workload Identity Federation
 
 env:
-  PROJECT_ID: hypnotic-pier-506015-m1
+  PROJECT_ID: wipeclip
   REGION: us-central1
   SERVICE: unmarkai-backend
+  # Identity the service runs as: reads/deletes UPLOAD_BUCKET and signs its
+  # upload URLs (see backend/README.md "Direct uploads").
+  RUN_SERVICE_ACCOUNT: wipeclip-backend@wipeclip.iam.gserviceaccount.com
+  # Direct video uploads (backend/app/uploads.py). Create it first - see
+  # backend/README.md "Direct uploads".
+  UPLOAD_BUCKET: wipeclip-uploads
 
 jobs:
   deploy:
@@ -38,6 +44,8 @@ jobs:
             --source . \
             --region "$REGION" \
             --allow-unauthenticated \
+            --service-account "$RUN_SERVICE_ACCOUNT" \
+            --use-http2 \
             --port 8000 \
             --memory 2Gi \
             --cpu 2 \
@@ -45,5 +53,6 @@ jobs:
             --max-instances 3 \
             --timeout 1800 \
             --set-env-vars "ALLOWED_ORIGINS=*" \
+            --set-env-vars "GCS_UPLOAD_BUCKET=$UPLOAD_BUCKET" \
             --set-env-vars "INTERNAL_API_SECRET=${{ secrets.INTERNAL_API_SECRET }}" \
             --project "$PROJECT_ID"

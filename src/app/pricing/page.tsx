@@ -9,7 +9,7 @@ export const metadata: Metadata = buildPageMetadata({
   path: "/pricing",
   ogTitle: "WipeClip.co Pricing: Free & Paid Plans",
   ogDescription:
-    "Free online video editor. Upgrade for premium effects, 4K exports and more AI credits.",
+    "Free video editor for Windows and Mac. Upgrade for premium effects, 4K exports and more AI credits.",
 });
 
 export default function PricingPage() {

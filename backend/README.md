@@ -58,3 +58,41 @@ Point the frontend at this backend via `NEXT_PUBLIC_TOOLS_API_URL` in
 
 Set `ALLOWED_ORIGINS` to your production frontend origin(s) in either case
 (defaults to `*`, fine for local dev only).
+
+### Direct uploads
+
+With `GCS_UPLOAD_BUCKET` set, the browser uploads videos for
+`/api/video/probe` and `/api/video/process` straight to that Cloud Storage
+bucket, so Cloud Run isn't billed (or holding the file in RAM) while a slow
+upload trickles in - see `app/uploads.py`. One-time setup (the bucket name
+matches `UPLOAD_BUCKET` in `.github/workflows/deploy-backend.yml`):
+
+```sh
+PROJECT=wipeclip
+BUCKET=gs://wipeclip-uploads
+SA=$(gcloud run services describe unmarkai-backend --region us-central1 \
+  --project $PROJECT --format='value(spec.template.spec.serviceAccountName)')
+# Empty means the default compute account:
+# PROJECT_NUMBER-compute@developer.gserviceaccount.com
+
+gcloud storage buckets create $BUCKET --project $PROJECT \
+  --location us-central1 --uniform-bucket-level-access --public-access-prevention
+
+# Delete leftovers (probed but never processed, failed jobs) after a day.
+echo '{"rule":[{"action":{"type":"Delete"},"condition":{"age":1}}]}' > lifecycle.json
+gcloud storage buckets update $BUCKET --lifecycle-file lifecycle.json
+
+# The browser PUTs to the bucket cross-origin. The signed URL is the auth.
+echo '[{"origin":["*"],"method":["PUT"],"responseHeader":["Content-Type","x-goog-content-length-range"],"maxAgeSeconds":3600}]' > cors.json
+gcloud storage buckets update $BUCKET --cors-file cors.json
+
+# Read/delete uploads, and sign URLs with its own identity (no key file).
+gcloud storage buckets add-iam-policy-binding $BUCKET \
+  --member serviceAccount:$SA --role roles/storage.objectAdmin
+gcloud iam service-accounts add-iam-policy-binding $SA --project $PROJECT \
+  --member serviceAccount:$SA --role roles/iam.serviceAccountTokenCreator
+gcloud services enable iamcredentials.googleapis.com --project $PROJECT
+```
+
+Unset (local dev), `/api/video/upload-url` answers 404 and the frontend
+posts the file to the backend as before.
