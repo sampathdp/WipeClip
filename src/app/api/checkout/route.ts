@@ -7,6 +7,7 @@ import { TIER_LABELS, TIERS, toTier } from "@/lib/entitlements";
 import { createCheckout, PaymentsLkError } from "@/lib/paymentsLk";
 import { createTransaction, getClientToken, PaddleError, paddleEnvironment, priceIdFor } from "@/lib/paddle";
 import { gatewayFor, visitorCountry } from "@/lib/checkoutGateway";
+import { currentPromo, discounted, promoBlockedReason, promoFor } from "@/lib/promo";
 
 // Payments.lk requires customer.name (2 to 80 characters) whenever a
 // customer object is sent, and refuses the whole checkout otherwise. Send
@@ -19,6 +20,33 @@ function checkoutCustomer(email: string | undefined, metadata: Record<string, un
   return { name, email };
 }
 
+/** The pricing page's promotion code check (GET ?promo=CODE): the offer's
+ * percent, plans and end date if the code is the live one, or why not. Only
+ * a matching code reveals that a promotion exists. Signed-in visitors also
+ * learn here whether they've already used it; checkout checks again. */
+async function checkPromoCode(code: string | null) {
+  type Result = {
+    promo: { percent: number; plans: PlanKey[]; endsAt: string } | null;
+    promoError: string | null;
+  };
+  if (!code?.trim() || !isSupabaseConfigured()) return { promo: null, promoError: null } satisfies Result;
+  const admin = createServiceClient();
+  const live = await currentPromo(admin);
+  if (!live || live.code.toUpperCase() !== code.trim().toUpperCase()) {
+    return { promo: null, promoError: "That code isn't valid or has expired." } satisfies Result;
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const blocked = user ? await promoBlockedReason(admin, live, user.id) : null;
+  if (blocked) return { promo: null, promoError: blocked } satisfies Result;
+  return {
+    promo: { percent: live.percent, plans: live.plans, endsAt: live.endsAt.toISOString() },
+    promoError: null,
+  } satisfies Result;
+}
+
 /** Which checkout this visitor gets, and what Paddle.js needs to run it:
  * the public client token, the environment, the price ID of each plan (for
  * Paddle.PricePreview's localized prices), the visitor's country from the
@@ -27,7 +55,8 @@ function checkoutCustomer(email: string | undefined, metadata: Record<string, un
  * ID (ctm_...), once a purchase has recorded it. */
 export async function GET(request: NextRequest) {
   const gateway = gatewayFor(request);
-  if (gateway !== "paddle") return NextResponse.json({ gateway, paddle: null });
+  const { promo, promoError } = await checkPromoCode(request.nextUrl.searchParams.get("promo"));
+  if (gateway !== "paddle") return NextResponse.json({ gateway, paddle: null, promo, promoError });
 
   const priceIds: Partial<Record<PlanKey, string>> = {};
   for (const plan of Object.keys(PLANS) as PlanKey[]) {
@@ -49,6 +78,8 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     gateway,
+    promo,
+    promoError,
     paddle: {
       clientToken: getClientToken(),
       environment: paddleEnvironment(),
@@ -118,6 +149,21 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // A promotion code from the pricing page (typed in, or from the newsletter
+  // link). Checked here, never trusted from the browser: it must be the live
+  // code, for this plan, and not already used by this account (once per
+  // account). A used code is refused rather than silently charged in full,
+  // so the buyer can remove it knowingly. Paddle needs its own discount
+  // object, so without one a Paddle buyer pays the list price.
+  let promo = await promoFor(admin, plan, body?.promo);
+  if (promo && gateway === "paddle" && !promo.paddleDiscountId) promo = null;
+  if (promo) {
+    const blocked = await promoBlockedReason(admin, promo, user.id);
+    if (blocked) return NextResponse.json({ error: blocked, promoBlocked: true }, { status: 409 });
+  }
+  const chargeCents = promo ? discounted(amountCents, promo.percent) : amountCents;
+  const chargeUsdCents = promo ? discounted(usdCents, promo.percent) : usdCents;
+
   // The order is recorded here first and its id travels with the checkout
   // (Payments.lk's `reference`, Paddle's custom_data.order_id). The webhook
   // reads it back to find which account to credit and how much - the plan,
@@ -130,9 +176,10 @@ export async function POST(request: NextRequest) {
       plan,
       credits,
       provider: gateway,
+      promo_code: promo?.code ?? null,
       ...(gateway === "paddle"
-        ? { amount_cents: usdCents, currency: "USD" }
-        : { amount_cents: amountCents, currency: "LKR" }),
+        ? { amount_cents: chargeUsdCents, currency: "USD" }
+        : { amount_cents: chargeCents, currency: "LKR" }),
     })
     .select("id")
     .single();
@@ -148,6 +195,7 @@ export async function POST(request: NextRequest) {
         priceId: priceId!,
         customData: { order_id: order.id, user_id: user.id },
         customerId: profile?.paddle_customer_id,
+        discountId: promo?.paddleDiscountId,
       });
       await admin.from("payment_orders").update({ checkout_id: txn.id }).eq("id", order.id);
       // Paddle.js opens this in its overlay; the email prefills the checkout
@@ -173,10 +221,11 @@ export async function POST(request: NextRequest) {
   try {
     const checkout = await createCheckout(
       {
-        amountCents,
-        description: period
-          ? `WipeClip ${label} (${period === "year" ? "yearly" : "monthly"}) - ${credits} AI credits`
-          : `WipeClip ${label} - ${credits} AI credits`,
+        amountCents: chargeCents,
+        description:
+          (period
+            ? `WipeClip ${label} (${period === "year" ? "yearly" : "monthly"}) - ${credits} AI credits`
+            : `WipeClip ${label} - ${credits} AI credits`) + (promo ? ` (${promo.percent}% off)` : ""),
         reference: order.id,
         customer: checkoutCustomer(user.email, user.user_metadata),
         successUrl: `${siteUrl}/welcome?plan=${plan}`,

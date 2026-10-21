@@ -134,11 +134,14 @@ async function request<T>(path: string, init: { method: string; body?: unknown }
 }
 
 /** Creates a draft transaction for one price, which Paddle.js then opens in
- * its overlay checkout. custom_data comes back on every webhook for it. */
+ * its overlay checkout. custom_data comes back on every webhook for it.
+ * discountId (dsc_...) applies a promotion; Paddle refuses the transaction
+ * if that discount is expired or not restricted to include this price. */
 export function createTransaction(params: {
   priceId: string;
   customData: Record<string, string>;
   customerId?: string | null;
+  discountId?: string;
 }): Promise<PaddleTransaction> {
   return request<PaddleTransaction>("/transactions", {
     method: "POST",
@@ -146,8 +149,42 @@ export function createTransaction(params: {
       items: [{ price_id: params.priceId, quantity: 1 }],
       custom_data: params.customData,
       ...(params.customerId ? { customer_id: params.customerId } : {}),
+      ...(params.discountId ? { discount_id: params.discountId } : {}),
     },
   });
+}
+
+/** Creates or updates the Paddle discount behind the promotion
+ * (/admin/promotion), so Paddle's percent, prices and expiry always match
+ * promo_settings. enabled_for_checkout is off: the server applies it by id
+ * after checking the code is used once per account, and nobody can type it
+ * into Paddle's checkout (which can only cap total redemptions, not per
+ * customer). An inactive promotion archives it. Returns the discount id (dsc_...). */
+export async function syncPromoDiscount(params: {
+  id: string | null;
+  percent: number;
+  priceIds: string[];
+  expiresAt: Date;
+  description: string;
+  active: boolean;
+}): Promise<string | null> {
+  if (!params.active) {
+    // Only the status: the expiry may already be in the past, which Paddle refuses.
+    if (params.id) await request(`/discounts/${params.id}`, { method: "PATCH", body: { status: "archived" } });
+    return params.id;
+  }
+  const body = {
+    description: params.description.slice(0, 500),
+    type: "percentage",
+    amount: String(params.percent),
+    enabled_for_checkout: false,
+    recur: false,
+    restrict_to: params.priceIds,
+    expires_at: params.expiresAt.toISOString(),
+  };
+  if (!params.id) return (await request<{ id: string }>("/discounts", { method: "POST", body })).id;
+  await request(`/discounts/${params.id}`, { method: "PATCH", body: { ...body, status: "active" } });
+  return params.id;
 }
 
 /** Price IDs on a transaction - Paddle sends the nested price object, older

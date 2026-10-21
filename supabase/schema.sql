@@ -92,6 +92,48 @@ alter table payment_orders add column if not exists currency text not null defau
 -- Retain as pwCustomer.
 alter table profiles add column if not exists paddle_customer_id text;
 
+-- Marketing email opt-out. Set by the unsubscribe link in every newsletter
+-- (/unsubscribe and the one-click /api/unsubscribe); scripts/send-newsletter.ts
+-- never sends to an account with marketing_opt_out = true. Service and
+-- account emails (receipts, password resets) are not affected.
+alter table profiles add column if not exists marketing_opt_out boolean not null default false;
+alter table profiles add column if not exists marketing_opt_out_at timestamptz;
+-- The promotion code an order was discounted with (src/lib/promo.ts), so
+-- each account can use a promotion once.
+alter table payment_orders add column if not exists promo_code text;
+
+-- Who each newsletter campaign has gone to (src/lib/newsletter.ts), so the
+-- admin panel and scripts/send-newsletter.ts can send in slices and resume
+-- without anyone getting the same campaign twice.
+create table if not exists newsletter_sends (
+  campaign text not null,
+  user_id uuid not null references profiles (id) on delete cascade,
+  sent_at timestamptz not null default now(),
+  primary key (campaign, user_id)
+);
+alter table newsletter_sends enable row level security;
+
+-- The live promotion (src/lib/promo.ts), edited at /admin/promotion. A
+-- single row (id is always 1). Read and written only with the service-role key.
+create table if not exists promo_settings (
+  id int primary key default 1 check (id = 1),
+  enabled boolean not null default false,
+  code text,
+  percent int check (percent between 1 and 99),
+  plans text[] not null default '{}',
+  ends_at timestamptz,
+  -- Only accounts created before this get the discount ("current users"). Null = any account.
+  accounts_before timestamptz,
+  -- The matching Paddle discount (dsc_...), created and kept in sync by the admin page.
+  paddle_discount_id text,
+  updated_at timestamptz not null default now(),
+  updated_by text
+);
+alter table promo_settings enable row level security;
+-- Removed: codes are entered on the pricing page instead, where each account
+-- can use a promotion only once (Paddle can only cap total redemptions).
+alter table promo_settings drop column if exists paddle_coupon;
+
 -- User-submitted bug reports, feature requests and general feedback from
 -- /feedback. Anyone can submit (user_id is null for signed-out visitors,
 -- who may leave a contact email instead); signed-in users can read back

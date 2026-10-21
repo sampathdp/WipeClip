@@ -8,7 +8,13 @@ export async function proxy(request: NextRequest) {
   const secret = process.env.SITE_BYPASS_SECRET;
   const paramBypass = Boolean(secret && searchParams.get("bypass") === secret);
   const cookieBypass = Boolean(secret && request.cookies.get(GATE_COOKIE)?.value === secret);
-  const exempt = pathname === "/under-construction" || pathname.startsWith("/api/") || pathname.startsWith("/auth/");
+  // /unsubscribe stays reachable even while the site is gated: an
+  // unsubscribe link in an email that was already sent must keep working.
+  const exempt =
+    pathname === "/under-construction" ||
+    pathname === "/unsubscribe" ||
+    pathname.startsWith("/api/") ||
+    pathname.startsWith("/auth/");
 
   if (process.env.SITE_UNDER_CONSTRUCTION === "true" && !exempt && !paramBypass && !cookieBypass) {
     const url = request.nextUrl.clone();

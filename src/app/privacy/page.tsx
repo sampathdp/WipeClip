@@ -99,6 +99,16 @@ export default function PrivacyPage() {
         abuse. The legal basis is performing our contract with you and, for
         security and fraud prevention, our legitimate interests.
       </P>
+      <P>
+        We may also email you occasionally about WipeClip offers and new
+        features, based on our legitimate interest in telling existing users
+        about our own similar products (or your consent, where the law
+        requires it). Every such email has an unsubscribe link that works in
+        one click without signing in, and we stop within a day of you using
+        it. Unsubscribing does not affect emails about your account, such as
+        receipts and password resets. We send these emails through an email
+        delivery provider that processes your address only to deliver them.
+      </P>
 
       <H2>3. Payment information</H2>
       <P>
@@ -158,6 +168,7 @@ export default function PrivacyPage() {
       <UL>
         <li>hosting, content delivery and security providers;</li>
         <li>our database and sign-in provider, which stores your account data;</li>
+        <li>our email delivery provider, to send account emails and, unless you unsubscribe, occasional offers;</li>
         <li>Google, only if you choose to sign in with Google;</li>
         <li>Paddle.com and Payments.lk, for payments, as described above; and</li>
         <li>authorities, when the law requires us to, or to protect our rights or the safety of others.</li>

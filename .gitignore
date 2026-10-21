@@ -58,3 +58,6 @@ dev.log
 /src-tauri/target/
 /src-tauri/tauri.generated.conf.json
 /src-tauri/gen/
+
+# newsletter send logs and previews (contain account ids)
+/newsletter-logs/

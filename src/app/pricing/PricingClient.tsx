@@ -25,7 +25,33 @@ type CheckoutConfig = {
     country: string | null;
     priceIds: Partial<Record<PlanKey, string>>;
   } | null;
+  /** The promotion behind the code sent as ?promo= (src/lib/promo.ts), if it is valid for this visitor. */
+  promo: { percent: number; plans: PlanKey[]; endsAt: string } | null;
+  /** Why the code sent as ?promo= can't be used (invalid, expired, already used). */
+  promoError: string | null;
 };
+
+const PROMO_STORAGE_KEY = "wc_promo";
+
+/** A code typed into the pricing page, or from the newsletter link
+ * (?promo=CODE). Kept in localStorage so it survives the sign-in round
+ * trip; the server decides whether it applies (once per account). */
+function rememberPromoCode(code: string | null) {
+  try {
+    if (code) localStorage.setItem(PROMO_STORAGE_KEY, code);
+    else localStorage.removeItem(PROMO_STORAGE_KEY);
+  } catch {}
+}
+
+function readPromoCode(): string | null {
+  const fromUrl = new URLSearchParams(window.location.search).get("promo")?.trim().slice(0, 40);
+  try {
+    if (fromUrl) localStorage.setItem(PROMO_STORAGE_KEY, fromUrl);
+    return fromUrl || localStorage.getItem(PROMO_STORAGE_KEY);
+  } catch {
+    return fromUrl || null;
+  }
+}
 
 let paddleLoad: Promise<Paddle> | null = null;
 
@@ -188,6 +214,11 @@ export default function PricingClient() {
   const [checkoutConfig, setCheckoutConfig] = useState<CheckoutConfig | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [localPrices, setLocalPrices] = useState<Partial<Record<PlanKey, string>>>({});
+  const [promoCode, setPromoCode] = useState<string | null>(null);
+  const [promoInput, setPromoInput] = useState("");
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoChecking, setPromoChecking] = useState(false);
+  const promo = promoCode ? checkoutConfig?.promo ?? null : null;
   const showLkr = checkoutConfig?.gateway !== "paddle";
   const manualPayments = MANUAL_PAYMENTS_FLAG || checkoutConfig?.gateway === null;
 
@@ -206,11 +237,15 @@ export default function PricingClient() {
       trackEvent("pricing_viewed", { logged_in: signedIn, source: landingPagePath() });
       // After the session read, so Paddle Retain gets the signed-in
       // customer. Paddle.js loads up front so the overlay opens instantly.
-      fetch("/api/checkout")
+      const code = readPromoCode();
+      fetch(code ? `/api/checkout?promo=${encodeURIComponent(code)}` : "/api/checkout")
         .then((r) => (r.ok ? r.json() : null))
         .then((c: CheckoutConfig | null) => {
           if (!c) return;
           setCheckoutConfig(c);
+          setPromoCode(c.promo ? code : null);
+          setPromoError(c.promoError);
+          if (!c.promo) rememberPromoCode(null);
           // Until the preview answers (or if it fails), cards show the USD list price.
           if (c.paddle) localizedPrices(c.paddle).then(setLocalPrices).catch(() => {});
         })
@@ -232,6 +267,35 @@ export default function PricingClient() {
     }
   }, []);
 
+  // Re-reads the checkout config with the code, which answers with the
+  // offer if the code is live and unused by this account, or why not.
+  const applyPromo = async (code: string) => {
+    const trimmed = code.trim().slice(0, 40);
+    if (!trimmed) return;
+    setPromoChecking(true);
+    setPromoError(null);
+    try {
+      const res = await fetch(`/api/checkout?promo=${encodeURIComponent(trimmed)}`);
+      const c: CheckoutConfig | null = res.ok ? await res.json() : null;
+      if (!c) throw new Error();
+      setCheckoutConfig(c);
+      setPromoCode(c.promo ? trimmed : null);
+      setPromoError(c.promoError);
+      rememberPromoCode(c.promo ? trimmed : null);
+      if (c.promo) setPromoInput("");
+    } catch {
+      setPromoError("Couldn't check the code. Try again.");
+    } finally {
+      setPromoChecking(false);
+    }
+  };
+
+  const removePromo = () => {
+    setPromoCode(null);
+    setPromoError(null);
+    rememberPromoCode(null);
+  };
+
   const buy = async (plan: PlanKey) => {
     trackEvent("checkout_started", { plan, logged_in: isSignedIn, ...(manualPayments ? { gateway: "manual" } : {}) });
     if (manualPayments) {
@@ -248,7 +312,7 @@ export default function PricingClient() {
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify({ plan, ...(promoCode ? { promo: promoCode } : {}) }),
       });
       // Parsed from text so an HTML error page (proxy or platform error, not
       // this app's JSON) surfaces as a status code instead of a JSON parse error.
@@ -257,16 +321,31 @@ export default function PricingClient() {
         url?: string;
         paddle?: { transactionId: string; email: string | null; successUrl: string };
         error?: string;
+        promoBlocked?: boolean;
       } | null = null;
       try {
         data = JSON.parse(text);
       } catch {}
+      if (data?.promoBlocked) {
+        // Already used on this account: drop the code and say why; buying again charges the list price.
+        removePromo();
+        setPromoError(data.error ?? "This code can't be used.");
+        setLoading(null);
+        return;
+      }
       if (res.ok && data?.paddle && checkoutConfig?.paddle) {
         const paddle = await loadPaddle(checkoutConfig.paddle);
         paddle.Checkout.open({
           transactionId: data.paddle.transactionId,
           ...(data.paddle.email ? { customer: { email: data.paddle.email } } : {}),
-          settings: { displayMode: "overlay", variant: "one-page", successUrl: data.paddle.successUrl },
+          // No discount box in Paddle's checkout: codes are entered on this
+          // page, where the server allows each account one use.
+          settings: {
+            displayMode: "overlay",
+            variant: "one-page",
+            successUrl: data.paddle.successUrl,
+            showAddDiscounts: false,
+          },
         });
         setLoading(null);
         return;
@@ -321,6 +400,54 @@ export default function PricingClient() {
             ))}
           </div>
         </div>
+
+        {!manualPayments && checkoutConfig && (
+          promo ? (
+            <div
+              role="status"
+              className="mx-auto mt-10 max-w-2xl rounded-2xl border border-emerald-500/50 bg-emerald-500/10 px-5 py-4 text-center text-sm text-foreground"
+            >
+              <p className="font-semibold">
+                Code {promoCode} applied: {promo.percent}% off{" "}
+                {promo.plans.map((p) => PLANS[p].label).filter((l, i, a) => a.indexOf(l) === i).join(" and ")}
+              </p>
+              <p className="mt-1 text-muted">
+                Applied at checkout, once per account, until{" "}
+                {new Date(promo.endsAt).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}.{" "}
+                <button type="button" onClick={removePromo} className="underline hover:text-foreground">
+                  Remove code
+                </button>
+              </p>
+            </div>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                applyPromo(promoInput);
+              }}
+              className="mx-auto mt-8 flex max-w-sm flex-col items-center gap-2"
+            >
+              <div className="flex w-full gap-2">
+                <input
+                  value={promoInput}
+                  onChange={(e) => setPromoInput(e.target.value)}
+                  placeholder="Have a code?"
+                  aria-label="Discount code"
+                  autoComplete="off"
+                  className="flex-1 rounded-full border border-border bg-surface-2/80 px-4 py-2 text-sm uppercase text-foreground placeholder:normal-case"
+                />
+                <button
+                  type="submit"
+                  disabled={promoChecking || !promoInput.trim()}
+                  className="btn-secondary rounded-full px-5 py-2 text-xs font-bold disabled:opacity-50"
+                >
+                  {promoChecking ? "Checking…" : "Apply"}
+                </button>
+              </div>
+              {promoError && <p role="alert" className="text-xs text-red-500">{promoError}</p>}
+            </form>
+          )
+        )}
 
         {manualPayments && (
           <div
@@ -377,6 +504,9 @@ export default function PricingClient() {
                       {key && plan ? (localPrices[key] ?? plan.priceLabel) : "$0"}
                     </span>
                     <span className="text-xs text-muted"> {plan ? (plan.period === "year" ? "for 1 year" : "for 30 days") : "/ forever"}</span>
+                    {key && promo?.plans.includes(key) && (
+                      <p className="mt-1 text-[11px] font-bold text-emerald-500">{promo.percent}% off at checkout</p>
+                    )}
                     {plan && (
                       <p className="mt-1 text-[11px] text-muted">
                         {showLkr ? `Charged as ${formatLkr(plan.amountCents)} · ` : ""}
