@@ -40,6 +40,11 @@ const nextConfig: NextConfig = {
     // compiled out of the website instead of shipped and skipped.
     NEXT_PUBLIC_WIPECLIP_DESKTOP: "0",
   },
+  experimental: {
+    // Tailwind output is small (~22 KiB), so shipping it inside the HTML
+    // beats a render-blocking stylesheet request on first visits.
+    inlineCss: true,
+  },
   // The online editor was retired: the editor ships only as the Windows and
   // macOS app, so old links and search results land on its download page.
   async redirects() {
