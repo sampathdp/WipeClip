@@ -11,6 +11,8 @@ import { createClient } from "@/lib/supabase/client";
 import { clearPendingResult, loadPendingResult, savePendingResult } from "@/lib/resultCache";
 import { trackEvent, useToolView } from "@/lib/analytics";
 import {
+  BACKEND_DISABLED,
+  BACKEND_DISABLED_MESSAGE,
   ContentBlockedError,
   InsufficientCreditsError,
   probeVideo,
@@ -188,6 +190,11 @@ export default function UploadDemo() {
 
   const pickFile = useCallback(async (picked: File | undefined) => {
     if (!picked) return;
+    // Say so before the upload, not after it fails with a Retry that can't work.
+    if (BACKEND_DISABLED) {
+      setError(BACKEND_DISABLED_MESSAGE);
+      return;
+    }
     if (!picked.type.startsWith("video/")) {
       setError("Please choose a video file.");
       return;
@@ -693,7 +700,7 @@ export default function UploadDemo() {
             </div>
           )}
 
-          {step === "error" && (
+          {step === "error" && !BACKEND_DISABLED && (
             <button
               onClick={() => (region ? process() : pickFile(file))}
               className="mt-6 w-full rounded-full bg-rose-500/20 border border-rose-500/40 px-5 py-3 text-sm font-semibold text-rose-600 hover:bg-rose-500/30 transition-all"
