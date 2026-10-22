@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRequestAuth, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { effectivePlan } from "@/lib/plan";
 import { preflight, withCors } from "@/lib/cors";
+import { edgeCountry, rememberCountry } from "@/lib/geo";
 
 export async function GET(request: NextRequest) {
   return withCors(request, await handle(request));
@@ -26,7 +27,8 @@ async function handle(request: NextRequest) {
   // so the number shown is never stale from a previous day. Locked to
   // service_role at the DB level (see supabase/schema.sql), so this needs
   // the service client, not the caller's own session.
-  const { error: resetErr } = await createServiceClient().rpc("ensure_daily_reset", {
+  const admin = createServiceClient();
+  const { error: resetErr } = await admin.rpc("ensure_daily_reset", {
     p_user_id: user.id,
   });
   if (resetErr) {
@@ -35,13 +37,17 @@ async function handle(request: NextRequest) {
 
   const { data: profile, error } = await supabase
     .from("profiles")
-    .select("plan, plan_expires_at, free_credits, paid_credits")
+    .select("plan, plan_expires_at, free_credits, paid_credits, country")
     .eq("id", user.id)
     .single();
 
   if (error || !profile) {
     return NextResponse.json({ error: error?.message ?? "No profile found." }, { status: 500 });
   }
+
+  // Every signed-in page load asks for the balance, so this is where the
+  // account's country for the admin stats stays current.
+  await rememberCountry(admin, user.id, edgeCountry(request.headers), profile.country);
 
   return NextResponse.json({
     email: user.email,

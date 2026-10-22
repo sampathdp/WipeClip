@@ -106,6 +106,16 @@ alter table profiles add column if not exists marketing_opt_out_at timestamptz;
 -- each account can use a promotion once.
 alter table payment_orders add column if not exists promo_code text;
 
+-- Visitor country (ISO 3166 alpha-2, from the edge's geo header - see
+-- src/lib/checkoutGateway.ts). profiles.country is the latest one seen for
+-- the account (sign-in, balance checks, checkout); payment_orders.country is
+-- where the buyer was when they pressed the pay button. Null = unknown.
+alter table profiles add column if not exists country text;
+alter table profiles add column if not exists country_updated_at timestamptz;
+alter table payment_orders add column if not exists country text;
+create index if not exists payment_orders_created_at_idx on payment_orders (created_at desc);
+create index if not exists payment_orders_country_idx on payment_orders (country);
+
 -- Who each newsletter campaign has gone to (src/lib/newsletter.ts), so the
 -- admin panel and scripts/send-newsletter.ts can send in slices and resume
 -- without anyone getting the same campaign twice.
@@ -450,6 +460,73 @@ drop policy if exists "read own feedback" on feedback;
 create policy "read own feedback" on feedback
   for select using (auth.uid() = user_id);
 
+-- Everything the admin dashboard (/admin/analytics) charts, aggregated here
+-- so the page never pulls raw rows: per-day signups and checkouts over the
+-- last p_days days (UTC), checkouts and revenue per country and currency in
+-- that window, order statuses in that window, and accounts per country of
+-- all time. Read-only; service role only (see the revoke block below).
+create or replace function admin_dashboard_stats(p_days int default 30)
+returns jsonb
+language sql
+stable
+security definer set search_path = public
+as $$
+  with bounds as (
+    select (current_date - (greatest(1, least(p_days, 366)) - 1))::date as since
+  ),
+  days as (
+    select d::date as day from bounds, generate_series(bounds.since, current_date, interval '1 day') d
+  ),
+  win as (
+    select o.* from payment_orders o, bounds where o.created_at >= bounds.since
+  )
+  select jsonb_build_object(
+    'since', (select since from bounds),
+    'signups', (
+      select coalesce(jsonb_agg(jsonb_build_object('day', days.day, 'count', coalesce(s.n, 0)) order by days.day), '[]')
+      from days
+      left join (
+        select created_at::date as day, count(*) as n from profiles, bounds where created_at >= bounds.since group by 1
+      ) s on s.day = days.day
+    ),
+    'checkouts', (
+      select coalesce(jsonb_agg(jsonb_build_object('day', days.day, 'started', coalesce(c.started, 0), 'paid', coalesce(c.paid, 0)) order by days.day), '[]')
+      from days
+      left join (
+        select created_at::date as day, count(*) as started, count(*) filter (where status = 'paid') as paid from win group by 1
+      ) c on c.day = days.day
+    ),
+    'revenue', (
+      select coalesce(jsonb_agg(jsonb_build_object('day', r.day, 'currency', r.currency, 'cents', r.cents) order by r.day), '[]')
+      from (
+        select paid_at::date as day, currency, sum(amount_cents) as cents
+        from payment_orders, bounds
+        where status = 'paid' and paid_at >= bounds.since
+        group by 1, 2
+      ) r
+    ),
+    'countries', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'country', c.country, 'started', c.started, 'paid', c.paid, 'currency', c.currency, 'cents', c.cents
+      ) order by c.started desc), '[]')
+      from (
+        select coalesce(country, '') as country, currency, count(*) as started,
+               count(*) filter (where status = 'paid') as paid,
+               coalesce(sum(amount_cents) filter (where status = 'paid'), 0) as cents
+        from win group by 1, 2
+      ) c
+    ),
+    'statuses', (
+      select coalesce(jsonb_agg(jsonb_build_object('status', s.status, 'count', s.n) order by s.n desc), '[]')
+      from (select status, count(*) as n from win group by 1) s
+    ),
+    'users_by_country', (
+      select coalesce(jsonb_agg(jsonb_build_object('country', u.country, 'count', u.n) order by u.n desc), '[]')
+      from (select coalesce(country, '') as country, count(*) as n from profiles group by 1) u
+    )
+  );
+$$;
+
 -- No insert/update/delete policies for authenticated users on purpose:
 -- all writes go through the SECURITY DEFINER functions above, or the
 -- service-role key (webhook handler), never directly from the client.
@@ -480,3 +557,5 @@ grant execute on function revoke_paid_credits(uuid, int, text, boolean) to servi
 grant execute on function tag_last_transaction(uuid, text, text) to service_role;
 grant execute on function ensure_referral_code(uuid) to service_role;
 grant execute on function claim_referral(uuid, text) to service_role;
+revoke execute on function admin_dashboard_stats(int) from public, anon, authenticated;
+grant execute on function admin_dashboard_stats(int) to service_role;

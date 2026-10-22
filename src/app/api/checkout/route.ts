@@ -8,6 +8,7 @@ import { createCheckout, PaymentsLkError } from "@/lib/paymentsLk";
 import { createTransaction, getClientToken, PaddleError, paddleEnvironment, priceIdFor } from "@/lib/paddle";
 import { gatewayFor, visitorCountry } from "@/lib/checkoutGateway";
 import { currentPromo, discounted, promoBlockedReason, promoFor } from "@/lib/promo";
+import { edgeCountry, rememberCountry } from "@/lib/geo";
 
 // Payments.lk requires customer.name (2 to 80 characters) whenever a
 // customer object is sent, and refuses the whole checkout otherwise. Send
@@ -134,6 +135,10 @@ export async function POST(request: NextRequest) {
   const { amountCents, usdCents, credits, label, period, tier } = PLANS[plan];
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? request.nextUrl.origin;
   const admin = createServiceClient();
+  // Where the buyer is as they press the pay button, kept on the order and
+  // the account for the admin panel (Orders, Analytics).
+  const country = edgeCountry(request.headers);
+  await rememberCountry(admin, user.id, country, null);
 
   // grant_paid_credits switches the account to the purchased tier, so a
   // lower pass bought during an active higher one would cut it short.
@@ -177,6 +182,7 @@ export async function POST(request: NextRequest) {
       credits,
       provider: gateway,
       promo_code: promo?.code ?? null,
+      country,
       ...(gateway === "paddle"
         ? { amount_cents: chargeUsdCents, currency: "USD" }
         : { amount_cents: chargeCents, currency: "LKR" }),

@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/admin";
 import { effectivePlan } from "@/lib/plan";
 import { PLANS, type PlanKey } from "@/lib/credits";
 import { TIERS, TIER_LABELS } from "@/lib/entitlements";
+import { Country } from "@/app/admin/charts";
 import { addCredits, grantPlan, removeCredits, setMarketing, setPlan, setTesterAccess } from "@/app/admin/actions";
 import {
   Badge,
@@ -48,6 +49,7 @@ export default async function AdminUser({
 
   const details: [string, React.ReactNode][] = [
     ["Stored plan", profile.plan],
+    ["Country", <span key="g" title={profile.country_updated_at ? `Last seen there ${fmtDate(profile.country_updated_at)}` : undefined}><Country code={profile.country} /></span>],
     ["Email confirmed", fmtDate(authUser?.email_confirmed_at)],
     ["Last sign-in", fmtDate(authUser?.last_sign_in_at)],
     ["Joined", fmtDate(profile.created_at)],
@@ -172,7 +174,7 @@ export default async function AdminUser({
       </div>
 
       <Card title="Orders" description="Latest 20." flush>
-        <Table head={["Created", "Plan", "Amount", "Provider", "Promo", "Status", "Paid"]} rows={(orders ?? []).length} empty="No orders from this account.">
+        <Table head={["Created", "Plan", "Amount", "Country", "Provider", "Promo", "Status", "Paid"]} rows={(orders ?? []).length} empty="No orders from this account.">
           {(orders ?? []).map((o) => (
             <tr key={o.id} className={tr}>
               <td className={`${td} whitespace-nowrap text-muted`}>{fmtDate(o.created_at)}</td>
@@ -180,6 +182,9 @@ export default async function AdminUser({
                 <StatusBadge value={o.plan} />
               </td>
               <td className={`${td} whitespace-nowrap font-semibold`}>{fmtMoney(o.amount_cents, o.currency)}</td>
+              <td className={`${td} text-muted`}>
+                <Country code={o.country} />
+              </td>
               <td className={`${td} text-muted`}>{o.provider}</td>
               <td className={td}>{o.promo_code ? <code className="font-mono text-xs">{o.promo_code}</code> : <span className="text-muted">-</span>}</td>
               <td className={td}>

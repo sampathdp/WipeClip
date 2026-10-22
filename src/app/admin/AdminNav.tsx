@@ -9,6 +9,7 @@ const ICONS: Record<string, React.ReactNode> = {
   users: (
     <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm13 10v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
   ),
+  analytics: <path d="M3 3v18h18M7 15l4-4 3 3 6-6" />,
   orders: <path d="M3 6h18M3 12h18M3 18h12M7 3v18" />,
   feedback: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10Z" />,
   promotion: <path d="M20.59 13.41 13.42 20.6a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82ZM7 7h.01" />,
@@ -17,6 +18,7 @@ const ICONS: Record<string, React.ReactNode> = {
 
 const NAV = [
   { href: "/admin", label: "Overview", icon: "overview" },
+  { href: "/admin/analytics", label: "Analytics", icon: "analytics" },
   { href: "/admin/users", label: "Users", icon: "users" },
   { href: "/admin/orders", label: "Orders", icon: "orders" },
   { href: "/admin/feedback", label: "Feedback", icon: "feedback" },

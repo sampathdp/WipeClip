@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/admin";
 import { effectivePlan } from "@/lib/plan";
+import { Country } from "@/app/admin/charts";
 import {
   Badge,
   Card,
@@ -31,7 +32,7 @@ export default async function AdminUsers({ searchParams }: { searchParams: Searc
 
   let query = admin
     .from("profiles")
-    .select("id, email, plan, plan_expires_at, tester_access, paid_credits, marketing_opt_out, created_at", { count: "exact" })
+    .select("id, email, plan, plan_expires_at, tester_access, paid_credits, marketing_opt_out, country, created_at", { count: "exact" })
     .order("created_at", { ascending: false })
     .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
   // Escaped for ilike: % and _ are wildcards, and a comma would break the filter.
@@ -71,7 +72,7 @@ export default async function AdminUsers({ searchParams }: { searchParams: Searc
         flush
       >
         <Table
-          head={["Email", "Plan now", "Pass ends", "Paid credits", "Marketing email", "Joined"]}
+          head={["Email", "Country", "Plan now", "Pass ends", "Paid credits", "Marketing email", "Joined"]}
           rows={rows.length}
           empty={q || plan ? "No accounts match these filters." : "No accounts yet."}
         >
@@ -81,6 +82,9 @@ export default async function AdminUsers({ searchParams }: { searchParams: Searc
                 <Link href={`/admin/users/${u.id}`} className={link}>
                   {u.email}
                 </Link>
+              </td>
+              <td className={`${td} text-muted`}>
+                <Country code={u.country} />
               </td>
               <td className={td}>
                 <span className="inline-flex flex-wrap items-center gap-1.5">
