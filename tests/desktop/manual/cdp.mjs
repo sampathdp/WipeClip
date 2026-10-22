@@ -83,15 +83,17 @@ export async function connect({ port, proc = null }) {
   /** Clicks an enabled button: exact text first, then text prefix, then aria-label/title prefix. */
   const click = (text) =>
     evaluate(`(() => { const t = ${JSON.stringify(text)}; const bs = [...document.querySelectorAll("button")].filter(b => !b.disabled); const b = bs.find(b => b.textContent.trim() === t) ?? bs.find(b => b.textContent.trim().startsWith(t)) ?? bs.find(b => (b.getAttribute("aria-label") || b.title || "").startsWith(t)); b?.click(); return !!b; })()`);
-  /** Saves a project the editor's IndexedDB store will offer to resume. */
+  /** Saves a project the editor lists under Recent projects (as "Seeded
+   * project", opened with its "Open" button). Open the editor page once
+   * first, so its database exists at the current version. */
   const seedProject = (videoB64, project, sourceMeta, recording) =>
     evaluate(`(async () => {
       const bytes = Uint8Array.from(atob(${JSON.stringify(videoB64)}), c => c.charCodeAt(0));
-      const db = await new Promise((res, rej) => { const r = indexedDB.open("wipeclip-editor", 1); r.onupgradeneeded = () => { r.result.createObjectStore("project"); r.result.createObjectStore("sources"); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+      const db = await new Promise((res, rej) => { const r = indexedDB.open("wipeclip-editor"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
       const put = (store, value, key) => new Promise((res, rej) => { const tx = db.transaction(store, "readwrite"); tx.objectStore(store).put(value, key); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
       await put("sources", new Blob([bytes], { type: "video/mp4" }), ${JSON.stringify(sourceMeta.id)});
       ${recording ? `await put("sources", ${JSON.stringify(recording)}, ${JSON.stringify(sourceMeta.id + "#recording")});` : ""}
-      await put("project", { project: ${JSON.stringify(project)}, sources: [${JSON.stringify(sourceMeta)}], savedAt: Date.now() }, "current");
+      await put("projects", { id: "prj_seed", name: "Seeded project", createdAt: Date.now(), project: ${JSON.stringify(project)}, sources: [${JSON.stringify(sourceMeta)}], savedAt: Date.now() }, "prj_seed");
       db.close();
     })()`);
   /** Color names of the preview stage at fractions, from a screenshot. */

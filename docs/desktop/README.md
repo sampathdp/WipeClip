@@ -115,7 +115,8 @@ Output goes to `src-tauri/target/release/bundle/`.
 - **Offline**: editing an already-open project and opening a new video work. AI cleanup, sign-in and export still need a connection for the plan check (the job ticket); a banner says so.
 - **Auto captions** download the Whisper model from Hugging Face on first use, as on the website.
 - **Screen recorder**: see [RECORDER.md](RECORDER.md) for permissions, format, limitations and the manual test checklist.
-- **Not in this release**: GPU processing, offline export, auto-update, Linux packages.
+- **Updates**: the app offers new versions from GitHub Releases and installs them on a click; see [RELEASE.md](RELEASE.md#updates).
+- **Not in this release**: GPU processing, offline export, Linux packages.
 
 ## Local engine
 

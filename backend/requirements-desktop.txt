@@ -1,15 +1,15 @@
 # The desktop app's bundled engine (desktop_engine.py, packaged by
 # desktop.spec): requirements.txt minus what only the cloud server uses -
 # hypercorn/a2wsgi (serving), redis/rq (job queue), google-cloud-storage
-# (direct uploads), sentry-sdk (error tracking) - and rembg, which only the
-# website's image tools need.
+# (direct uploads), sentry-sdk (error tracking) - and rembg with its
+# onnxruntime, which only the website's image tools need. The moderation
+# model runs in numpy (app/pipeline/nsfw_classifier.py); desktop.spec bundles
+# its weights, which `python -m app.pipeline.nsfw_classifier` downloads.
 fastapi>=0.110.0
 uvicorn>=0.29.0
 python-multipart>=0.0.9
 opencv-contrib-python-headless>=4.9.0
 numpy>=1.26.0
 Pillow>=10.2.0
-onnxruntime>=1.17.0
-nudenet>=3.4.2
 imageio-ffmpeg>=0.5.1
 pyinstaller>=6.6

@@ -15,7 +15,6 @@ import type { RecordingBundle } from "@/lib/recorder/bundle";
 export default function DesktopEditorPage() {
   const [recording, setRecording] = useState(false);
   const [incoming, setIncoming] = useState<IncomingRecording | null>(null);
-  const [projectOpen, setProjectOpen] = useState(false);
 
   const openInEditor = useCallback((bundle: RecordingBundle) => {
     setIncoming({ key: Date.now(), bundle });
@@ -34,9 +33,8 @@ export default function DesktopEditorPage() {
         incomingRecording={incoming}
         onRecordingImported={imported}
         suspended={recording}
-        onProjectOpen={setProjectOpen}
       />
-      {recording && <ScreenRecorder onClose={() => setRecording(false)} onOpenInEditor={openInEditor} editorHasProject={projectOpen} />}
+      {recording && <ScreenRecorder onClose={() => setRecording(false)} onOpenInEditor={openInEditor} />}
     </>
   );
 }

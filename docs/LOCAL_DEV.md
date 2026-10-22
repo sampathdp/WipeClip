@@ -15,7 +15,7 @@ npm run dev:setup
 
 1. creates `backend/.venv` if missing and installs `backend/requirements.txt`, then makes sure the contrib build of OpenCV is the one installed (see Troubleshooting);
 2. creates `backend/.env` from `backend/.env.example`, and gives the site (`.env.local`) and the backend the same **local-only** `INTERNAL_API_SECRET`, so job tickets are signed and checked as in production. It also sets `SITE_URL=http://localhost:3000` so the backend can claim tickets and refund failed paid jobs. It points the site at `http://localhost:8002` unless `.env.local` already names a backend;
-3. downloads the AI models now (background removal, about 180 MB, cached in `~/.rembg`; moderation ships with the package), so the first request isn't slow;
+3. downloads the AI models now (background removal, about 180 MB, cached in `~/.rembg`; the 22 MB moderation model goes to `backend/app/models/`), so the first request isn't slow;
 4. finds ffmpeg (a system install if on PATH, otherwise the copy bundled with `imageio-ffmpeg`).
 
 It never talks to Supabase. Stop `npm run dev` before re-running it, because Windows locks packages the running backend has loaded.

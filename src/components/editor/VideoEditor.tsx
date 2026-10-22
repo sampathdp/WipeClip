@@ -8,7 +8,7 @@ import SignInModal from "@/components/SignInModal";
 import ThemeToggle from "@/components/ThemeToggle";
 import { trackEvent, useToolView } from "@/lib/analytics";
 import { createClient } from "@/lib/supabase/client";
-import { apiFetch, confirmAction, IS_DESKTOP } from "@/lib/platform";
+import { apiFetch, confirmAction, IS_DESKTOP, openNotices, showDesktopError } from "@/lib/platform";
 import { createClock, useClockTime, type Clock } from "@/lib/editor/clock";
 import { useProjectHistory } from "@/lib/editor/history";
 import {
@@ -22,13 +22,19 @@ import {
 } from "@/lib/editor/media";
 import {
   clearLastExport,
-  clearProject,
-  loadLastExport,
+  deleteProject,
   isProjectProblem,
+  listProjects,
+  loadLastExport,
   loadProject,
+  nameFromFile,
+  newProjectInfo,
+  renameProject,
   saveProject,
   saveSource,
-  type RestoredProject,
+  tidyProjects,
+  type ProjectInfo,
+  type ProjectSummary,
 } from "@/lib/editor/projectStore";
 import { useOverlayRasters } from "@/lib/editor/rasters";
 import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
@@ -90,6 +96,7 @@ import AiCleanupDialog from "./AiCleanupDialog";
 import ExportDialog from "./ExportDialog";
 import { ActionButton, ClipPanel, PanelShell, TransitionPanel } from "./Inspector";
 import OverlayLayer from "./OverlayLayer";
+import RecentProjects from "./RecentProjects";
 import {
   AudioAddPanel,
   AudioPanel,
@@ -161,21 +168,18 @@ export interface IncomingRecording {
  *  - `incomingRecording` opens a recording as a new project and reports
  *    the outcome through `onRecordingImported`,
  *  - `suspended` turns the editor's keyboard shortcuts off while the
- *    recorder covers it,
- *  - `onProjectOpen` reports whether a project is open.
+ *    recorder covers it.
  */
 export default function VideoEditor({
   onRecord,
   incomingRecording,
   onRecordingImported,
   suspended = false,
-  onProjectOpen,
 }: {
   onRecord?: () => void;
   incomingRecording?: IncomingRecording | null;
   onRecordingImported?: (key: number, error: string | null) => void;
   suspended?: boolean;
-  onProjectOpen?: (open: boolean) => void;
 }) {
   useToolView(TOOL);
   const clock = useMemo(() => createClock(), []);
@@ -183,7 +187,9 @@ export default function VideoEditor({
 
   const [phase, setPhase] = useState<"loading" | "import" | "probing" | "edit">("loading");
   const [importError, setImportError] = useState<{ message: string; blocked?: boolean } | null>(null);
-  const [resume, setResume] = useState<RestoredProject | null>(null);
+  const [recents, setRecents] = useState<ProjectSummary[]>([]);
+  /** The open project's id and name (null on the start screen). */
+  const [info, setInfo] = useState<ProjectInfo | null>(null);
   const [sources, setSources] = useState<Record<string, MediaSource>>({});
   const [originalId, setOriginalId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
@@ -271,17 +277,14 @@ export default function VideoEditor({
   const tier: Tier = isSignedIn ? signedInTier : "free";
   const premiumLocked = !TIER_LIMITS[tier].premiumEffects;
 
-  // --- recovery -----------------------------------------------------------
+  // --- saved projects -------------------------------------------------------
+  const refreshRecents = useCallback(() => listProjects().then(setRecents), []);
   useEffect(() => {
     let cancelled = false;
-    Promise.all([loadProject(), loadLastExport()]).then(([saved, lastExport]) => {
+    // Housekeeping first, while nothing is open (see tidyProjects).
+    Promise.all([tidyProjects().then(listProjects), loadLastExport()]).then(([saved, lastExport]) => {
       if (cancelled) return;
-      if (isProjectProblem(saved)) {
-        setImportError({ message: saved.problem });
-        setResume(null);
-      } else {
-        setResume(saved);
-      }
+      setRecents(saved);
       setPendingExport(lastExport);
       setPhase("import");
     });
@@ -303,12 +306,27 @@ export default function VideoEditor({
     };
   }, []);
 
-  // Autosave the (small) project JSON; source files are saved once when added.
+  // Autosave the (small) project record; source files are saved once when
+  // added. `pendingSave` holds what the next autosave would write, so
+  // switching or closing a project can write it at once (`saveNow`)
+  // instead of dropping the last 800 ms of edits.
+  const listThumb = thumbs[project.clips[0]?.sourceId ?? ""]?.urls[0] ?? null;
+  const pendingSave = useRef<(() => Promise<void>) | null>(null);
   useEffect(() => {
-    if (phase !== "edit" || project.clips.length === 0) return;
-    const t = setTimeout(() => void saveProject(project, Object.values(sources)), 800);
+    if (phase !== "edit" || project.clips.length === 0 || !info) return;
+    const save = () => saveProject(info, project, Object.values(sources), listThumb);
+    pendingSave.current = save;
+    const t = setTimeout(() => {
+      pendingSave.current = null;
+      void save();
+    }, 800);
     return () => clearTimeout(t);
-  }, [project, sources, phase]);
+  }, [project, sources, phase, info, listThumb]);
+  const saveNow = useCallback(async () => {
+    const save = pendingSave.current;
+    pendingSave.current = null;
+    if (save) await save();
+  }, []);
 
   // Thumbnails for every video source, generated once each in the background.
   useEffect(() => {
@@ -337,7 +355,7 @@ export default function VideoEditor({
 
   // --- project lifecycle ---------------------------------------------------
   const startProject = useCallback(
-    (srcs: MediaSource[], next: Project) => {
+    (srcs: MediaSource[], next: Project, nextInfo: ProjectInfo) => {
       thumbJobs.current.forEach((c) => c.abort());
       thumbJobs.current.clear();
       Object.values(sourcesRef.current).forEach((s) => URL.revokeObjectURL(s.url));
@@ -350,22 +368,10 @@ export default function VideoEditor({
       setPlaying(false);
       setSelection(null);
       setTool(null);
+      setInfo(nextInfo);
       setPhase("edit");
     },
     [reset, clock]
-  );
-
-  /** Opening a video or recording starts a new project: ask first when
-   * that would close an open project or a saved one waiting to be resumed.
-   * `openChecked`: the caller (the recorder) already asked about the open
-   * project, so only a saved one is left to ask about - never twice. */
-  const confirmReplace = useCallback(
-    async (openChecked = false) => {
-      const open = !openChecked && phase === "edit" && project.clips.length > 0;
-      if (!open && !resume) return true;
-      return confirmAction("Open this as a new project? Your current project will be closed and can't be reopened afterwards.", { okLabel: "Open" });
-    },
-    [phase, project.clips.length, resume]
   );
 
   const importFile = useCallback(
@@ -381,7 +387,8 @@ export default function VideoEditor({
         setImportError({ message: "That file is over the 300MB limit. Try a shorter or smaller video." });
         return;
       }
-      if (!(await confirmReplace())) return;
+      // Opening a video starts a new project; an open one stays in Recent projects.
+      await saveNow();
       setPhase("probing");
       const url = URL.createObjectURL(file);
       try {
@@ -401,11 +408,9 @@ export default function VideoEditor({
           fps: probe.info.fps > 0 && probe.info.fps <= 240 ? probe.info.fps : 30,
           hasAudio: probe.info.hasAudio ?? true,
         };
-        await clearProject();
         await clearLastExport();
         setPendingExport(null);
-        setResume(null);
-        startProject([src], { ...EMPTY, clips: [newClip(newId("clip"), src.id, 0, meta.duration)] });
+        startProject([src], { ...EMPTY, clips: [newClip(newId("clip"), src.id, 0, meta.duration)] }, newProjectInfo(nameFromFile(file.name)));
         keepForRecovery(src);
       } catch (e) {
         URL.revokeObjectURL(url);
@@ -423,10 +428,12 @@ export default function VideoEditor({
           message = "Couldn't reach WipeClip to check this video. Check your connection and try again.";
         }
         setImportError({ message, blocked });
+        setInfo(null);
         setPhase("import");
+        void refreshRecents();
       }
     },
-    [startProject, confirmReplace, keepForRecovery]
+    [startProject, keepForRecovery, saveNow, refreshRecents]
   );
 
   /** Opens a screen recording as a new project, entirely locally: the
@@ -438,7 +445,7 @@ export default function VideoEditor({
   const importRecording = useCallback(
     async (bundle: RecordingBundle): Promise<string | null> => {
       setImportError(null);
-      if (!(await confirmReplace(true))) return "Kept your current project. The recording is saved in its folder - open it later with Open a recording.";
+      await saveNow();
       setPhase("probing");
       let made: MediaSource[] = [];
       try {
@@ -451,11 +458,9 @@ export default function VideoEditor({
         // the video; the drawn cursor only if the video has no cursor of its own.
         const mappable = bundle.events.length > 0 && manifest.capture.coordinateSpace === "capture";
         if (mappable) plan.project.pointer = { ...DEFAULT_POINTER, cursor: manifest.capture.cursorCaptured === false };
-        await clearProject();
         await clearLastExport();
         setPendingExport(null);
-        setResume(null);
-        startProject(made, plan.project);
+        startProject(made, plan.project, newProjectInfo(`Recording ${new Date(manifest.createdAt || Date.now()).toLocaleString()}`));
         made.forEach(keepForRecovery);
         // Next step of the workflow: analyze interactions (or skip it).
         if (mappable) setTool("focus");
@@ -471,11 +476,13 @@ export default function VideoEditor({
               ? e.message
               : "Couldn't open this recording.";
         setImportError({ message });
+        setInfo(null);
         setPhase("import");
+        void refreshRecents();
         return message;
       }
     },
-    [startProject, confirmReplace, keepForRecovery]
+    [startProject, keepForRecovery, saveNow, refreshRecents]
   );
 
   // Recordings handed over by the desktop recorder, once recovery has been checked.
@@ -487,15 +494,35 @@ export default function VideoEditor({
     queueMicrotask(() => void importRecording(bundle).then((error) => onRecordingImported?.(key, error)));
   }, [incomingRecording, phase, importRecording, onRecordingImported]);
 
-  useEffect(() => {
-    onProjectOpen?.(phase === "edit");
-  }, [phase, onProjectOpen]);
+  const openSaved = useCallback(
+    async (id: string) => {
+      setImportError(null);
+      const saved = await loadProject(id);
+      if (isProjectProblem(saved)) {
+        setImportError({ message: saved.problem });
+        return;
+      }
+      startProject(saved.sources, saved.project, saved.info);
+    },
+    [startProject]
+  );
 
-  const resumeProject = useCallback(() => {
-    if (!resume) return;
-    startProject(resume.sources, resume.project);
-    setResume(null);
-  }, [resume, startProject]);
+  const removeSaved = useCallback(
+    async (p: ProjectSummary) => {
+      if (!(await confirmAction(`Delete "${p.name}"? Its edits can't be recovered afterwards. Your original video files are not affected.`, { okLabel: "Delete project" }))) return;
+      await deleteProject(p.id);
+      await refreshRecents();
+    },
+    [refreshRecents]
+  );
+
+  const renameSaved = useCallback(
+    async (id: string, name: string) => {
+      await renameProject(id, name);
+      await refreshRecents();
+    },
+    [refreshRecents]
+  );
 
   const addSource = useCallback(
     (src: MediaSource) => {
@@ -1232,10 +1259,11 @@ export default function VideoEditor({
     [apply, say, addSource]
   );
 
-  const newProject = useCallback(async () => {
-    if (!(await confirmAction("Start a new project? Your current edit will be closed.", { okLabel: "New project" }))) return;
+  /** Back to the start screen. The project is saved first and stays in
+   * Recent projects, so nothing needs confirming. */
+  const closeProject = useCallback(async () => {
     setPlaying(false);
-    await clearProject();
+    await saveNow();
     thumbJobs.current.forEach((c) => c.abort());
     thumbJobs.current.clear();
     Object.values(sourcesRef.current).forEach((s) => URL.revokeObjectURL(s.url));
@@ -1244,8 +1272,10 @@ export default function VideoEditor({
     setSources({});
     setOriginalId(null);
     reset(EMPTY);
+    setInfo(null);
     setPhase("import");
-  }, [reset]);
+    void refreshRecents();
+  }, [reset, saveNow, refreshRecents]);
 
   // --- keyboard shortcuts ------------------------------------------------
   useEffect(() => {
@@ -1329,9 +1359,17 @@ export default function VideoEditor({
       <span className="hidden rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[11px] font-bold text-accent sm:inline dark:text-accent-light">
         Editor
       </span>
-      {phase === "edit" && original && (
+      {phase === "edit" && original && info && (
         <div className="hidden min-w-0 flex-1 md:block">
-          <p className="truncate text-xs font-semibold text-foreground">{original.file.name}</p>
+          <input
+            value={info.name}
+            onChange={(e) => setInfo({ ...info, name: e.target.value })}
+            onBlur={() => !info.name.trim() && setInfo({ ...info, name: nameFromFile(original.file.name) })}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            aria-label="Project name"
+            maxLength={120}
+            className="w-full max-w-sm truncate rounded-md border border-transparent bg-transparent px-1 -mx-1 text-xs font-semibold text-foreground hover:border-border focus:border-accent-2 focus:outline-none"
+          />
           <p className="truncate text-[11px] text-muted">
             {original.width}×{original.height} · {Math.round(original.fps * 100) / 100} fps · {original.hasAudio ? "with audio" : "no audio"}
           </p>
@@ -1348,10 +1386,11 @@ export default function VideoEditor({
             </ToolButton>
             <button
               type="button"
-              onClick={newProject}
+              onClick={closeProject}
+              title="Back to your projects. This one is saved."
               className="hidden rounded-full px-3 py-2 text-xs font-semibold text-muted hover:text-foreground sm:inline"
             >
-              New
+              Projects
             </button>
           </>
         )}
@@ -1401,34 +1440,7 @@ export default function VideoEditor({
               original file is never changed.
             </p>
 
-            {resume && phase === "import" && (
-              <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-accent-2/40 bg-accent-2/5 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-foreground">Continue where you left off?</p>
-                  <p className="truncate text-xs text-muted">
-                    {resume.sources.find((s) => s.kind === "original")?.file.name} · {resume.project.clips.length} clip
-                    {resume.project.clips.length === 1 ? "" : "s"} · saved {new Date(resume.savedAt).toLocaleString()}
-                  </p>
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <button type="button" onClick={resumeProject} className="btn-primary rounded-full px-4 py-2 text-sm font-semibold">
-                    Resume
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!(await confirmAction("Delete the saved project? Your edits can't be recovered afterwards. Your original video files are not affected.", { okLabel: "Delete project" }))) return;
-                      resume.sources.forEach((s) => URL.revokeObjectURL(s.url));
-                      setResume(null);
-                      void clearProject();
-                    }}
-                    className="btn-secondary rounded-full px-4 py-2 text-sm font-semibold"
-                  >
-                    Discard
-                  </button>
-                </div>
-              </div>
-            )}
+            {phase === "import" && <RecentProjects projects={recents} onOpen={openSaved} onRename={renameSaved} onDelete={removeSaved} />}
 
             {phase === "probing" ? (
               <div className="mt-8 flex flex-col items-center gap-4 rounded-[1.75rem] border border-border bg-surface-2/70 p-12 text-center" role="status">
@@ -1505,6 +1517,17 @@ export default function VideoEditor({
             <p className="mt-6 text-center text-xs text-muted">
               {IS_DESKTOP ? "Editing happens on this computer." : "Editing happens in your browser."} Your video is only uploaded to check it and when you export{AI_CLEANUP_ENABLED ? " or run AI Cleanup" : ""}, and isn&apos;t stored.
             </p>
+            {IS_DESKTOP && (
+              <p className="mt-2 text-center text-xs text-muted">
+                <button
+                  type="button"
+                  className="underline hover:text-foreground"
+                  onClick={() => openNotices().catch((e) => showDesktopError("Couldn't open the licences", String(e)))}
+                >
+                  Open-source licences
+                </button>
+              </p>
+            )}
           </div>
         </main>
       </div>

@@ -47,7 +47,7 @@ Build: `npm run desktop:build` (Rust release in ~2.5–3.5 min, Next static expo
 | Captions (local Whisper) | Asks before the 80 MB download; download ~25 s; 14.8 s of speech transcribed in ~60 s, 11 captions, word-perfect |
 | SRT export via native Save dialog | File written with correct timings |
 | Privacy mask (blur), arrow, insert recording screenshot | All on the timeline; screenshot placed at the moment it was taken |
-| Save → close → reopen (also after upgrade and after uninstall + reinstall) | "Continue where you left off?" → everything restored, including click data |
+| Save → close → reopen (also after upgrade and after uninstall + reinstall) | Listed under Recent projects → Open restores everything, including click data (verified with the single-project format before the library; re-check) |
 | Native confirm dialogs (new project, replace project) | Correct text and buttons; Cancel keeps the project |
 | Export (signed out → 720p free preview) | Valid MP4 (H.264 + AAC), 1280×720, **30 fps**, 81.50 s, decodes without errors. Zoom matches the expected crop (mean pixel difference 1.5 vs 19.9 unzoomed); mask blurred exactly 30–35 s inside its rectangle (detail 3.6 → 0.22) and nowhere else; click rings at each click and only then |
 | Free export limit | Clear message "Free export limit reached for today. Sign in for more." |
@@ -98,8 +98,9 @@ Measured on this machine (12 threads), 81.5 s 1920×1080 screen recording export
 - npm production dependency tree (183 packages): MIT, Apache-2.0, BSD, ISC, BlueOak, 0BSD, CC0, CC-BY-4.0 (`caniuse-lite`, attribution). `@sentry/cli` is FSL-1.1-MIT but is a website build tool, not shipped in the desktop app.
 - Rust crates (~490): MIT/Apache-2.0 dual-licensed in the vast majority; Unicode-3.0, Zlib, Unlicense, BSD-3-Clause; MPL-2.0 (5 crates, file-level copyleft — fine to ship unmodified with notice).
 - Speech model: Whisper base (OpenAI, MIT), ONNX conversion from Hugging Face `onnx-community`, downloaded on first use only after the user agrees.
-- The processing backend uses ffmpeg through `imageio-ffmpeg` (a GPL build) on the server; it isn't distributed with the desktop app.
-- Include third-party notices (npm + cargo) in the installer/about screen before release — not done yet.
+- **ffmpeg is distributed with the desktop app.** The local engine bundles `imageio-ffmpeg`'s static ffmpeg 7.1 (Windows: the gyan.dev "essentials" build, `--enable-gpl --enable-version3`, with libx264/libx265), so the installer ships a GPL-3.0 program. It runs as a separate process, so the app itself isn't affected, but every release must carry the GPL text and a way to get the corresponding source; the notices file does both and points source requests to the feedback page.
+- **Content check model**: Marqo `nsfw-image-detection-384` (Apache-2.0), run in numpy by `backend/app/pipeline/nsfw_classifier.py`, weights pinned by revision and SHA-256 and bundled in the engine. It replaced nudenet, whose wheel is AGPL-3.0 despite its MIT metadata; the engine no longer ships nudenet or onnxruntime (about 28 MB smaller).
+- **Third-party notices**: `desktop/scripts/notices.mjs` writes `THIRD-PARTY-NOTICES.txt` on every release build: npm packages in the UI bundle, Rust crates and, with the engine, its Python packages, the Python runtime, the content check model (Apache-2.0 text) and ffmpeg with the GPL-3.0 text, both texts from `desktop/notices/`. It ships as a bundle resource; **Open-source licences** on the start screen opens it. Run the build with the Python that built the engine (CI does; locally set `WIPECLIP_ENGINE_PYTHON` if it isn't `backend/.venv`), or the listed Python versions won't match the engine's.
 
 ## Packaging and distribution
 
@@ -119,9 +120,28 @@ NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_ANON_KEY=... npm run desktop:b
 
 - Windows: per-user NSIS install, no admin; WebView2 bootstrapper downloaded if missing; Windows 10 21H2+ / 11 (WebView2 preinstalled). Silent: `/S`. Uninstaller keeps app data and recordings when run silently; the interactive uninstaller offers to delete app data.
 - macOS: `.app` / `.dmg`, macOS 11+, needs signing + notarization for Gatekeeper.
-- Upgrades: install the new build over the old one; projects and settings survive.
-- The version is `0.1.0` in `tauri.conf.json` and `package.json`; bump both per release.
+- Upgrades: the app updates itself (see Updates), or install the new build over the old one; projects and settings survive.
+- The version is in `tauri.conf.json` and `package.json`; bump both per release.
 - `src-tauri/tauri.generated.conf.json` is rewritten by every build (CSP); after a local test build it names localhost — run a release build before shipping.
+
+## Projects
+
+The start screen lists every saved project (`src/components/editor/RecentProjects.tsx`): thumbnail, name, clip count, length, disk space, last saved. Open, rename (click the name, or the name field in the editor header) and delete. Projects autosave while editing; **Projects** in the header saves and goes back to the list, and opening another video or recording starts a new project without closing anything for good. Storage (`src/lib/editor/projectStore.ts`, IndexedDB `wipeclip-editor` version 2): a `projects` store keyed by project id, source files once each in `sources` under their own ids. The version 2 upgrade moves 0.1.0's single saved project into the list. On startup, files no project refers to (a crash between adding a video and the first autosave) are deleted. Each project still keeps its own copy of its videos (see Performance); a project file format and on-disk sources are not done yet. Tests: `tests/desktop/projects.test.ts` (in-memory IndexedDB via `fake-indexeddb`, a dev dependency only).
+
+## Updates
+
+The app checks `https://github.com/sampathdp/WipeClip/releases/latest/download/latest.json` 10 s after launch and every 6 hours (`src-tauri/src/updater.rs`, `UpdateBanner` in `desktop/app/DesktopShell.tsx`). A newer version shows a banner. **Update now** downloads it, verifies its signature, installs it (Windows: the NSIS installer in passive mode) and restarts; **Later** hides that version until a newer one appears. Nothing installs without the click, and installing is refused while a recording is being written. Debug builds never check.
+
+Update bundles are signed with a minisign key, separate from code signing. The public key is in `tauri.conf.json` (`plugins.updater.pubkey`). The private key and its password were generated on the release maintainer's machine (`~/.tauri/wipeclip-updater.key`, `~/.tauri/wipeclip-updater.password`) and must exist **only** there, in a password manager backup, and as repository secrets `TAURI_SIGNING_PRIVATE_KEY` (the key file's contents) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. **If the key is lost, installed apps can never be updated again** - users would have to reinstall by hand.
+
+Releasing a version:
+
+1. Bump `version` in `src-tauri/tauri.conf.json` and `package.json`, commit, push.
+2. `git tag desktop-v<version> && git push origin desktop-v<version>`.
+3. `desktop.yml` builds both platforms with the signing key, then `desktop/scripts/update-manifest.mjs` checks that the tag matches the version, renames the assets and writes `latest.json`, and a **draft** release is created with the Windows installer, the macOS DMG and update tarball, and `latest.json`.
+4. Check the draft (install it on a test machine), then publish it. Only published, non-prerelease releases count as "latest", so users are offered the update from that moment.
+
+The repository must stay public: the updater downloads release assets without authentication. Builds without `TAURI_SIGNING_PRIVATE_KEY` (local and PR builds) produce no update bundles but otherwise work; release tags fail without it (`WIPECLIP_REQUIRE_UPDATER`).
 
 ## Required permissions
 
@@ -149,7 +169,7 @@ NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_ANON_KEY=... npm run desktop:b
 2. **Code signing.** Windows installer is unsigned (SmartScreen "unknown publisher"); macOS needs Developer ID signing + notarization (CI secrets).
 3. **macOS build and full manual pass** on a real Mac (permissions, system audio absence, Retina coordinates, export, uninstall).
 4. **Signed-in production test**: export and download at 1080p, credits, Google sign-in deep link `wipeclip://auth/callback` (Supabase redirect URL must be configured).
-5. **Third-party notices** in the app/installer.
+5. **ffmpeg source requests**: someone must answer them (see Dependencies and licensing). The notices file and the nudenet replacement are done.
 
 Recommended before a wide release: crash/interrupted-recording recovery and device-unplug tests (checklist 10), multiple displays, a 9-minute recording export, audio-pass split for export speed.
 
@@ -166,7 +186,7 @@ Tick with OS version and date. Windows results from this pass are noted.
 7. Open in editor; Analyze zooms; edit one; undo/redo; preview plays the zoom. *(✓)*
 8. Captions: download consent, generate, edit one, export SRT. *(✓)*
 9. Privacy mask, arrow, screenshot insert; play through. *(✓)*
-10. Close app; reopen; Resume; everything there. Discard asks first. *(✓)*
+10. Close app; reopen; the project is under Recent projects; Open; everything there. Rename from the list and from the header; Delete asks first and frees the space. Opening another video keeps the first project in the list. A project saved by 0.1.0 (single-project format) shows up in the list after upgrading.
 11. Export signed out (720p) and signed in (1080p); open the file in the system player; check zoom, rings, mask, captions, audio sync, 30 fps. *(signed out ✓; signed in not run)*
 12. AI Cleanup on a short clip. *(API ✓ via dev:smoke; in-app run not done)*
 13. Upgrade install over the previous version; project kept. *(✓)*

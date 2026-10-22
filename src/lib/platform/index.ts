@@ -142,6 +142,34 @@ export async function saveTextFile(suggestedName: string, contents: string): Pro
   return path ? { status: "saved", path } : { status: "cancelled" };
 }
 
+export interface AppUpdate {
+  version: string;
+  notes: string | null;
+}
+
+export type UpdateProgress = { event: "progress"; downloaded: number; total: number | null } | { event: "installing" };
+
+/** A newer desktop version from the release feed, or null (also on the
+ * website and in dev builds). */
+export async function checkForUpdate(): Promise<AppUpdate | null> {
+  if (!IS_DESKTOP) return null;
+  return invoke<AppUpdate | null>("update_check");
+}
+
+/** Downloads and installs the update found by `checkForUpdate`, then the
+ * app restarts. Rejects while a recording is running. */
+export async function installUpdate(onProgress: (p: UpdateProgress) => void): Promise<void> {
+  const { Channel } = await import("@tauri-apps/api/core");
+  const channel = new Channel<UpdateProgress>();
+  channel.onmessage = onProgress;
+  await invoke("update_install", { onProgress: channel });
+}
+
+/** Opens the third-party notices shipped with the desktop app. */
+export async function openNotices(): Promise<void> {
+  if (IS_DESKTOP) await invoke("open_notices");
+}
+
 /** OK/Cancel confirmation. Always use this instead of window.confirm: in
  * the desktop app the dialog plugin replaces window.confirm with an async
  * version whose Promise is always truthy, so `if (!window.confirm(...))`

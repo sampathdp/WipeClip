@@ -5,11 +5,12 @@
 //   node desktop/scripts/tauri.mjs dev            -> tauri dev
 //   node desktop/scripts/tauri.mjs build [args]   -> tauri build [args]
 import { spawn } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import nextEnv from "@next/env";
+import { buildNotices, NOTICES_PATH } from "./notices.mjs";
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -102,13 +103,34 @@ const config = {
 // WIPECLIP_REQUIRE_ENGINE=1 so a release can't ship without it by accident.
 const engineDir = path.join(root, "src-tauri", "resources", "engine");
 if (!dev) {
-  if (existsSync(engineDir)) {
-    config.bundle = { resources: { "resources/engine/": "engine/" } };
+  const engine = existsSync(engineDir);
+  const resources = {};
+  if (engine) {
+    resources["resources/engine/"] = "engine/";
   } else if (process.env.WIPECLIP_REQUIRE_ENGINE === "1") {
     console.error(`No engine at ${engineDir} - build it with backend/desktop.spec first.`);
     process.exit(1);
   } else {
     console.warn("No local engine bundled: this build processes video on the cloud backend.");
+  }
+  // Licence texts of everything shipped (desktop/scripts/notices.mjs); the
+  // app opens it from the start screen.
+  const notices = buildNotices({ engine });
+  mkdirSync(path.dirname(NOTICES_PATH), { recursive: true });
+  writeFileSync(NOTICES_PATH, notices);
+  console.log(`Third-party notices: ${(notices.length / 1024).toFixed(0)} KB`);
+  resources["resources/THIRD-PARTY-NOTICES.txt"] = "THIRD-PARTY-NOTICES.txt";
+  config.bundle = { resources };
+  // Signed update bundles (src-tauri/src/updater.rs) need the private key,
+  // which only release builds have (CI secret). Other builds still install
+  // and run, they just can't be offered as an update.
+  if (process.env.TAURI_SIGNING_PRIVATE_KEY) {
+    config.bundle.createUpdaterArtifacts = true;
+  } else if (process.env.WIPECLIP_REQUIRE_UPDATER === "1") {
+    console.error("TAURI_SIGNING_PRIVATE_KEY is not set - a release build must produce signed update bundles.");
+    process.exit(1);
+  } else {
+    console.warn("No TAURI_SIGNING_PRIVATE_KEY: no update bundles in this build.");
   }
 }
 

@@ -16,8 +16,9 @@ Both video endpoints screen sampled frames for explicit content
 `422 {"detail": {"code": "content_blocked", ...}}` if flagged — the
 frontend shows this as a hard stop, not a retryable error.
 
-The default (`MODERATION_PROVIDER=local`, or unset) uses NudeNet, a
-self-hosted ONNX nudity classifier — no account or API key needed, but it's
+The default (`MODERATION_PROVIDER=local`, or unset) uses a self-hosted NSFW
+image classifier (Marqo `nsfw-image-detection-384`, Apache-2.0, run in numpy
+by `app/pipeline/nsfw_classifier.py`) — no account or API key needed, but it's
 a heuristic, not a guarantee, and it is **not** CSAM detection (that needs a
 vetted hash-matching service under formal registration — see the module
 docstring before touching this). For stronger/legally-defensible coverage,
@@ -26,9 +27,10 @@ Intelligence SafeSearch, Azure Content Moderator) into
 `screen_frames_cloud()` in that module and set `MODERATION_PROVIDER`
 accordingly.
 
-NudeNet's model (~a few MB) downloads automatically on first use of a video
-endpoint — that first call needs network access; every call after is
-offline.
+Its weights (22 MB, pinned revision and SHA-256) go to `app/models/`:
+fetched by `npm run dev:setup`, the Docker build and the desktop engine
+build (`python -m app.pipeline.nsfw_classifier`), or else downloaded on the
+first video request, which then needs network access.
 
 ## Run locally
 
@@ -41,7 +43,7 @@ npm run dev:check     # health check
 ```
 
 `npm run dev:setup` also removes `opencv-python-headless` after installing:
-nudenet depends on it, and it overwrites the `cv2` package from
+rembg depends on it, and it overwrites the `cv2` package from
 `opencv-contrib-python-headless`, which drops the `cv2.xphoto` inpainting
 that AI cleanup uses.
 

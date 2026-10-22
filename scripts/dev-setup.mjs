@@ -46,7 +46,7 @@ const version = spawnSync(venvPython, ["--version"], { encoding: "utf8" }).stdou
 console.log(`${version} in backend/.venv`);
 if (!/Python 3\.1[23]\./.test(version)) console.warn("Note: CI and Docker use Python 3.12; other versions may behave differently.");
 run(venvPython, ["-m", "pip", "install", "--disable-pip-version-check", "-q", "-r", "requirements.txt"]);
-// nudenet pulls in opencv-python-headless, which installs into the same
+// rembg pulls in opencv-python-headless, which installs into the same
 // cv2/ folder as opencv-contrib-python-headless and can overwrite it -
 // dropping cv2.xphoto, which AI cleanup's inpainting needs (video.py).
 // Keep only the contrib build.
@@ -103,14 +103,14 @@ console.log("backend/.env and .env.local share a local INTERNAL_API_SECRET");
 console.log(`site -> backend URL: ${readVar(siteEnv, "NEXT_PUBLIC_TOOLS_API_URL")}`);
 
 // 3. Models ---------------------------------------------------------------------
-step("AI models (first run downloads ~180 MB)");
+step("AI models (first run downloads ~200 MB)");
 run(venvPython, [
   "-c",
   [
     "from app.pipeline.bg_removal import _rembg_session",
-    "from app.pipeline.moderation import _detector",
+    "from app.pipeline.nsfw_classifier import ensure_model",
     "_rembg_session(); print('background removal model ready')",
-    "_detector(); print('moderation model ready')",
+    "ensure_model(); print('moderation model ready')",
   ].join("\n"),
 ]);
 

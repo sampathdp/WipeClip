@@ -3,7 +3,7 @@
 //
 //   node tests/desktop/manual/preview-tutorial.mjs http://localhost:3005/editor out-dir
 //
-// Resumes a saved project (4-color video with speech-like sound, a pause
+// Opens a saved project (4-color video with speech-like sound, a pause
 // in the middle) with a solid and a blur privacy mask and an arrow, checks
 // the preview pixels, then runs Tutorial > Review > Analyze, accepts the
 // suggested cut, checks the timeline got shorter, and undoes it.
@@ -47,7 +47,7 @@ try {
   await b.goto(url);
   await b.seedProject(readFileSync(video).toString("base64"), project, meta, null);
   await b.goto(url);
-  if (!(await b.click("Resume"))) throw new Error("No Resume button");
+  if (!(await b.click("Open"))) throw new Error("No Open button - the saved project wasn't listed");
   await sleep(3000);
   for (let i = 0; i < 30; i++) await b.key("ArrowRight", "ArrowRight", 39); // 1 s
   await sleep(900);

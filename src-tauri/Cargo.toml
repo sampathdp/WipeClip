@@ -33,6 +33,7 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 # Recorder hotkeys (start/stop, pause, marker, screenshot). Registered from
 # Rust only; the page gets no global-shortcut plugin permissions.
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-updater = "2"
 
 # Screen recorder input metadata (src/input): low-level mouse/keyboard hooks,
 # cursor polling, foreground window, free disk space.

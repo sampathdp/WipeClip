@@ -13,9 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
-# Pre-download the rembg model at build time so cold starts don't pay for it
-# (NudeNet ships its model inside the package).
-RUN python -c "from app.pipeline.bg_removal import _rembg_session; _rembg_session()"
+# Pre-download the rembg and moderation models at build time so cold starts
+# don't pay for them.
+RUN python -c "from app.pipeline.bg_removal import _rembg_session; _rembg_session()"     && python -m app.pipeline.nsfw_classifier
 
 # glibc gives every thread its own malloc arena and rarely hands freed
 # memory back, so RSS keeps the peak of every large numpy/OpenCV buffer.

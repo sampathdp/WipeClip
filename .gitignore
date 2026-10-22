@@ -45,6 +45,7 @@ next-env.d.ts
 backend/.venv
 backend/**/__pycache__
 backend/*.egg-info
+backend/app/models/
 backend/*.log
 
 # local dev logs
@@ -62,3 +63,4 @@ dev.log
 # newsletter send logs and previews (contain account ids)
 /newsletter-logs/
 /src-tauri/resources/engine/
+/src-tauri/resources/THIRD-PARTY-NOTICES.txt

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { openExternal, showDesktopError, SITE_ORIGIN } from "@/lib/platform";
+import { checkForUpdate, installUpdate, openExternal, showDesktopError, SITE_ORIGIN, type AppUpdate } from "@/lib/platform";
 
 /** App-wide desktop glue around the editor:
  *  - Links: the app bundles only the editor, so any link to another page
@@ -11,7 +11,8 @@ import { openExternal, showDesktopError, SITE_ORIGIN } from "@/lib/platform";
  *    in the system browser instead of navigating this window away.
  *  - Sign-in return: Google sign-in and email links come back as
  *    wipeclip://auth/callback?code=..., and the code is exchanged here.
- *  - Offline banner, and uncaught errors forwarded to the app's log file.
+ *  - Offline banner, update banner, and uncaught errors forwarded to the
+ *    app's log file.
  */
 export default function DesktopShell({ children }: { children: React.ReactNode }) {
   // The recording mini player window gets none of this (no sign-in, links or banner).
@@ -92,6 +93,7 @@ function MainShell({ children }: { children: React.ReactNode }) {
           You&apos;re offline. Editing still works, but opening a new video, AI cleanup, sign-in and export need an internet connection.
         </div>
       )}
+      {online && <UpdateBanner />}
       {children}
     </>
   );
@@ -160,6 +162,83 @@ async function finishSignIn(raw: string) {
       `${error.message}\n\nStart the sign-in again from this app (links opened from a different app or device can't finish here).`
     );
   }
+}
+
+/** Versions the user chose "Later" for; not offered again until a newer one. */
+const SKIPPED_UPDATE_KEY = "wipeclip.skippedUpdate";
+const UPDATE_FIRST_CHECK_MS = 10_000;
+const UPDATE_CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+
+/** Offers a new version from the release feed (src-tauri/src/updater.rs).
+ * Nothing installs without a click; the project autosaves, so the restart
+ * loses nothing. */
+function UpdateBanner() {
+  const [update, setUpdate] = useState<AppUpdate | null>(null);
+  const [progress, setProgress] = useState<number | "installing" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => {
+      checkForUpdate()
+        .then((found) => {
+          if (cancelled || !found) return;
+          let skipped: string | null = null;
+          try {
+            skipped = localStorage.getItem(SKIPPED_UPDATE_KEY);
+          } catch {
+            // storage unavailable: just offer it
+          }
+          if (skipped !== found.version) setUpdate(found);
+        })
+        .catch((err) => console.warn("[desktop] update check failed", err));
+    };
+    const first = setTimeout(check, UPDATE_FIRST_CHECK_MS);
+    const every = setInterval(check, UPDATE_CHECK_EVERY_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(first);
+      clearInterval(every);
+    };
+  }, []);
+
+  if (!update) return null;
+
+  const install = () => {
+    setError(null);
+    setProgress(0);
+    installUpdate((p) => setProgress(p.event === "installing" ? "installing" : p.total ? Math.round((p.downloaded / p.total) * 100) : 0)).catch((err) => {
+      setProgress(null);
+      setError(String(err));
+    });
+  };
+  const later = () => {
+    try {
+      localStorage.setItem(SKIPPED_UPDATE_KEY, update.version);
+    } catch {
+      // storage unavailable: hidden for this session only
+    }
+    setUpdate(null);
+  };
+
+  return (
+    <div role="status" className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-accent px-4 py-1.5 text-center text-xs font-semibold text-white">
+      {progress === null ? (
+        <>
+          <span>WipeClip {update.version} is available. The app restarts to update; your project is saved.</span>
+          <button type="button" onClick={install} className="rounded-full bg-white px-3 py-0.5 text-black hover:bg-white/90">
+            Update now
+          </button>
+          <button type="button" onClick={later} className="underline hover:no-underline">
+            Later
+          </button>
+          {error && <span className="w-full font-medium">Update failed: {error}</span>}
+        </>
+      ) : (
+        <span>{progress === "installing" ? "Installing, WipeClip will restart…" : `Downloading WipeClip ${update.version}… ${progress}%`}</span>
+      )}
+    </div>
+  );
 }
 
 function useOnline() {

@@ -2,11 +2,15 @@ name: Desktop
 
 # Builds the WipeClip desktop app (Tauri) on real Windows and macOS runners.
 # See docs/desktop/README.md. Runs on demand and on PRs touching desktop
-# code; it never publishes anything - installers are uploaded as workflow
-# artifacts only.
+# code, uploading the installers as workflow artifacts. A pushed tag
+# desktop-v<version> also creates a *draft* GitHub release with the signed
+# installers and latest.json (the app's update feed); publishing the draft
+# is what offers the update to users. See docs/desktop/RELEASE.md (Updates).
 
 on:
   workflow_dispatch: {}
+  push:
+    tags: ["desktop-v*"]
   pull_request:
     branches: [master]
     paths:
@@ -106,14 +110,20 @@ jobs:
         shell: bash
         run: |
           pip install -r requirements-desktop.txt
+          python -m app.pipeline.nsfw_classifier
           pyinstaller desktop.spec --noconfirm
           mkdir -p ../src-tauri/resources
           rm -rf ../src-tauri/resources/engine
           cp -R dist/wipeclip-engine ../src-tauri/resources/engine
 
+      # TAURI_SIGNING_PRIVATE_KEY signs the update bundles (not the code
+      # signing certificate). Required for release tags.
       - name: Build
         env:
           WIPECLIP_REQUIRE_ENGINE: "1"
+          WIPECLIP_REQUIRE_UPDATER: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && '1' || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run desktop:build -- --bundles ${{ matrix.bundles }}
 
       - uses: actions/upload-artifact@v4
@@ -121,5 +131,34 @@ jobs:
           name: wipeclip-${{ runner.os }}
           path: |
             src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
             src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Release assets and update feed
+        run: node desktop/scripts/update-manifest.mjs artifacts release "${GITHUB_REF_NAME}" "${GITHUB_REPOSITORY}"
+
+      # A draft: users get nothing until it is published on GitHub.
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" release/* --draft --title "WipeClip ${GITHUB_REF_NAME#desktop-v}" --generate-notes

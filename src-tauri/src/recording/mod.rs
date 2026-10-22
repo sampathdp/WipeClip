@@ -63,6 +63,11 @@ impl RecordingState {
         self.sessions.lock().ok()?.get(id).map(|s| s.dir.clone())
     }
 
+    /// A recording is being written (started and not yet finished).
+    pub fn is_recording(&self) -> bool {
+        self.sessions.lock().map(|s| !s.is_empty()).unwrap_or(true)
+    }
+
     /// Flushes every open recording, e.g. when the app quits mid-recording;
     /// the folders stay behind as interrupted recordings to recover.
     pub fn close_all(&self) {

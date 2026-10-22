@@ -16,6 +16,7 @@ mod links;
 mod recording;
 mod secure_storage;
 mod shortcuts;
+mod updater;
 
 use serde::Serialize;
 use tauri::utils::config::BackgroundThrottlingPolicy;
@@ -215,6 +216,21 @@ fn open_privacy_settings(app: tauri::AppHandle, kind: String) -> Result<(), Stri
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Opens the bundled third-party notices (desktop/scripts/notices.mjs) in
+/// the default text viewer. Fixed path - the page can't name another file.
+#[tauri::command]
+fn open_notices(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = app
+        .path()
+        .resolve("THIRD-PARTY-NOTICES.txt", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| e.to_string())?;
+    if !path.is_file() {
+        return Err("The licence file isn't part of this build.".into());
+    }
+    app.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+}
+
 fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
     let handle = app.handle().clone();
     WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
@@ -275,11 +291,13 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(export::ExportState::default())
         .manage(recording::RecordingState::default())
         .manage(input::InputState::default())
         .manage(capture::CaptureState::default())
         .manage(engine::EngineState::default())
+        .manage(updater::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
             engine::local_engine,
             desktop_capabilities,
@@ -309,6 +327,9 @@ pub fn run() {
             recorder_mini,
             recorder_window,
             open_privacy_settings,
+            open_notices,
+            updater::update_check,
+            updater::update_install,
             shortcuts::recorder_shortcuts,
             recording::recording_default_dir,
             recording::recording_choose_dir,

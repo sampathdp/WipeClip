@@ -12,16 +12,21 @@
 import os
 import sys
 
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 # macOS release builds: every bundled binary signed with the app's identity
 # and hardened runtime, as notarization requires (CI imports the certificate).
 codesign_identity = (os.environ.get("APPLE_SIGNING_IDENTITY") or None) if sys.platform == "darwin" else None
 
 datas = []
-datas += collect_data_files("nudenet")  # the bundled detector model
+# The moderation model (app/pipeline/nsfw_classifier.py), fetched into
+# app/models/ by `python -m app.pipeline.nsfw_classifier` before this runs.
+nsfw_model = os.path.join("app", "models", "nsfw-image-detection-384.safetensors")
+if not os.path.exists(nsfw_model):
+    raise SystemExit(f"{nsfw_model} missing - run `python -m app.pipeline.nsfw_classifier` first")
+datas += [(nsfw_model, os.path.join("app", "models"))]
 datas += collect_data_files("imageio_ffmpeg")  # the static ffmpeg binary
-binaries = collect_dynamic_libs("onnxruntime")
+binaries = []
 
 hiddenimports = []
 hiddenimports += collect_submodules("app")  # pipelines are imported lazily
@@ -34,7 +39,7 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     # Cloud-server-only modules; app/ imports them lazily and only when configured.
-    excludes=["redis", "rq", "google", "sentry_sdk", "rembg", "hypercorn", "a2wsgi", "boto3", "tkinter"],
+    excludes=["redis", "rq", "google", "sentry_sdk", "rembg", "onnxruntime", "hypercorn", "a2wsgi", "boto3", "tkinter"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

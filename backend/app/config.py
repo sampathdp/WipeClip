@@ -111,12 +111,12 @@ MAX_UPLOAD_DIMENSION: int = 6000  # px, safety cap on longest side
 MAX_CONCURRENT_JOBS: int = max(1, int(os.environ.get("MAX_CONCURRENT_JOBS", "1")))
 # Threads one job may use: ffmpeg (decode, filters, x264 - fewer threads
 # also means fewer frames in flight, so less RAM), OpenCV and the
-# ONNX models (rembg, NudeNet). Defaults to an even share of the cores, so
+# ONNX models (rembg). Defaults to an even share of the cores, so
 # concurrent jobs don't oversubscribe the CPU.
 JOB_THREADS: int = max(
     1, int(os.environ.get("JOB_THREADS", str(max(1, (os.cpu_count() or 1) // MAX_CONCURRENT_JOBS))))
 )
-# onnxruntime (via rembg/NudeNet) reads this when a session is created.
+# onnxruntime (via rembg) reads this when a session is created.
 os.environ.setdefault("OMP_NUM_THREADS", str(JOB_THREADS))
 
 # --- Video region cleanup (ffmpeg-based) ---- -----------------------------------
@@ -326,13 +326,9 @@ EDITOR_COMPACT_AUDIO_BITRATE: str = "128k"
 # moderation API (AWS Rekognition / Google Video Intelligence / Azure)
 # alongside or instead of this local pass.
 NSFW_SAMPLE_FRAMES: int = 5              # frames sampled evenly across the clip
-NSFW_CONFIDENCE_THRESHOLD: float = 0.6   # per-detection confidence to count as a hit
-NSFW_BLOCKED_LABELS: frozenset[str] = frozenset(
-    {
-        "FEMALE_GENITALIA_EXPOSED",
-        "MALE_GENITALIA_EXPOSED",
-        "ANUS_EXPOSED",
-        "FEMALE_BREAST_EXPOSED",
-        "BUTTOCKS_EXPOSED",
-    }
-)
+# A frame counts as a hit at this NSFW probability (local classifier) or
+# label confidence (MODERATION_PROVIDER=aws). Above the classifier's 0.5
+# decision point on purpose: dark or violent but non-explicit film scenes
+# score up to ~0.7 (Sintel, the bundled demo, peaks at 0.67), and a false
+# block stops someone editing their own footage.
+NSFW_CONFIDENCE_THRESHOLD: float = 0.85

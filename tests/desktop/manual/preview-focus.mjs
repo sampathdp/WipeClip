@@ -7,7 +7,7 @@
 //
 // It makes a 4-color test video with ffmpeg (from the backend venv), stores
 // a saved project in the editor's IndexedDB - a synthetic screen recording
-// with one zoom on the red quadrant and one left click - resumes it in
+// with one zoom on the red quadrant and one left click - opens it in
 // headless Chrome over the DevTools protocol, steps the playhead and
 // checks/screenshots the preview stage. Uses only Node built-ins.
 import { execFileSync, spawn } from "node:child_process";
@@ -106,18 +106,19 @@ const project = {
 };
 
 await goto(url);
+// A Recent projects entry (the page opened the database at its current version above).
 await evaluate(`(async () => {
   const bytes = Uint8Array.from(atob(${JSON.stringify(readFileSync(video).toString("base64"))}), c => c.charCodeAt(0));
-  const db = await new Promise((res, rej) => { const r = indexedDB.open("wipeclip-editor", 1); r.onupgradeneeded = () => { r.result.createObjectStore("project"); r.result.createObjectStore("sources"); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  const db = await new Promise((res, rej) => { const r = indexedDB.open("wipeclip-editor"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
   const put = (store, value, key) => new Promise((res, rej) => { const tx = db.transaction(store, "readwrite"); tx.objectStore(store).put(value, key); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
   await put("sources", new Blob([bytes], { type: "video/mp4" }), "src_1");
   await put("sources", ${JSON.stringify(recording)}, "src_1#recording");
-  await put("project", { project: ${JSON.stringify(project)}, sources: [{ id: "src_1", kind: "original", duration: 6, width: 320, height: 180, fps: 30, hasAudio: false, name: "quad.mp4", type: "video/mp4" }], savedAt: Date.now() }, "current");
+  await put("projects", { id: "prj_seed", name: "Seeded project", createdAt: Date.now(), project: ${JSON.stringify(project)}, sources: [{ id: "src_1", kind: "original", duration: 6, width: 320, height: 180, fps: 30, hasAudio: false, name: "quad.mp4", type: "video/mp4" }], savedAt: Date.now() }, "prj_seed");
   db.close();
 })()`);
 await goto(url);
-if (!(await evaluate(`(() => { const b = [...document.querySelectorAll("button")].find(b => b.textContent.trim() === "Resume"); b?.click(); return !!b; })()`))) {
-  throw new Error("No Resume button - the saved project wasn't picked up.");
+if (!(await evaluate(`(() => { const b = [...document.querySelectorAll("button")].find(b => b.textContent.trim() === "Open"); b?.click(); return !!b; })()`))) {
+  throw new Error("No Open button - the saved project wasn't listed.");
 }
 await sleep(3000);
 

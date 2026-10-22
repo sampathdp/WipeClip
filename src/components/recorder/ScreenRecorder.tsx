@@ -164,11 +164,9 @@ function readAutoOpen(): boolean {
 export default function ScreenRecorder({
   onClose,
   onOpenInEditor,
-  editorHasProject,
 }: {
   onClose: () => void;
   onOpenInEditor: (bundle: RecordingBundle) => void;
-  editorHasProject: boolean;
 }) {
   const [step, setStep] = useState<Step>("setup");
   const [platform, setPlatform] = useState<Platform>("web");
@@ -620,11 +618,11 @@ export default function ScreenRecorder({
       return;
     }
     // Straight to the editor; the review screen is the fallback when that
-    // isn't possible (too large, unreadable, or the user keeps their project).
+    // isn't possible (too large or unreadable). An open project stays in
+    // the editor's Recent projects.
     const screenTrack = result.manifest.tracks.find((t) => t.kind === "screen");
     if (opts.autoOpen && screenTrack && screenTrack.bytes > 0 && screenTrack.bytes <= EDITOR_MAX_VIDEO_BYTES) {
-      const replace = !editorHasProject || (await confirmAction("Open the new recording in the editor? The project that's open now will be closed.", { okLabel: "Open" }));
-      if (replace) {
+      {
         setStep("review");
         setBusy("Opening in the editor…");
         try {
@@ -649,7 +647,7 @@ export default function ScreenRecorder({
         console.error("[recorder] preview failed", e);
       }
     }
-  }, [editorHasProject, onOpenInEditor]);
+  }, [onOpenInEditor]);
 
   const begin = useCallback(async () => {
     if (!source || !saveDir || step !== "setup") return;
@@ -902,7 +900,6 @@ export default function ScreenRecorder({
 
   const openInEditor = useCallback(async () => {
     if (!finished) return;
-    if (editorHasProject && !(await confirmAction("Open this recording as a new project? The project that's open in the editor will be closed.", { okLabel: "Open" }))) return;
     setBusy("Opening in the editor…");
     try {
       const bundle = await loadRecordingBundle(finished.path, finished.manifest);
@@ -913,7 +910,7 @@ export default function ScreenRecorder({
     } finally {
       setBusy(null);
     }
-  }, [finished, editorHasProject, onOpenInEditor, backToSetup]);
+  }, [finished, onOpenInEditor, backToSetup]);
 
   const retake = useCallback(async () => {
     if (!finished || !(await confirmAction("Delete this recording and record again?", { okLabel: "Delete" }))) return;
