@@ -33,6 +33,10 @@ create table if not exists profiles (
 alter table profiles add column if not exists referral_code text unique;
 alter table profiles add column if not exists referred_by uuid references profiles (id);
 alter table profiles add column if not exists plan_expires_at timestamptz;
+-- Tester accounts (friends trying the product), switched on from the admin
+-- panel: AI jobs run without spending credits. The admin action also sets
+-- the plan to Pro with no expiry for the editor features.
+alter table profiles add column if not exists tester_access boolean not null default false;
 
 create table if not exists credit_transactions (
   id bigserial primary key,
@@ -208,13 +212,21 @@ declare
   v_paid int;
   v_from_free int;
   v_from_paid int;
+  v_tester boolean;
 begin
-  select free_credits, paid_credits into v_free, v_paid
+  select free_credits, paid_credits, tester_access into v_free, v_paid, v_tester
   from profiles where id = p_user_id
   for update;
 
   if not found then
     return false;
+  end if;
+
+  -- Tester accounts run free: logged at 0 so Job History still lists the job.
+  if v_tester then
+    insert into credit_transactions (user_id, kind, amount, resolution)
+    values (p_user_id, 'consume', 0, p_resolution);
+    return true;
   end if;
 
   -- Lazy daily reset: only actually touches the row on a user's first
@@ -251,6 +263,10 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
+  -- Tester jobs were never charged (see consume_credits), so nothing to refund.
+  if exists (select 1 from profiles where id = p_user_id and tester_access) then
+    return;
+  end if;
   update profiles set paid_credits = paid_credits + p_amount where id = p_user_id;
   insert into credit_transactions (user_id, kind, amount, resolution)
   values (p_user_id, 'refund', p_amount, p_resolution);

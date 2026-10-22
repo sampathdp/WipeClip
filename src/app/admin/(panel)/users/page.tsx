@@ -31,7 +31,7 @@ export default async function AdminUsers({ searchParams }: { searchParams: Searc
 
   let query = admin
     .from("profiles")
-    .select("id, email, plan, plan_expires_at, paid_credits, marketing_opt_out, created_at", { count: "exact" })
+    .select("id, email, plan, plan_expires_at, tester_access, paid_credits, marketing_opt_out, created_at", { count: "exact" })
     .order("created_at", { ascending: false })
     .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
   // Escaped for ilike: % and _ are wildcards, and a comma would break the filter.
@@ -83,7 +83,10 @@ export default async function AdminUsers({ searchParams }: { searchParams: Searc
                 </Link>
               </td>
               <td className={td}>
-                <StatusBadge value={effectivePlan(u)} />
+                <span className="inline-flex flex-wrap items-center gap-1.5">
+                  <StatusBadge value={effectivePlan(u)} />
+                  {u.tester_access && <Badge tone="info">Tester</Badge>}
+                </span>
               </td>
               <td className={`${td} whitespace-nowrap text-muted`}>{u.plan === "free" ? "-" : fmtDate(u.plan_expires_at)}</td>
               <td className={`${td} font-semibold`}>{u.paid_credits}</td>

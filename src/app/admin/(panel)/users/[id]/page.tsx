@@ -3,7 +3,7 @@ import { requireAdmin } from "@/lib/admin";
 import { effectivePlan } from "@/lib/plan";
 import { PLANS, type PlanKey } from "@/lib/credits";
 import { TIERS, TIER_LABELS } from "@/lib/entitlements";
-import { addCredits, grantPlan, removeCredits, setMarketing, setPlan } from "@/app/admin/actions";
+import { addCredits, grantPlan, removeCredits, setMarketing, setPlan, setTesterAccess } from "@/app/admin/actions";
 import {
   Badge,
   Card,
@@ -67,6 +67,7 @@ export default async function AdminUser({
         description={
           <span className="inline-flex flex-wrap items-center gap-2">
             <StatusBadge value={plan} />
+            {profile.tester_access && <Badge tone="info">Tester</Badge>}
             {profile.marketing_opt_out ? <Badge>Unsubscribed</Badge> : <Badge tone="success">Subscribed</Badge>}
             {!authUser?.email_confirmed_at && <Badge tone="warning">Email not confirmed</Badge>}
           </span>
@@ -95,6 +96,23 @@ export default async function AdminUser({
         </div>
 
         <div className="space-y-4 lg:col-span-3">
+          <Card
+            title="Tester access"
+            description={
+              profile.tester_access
+                ? "On: Pro with no end date, and AI jobs use no credits. Turning it off moves the account back to Free."
+                : "Free full access for testing: Pro with no end date, and AI jobs use no credits."
+            }
+          >
+            <form action={setTesterAccess}>
+              <input type="hidden" name="userId" value={id} />
+              <input type="hidden" name="on" value={profile.tester_access ? "0" : "1"} />
+              <button className={`${profile.tester_access ? buttonSecondary : button} w-full`}>
+                {profile.tester_access ? "Turn off tester access" : "Give free full access"}
+              </button>
+            </form>
+          </Card>
+
           <Card title="Grant a plan or credit pack" description="Same as a purchase: adds the credits and starts or extends the pass. Use for manual payments.">
             <form action={grantPlan} className="flex flex-wrap gap-2">
               <input type="hidden" name="userId" value={id} />

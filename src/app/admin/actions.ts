@@ -93,6 +93,24 @@ export async function setPlan(form: FormData) {
   back(`/admin/users/${userId}`, error ? `Failed: ${error.message}` : "Plan updated.");
 }
 
+/** Free full access for testers: Pro with no end date, and AI jobs that
+ * spend no credits (consume_credits checks tester_access). Turning it off
+ * drops the account back to Free; paid credits are left alone. */
+export async function setTesterAccess(form: FormData) {
+  const { admin } = await requireAdmin();
+  const userId = str(form, "userId");
+  const on = str(form, "on") === "1";
+  if (!UUID_RE.test(userId)) back("/admin/users", "Unknown account.");
+  const { error } = await admin
+    .from("profiles")
+    .update({ tester_access: on, plan: on ? "pro" : "free", plan_expires_at: null })
+    .eq("id", userId);
+  back(
+    `/admin/users/${userId}`,
+    error ? `Failed: ${error.message}` : on ? "Tester access on: Pro with no end date, AI jobs use no credits." : "Tester access off. The account is back on Free."
+  );
+}
+
 export async function setMarketing(form: FormData) {
   const { admin } = await requireAdmin();
   const userId = str(form, "userId");
