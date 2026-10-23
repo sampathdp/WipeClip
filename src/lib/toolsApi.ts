@@ -393,6 +393,31 @@ export async function exportEditorProject(
   }
 }
 
+/** Desktop app: a cleaned copy of a clip's sound for source seconds
+ * `start`..`end` (background noise reduced, loudness evened out - see
+ * backend/app/pipeline/audio_clean.py), as AAC. Runs on the local engine
+ * only, free like the import check. */
+export async function cleanAudio(
+  input: MediaInput,
+  start: number,
+  end: number,
+  opts: { denoise: number; level: boolean },
+  signal?: AbortSignal
+): Promise<Blob> {
+  const engine = await localEngine();
+  if (!engine) throw new ApiError("Audio cleanup runs on this computer and needs the WipeClip desktop app's engine.", "engine_required");
+  const body = new FormData();
+  if (isDisk(input)) body.append("path", input.path);
+  else body.append("file", input);
+  body.append("start", start.toFixed(3));
+  body.append("end", end.toFixed(3));
+  body.append("denoise", String(opts.denoise));
+  body.append("level", opts.level ? "true" : "false");
+  const res = await fetch(`${engine.url}/api/audio/clean`, { method: "POST", body, headers: engineHeaders(engine), signal });
+  if (!res.ok) await throwApiError(res, "This clip's audio couldn't be cleaned up.");
+  return res.blob();
+}
+
 /** Goes through our own /api/process-image route (Pro-plan + credit
  * gated), not the FastAPI backend directly - same non-bypassable pattern
  * as processVideo/src/app/api/process/route.ts.

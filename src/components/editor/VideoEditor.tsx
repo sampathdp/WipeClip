@@ -39,7 +39,7 @@ import {
 } from "@/lib/editor/projectStore";
 import { createProjectFile, PROJECT_FILE_EXT, ProjectFileError, projectFileName, readProjectFile } from "@/lib/editor/projectFile";
 import { useOverlayRasters } from "@/lib/editor/rasters";
-import { sourceFile, sourceName, sourceSize } from "@/lib/editor/sourceFile";
+import { sourceFile, sourceInput, sourceName, sourceSize } from "@/lib/editor/sourceFile";
 import { chooseVideoOnDisk, diskMediaUrl, openDiskMedia } from "@/lib/platform/media";
 import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
 import { DEFAULT_TEXT } from "@/lib/editor/textRaster";
@@ -79,7 +79,7 @@ import {
   type Selection,
   type TextStyle,
 } from "@/lib/editor/types";
-import { ApiError, ContentBlockedError, probeVideo } from "@/lib/toolsApi";
+import { ApiError, cleanAudio, ContentBlockedError, probeVideo } from "@/lib/toolsApi";
 import type { RecordingBundle } from "@/lib/recorder/bundle";
 import { recordingToSources } from "@/lib/recorder/editorImport";
 import { planRecordingProject, type ImportedTrack } from "@/lib/recorder/importPlan";
@@ -1075,6 +1075,65 @@ export default function VideoEditor({
     [lay, apply, say]
   );
 
+  /** Desktop: the clip's sound, cleaned up on the local engine (noise
+   * reduced, loudness evened out), on its own audio track in place of the
+   * clip's own - like Extract audio, so preview and export play the same
+   * file. Undo brings the original back. */
+  const cleanUpAudio = useCallback(
+    async (clipId: string) => {
+      const laid = lay.clips.find((c) => c.clip.id === clipId);
+      const src = laid && sources[laid.clip.sourceId];
+      if (!laid || !src) return;
+      if (laid.clip.freeze !== null || laid.clip.reverse) {
+        say("Freeze frames and reversed clips have no audio to clean up.");
+        return;
+      }
+      if (laid.clip.speed !== 1) {
+        say("Set the clip's speed to 1× before cleaning up its audio.");
+        return;
+      }
+      setPlaying(false);
+      setBusy("Cleaning up audio…");
+      try {
+        const blob = await cleanAudio(sourceInput(src), laid.clip.start, laid.clip.end, { denoise: 0.6, level: true });
+        const file = new File([blob], `clean-${sourceName(src).replace(/.[^.]+$/, "")}.m4a`, { type: "audio/mp4" });
+        const cleaned: MediaSource = {
+          id: newId("snd"),
+          kind: "audio",
+          file,
+          url: URL.createObjectURL(file),
+          duration: laid.clip.end - laid.clip.start,
+          width: 0,
+          height: 0,
+          fps: 0,
+          hasAudio: true,
+        };
+        addSource(cleaned);
+        const track: AudioClip = {
+          id: newId("aud"),
+          sourceId: cleaned.id,
+          label: `Cleaned audio from clip ${laid.index + 1}`,
+          start: laid.start,
+          offset: 0,
+          duration: laid.duration,
+          volume: laid.clip.volume || 1,
+          fadeIn: 0,
+          fadeOut: 0,
+          muted: false,
+        };
+        apply((p) => ({ ...updateClip(p, clipId, { volume: 0 }), audio: [...p.audio, track] }));
+        setSelection({ kind: "audio", id: track.id });
+        say("Cleaned-up audio is on its own track. Undo brings the original back.");
+      } catch (e) {
+        console.error("[editor] audio cleanup failed", e);
+        say(e instanceof Error && e.message ? e.message : "This clip's audio couldn't be cleaned up.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [lay, sources, apply, say, addSource]
+  );
+
   const addEffect = useCallback(
     (type: EffectType) => {
       const e: EffectClip = { id: newId("fx"), type, ...placeAt(2), intensity: 50 };
@@ -1883,6 +1942,7 @@ export default function VideoEditor({
             source={src}
             onChange={change}
             onExtractAudio={() => extractAudio(selectedClip.clip.id)}
+            onCleanAudio={IS_DESKTOP ? () => void cleanUpAudio(selectedClip.clip.id) : undefined}
             onOpenLook={() => openLook("filters")}
             gesture={gesture}
           />

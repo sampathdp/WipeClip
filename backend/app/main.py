@@ -103,7 +103,7 @@ from app.config import (
     RESOLUTION_HEIGHTS,
     SHARPEN_AMOUNT_PRESETS,
 )
-from app.pipeline import io_utils, moderation
+from app.pipeline import audio_clean, io_utils, moderation
 from app.pipeline import editor as editor_pipeline
 from app.pipeline import video as video_pipeline
 from app.queue import get_queue
@@ -373,6 +373,35 @@ async def _receive_video(
     in_path = os.path.join(tmp, f"input{Path(file.filename or '').suffix or '.mp4'}")
     _save_upload(file, in_path, max_bytes)
     return in_path
+
+
+@app.post("/api/audio/clean")
+async def api_audio_clean(
+    file: Optional[UploadFile] = File(None),
+    path: Optional[str] = Form(None),
+    start: float = Form(0.0, ge=0),
+    end: float = Form(..., gt=0),
+    denoise: float = Form(0.6, ge=0, le=1),
+    level: bool = Form(True),
+):
+    """Desktop engine only: a cleaned copy of a clip's sound (noise reduced,
+    loudness evened out - app/pipeline/audio_clean.py) for source seconds
+    `start`..`end`, as an AAC file. Free and unmetered like the import
+    check: it runs on the user's own machine. The cloud backend refuses it.
+    """
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    if end <= start or end - start > MAX_VIDEO_DURATION_SECONDS + 1:
+        raise HTTPException(status_code=400, detail="Invalid range")
+    with tempfile.TemporaryDirectory() as tmp:
+        in_path = await _receive_video(file, None, tmp, path=path)
+        out_path = os.path.join(tmp, "clean.m4a")
+        try:
+            await audio_clean.clean_audio(in_path, out_path, start, end, denoise, level)
+        except RuntimeError as exc:
+            traceback.print_exc()
+            raise HTTPException(status_code=400, detail="This clip's audio couldn't be cleaned up.") from exc
+        return _stream_result(out_path, "audio/mp4")
 
 
 @app.post("/api/video/probe")

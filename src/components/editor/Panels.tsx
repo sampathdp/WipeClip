@@ -241,6 +241,7 @@ export function ClipExtras({
   source,
   onChange,
   onExtractAudio,
+  onCleanAudio,
   onOpenLook,
   gesture,
 }: {
@@ -248,6 +249,8 @@ export function ClipExtras({
   source: MediaSource;
   onChange: (patch: Partial<Clip>) => void;
   onExtractAudio: () => void;
+  /** Desktop only: noise reduction and levelling on the local engine. */
+  onCleanAudio?: () => void;
   onOpenLook: () => void;
   gesture: Gesture;
 }) {
@@ -275,6 +278,11 @@ export function ClipExtras({
           {source.hasAudio && !clip.reverse && (
             <ActionButton onClick={onExtractAudio} title="Move this clip's sound to its own audio track">
               Extract audio
+            </ActionButton>
+          )}
+          {onCleanAudio && source.hasAudio && !clip.reverse && clip.freeze === null && (
+            <ActionButton onClick={onCleanAudio} title="Reduce background noise (fan, hum, hiss) and even out the loudness, on this computer">
+              Clean up audio
             </ActionButton>
           )}
           <div>
