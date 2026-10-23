@@ -50,6 +50,7 @@ client.
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 import math
 import os
 import re
@@ -61,6 +62,9 @@ from dataclasses import asdict, dataclass, field
 from app.config import VIDEO_ENCODE_CRF, VIDEO_ENCODE_PRESET
 from app.pipeline import look as look_pipeline
 from app.pipeline.video import _run_ffmpeg, get_ffmpeg_path
+
+if TYPE_CHECKING:
+    from app.progress import JobProgress
 
 # Editor transition type -> (xfade transition, audio style). "dip" audio
 # fades the outgoing clip's sound out before the incoming one fades in (a
@@ -980,9 +984,21 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
     return args
 
 
-async def render_export(plan: ExportPlan, output_path: str) -> None:
+async def render_export(plan: ExportPlan, output_path: str, job: "JobProgress | None" = None) -> None:
+    """Renders the plan. With a `job` (app/progress.py) it reports seconds
+    rendered out of the timeline's length and stops on cancel."""
     tmp = tempfile.mkdtemp(prefix="wipeclip-export-")
     try:
-        await _run_ffmpeg(build_export_args(plan, output_path, tmp))
+        if job is None:
+            await _run_ffmpeg(build_export_args(plan, output_path, tmp))
+            return
+        job.check()
+        job.total = timeline_duration(plan)
+        job.phase = "rendering"
+
+        def report(seconds: float) -> None:
+            job.done = seconds
+
+        await _run_ffmpeg(build_export_args(plan, output_path, tmp), progress=report, cancel=job.cancel)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

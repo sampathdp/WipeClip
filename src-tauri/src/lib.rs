@@ -14,6 +14,7 @@ mod export;
 mod input;
 mod links;
 mod media;
+mod notify;
 mod opened;
 mod recording;
 mod secure_storage;
@@ -297,6 +298,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(export::ExportState::default())
         .manage(recording::RecordingState::default())
         .manage(input::InputState::default())
@@ -342,6 +344,7 @@ pub fn run() {
             opened::opened_file_read,
             media::media_choose,
             media::media_open,
+            notify::notify_if_away,
             shortcuts::recorder_shortcuts,
             recording::recording_default_dir,
             recording::recording_choose_dir,

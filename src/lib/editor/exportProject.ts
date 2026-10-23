@@ -1,4 +1,4 @@
-import { exportEditorProject, type Resolution } from "@/lib/toolsApi";
+import { exportEditorProject, type RenderProgress, type Resolution } from "@/lib/toolsApi";
 import { loadRaster, rasterKey } from "./rasters";
 import { overlayWidth } from "./textRaster";
 import { canvasSize, layout } from "./timeline";
@@ -28,7 +28,8 @@ export async function exportProject(
   sources: Record<string, MediaSource>,
   originalId: string,
   resolution: Resolution,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onProgress?: (p: RenderProgress) => void
 ): Promise<Blob> {
   const original = sources[originalId];
   const canvas = canvasSize(project.canvas.aspect, original.width, original.height);
@@ -180,7 +181,8 @@ export async function exportProject(
     audioIds.map((id) => sourceInput(sources[id])),
     bgSource?.file ?? null,
     resolution,
-    signal
+    signal,
+    onProgress
   );
 }
 

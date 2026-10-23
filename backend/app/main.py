@@ -71,7 +71,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, ValidationError
 from starlette.background import BackgroundTask
 
-from app import jobs, tickets, uploads
+from app import progress, jobs, tickets, uploads
 from app.config import (
     IMAGE_PREVIEW_MAX_MEGAPIXELS,
     EDITOR_COMPACT_AUDIO_BITRATE,
@@ -265,6 +265,26 @@ def _stream_result(path: str, media_type: str) -> FileResponse:
     os.close(fd)
     os.replace(path, kept)
     return FileResponse(kept, media_type=media_type, background=BackgroundTask(os.remove, kept))
+
+
+@app.get("/api/jobs/{job_id}")
+def job_status(job_id: str) -> dict:
+    """Progress of a job started with this `job_id` (app/progress.py):
+    `phase` "checking" or "rendering", `progress` 0..1 while rendering."""
+    job = progress.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="No such job.")
+    return {"phase": job.phase, "progress": job.fraction()}
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def job_cancel(job_id: str) -> dict:
+    """Stops a running job; its own request then answers 409 "cancelled"."""
+    job = progress.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="No such job.")
+    job.cancel.set()
+    return {"cancelled": True}
 
 
 @app.get("/api/health")
@@ -870,6 +890,7 @@ async def api_video_export(
     background: Optional[UploadFile] = File(None),
     source_paths: Optional[str] = Form(None),
     audio_paths: Optional[str] = Form(None),
+    job_id: Optional[str] = Form(None),
 ):
     """Renders a browser-editor project (see app/pipeline/editor.py) into
     one MP4. `sources[0]` is the original upload and sets the frame rate and
@@ -879,6 +900,9 @@ async def api_video_export(
     `project` is the JSON timeline - see _EditorProject. The desktop engine
     also takes `source_paths`/`audio_paths` (see _local_paths): files on the
     user's machine used in place, mixed in order with the uploads.
+
+    With a `job_id` (see app/progress.py) the caller can watch the render's
+    progress at /api/jobs/{job_id} and cancel it there.
 
     Nothing the client says about a file is trusted: every video and audio
     file is re-probed (videos are moderation-screened too), every image is
@@ -955,238 +979,248 @@ async def api_video_export(
     if canvas.background.type == "image" and background is None:
         raise HTTPException(status_code=400, detail="Background image missing")
 
-    with tempfile.TemporaryDirectory() as tmp:
-        total_bytes = 0
-        source_paths: list[str] = []
-        source_infos: list[editor_pipeline.MediaInfo] = []
-        for i, (kind, item) in enumerate(source_items):
-            if kind == "path":
-                path = _local_file(item, _VIDEO_SUFFIXES)
+    job = progress.start(job_id)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            total_bytes = 0
+            source_paths: list[str] = []
+            source_infos: list[editor_pipeline.MediaInfo] = []
+            for i, (kind, item) in enumerate(source_items):
+                if kind == "path":
+                    path = _local_file(item, _VIDEO_SUFFIXES)
+                else:
+                    suffix = Path(item.filename or "").suffix.lower()
+                    path = os.path.join(tmp, f"source{i}{suffix if suffix in _VIDEO_SUFFIXES else '.mp4'}")
+                    total_bytes += _save_upload(item, path, MAX_VIDEO_UPLOAD_BYTES)
+                    if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES:
+                        raise HTTPException(status_code=400, detail="Project files are too large to export together")
+                try:
+                    info = editor_pipeline.probe_media(path)
+                    # OpenCV's read also proves frames actually decode (probe_media
+                    # only parses container metadata) - catches truncated files.
+                    cv_info, _ = video_pipeline.probe_video(path)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail="One of the videos could not be read") from exc
+                info.duration = max(info.duration, cv_info.duration)
+                if info.duration > MAX_VIDEO_DURATION_SECONDS + 1:
+                    raise HTTPException(status_code=400, detail="Video too long")
+                _assert_video_safe(path)
+                source_paths.append(path)
+                if job:
+                    job.check()
+                source_infos.append(info)
+
+            audio_paths: list[str] = []
+            audio_durations: list[float] = []
+            for i, (kind, item) in enumerate(audio_items):
+                if kind == "path":
+                    # Extracted audio of a video on disk: the video file itself.
+                    path = _local_file(item, _AUDIO_SUFFIXES | _VIDEO_SUFFIXES)
+                else:
+                    suffix = Path(item.filename or "").suffix.lower()
+                    path = os.path.join(tmp, f"audio{i}{suffix if suffix in _AUDIO_SUFFIXES else '.bin'}")
+                    total_bytes += _save_upload(item, path, EDITOR_MAX_AUDIO_BYTES)
+                    if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES:
+                        raise HTTPException(status_code=400, detail="Project files are too large to export together")
+                try:
+                    audio_durations.append(editor_pipeline.probe_audio(path))
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail="An audio file could not be read") from exc
+                audio_paths.append(path)
+
+            overlay_images = [_load_image_upload(u, tmp, f"overlay{i}") for i, u in enumerate(overlays)]
+            background_path = _load_image_upload(background, tmp, "background")[0] if background is not None else None
+
+            # Output canvas: the original's frame rate; its display size, or the
+            # chosen aspect ratio at the original's short side. The short side is
+            # then capped (never upscaled) at the requested resolution, and both
+            # sides rounded down to even numbers for yuv420p.
+            base = source_infos[0]
+            short_side = min(base.width, base.height)
+            if canvas.aspect == "original":
+                cw, ch = float(base.width), float(base.height)
             else:
-                suffix = Path(item.filename or "").suffix.lower()
-                path = os.path.join(tmp, f"source{i}{suffix if suffix in _VIDEO_SUFFIXES else '.mp4'}")
-                total_bytes += _save_upload(item, path, MAX_VIDEO_UPLOAD_BYTES)
-                if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES:
-                    raise HTTPException(status_code=400, detail="Project files are too large to export together")
-            try:
-                info = editor_pipeline.probe_media(path)
-                # OpenCV's read also proves frames actually decode (probe_media
-                # only parses container metadata) - catches truncated files.
-                cv_info, _ = video_pipeline.probe_video(path)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail="One of the videos could not be read") from exc
-            info.duration = max(info.duration, cv_info.duration)
-            if info.duration > MAX_VIDEO_DURATION_SECONDS + 1:
-                raise HTTPException(status_code=400, detail="Video too long")
-            _assert_video_safe(path)
-            source_paths.append(path)
-            source_infos.append(info)
+                ar = _CANVAS_ASPECTS[canvas.aspect]
+                cw, ch = (short_side * ar, float(short_side)) if ar >= 1 else (float(short_side), short_side / ar)
+            scale = min(1.0, RESOLUTION_HEIGHTS[resolution] / min(cw, ch)) if short_side > 0 else 1.0
+            out_w = max(2, int(cw * scale) // 2 * 2)
+            out_h = max(2, int(ch * scale) // 2 * 2)
+            fps = base.fps if 1 <= base.fps <= EDITOR_MAX_FPS else (EDITOR_MAX_FPS if base.fps > EDITOR_MAX_FPS else 30.0)
+            if spec.fps:
+                fps = spec.fps
 
-        audio_paths: list[str] = []
-        audio_durations: list[float] = []
-        for i, (kind, item) in enumerate(audio_items):
-            if kind == "path":
-                # Extracted audio of a video on disk: the video file itself.
-                path = _local_file(item, _AUDIO_SUFFIXES | _VIDEO_SUFFIXES)
-            else:
-                suffix = Path(item.filename or "").suffix.lower()
-                path = os.path.join(tmp, f"audio{i}{suffix if suffix in _AUDIO_SUFFIXES else '.bin'}")
-                total_bytes += _save_upload(item, path, EDITOR_MAX_AUDIO_BYTES)
-                if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES:
-                    raise HTTPException(status_code=400, detail="Project files are too large to export together")
-            try:
-                audio_durations.append(editor_pipeline.probe_audio(path))
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail="An audio file could not be read") from exc
-            audio_paths.append(path)
-
-        overlay_images = [_load_image_upload(u, tmp, f"overlay{i}") for i, u in enumerate(overlays)]
-        background_path = _load_image_upload(background, tmp, "background")[0] if background is not None else None
-
-        # Output canvas: the original's frame rate; its display size, or the
-        # chosen aspect ratio at the original's short side. The short side is
-        # then capped (never upscaled) at the requested resolution, and both
-        # sides rounded down to even numbers for yuv420p.
-        base = source_infos[0]
-        short_side = min(base.width, base.height)
-        if canvas.aspect == "original":
-            cw, ch = float(base.width), float(base.height)
-        else:
-            ar = _CANVAS_ASPECTS[canvas.aspect]
-            cw, ch = (short_side * ar, float(short_side)) if ar >= 1 else (float(short_side), short_side / ar)
-        scale = min(1.0, RESOLUTION_HEIGHTS[resolution] / min(cw, ch)) if short_side > 0 else 1.0
-        out_w = max(2, int(cw * scale) // 2 * 2)
-        out_h = max(2, int(ch * scale) // 2 * 2)
-        fps = base.fps if 1 <= base.fps <= EDITOR_MAX_FPS else (EDITOR_MAX_FPS if base.fps > EDITOR_MAX_FPS else 30.0)
-        if spec.fps:
-            fps = spec.fps
-
-        plan_clips: list[editor_pipeline.PlanClip] = []
-        for c in spec.clips:
-            info = source_infos[c.source]
-            if c.freeze is not None:
-                hold = c.end - c.start
-                if hold > EDITOR_MAX_FREEZE_SECONDS + 0.01 or hold < 0.5 / fps:
-                    raise HTTPException(status_code=400, detail="A freeze frame is too long")
-                # Last decodable frame at the latest; then held for `hold`.
-                start, duration = max(0.0, min(c.freeze, info.duration - 2 / fps)), hold
-            else:
-                end = min(c.end, info.duration)
-                if c.start >= end - 0.5 / fps:
-                    raise HTTPException(status_code=400, detail="A clip's time range is outside its video")
-                if c.reverse and end - c.start > EDITOR_MAX_REVERSE_SECONDS + 0.01:
-                    raise HTTPException(status_code=400, detail="A reversed clip is too long")
-                if c.reverse:
-                    # ffmpeg's reverse buffers every frame, after scaling to
-                    # the clip's fitted box (canvas size times its zoom) -
-                    # yuv420p is 1.5 bytes per pixel.
-                    zoom = max(1.0, c.transform.scale)
-                    frames = (end - c.start) / c.speed * fps
-                    if out_w * out_h * zoom * zoom * 1.5 * frames > EDITOR_MAX_REVERSE_BUFFER_BYTES:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="A reversed clip is too long for this resolution. Shorten it or export at a lower resolution.",
-                        )
-                start, duration = c.start, end - c.start
-            # Clamp the crop into the frame (x + w <= 1, y + h <= 1).
-            crop_w, crop_h = min(c.crop.w, 1 - c.crop.x), min(c.crop.h, 1 - c.crop.y)
-            plan_clips.append(
-                editor_pipeline.PlanClip(
-                    source_path=source_paths[c.source],
-                    source_has_audio=info.has_audio and c.freeze is None,
-                    source_width=info.width,
-                    source_height=info.height,
-                    start=start,
-                    duration=duration,
-                    freeze=c.freeze is not None,
-                    reverse=c.reverse and c.freeze is None,
-                    crop_x=c.crop.x,
-                    crop_y=c.crop.y,
-                    crop_w=crop_w,
-                    crop_h=crop_h,
-                    transition=c.transition.type if c.transition and c.transition.duration > 0 else None,
-                    transition_duration=c.transition.duration if c.transition else 0.0,
-                    speed=c.speed,
-                    volume=c.volume,
-                    x=c.transform.x,
-                    y=c.transform.y,
-                    scale=c.transform.scale,
-                    rotation=c.transform.rotation,
-                    filter=c.look.filter,
-                    intensity=c.look.intensity,
-                    adjust=c.look.adjust.model_dump(),
-                    camera=_camera_rows(c.camera) if c.camera and c.freeze is None else [],
-                )
-            )
-
-        plan = editor_pipeline.ExportPlan(
-            width=out_w,
-            height=out_h,
-            fps=round(fps, 3),
-            with_audio=False,
-            clips=plan_clips,
-            fit=canvas.fit,
-            background=canvas.background.type,
-            color=canvas.background.color,
-            color2=canvas.background.color2,
-            background_image=background_path,
-        )
-        if spec.pointer and (spec.pointer.cursorRows or spec.pointer.ringRows):
-            plan.pointer = _pointer_plan(spec.pointer, overlay_images)
-        if compact:
-            plan.crf = EDITOR_COMPACT_CRF
-            plan.audio_bitrate = EDITOR_COMPACT_AUDIO_BITRATE
-        editor_pipeline.quantize_plan(plan)
-        total = editor_pipeline.timeline_duration(plan)
-        if total > MAX_VIDEO_DURATION_SECONDS:
-            raise HTTPException(status_code=400, detail="The edited video is too long to export")
-        for m in spec.masks:
-            planned = _mask_plan(m, total)
-            if planned:
-                plan.masks.append(planned)
-
-        # Layers entirely past the end of the (possibly shortened) timeline
-        # are skipped; the rest are clamped to it.
-        layer_audio: list[editor_pipeline.PlanAudio] = []
-        for o in spec.overlays:
-            start, end = o.start, min(o.end, total)
-            if o.video is not None:
-                info = source_infos[o.video]
-                end = min(end, start + info.duration - o.offset)
-            if end - start < 0.05:
-                continue
-            if o.video is not None:
-                info = source_infos[o.video]
-                path, iw, ih = source_paths[o.video], info.width, info.height
-                if info.has_audio and o.volume > 0:
-                    layer_audio.append(
-                        editor_pipeline.PlanAudio(path=path, start=start, offset=o.offset, duration=end - start, volume=o.volume)
+            plan_clips: list[editor_pipeline.PlanClip] = []
+            for c in spec.clips:
+                info = source_infos[c.source]
+                if c.freeze is not None:
+                    hold = c.end - c.start
+                    if hold > EDITOR_MAX_FREEZE_SECONDS + 0.01 or hold < 0.5 / fps:
+                        raise HTTPException(status_code=400, detail="A freeze frame is too long")
+                    # Last decodable frame at the latest; then held for `hold`.
+                    start, duration = max(0.0, min(c.freeze, info.duration - 2 / fps)), hold
+                else:
+                    end = min(c.end, info.duration)
+                    if c.start >= end - 0.5 / fps:
+                        raise HTTPException(status_code=400, detail="A clip's time range is outside its video")
+                    if c.reverse and end - c.start > EDITOR_MAX_REVERSE_SECONDS + 0.01:
+                        raise HTTPException(status_code=400, detail="A reversed clip is too long")
+                    if c.reverse:
+                        # ffmpeg's reverse buffers every frame, after scaling to
+                        # the clip's fitted box (canvas size times its zoom) -
+                        # yuv420p is 1.5 bytes per pixel.
+                        zoom = max(1.0, c.transform.scale)
+                        frames = (end - c.start) / c.speed * fps
+                        if out_w * out_h * zoom * zoom * 1.5 * frames > EDITOR_MAX_REVERSE_BUFFER_BYTES:
+                            raise HTTPException(
+                                status_code=400,
+                                detail="A reversed clip is too long for this resolution. Shorten it or export at a lower resolution.",
+                            )
+                    start, duration = c.start, end - c.start
+                # Clamp the crop into the frame (x + w <= 1, y + h <= 1).
+                crop_w, crop_h = min(c.crop.w, 1 - c.crop.x), min(c.crop.h, 1 - c.crop.y)
+                plan_clips.append(
+                    editor_pipeline.PlanClip(
+                        source_path=source_paths[c.source],
+                        source_has_audio=info.has_audio and c.freeze is None,
+                        source_width=info.width,
+                        source_height=info.height,
+                        start=start,
+                        duration=duration,
+                        freeze=c.freeze is not None,
+                        reverse=c.reverse and c.freeze is None,
+                        crop_x=c.crop.x,
+                        crop_y=c.crop.y,
+                        crop_w=crop_w,
+                        crop_h=crop_h,
+                        transition=c.transition.type if c.transition and c.transition.duration > 0 else None,
+                        transition_duration=c.transition.duration if c.transition else 0.0,
+                        speed=c.speed,
+                        volume=c.volume,
+                        x=c.transform.x,
+                        y=c.transform.y,
+                        scale=c.transform.scale,
+                        rotation=c.transform.rotation,
+                        filter=c.look.filter,
+                        intensity=c.look.intensity,
+                        adjust=c.look.adjust.model_dump(),
+                        camera=_camera_rows(c.camera) if c.camera and c.freeze is None else [],
                     )
-            else:
-                path, iw, ih = overlay_images[o.image]  # type: ignore[index]
-            plan.overlays.append(
-                editor_pipeline.PlanOverlay(
-                    image_path=path, image_width=iw, image_height=ih, start=start, end=end,
-                    x=o.x, y=o.y, width=o.width, rotation=o.rotation, opacity=o.opacity,
-                    anim_in=o.animIn, anim_out=o.animOut,
-                    video=o.video is not None, offset=o.offset,
                 )
+
+            plan = editor_pipeline.ExportPlan(
+                width=out_w,
+                height=out_h,
+                fps=round(fps, 3),
+                with_audio=False,
+                clips=plan_clips,
+                fit=canvas.fit,
+                background=canvas.background.type,
+                color=canvas.background.color,
+                color2=canvas.background.color2,
+                background_image=background_path,
             )
-        if branding:
-            # Drawn last, so it sits above every user layer.
-            path, iw, ih = _branding_overlay(tmp)
-            mark_h = 0.045 * out_h
-            width = iw * (mark_h / ih) / out_w
-            margin = 0.02 * min(out_w, out_h)
-            plan.overlays.append(
-                editor_pipeline.PlanOverlay(
-                    image_path=path, image_width=iw, image_height=ih, start=0.0, end=total,
-                    x=1 - width / 2 - margin / out_w, y=1 - (mark_h / 2 + margin) / out_h,
-                    width=width, rotation=0.0, opacity=1.0,
-                )
-            )
-        for e in spec.effects:
-            start, end = e.start, min(e.end, total)
-            if end - start >= 0.05:
-                plan.effects.append(editor_pipeline.PlanEffect(type=e.type, start=start, end=end, intensity=e.intensity))
-        for a in spec.audio:
-            if a.audio is not None:
-                path, src_duration = audio_paths[a.audio], audio_durations[a.audio]
-            else:
-                info = source_infos[a.video]  # type: ignore[index]
-                if not info.has_audio:
+            if spec.pointer and (spec.pointer.cursorRows or spec.pointer.ringRows):
+                plan.pointer = _pointer_plan(spec.pointer, overlay_images)
+            if compact:
+                plan.crf = EDITOR_COMPACT_CRF
+                plan.audio_bitrate = EDITOR_COMPACT_AUDIO_BITRATE
+            editor_pipeline.quantize_plan(plan)
+            total = editor_pipeline.timeline_duration(plan)
+            if total > MAX_VIDEO_DURATION_SECONDS:
+                raise HTTPException(status_code=400, detail="The edited video is too long to export")
+            for m in spec.masks:
+                planned = _mask_plan(m, total)
+                if planned:
+                    plan.masks.append(planned)
+
+            # Layers entirely past the end of the (possibly shortened) timeline
+            # are skipped; the rest are clamped to it.
+            layer_audio: list[editor_pipeline.PlanAudio] = []
+            for o in spec.overlays:
+                start, end = o.start, min(o.end, total)
+                if o.video is not None:
+                    info = source_infos[o.video]
+                    end = min(end, start + info.duration - o.offset)
+                if end - start < 0.05:
                     continue
-                path, src_duration = source_paths[a.video], info.duration  # type: ignore[index]
-            duration = min(a.duration, src_duration - a.offset, total - a.start)
-            if duration < 0.05:
-                continue
-            plan.audio.append(
-                editor_pipeline.PlanAudio(
-                    path=path, start=a.start, offset=a.offset, duration=duration,
-                    volume=a.volume, fade_in=min(a.fadeIn, duration / 2), fade_out=min(a.fadeOut, duration / 2),
+                if o.video is not None:
+                    info = source_infos[o.video]
+                    path, iw, ih = source_paths[o.video], info.width, info.height
+                    if info.has_audio and o.volume > 0:
+                        layer_audio.append(
+                            editor_pipeline.PlanAudio(path=path, start=start, offset=o.offset, duration=end - start, volume=o.volume)
+                        )
+                else:
+                    path, iw, ih = overlay_images[o.image]  # type: ignore[index]
+                plan.overlays.append(
+                    editor_pipeline.PlanOverlay(
+                        image_path=path, image_width=iw, image_height=ih, start=start, end=end,
+                        x=o.x, y=o.y, width=o.width, rotation=o.rotation, opacity=o.opacity,
+                        anim_in=o.animIn, anim_out=o.animOut,
+                        video=o.video is not None, offset=o.offset,
+                    )
                 )
-            )
-        plan.audio.extend(layer_audio)
-        plan.with_audio = bool(plan.audio) or any(c.source_has_audio for c in plan.clips)
+            if branding:
+                # Drawn last, so it sits above every user layer.
+                path, iw, ih = _branding_overlay(tmp)
+                mark_h = 0.045 * out_h
+                width = iw * (mark_h / ih) / out_w
+                margin = 0.02 * min(out_w, out_h)
+                plan.overlays.append(
+                    editor_pipeline.PlanOverlay(
+                        image_path=path, image_width=iw, image_height=ih, start=0.0, end=total,
+                        x=1 - width / 2 - margin / out_w, y=1 - (mark_h / 2 + margin) / out_h,
+                        width=width, rotation=0.0, opacity=1.0,
+                    )
+                )
+            for e in spec.effects:
+                start, end = e.start, min(e.end, total)
+                if end - start >= 0.05:
+                    plan.effects.append(editor_pipeline.PlanEffect(type=e.type, start=start, end=end, intensity=e.intensity))
+            for a in spec.audio:
+                if a.audio is not None:
+                    path, src_duration = audio_paths[a.audio], audio_durations[a.audio]
+                else:
+                    info = source_infos[a.video]  # type: ignore[index]
+                    if not info.has_audio:
+                        continue
+                    path, src_duration = source_paths[a.video], info.duration  # type: ignore[index]
+                duration = min(a.duration, src_duration - a.offset, total - a.start)
+                if duration < 0.05:
+                    continue
+                plan.audio.append(
+                    editor_pipeline.PlanAudio(
+                        path=path, start=a.start, offset=a.offset, duration=duration,
+                        volume=a.volume, fade_in=min(a.fadeIn, duration / 2), fade_out=min(a.fadeOut, duration / 2),
+                    )
+                )
+            plan.audio.extend(layer_audio)
+            plan.with_audio = bool(plan.audio) or any(c.source_has_audio for c in plan.clips)
 
-        out_path = os.path.join(tmp, "export.mp4")
-        plan_json = editor_pipeline.plan_to_json(plan)
-        # Full re-encode of the timeline plus per-clip decode seeks; layers,
-        # effects and grading add compositing work on top.
-        job_timeout = max(180.0, total * (8 + 0.5 * (len(plan.overlays) + len(plan.effects))))
-        try:
-            await _run_pipeline_job(jobs.editor_export_job, plan_json, out_path, timeout=job_timeout)
-        except Exception as exc:  # noqa: BLE001
-            traceback.print_exc()
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "code": "export_failed",
-                    "message": "Export failed. Your original video is safe. Please try exporting again.",
-                },
-            ) from exc
+            out_path = os.path.join(tmp, "export.mp4")
+            plan_json = editor_pipeline.plan_to_json(plan)
+            # Full re-encode of the timeline plus per-clip decode seeks; layers,
+            # effects and grading add compositing work on top.
+            job_timeout = max(180.0, total * (8 + 0.5 * (len(plan.overlays) + len(plan.effects))))
+            try:
+                await _run_pipeline_job(jobs.editor_export_job, plan_json, out_path, job_id if job else None, timeout=job_timeout)
+            except progress.Cancelled:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                traceback.print_exc()
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "code": "export_failed",
+                        "message": "Export failed. Your original video is safe. Please try exporting again.",
+                    },
+                ) from exc
 
-        return _stream_result(out_path, "video/mp4")
+            return _stream_result(out_path, "video/mp4")
+    except progress.Cancelled as exc:
+        raise HTTPException(status_code=409, detail={"code": "cancelled", "message": "Export cancelled."}) from exc
+    finally:
+        progress.finish(job_id)
 
 
 

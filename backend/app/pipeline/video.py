@@ -27,9 +27,11 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import Callable, Optional
 
 import cv2
 import imageio_ffmpeg
@@ -165,7 +167,53 @@ def sample_frames(path: str, count: int) -> list[np.ndarray]:
     return frames
 
 
-async def _run_ffmpeg(args: list[str]) -> None:
+def _run_ffmpeg_watched(
+    ffmpeg: str, args: list[str], progress: Optional[Callable[[float], None]], cancel: Optional[threading.Event]
+) -> subprocess.CompletedProcess:
+    """_run_ffmpeg's blocking run with `-progress`: reports seconds of
+    output written to `progress` as ffmpeg goes, and kills ffmpeg as soon as
+    `cancel` is set (raising progress.Cancelled). stderr goes to a temporary
+    file, so neither pipe can fill up and stall ffmpeg."""
+    from app.progress import Cancelled
+
+    with tempfile.TemporaryFile() as err:
+        proc = subprocess.Popen(
+            [ffmpeg, "-nostats", "-progress", "pipe:1", *args], stdout=subprocess.PIPE, stderr=err, stdin=subprocess.DEVNULL
+        )
+        stop = threading.Event()
+
+        def watch() -> None:
+            while not stop.is_set():
+                if cancel is not None and cancel.wait(0.2):
+                    proc.kill()
+                    return
+                if cancel is None:
+                    stop.wait(0.2)
+
+        watcher = threading.Thread(target=watch, daemon=True)
+        watcher.start()
+        try:
+            assert proc.stdout is not None
+            with proc.stdout:
+                for raw in proc.stdout:
+                    key, _, value = raw.decode(errors="replace").strip().partition("=")
+                    if key == "out_time_us" and progress is not None and value.lstrip("-").isdigit():
+                        progress(max(0, int(value)) / 1_000_000)
+            proc.wait()
+        finally:
+            stop.set()
+            watcher.join()
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
+        err.seek(0)
+        return subprocess.CompletedProcess(proc.args, proc.returncode, b"", err.read())
+
+
+async def _run_ffmpeg(
+    args: list[str],
+    progress: Optional[Callable[[float], None]] = None,
+    cancel: Optional[threading.Event] = None,
+) -> None:
     # Deliberately NOT asyncio.create_subprocess_exec: on Windows that
     # requires the ProactorEventLoop, and uvicorn's --reload supervisor
     # ends up running the worker under SelectorEventLoop instead (its own
@@ -184,6 +232,8 @@ async def _run_ffmpeg(args: list[str]) -> None:
     args = ["-filter_complex_threads", n, "-filter_threads", n, *args[:-1], "-threads", n, args[-1]]
 
     def _run() -> subprocess.CompletedProcess:
+        if progress is not None or cancel is not None:
+            return _run_ffmpeg_watched(ffmpeg, args, progress, cancel)
         return subprocess.run([ffmpeg, *args], capture_output=True)
 
     proc = await asyncio.to_thread(_run)

@@ -39,6 +39,14 @@ export class ProRequiredError extends ApiError {}
 /** The export needs a higher plan (resolution or premium features). */
 export class PlanRequiredError extends ApiError {}
 
+/** How far a render is: "checking" its files, then "rendering" with
+ * `progress` 0..1 (null when unknown). Reported by the desktop app's
+ * local engine (backend/app/progress.py). */
+export interface RenderProgress {
+  phase: "checking" | "rendering";
+  progress: number | null;
+}
+
 async function throwApiError(res: Response, fallback: string): Promise<never> {
   const data = await res.json().catch(() => null);
   const detail = data?.detail;
@@ -329,7 +337,8 @@ export async function exportEditorProject(
   audios: MediaInput[],
   background: File | null,
   resolution: Resolution,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onProgress?: (p: RenderProgress) => void
 ): Promise<Blob> {
   const projectJson = JSON.stringify(project);
   const exportFailed = "Export failed. Your original video is safe. Please try exporting again.";
@@ -355,11 +364,33 @@ export async function exportEditorProject(
   await files("audios", audios);
   if (background) body.append("background", background, background.name);
 
-  const res = engine
-    ? await fetch(`${engine.url}/api/video/export`, { method: "POST", body, headers: engineHeaders(engine), signal })
-    : await fetch(`${TOOLS_API_URL}/api/video/export`, { method: "POST", body, signal });
-  if (!res.ok) await throwApiError(res, exportFailed);
-  return res.blob();
+  if (!engine) {
+    const res = await fetch(`${TOOLS_API_URL}/api/video/export`, { method: "POST", body, signal });
+    if (!res.ok) await throwApiError(res, exportFailed);
+    return res.blob();
+  }
+
+  // Local engine: watch the render under a job id, and stop it there when
+  // `signal` aborts (aborting the request alone wouldn't stop ffmpeg).
+  const jobId = crypto.randomUUID();
+  body.append("job_id", jobId);
+  const job = `${engine.url}/api/jobs/${jobId}`;
+  const cancel = () => void fetch(`${job}/cancel`, { method: "POST", headers: engineHeaders(engine) }).catch(() => {});
+  signal?.addEventListener("abort", cancel, { once: true });
+  const poll = setInterval(() => {
+    void fetch(job, { headers: engineHeaders(engine) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p: RenderProgress | null) => p && onProgress?.(p))
+      .catch(() => {});
+  }, 700);
+  try {
+    const res = await fetch(`${engine.url}/api/video/export`, { method: "POST", body, headers: engineHeaders(engine), signal });
+    if (!res.ok) await throwApiError(res, exportFailed);
+    return await res.blob();
+  } finally {
+    clearInterval(poll);
+    signal?.removeEventListener("abort", cancel);
+  }
 }
 
 /** Goes through our own /api/process-image route (Pro-plan + credit

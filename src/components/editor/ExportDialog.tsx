@@ -9,8 +9,8 @@ import { exportProject } from "@/lib/editor/exportProject";
 import { saveLastExport } from "@/lib/editor/projectStore";
 import { canvasSize, formatTime } from "@/lib/editor/timeline";
 import type { MediaSource, Project } from "@/lib/editor/types";
-import { ContentBlockedError, PlanRequiredError, type Resolution } from "@/lib/toolsApi";
-import { IS_DESKTOP, revealExport, saveExportFile } from "@/lib/platform";
+import { ContentBlockedError, PlanRequiredError, type RenderProgress, type Resolution } from "@/lib/toolsApi";
+import { IS_DESKTOP, notifyIfAway, revealExport, saveExportFile } from "@/lib/platform";
 import Dialog from "./Dialog";
 import { ExportIcon } from "./icons";
 import PremiumBadge from "./PremiumBadge";
@@ -71,7 +71,12 @@ export default function ExportDialog({
     initialResult ? { blob: initialResult, url: URL.createObjectURL(initialResult) } : null
   );
   const [elapsed, setElapsed] = useState(0);
+  /** Progress the local engine reports (desktop); null = unknown. */
+  const [render, setRender] = useState<RenderProgress | null>(null);
+  /** `elapsed` when rendering proper began, for the time-left estimate. */
+  const [renderFrom, setRenderFrom] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const cancelledRef = useRef(false);
 
   useEffect(() => () => abortRef.current?.abort(), []);
   useEffect(() => {
@@ -83,6 +88,9 @@ export default function ExportDialog({
   const start = async () => {
     setState("rendering");
     setError(null);
+    setRender(null);
+    setRenderFrom(null);
+    cancelledRef.current = false;
     const started = Date.now();
     const timer = setInterval(() => setElapsed(Date.now() - started), 500);
     const controller = new AbortController();
@@ -90,15 +98,24 @@ export default function ExportDialog({
     const hardStop = setTimeout(() => controller.abort(), 20 * 60 * 1000);
     trackEvent("processing_started", { tool: TOOL, resolution });
     try {
-      const blob = await exportProject(project, sources, originalId, isSignedIn ? resolution : "720p", controller.signal);
+      const blob = await exportProject(project, sources, originalId, isSignedIn ? resolution : "720p", controller.signal, (p) => {
+        setRender(p);
+        if (p.phase === "rendering") setRenderFrom((from) => from ?? Date.now() - started);
+      });
       setResult({ blob, url: URL.createObjectURL(blob) });
       setState("done");
+      void notifyIfAway("Export finished", `"${filename}" is ready to save in WipeClip.`);
       trackEvent("processing_completed", { tool: TOOL, resolution });
       // Survives a sign-in redirect, so an anonymous export isn't lost
       // (and re-rendered) just to download it.
       if (!isSignedIn) void saveLastExport(blob);
     } catch (e) {
+      if (cancelledRef.current) {
+        setState("setup");
+        return;
+      }
       console.error("[editor] export failed", e);
+      void notifyIfAway("Export failed", "Open WipeClip to see why. Your project is safe.");
       if (controller.signal.aborted) {
         setError({ message: "Export took too long. Try a shorter video or a lower resolution. Your project is safe." });
       } else if (e instanceof PlanRequiredError) {
@@ -234,14 +251,46 @@ export default function ExportDialog({
 
       {state === "rendering" && (
         <div className="space-y-3 py-8 text-center" role="status" aria-live="polite">
-          <div className="mx-auto h-2 w-full max-w-sm overflow-hidden rounded-full bg-surface-3">
-            <div className="h-full w-1/3 animate-[editor-indeterminate_1.4s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-accent to-accent-2" />
+          <div
+            className="mx-auto h-2 w-full max-w-sm overflow-hidden rounded-full bg-surface-3"
+            role="progressbar"
+            aria-label="Export progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={render?.progress != null ? Math.round(render.progress * 100) : undefined}
+          >
+            {render?.progress != null ? (
+              <div className="h-full rounded-full bg-gradient-to-r from-accent to-accent-2 transition-[width] duration-500" style={{ width: `${Math.max(2, render.progress * 100)}%` }} />
+            ) : (
+              <div className="h-full w-1/3 animate-[editor-indeterminate_1.4s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-accent to-accent-2" />
+            )}
           </div>
-          <p className="text-sm font-medium text-foreground">Rendering your video…</p>
-          <p className="font-mono text-xs text-muted">
-            {Math.floor(elapsed / 60000)}:{String(Math.floor((elapsed % 60000) / 1000)).padStart(2, "0")}
+          <p className="text-sm font-medium text-foreground">
+            {render?.phase === "checking"
+              ? "Checking your videos…"
+              : render?.progress != null
+                ? `Rendering your video… ${Math.floor(render.progress * 100)}%`
+                : "Rendering your video…"}
           </p>
-          <p className="text-xs text-muted">Uploading, then applying every cut, transition and sticker. {IS_DESKTOP ? "Keep WipeClip open." : "Keep this tab open."}</p>
+          <p className="font-mono text-xs text-muted">
+            {clock(elapsed)}
+            {render?.progress != null && renderFrom !== null && render.progress > 0.03 && (
+              <> · about {clock(((elapsed - renderFrom) * (1 - render.progress)) / render.progress)} left</>
+            )}
+          </p>
+          <p className="text-xs text-muted">
+            {IS_DESKTOP ? "Rendering on this computer. Keep WipeClip open; you'll get a notification when it's done." : "Uploading, then applying every cut, transition and sticker. Keep this tab open."}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              cancelledRef.current = true;
+              abortRef.current?.abort();
+            }}
+            className="btn-secondary rounded-full px-4 py-2 text-xs font-semibold"
+          >
+            Cancel export
+          </button>
         </div>
       )}
 
@@ -344,4 +393,10 @@ function DesktopSaveButton({ blob, filename }: { blob: Blob; filename: string })
       )}
     </div>
   );
+}
+
+/** m:ss for a duration in milliseconds. */
+function clock(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }

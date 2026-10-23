@@ -235,3 +235,10 @@ export function watchOpenedProjectFiles(onFile: (file: File) => Promise<void>, o
     unlisten?.();
   };
 }
+
+/** Desktop: an OS notification, shown only while WipeClip's window isn't
+ * focused (for work that finishes while the user is elsewhere). */
+export async function notifyIfAway(title: string, body: string): Promise<void> {
+  if (!IS_DESKTOP) return;
+  await invoke<boolean>("notify_if_away", { title, body }).catch((err) => console.warn("[desktop] notification failed", err));
+}
