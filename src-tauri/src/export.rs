@@ -29,18 +29,39 @@ pub struct ExportState {
     saved: Mutex<HashSet<PathBuf>>,
 }
 
-/// Keeps the suggested name to a plain file name ending in .mp4.
-fn clean_file_name(suggested: &str) -> String {
+/// What is being saved: an exported video, or a project file
+/// (src/lib/editor/projectFile.ts). Decides the dialog's title and filter
+/// and the extension the file must end in.
+struct SaveKind {
+    title: &'static str,
+    filter: &'static str,
+    ext: &'static str,
+    fallback: &'static str,
+}
+
+const VIDEO: SaveKind = SaveKind { title: "Save exported video", filter: "MP4 video", ext: "mp4", fallback: "wipeclip-export" };
+const PROJECT: SaveKind = SaveKind { title: "Save project file", filter: "WipeClip project", ext: "wipeclip", fallback: "project" };
+
+fn save_kind(kind: Option<&str>) -> Result<&'static SaveKind, String> {
+    match kind.unwrap_or("video") {
+        "video" => Ok(&VIDEO),
+        "project" => Ok(&PROJECT),
+        _ => Err("Unknown file kind.".into()),
+    }
+}
+
+/// Keeps the suggested name to a plain file name ending in the kind's extension.
+fn clean_file_name(suggested: &str, kind: &SaveKind) -> String {
     let name: String = suggested
         .chars()
         .map(|c| if c.is_control() || r#"<>:"/\|?*"#.contains(c) { '_' } else { c })
         .collect();
     let name = name.trim().trim_matches('.').to_string();
-    let name = if name.is_empty() { "wipeclip-export.mp4".to_string() } else { name };
-    if name.to_ascii_lowercase().ends_with(".mp4") {
+    let name = if name.is_empty() { format!("{}.{}", kind.fallback, kind.ext) } else { name };
+    if name.to_ascii_lowercase().ends_with(&format!(".{}", kind.ext)) {
         name
     } else {
-        format!("{name}.mp4")
+        format!("{name}.{}", kind.ext)
     }
 }
 
@@ -49,19 +70,21 @@ pub async fn choose_export_path(
     app: tauri::AppHandle,
     state: State<'_, ExportState>,
     suggested_name: String,
+    kind: Option<String>,
 ) -> Result<Option<String>, String> {
+    let kind = save_kind(kind.as_deref())?;
     let picked = app
         .dialog()
         .file()
-        .set_title("Save exported video")
-        .set_file_name(clean_file_name(&suggested_name))
-        .add_filter("MP4 video", &["mp4"])
+        .set_title(kind.title)
+        .set_file_name(clean_file_name(&suggested_name, kind))
+        .add_filter(kind.filter, &[kind.ext])
         .blocking_save_file();
     let Some(picked) = picked else { return Ok(None) };
     let mut path = picked.into_path().map_err(|e| e.to_string())?;
-    if path.extension().map(|e| !e.eq_ignore_ascii_case("mp4")).unwrap_or(true) {
+    if path.extension().map(|e| !e.eq_ignore_ascii_case(kind.ext)).unwrap_or(true) {
         let mut name = path.file_name().unwrap_or_default().to_os_string();
-        name.push(".mp4");
+        name.push(format!(".{}", kind.ext));
         path.set_file_name(name);
     }
     let token = uuid::Uuid::new_v4().to_string();
@@ -184,10 +207,20 @@ mod tests {
 
     #[test]
     fn file_names() {
-        assert_eq!(clean_file_name("wipeclip-clip-edit.mp4"), "wipeclip-clip-edit.mp4");
-        assert_eq!(clean_file_name("a/b\\c:d"), "a_b_c_d.mp4");
-        assert_eq!(clean_file_name("..."), "wipeclip-export.mp4");
-        assert_eq!(clean_file_name("clip.MP4"), "clip.MP4");
+        assert_eq!(clean_file_name("wipeclip-clip-edit.mp4", &VIDEO), "wipeclip-clip-edit.mp4");
+        assert_eq!(clean_file_name("a/b\\c:d", &VIDEO), "a_b_c_d.mp4");
+        assert_eq!(clean_file_name("...", &VIDEO), "wipeclip-export.mp4");
+        assert_eq!(clean_file_name("clip.MP4", &VIDEO), "clip.MP4");
+        assert_eq!(clean_file_name("My trip", &PROJECT), "My trip.wipeclip");
+        assert_eq!(clean_file_name("trip.mp4", &PROJECT), "trip.mp4.wipeclip");
+        assert_eq!(clean_file_name("", &PROJECT), "project.wipeclip");
+    }
+
+    #[test]
+    fn save_kinds() {
+        assert_eq!(save_kind(None).unwrap().ext, "mp4");
+        assert_eq!(save_kind(Some("project")).unwrap().ext, "wipeclip");
+        assert!(save_kind(Some("exe")).is_err());
     }
 
     #[test]

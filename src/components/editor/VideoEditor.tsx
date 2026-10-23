@@ -8,7 +8,7 @@ import SignInModal from "@/components/SignInModal";
 import ThemeToggle from "@/components/ThemeToggle";
 import { trackEvent, useToolView } from "@/lib/analytics";
 import { createClient } from "@/lib/supabase/client";
-import { apiFetch, confirmAction, IS_DESKTOP, openNotices, showDesktopError } from "@/lib/platform";
+import { apiFetch, confirmAction, IS_DESKTOP, openNotices, saveExportFile, showDesktopError, watchOpenedProjectFiles } from "@/lib/platform";
 import { createClock, useClockTime, type Clock } from "@/lib/editor/clock";
 import { useProjectHistory } from "@/lib/editor/history";
 import {
@@ -36,6 +36,7 @@ import {
   type ProjectInfo,
   type ProjectSummary,
 } from "@/lib/editor/projectStore";
+import { createProjectFile, PROJECT_FILE_EXT, ProjectFileError, projectFileName, readProjectFile } from "@/lib/editor/projectFile";
 import { useOverlayRasters } from "@/lib/editor/rasters";
 import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
 import { DEFAULT_TEXT } from "@/lib/editor/textRaster";
@@ -212,6 +213,9 @@ export default function VideoEditor({
   const [isDragOver, setIsDragOver] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const projectFileInput = useRef<HTMLInputElement>(null);
+  /** What the start screen's spinner says while a file opens. */
+  const [opening, setOpening] = useState<string | null>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const thumbJobs = useRef(new Map<string, AbortController>()); // thumbnail + "wave:" jobs
   const waveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -374,9 +378,52 @@ export default function VideoEditor({
     [reset, clock]
   );
 
+  /** Opens a .wipeclip project file as a new project in the list. Its
+   * videos are slices of the picked file, then stored like any project's. */
+  const openProjectFile = useCallback(
+    async (file: File) => {
+      setImportError(null);
+      await saveNow();
+      setOpening("Opening project file…");
+      setPhase("probing");
+      try {
+        const opened = await readProjectFile(file);
+        await clearLastExport();
+        setPendingExport(null);
+        startProject(opened.sources, opened.project, newProjectInfo(opened.name));
+        opened.sources.forEach(keepForRecovery);
+      } catch (e) {
+        console.error("[editor] project file open failed", e);
+        setImportError({ message: e instanceof ProjectFileError ? e.message : "Couldn't open this project file." });
+        setInfo(null);
+        setPhase("import");
+        void refreshRecents();
+      } finally {
+        setOpening(null);
+      }
+    },
+    [startProject, keepForRecovery, saveNow, refreshRecents]
+  );
+
+  // Project files double-clicked in the OS (desktop), once startup
+  // housekeeping is done; one at a time, each becomes a new project.
+  const openProjectFileRef = useRef(openProjectFile);
+  useEffect(() => {
+    openProjectFileRef.current = openProjectFile;
+  }, [openProjectFile]);
+  const ready = phase !== "loading";
+  useEffect(() => {
+    if (!ready) return;
+    return watchOpenedProjectFiles(
+      (file) => openProjectFileRef.current(file),
+      (message) => setImportError({ message })
+    );
+  }, [ready]);
+
   const importFile = useCallback(
     async (file: File | undefined) => {
       if (!file) return;
+      if (file.name.toLowerCase().endsWith(`.${PROJECT_FILE_EXT}`)) return openProjectFile(file);
       trackEvent("file_selected", { tool: TOOL });
       setImportError(null);
       if (!file.type.startsWith("video/")) {
@@ -433,7 +480,7 @@ export default function VideoEditor({
         void refreshRecents();
       }
     },
-    [startProject, keepForRecovery, saveNow, refreshRecents]
+    [startProject, keepForRecovery, saveNow, refreshRecents, openProjectFile]
   );
 
   /** Opens a screen recording as a new project, entirely locally: the
@@ -1259,6 +1306,24 @@ export default function VideoEditor({
     [apply, say, addSource]
   );
 
+  /** Saves the open project as a .wipeclip file the user can move to
+   * another computer (projectFile.ts). */
+  const saveProjectFile = useCallback(async () => {
+    if (!info) return;
+    setPlaying(false);
+    setBusy("Saving project file…");
+    try {
+      const blob = await createProjectFile(info, project, Object.values(sources));
+      const res = await saveExportFile(blob, projectFileName(info.name), "project");
+      if (res.status === "saved") say(IS_DESKTOP ? `Saved ${res.path}` : "Project file downloaded.");
+    } catch (e) {
+      console.error("[editor] project file save failed", e);
+      say(e instanceof Error && e.message ? `Couldn't save the project file: ${e.message}` : "Couldn't save the project file.");
+    } finally {
+      setBusy(null);
+    }
+  }, [info, project, sources, say]);
+
   /** Back to the start screen. The project is saved first and stays in
    * Recent projects, so nothing needs confirming. */
   const closeProject = useCallback(async () => {
@@ -1386,6 +1451,14 @@ export default function VideoEditor({
             </ToolButton>
             <button
               type="button"
+              onClick={saveProjectFile}
+              title="Save this project, with its videos, as one .wipeclip file"
+              className="hidden rounded-full px-3 py-2 text-xs font-semibold text-muted hover:text-foreground sm:inline"
+            >
+              Save file
+            </button>
+            <button
+              type="button"
               onClick={closeProject}
               title="Back to your projects. This one is saved."
               className="hidden rounded-full px-3 py-2 text-xs font-semibold text-muted hover:text-foreground sm:inline"
@@ -1445,7 +1518,7 @@ export default function VideoEditor({
             {phase === "probing" ? (
               <div className="mt-8 flex flex-col items-center gap-4 rounded-[1.75rem] border border-border bg-surface-2/70 p-12 text-center" role="status">
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent-2/20 border-t-accent-2" />
-                <p className="text-sm font-medium text-foreground">Checking your video…</p>
+                <p className="text-sm font-medium text-foreground">{opening ?? "Checking your video…"}</p>
               </div>
             ) : phase === "loading" ? (
               <div className="mt-8 h-48 animate-pulse rounded-[1.75rem] bg-surface-2/70" />
@@ -1458,6 +1531,17 @@ export default function VideoEditor({
                   className="hidden"
                   onChange={(e) => {
                     void importFile(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+                <input
+                  ref={projectFileInput}
+                  type="file"
+                  accept={`.${PROJECT_FILE_EXT}`}
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void openProjectFile(f);
                     e.target.value = "";
                   }}
                 />
@@ -1487,6 +1571,11 @@ export default function VideoEditor({
                   <span className="text-base font-semibold text-foreground">Drop a video here, or click to browse</span>
                   <span className="mt-1 text-xs text-muted sm:text-sm">MP4, MOV, WebM · up to 300MB · up to 10 minutes</span>
                 </button>
+                <p className="mt-2 text-center text-xs text-muted">
+                  <button type="button" onClick={() => projectFileInput.current?.click()} className="underline hover:text-foreground">
+                    Open a project file (.{PROJECT_FILE_EXT})
+                  </button>
+                </p>
                 {onRecord && (
                   <button
                     type="button"
