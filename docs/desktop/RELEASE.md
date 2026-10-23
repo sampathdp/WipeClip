@@ -154,7 +154,7 @@ With the local engine, an export shows real progress: "Checking your videos…" 
 
 ## Updates
 
-The app checks `https://github.com/sampathdp/WipeClip/releases/latest/download/latest.json` 10 s after launch and every 6 hours (`src-tauri/src/updater.rs`, `UpdateBanner` in `desktop/app/DesktopShell.tsx`). A newer version shows a banner. **Update now** downloads it, verifies its signature, installs it (Windows: the NSIS installer in passive mode) and restarts; **Later** hides that version until a newer one appears. Nothing installs without the click, and installing is refused while a recording is being written. Debug builds never check.
+The app checks `https://github.com/sampathdp/wipeclip-releases/releases/latest/download/latest.json` 10 s after launch and every 6 hours (`src-tauri/src/updater.rs`, `UpdateBanner` in `desktop/app/DesktopShell.tsx`). A newer version shows a banner. **Update now** downloads it, verifies its signature, installs it (Windows: the NSIS installer in passive mode) and restarts; **Later** hides that version until a newer one appears. Nothing installs without the click, and installing is refused while a recording is being written. Debug builds never check.
 
 Update bundles are signed with a minisign key, separate from code signing. The public key is in `tauri.conf.json` (`plugins.updater.pubkey`). The private key and its password were generated on the release maintainer's machine (`~/.tauri/wipeclip-updater.key`, `~/.tauri/wipeclip-updater.password`) and must exist **only** there, in a password manager backup, and as repository secrets `TAURI_SIGNING_PRIVATE_KEY` (the key file's contents) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. **If the key is lost, installed apps can never be updated again** - users would have to reinstall by hand.
 
@@ -162,10 +162,14 @@ Releasing a version:
 
 1. Bump `version` in `src-tauri/tauri.conf.json` and `package.json`, commit, push.
 2. `git tag desktop-v<version> && git push origin desktop-v<version>`.
-3. `desktop.yml` builds both platforms with the signing key, then `desktop/scripts/update-manifest.mjs` checks that the tag matches the version, renames the assets and writes `latest.json`, and a **draft** release is created with the Windows installer, the macOS DMG and update tarball, and `latest.json`.
-4. Check the draft (install it on a test machine), then publish it. Only published, non-prerelease releases count as "latest", so users are offered the update from that moment.
+3. `desktop.yml` builds both platforms with the signing key, then `desktop/scripts/update-manifest.mjs` checks that the tag matches the version, renames the assets and writes `latest.json`, and a **draft** release is created in the releases repo with the Windows installer, the macOS DMG and update tarball, fixed-name copies of both installers, and `latest.json`.
+4. Check the draft (install it on a test machine), then publish it. Only published, non-prerelease releases count as "latest", so users are offered the update and the website's download buttons serve it from that moment.
 
-The repository must stay public: the updater downloads release assets without authentication. Builds without `TAURI_SIGNING_PRIVATE_KEY` (local and PR builds) produce no update bundles but otherwise work; release tags fail without it (`WIPECLIP_REQUIRE_UPDATER`).
+Releases live in a separate **public** repository, `sampathdp/wipeclip-releases` (`RELEASES_REPO` in `desktop.yml`, which must match `plugins.updater.endpoints`): the updater and the website's download buttons fetch release assets without authentication, and this code repository can stay private. One-time setup:
+
+- Create `sampathdp/wipeclip-releases` as a public repository with at least one commit (a README), so releases can be created in it.
+- Create a fine-grained personal access token limited to that repository with **Contents: read and write**, and add it to this repository as the secret `RELEASES_TOKEN`. Release tags fail without it.
+- On the website, set `NEXT_PUBLIC_DOWNLOAD_WINDOWS_URL=https://github.com/sampathdp/wipeclip-releases/releases/latest/download/WipeClip-Windows-x64-setup.exe` and `NEXT_PUBLIC_DOWNLOAD_MAC_URL=https://github.com/sampathdp/wipeclip-releases/releases/latest/download/WipeClip-macOS-AppleSilicon.dmg` (`src/lib/download.ts`), then redeploy. Leave the Mac one empty until a Mac build is published; its button shows "Coming soon". Builds without `TAURI_SIGNING_PRIVATE_KEY` (local and PR builds) produce no update bundles but otherwise work; release tags fail without it (`WIPECLIP_REQUIRE_UPDATER`).
 
 ## Required permissions
 
