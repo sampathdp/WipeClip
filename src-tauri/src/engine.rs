@@ -8,7 +8,9 @@
 //! 127.0.0.1 on a free port and refuses any request without the random token
 //! made here, so other programs and web pages on the machine can't use it.
 //! It exits with the app: killed on a normal exit, and it watches the app's
-//! process id itself for a crash.
+//! process id itself for a crash. It also exits by itself after a few idle
+//! minutes (WIPECLIP_IDLE_EXIT in desktop_engine.py) to give its memory back
+//! while the user only edits; the next job starts it again.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -33,6 +35,7 @@ pub struct EngineInfo {
 
 struct Running {
     child: Child,
+    port: u16,
     info: EngineInfo,
 }
 
@@ -59,8 +62,22 @@ impl EngineState {
 pub async fn local_engine(app: AppHandle, state: State<'_, EngineState>) -> Result<Option<EngineInfo>, String> {
     let mut running = state.running.lock().await;
     if let Some(r) = running.as_mut() {
+        if r.child.try_wait().is_ok_and(|s| s.is_none()) {
+            // Counts as activity, so the engine can't go idle between this
+            // answer and the page's request. A failed ping alone is no reason
+            // to restart (a busy machine can be slow to answer); only an exit is.
+            let (port, token) = (r.port, r.info.token.clone());
+            let answered = tauri::async_runtime::spawn_blocking(move || healthy(port, &token)).await.unwrap_or(false);
+            if answered {
+                return Ok(Some(r.info.clone()));
+            }
+            tauri::async_runtime::spawn_blocking(|| std::thread::sleep(Duration::from_millis(300))).await.ok();
+            if r.child.try_wait().is_ok_and(|s| s.is_none()) {
+                return Ok(Some(r.info.clone()));
+            }
+        }
         match r.child.try_wait() {
-            Ok(None) => return Ok(Some(r.info.clone())),
+            Ok(Some(status)) if status.success() => log::info!("engine had exited while idle; starting it again"),
             _ => log::warn!("engine had stopped; starting it again"),
         }
         *running = None;
@@ -140,7 +157,7 @@ fn start(command: &mut Command) -> Result<Running, String> {
         if healthy(port, &token) {
             log::info!("engine ready on port {port}");
             let info = EngineInfo { url: format!("http://127.0.0.1:{port}"), token };
-            return Ok(Running { child, info });
+            return Ok(Running { child, port, info });
         }
         if let Ok(Some(status)) = child.try_wait() {
             return Err(format!("The engine stopped while starting ({status})."));

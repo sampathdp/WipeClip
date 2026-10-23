@@ -21,6 +21,7 @@ import {
   type AnimOut,
   type AudioClip,
   type Canvas,
+  type CanvasFrame,
   type Clip,
   type Crop,
   type EffectClip,
@@ -38,6 +39,7 @@ import GradeFilter from "./GradeFilter";
 import PremiumBadge from "./PremiumBadge";
 import { ActionButton, Field, PanelShell, SecondsInput, StickerLibrary } from "./Inspector";
 import { TrashIcon } from "./icons";
+import { sourceName } from "@/lib/editor/sourceFile";
 
 /** Brackets a continuous control (slider drag, color picker) as one undo step. */
 export interface Gesture {
@@ -239,6 +241,7 @@ export function ClipExtras({
   source,
   onChange,
   onExtractAudio,
+  onCleanAudio,
   onOpenLook,
   gesture,
 }: {
@@ -246,6 +249,8 @@ export function ClipExtras({
   source: MediaSource;
   onChange: (patch: Partial<Clip>) => void;
   onExtractAudio: () => void;
+  /** Desktop only: noise reduction and levelling on the local engine. */
+  onCleanAudio?: () => void;
   onOpenLook: () => void;
   gesture: Gesture;
 }) {
@@ -273,6 +278,11 @@ export function ClipExtras({
           {source.hasAudio && !clip.reverse && (
             <ActionButton onClick={onExtractAudio} title="Move this clip's sound to its own audio track">
               Extract audio
+            </ActionButton>
+          )}
+          {onCleanAudio && source.hasAudio && !clip.reverse && clip.freeze === null && (
+            <ActionButton onClick={onCleanAudio} title="Reduce background noise (fan, hum, hiss) and even out the loudness, on this computer">
+              Clean up audio
             </ActionButton>
           )}
           <div>
@@ -1299,8 +1309,79 @@ export function CanvasPanel({
         {bg.type === "image" && <ActionButton onClick={() => input.current?.click()}>Change image…</ActionButton>}
       </div>
       <p className="mt-4 text-[11px] text-muted">The background shows wherever the video doesn&apos;t cover the canvas.</p>
+
+      <SectionTitle>
+        <span className="mt-5 block">Frame</span>
+      </SectionTitle>
+      <Chips
+        label="Frame"
+        value={framePreset(canvas.frame)}
+        onChange={(preset) => {
+          if (preset === "custom") return;
+          const next: Canvas = { ...canvas, frame: preset === "none" ? undefined : FRAME_PRESETS[preset] };
+          if (!next.frame) delete next.frame;
+          onChange(next);
+        }}
+        options={[
+          { value: "none", label: "None" },
+          { value: "subtle", label: "Subtle" },
+          { value: "card", label: "Card" },
+          { value: "floating", label: "Floating" },
+          ...(framePreset(canvas.frame) === "custom" ? [{ value: "custom" as const, label: "Custom" }] : []),
+        ]}
+      />
+      {canvas.frame && (
+        <div className="mt-3 space-y-2">
+          <SliderField
+            label="Padding"
+            value={Math.round(canvas.frame.padding * 100)}
+            min={0}
+            max={20}
+            neutral={0}
+            format={(v) => `${v}%`}
+            onChange={(v) => onChange({ ...canvas, frame: { ...canvas.frame!, padding: v / 100 } })}
+            gesture={gesture}
+          />
+          <SliderField
+            label="Corners"
+            value={Math.round(canvas.frame.radius * 1000)}
+            min={0}
+            max={100}
+            neutral={0}
+            format={(v) => `${v}`}
+            onChange={(v) => onChange({ ...canvas, frame: { ...canvas.frame!, radius: v / 1000 } })}
+            gesture={gesture}
+          />
+          <SliderField
+            label="Shadow"
+            value={Math.round(canvas.frame.shadow * 100)}
+            min={0}
+            max={100}
+            neutral={0}
+            format={(v) => `${v}%`}
+            onChange={(v) => onChange({ ...canvas, frame: { ...canvas.frame!, shadow: v / 100 } })}
+            gesture={gesture}
+          />
+        </div>
+      )}
+      <p className="mt-3 text-[11px] text-muted">Shows the video as a card on the background - great for screen recordings with a gradient or image behind them.</p>
     </PanelShell>
   );
+}
+
+const FRAME_PRESETS = {
+  subtle: { padding: 0.05, radius: 0.02, shadow: 0.4 },
+  card: { padding: 0.08, radius: 0.035, shadow: 0.7 },
+  floating: { padding: 0.12, radius: 0.05, shadow: 1 },
+} satisfies Record<string, CanvasFrame>;
+
+function framePreset(f: CanvasFrame | undefined): "none" | "custom" | keyof typeof FRAME_PRESETS {
+  if (!f || (f.padding === 0 && f.radius === 0 && f.shadow === 0)) return "none";
+  const hit = (Object.keys(FRAME_PRESETS) as (keyof typeof FRAME_PRESETS)[]).find((k) => {
+    const p = FRAME_PRESETS[k];
+    return p.padding === f.padding && p.radius === f.radius && p.shadow === f.shadow;
+  });
+  return hit ?? "custom";
 }
 
 // --- Layers ---------------------------------------------------------------------
@@ -1339,7 +1420,7 @@ export function LayersPanel({
                 ? (getStickerDef(o.stickerId)?.label ?? "Sticker")
                 : o.kind === "shape"
                   ? SHAPE_LABELS[o.shape.type]
-                  : (sources[o.sourceId]?.file.name ?? (o.kind === "video" ? "Video" : "Image"));
+                  : ((sources[o.sourceId] ? sourceName(sources[o.sourceId]) : undefined) ?? (o.kind === "video" ? "Video" : "Image"));
           const thumb = o.kind === "sticker" ? stickerThumbSrc(getStickerDef(o.stickerId)!) : o.kind === "image" ? sources[o.sourceId]?.url : null;
           return (
             <li

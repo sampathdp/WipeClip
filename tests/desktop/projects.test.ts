@@ -112,6 +112,24 @@ test("tidy drops files no project refers to", async () => {
   assert.deepEqual(await sourceKeys(), ["src-kept"]);
 });
 
+test("a source that stays on disk is kept by path, not copied", async () => {
+  const disk = { path: "D:\Videos\big talk.mp4", name: "big talk.mp4", size: 5_000_000_000, type: "video/mp4" };
+  const src: MediaSource = { id: "src-disk", kind: "original", file: null, disk, url: "http://asset.localhost/x", duration: 3600, width: 1920, height: 1080, fps: 30, hasAudio: true };
+  const info = newProjectInfo("big talk");
+  assert.ok(await saveSource(src));
+  await saveProject(info, projectFor(src), [src], null);
+  assert.deepEqual(await sourceKeys(), [], "nothing copied into storage");
+  const list = await listProjects();
+  assert.equal(list[0].bytes, 5_000_000_000);
+  const loaded = await loadProject(info.id);
+  assert.ok(!isProjectProblem(loaded));
+  assert.equal(loaded.sources[0].file, null);
+  assert.deepEqual(loaded.sources[0].disk, disk);
+  assert.equal(loaded.sources[0].url, "", "the editor sets it once the file is found");
+  await tidyProjects();
+  assert.ok(!isProjectProblem(await loadProject(info.id)), "tidy leaves disk projects alone");
+});
+
 test("a missing source file is reported, not opened", async () => {
   const a = source("src-a", "gone.mp4");
   const info = newProjectInfo("broken");

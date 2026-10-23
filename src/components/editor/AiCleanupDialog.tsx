@@ -17,6 +17,7 @@ import {
   type Resolution,
 } from "@/lib/toolsApi";
 import Dialog from "./Dialog";
+import { sourceInput, sourceName } from "@/lib/editor/sourceFile";
 
 const TOOL = "video_editor";
 const TIERS: { key: Resolution; label: string; height: number }[] = [
@@ -112,11 +113,11 @@ export default function AiCleanupDialog({
     const hardStop = setTimeout(() => controller.abort(), 20 * 60 * 1000);
     trackEvent("processing_started", { tool: TOOL, mode: "remove", resolution });
     try {
-      const blob = await processVideo(source.file, region, resolution, source.duration, controller.signal, {
+      const blob = await processVideo(sourceInput(source), region, resolution, source.duration, controller.signal, {
         start: clip.start,
         end: clip.end,
       });
-      const file = new File([blob], `cleaned-${source.file.name.replace(/\.[^.]+$/, "")}.mp4`, { type: "video/mp4" });
+      const file = new File([blob], `cleaned-${sourceName(source).replace(/\.[^.]+$/, "")}.mp4`, { type: "video/mp4" });
       const url = URL.createObjectURL(file);
       const meta = await loadVideoMeta(url);
       trackEvent("processing_completed", { tool: TOOL, mode: "remove", resolution });

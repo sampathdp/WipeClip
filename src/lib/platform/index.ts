@@ -86,13 +86,33 @@ export async function localEngine(): Promise<LocalEngine | null> {
   }
 }
 
+/** Memory this machine can give to heavy work, in GB: what's free now where
+ * the OS says (desktop on Windows), else half the total. The desktop app asks
+ * the OS (src-tauri/src/system.rs); the website only has
+ * navigator.deviceMemory (Chromium, rounded and capped at 8). null if unknown. */
+export async function memoryBudgetGb(): Promise<number | null> {
+  const GB = 1024 ** 3;
+  if (IS_DESKTOP) {
+    try {
+      const m = await invoke<{ totalBytes: number | null; availableBytes: number | null }>("system_memory");
+      if (m.availableBytes != null) return m.availableBytes / GB;
+      if (m.totalBytes != null) return m.totalBytes / GB / 2;
+    } catch (err) {
+      console.warn("[system] memory unknown", err);
+    }
+  }
+  const reported = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  return reported ? reported / 2 : null;
+}
+
 export type SaveResult = { status: "saved"; path: string } | { status: "cancelled" };
 
-/** Saves an exported video. Website: the usual browser download. Desktop:
- * the OS save dialog picks the destination first, then the bytes are
- * written beside it under a temporary name and renamed into place, so a
- * failed write never leaves a half-written file under the chosen name. */
-export async function saveExportFile(blob: Blob, suggestedName: string): Promise<SaveResult> {
+/** Saves an exported video, with kind "project" a project file
+ * (.wipeclip), or with kind "image" a PNG (the image tools). Website: the usual browser download. Desktop: the OS save
+ * dialog picks the destination first, then the bytes are written beside it
+ * under a temporary name and renamed into place, so a failed write never
+ * leaves a half-written file under the chosen name. */
+export async function saveExportFile(blob: Blob, suggestedName: string, kind: "video" | "project" | "image" = "video"): Promise<SaveResult> {
   if (!IS_DESKTOP) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -102,7 +122,7 @@ export async function saveExportFile(blob: Blob, suggestedName: string): Promise
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
     return { status: "saved", path: suggestedName };
   }
-  const token = await invoke<string | null>("choose_export_path", { suggestedName });
+  const token = await invoke<string | null>("choose_export_path", { suggestedName, kind });
   if (!token) return { status: "cancelled" };
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const path = await invoke<string>("write_export", bytes, { "x-export-token": token });
@@ -178,4 +198,59 @@ export async function confirmAction(message: string, opts: { title?: string; okL
   // eslint-disable-next-line no-restricted-properties -- the website (no dialog plugin) keeps the native, synchronous confirm
   if (!IS_DESKTOP) return window.confirm(message);
   return invoke<boolean>("confirm_action", { title: opts.title ?? "WipeClip", message, okLabel: opts.okLabel ?? "OK" });
+}
+
+/** Desktop: hands over .wipeclip files the OS asked the app to open
+ * (double-click, "Open with"), one at a time, including any that arrived
+ * before this was called. Returns a function that stops listening. */
+export function watchOpenedProjectFiles(onFile: (file: File) => Promise<void>, onError: (message: string) => void): () => void {
+  if (!IS_DESKTOP) return () => {};
+  let stopped = false;
+  let unlisten: (() => void) | undefined;
+  let queue = Promise.resolve();
+  const pull = () => {
+    queue = queue.then(async () => {
+      const files = await invoke<{ token: string; name: string; size: number }[]>("opened_files");
+      for (const f of files) {
+        if (stopped) return;
+        try {
+          const bytes = await invoke<ArrayBuffer>("opened_file_read", { token: f.token });
+          await onFile(new File([bytes], f.name, { type: "application/zip" }));
+        } catch (err) {
+          onError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    });
+  };
+  pull();
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) => listen("project-file-opened", pull))
+    .then((stop) => {
+      if (stopped) stop();
+      else unlisten = stop;
+    })
+    .catch((err) => console.error("[desktop] opened files unavailable", err));
+  return () => {
+    stopped = true;
+    unlisten?.();
+  };
+}
+
+/** Desktop: an OS notification, shown only while WipeClip's window isn't
+ * focused (for work that finishes while the user is elsewhere). */
+export async function notifyIfAway(title: string, body: string): Promise<void> {
+  if (!IS_DESKTOP) return;
+  await invoke<boolean>("notify_if_away", { title, body }).catch((err) => console.warn("[desktop] notification failed", err));
+}
+
+/** Desktop: saves an image tool's result (a blob: URL) through the Save
+ * dialog. For a download link's onClick: on the website it does nothing
+ * and the link downloads as usual. */
+export function saveImageLink(e: { preventDefault: () => void }, url: string, filename: string): void {
+  if (!IS_DESKTOP) return;
+  e.preventDefault();
+  void fetch(url)
+    .then((r) => r.blob())
+    .then((blob) => saveExportFile(blob, filename, "image"))
+    .catch((err) => showDesktopError("Couldn't save the image", err instanceof Error ? err.message : String(err)));
 }

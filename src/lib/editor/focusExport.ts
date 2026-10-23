@@ -37,7 +37,7 @@ export function cameraPayload(
   cache = new CameraCache()
 ): (number[][] | null)[] {
   return lay.clips.map((c) => {
-    const view = clipView(c.clip, sources[c.clip.sourceId], canvas, project.canvas.fit);
+    const view = clipView(c.clip, sources[c.clip.sourceId], canvas, project.canvas);
     const track = cache.track(project.zooms, c.clip, view);
     return track ? cameraSamples(track, c, lay.fps) : null;
   });

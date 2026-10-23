@@ -12,7 +12,7 @@
  * (not zoom factor and center separately) makes the camera close in on the
  * focus point along a straight line, without swinging.
  */
-import { videoBox, type LaidOutClip } from "./timeline.ts";
+import { videoBox, type BoxLayout, type LaidOutClip } from "./timeline.ts";
 import type { CameraZoom, Clip, Crop, ZoomEase } from "./types.ts";
 
 /** Zooms closer than this pan straight from one focus to the next instead
@@ -231,10 +231,10 @@ export function clipView(
   clip: Clip,
   src: { width: number; height: number } | undefined,
   canvas: { width: number; height: number },
-  fit: "fit" | "fill"
+  layout: BoxLayout
 ): ViewRect {
   if (!src) return FULL_VIEW;
-  return visibleView(videoBox(clip, src, canvas, fit), clip.transform);
+  return visibleView(videoBox(clip, src, canvas, layout), clip.transform);
 }
 
 // --- Source time <-> timeline time --------------------------------------------

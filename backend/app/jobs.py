@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
+from app import progress
 from app.config import DEFAULT_SHARPEN_RADIUS
 from app.pipeline import editor as editor_pipeline
 from app.pipeline import full_pipeline, io_utils, manual_inpaint, sharpen as sharpen_pipeline
@@ -30,15 +31,17 @@ def reconstruct_region_job(
     asyncio.run(video_pipeline.reconstruct_region(in_path, out_path, x, y, w, h, output_height, quality))
 
 
-def editor_export_job(plan_json: str, out_path: str) -> None:
+def editor_export_job(plan_json: str, out_path: str, job_id: str | None = None) -> None:
     """`plan_json` is editor.ExportPlan serialized by main.py (a plain
     string, so it crosses the RQ boundary cheaply like the other jobs' args).
+    `job_id`: report progress and honor cancel (app/progress.py) - only
+    found when this runs in the request's own process.
     """
     plan = editor_pipeline.plan_from_json(plan_json)
     # main.py already quantized durations (speed + frame snapping) before
     # serializing; don't apply it twice.
     plan._quantized = True  # type: ignore[attr-defined]
-    asyncio.run(editor_pipeline.render_export(plan, out_path))
+    asyncio.run(editor_pipeline.render_export(plan, out_path, progress.get(job_id)))
 
 
 def image_remove_job(in_path: str, out_path: str, x: int, y: int, w: int, h: int) -> None:

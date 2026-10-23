@@ -1,7 +1,8 @@
 import type { NextResponse } from "next/server";
 
 /** CORS for the few routes the WipeClip desktop app calls (/api/process,
- * /api/export, /api/credits, /api/referrals/claim). The desktop app's pages
+ * /api/export, /api/credits, /api/referrals/claim, and the image tools'
+ * /api/remove-background, /api/sharpen-image, /api/frame-grab). The desktop app's pages
  * are served from Tauri's own origin, so these calls are cross-origin and
  * carry a Supabase bearer token instead of cookies (see getRequestAuth in
  * src/lib/supabase/server.ts). Only the Tauri origins are allowed - no

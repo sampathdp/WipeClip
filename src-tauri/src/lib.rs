@@ -13,9 +13,13 @@ mod engine;
 mod export;
 mod input;
 mod links;
+mod media;
+mod notify;
+mod opened;
 mod recording;
 mod secure_storage;
 mod shortcuts;
+mod system;
 mod updater;
 
 use serde::Serialize;
@@ -268,14 +272,16 @@ pub fn run() {
 
     // A second launch (e.g. from a wipeclip:// link on Windows) hands its
     // link to this instance - via the deep-link feature - and just focuses
-    // the existing window. Registered first, as the plugin requires.
+    // the existing window; a double-clicked project file in its arguments is
+    // queued for opening. Registered first, as the plugin requires.
     #[cfg(desktop)]
     {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.set_focus();
             }
+            opened::offer(app, opened::paths_from_args(&argv, std::path::Path::new(&cwd)));
         }));
     }
 
@@ -292,14 +298,18 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(export::ExportState::default())
         .manage(recording::RecordingState::default())
         .manage(input::InputState::default())
         .manage(capture::CaptureState::default())
         .manage(engine::EngineState::default())
         .manage(updater::UpdateState::default())
+        .manage(opened::OpenedState::default())
+        .manage(media::MediaState::default())
         .invoke_handler(tauri::generate_handler![
             engine::local_engine,
+            system::system_memory,
             desktop_capabilities,
             show_error,
             confirm_action,
@@ -330,6 +340,11 @@ pub fn run() {
             open_notices,
             updater::update_check,
             updater::update_install,
+            opened::opened_files,
+            opened::opened_file_read,
+            media::media_choose,
+            media::media_open,
+            notify::notify_if_away,
             shortcuts::recorder_shortcuts,
             recording::recording_default_dir,
             recording::recording_choose_dir,
@@ -363,12 +378,22 @@ pub fn run() {
                 }
             }
             create_main_window(app)?;
+            // Launched by double-clicking a project file (Windows/Linux).
+            if let Ok(cwd) = std::env::current_dir() {
+                let args: Vec<String> = std::env::args().collect();
+                opened::offer(app.handle(), opened::paths_from_args(&args, &cwd));
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building WipeClip");
 
     app.run(|handle, event| {
+        // macOS hands double-clicked project files over as an event.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Opened { urls } = &event {
+            opened::offer(handle, urls.iter().filter_map(|u| u.to_file_path().ok()).collect());
+        }
         // Quitting mid-recording: stop the input hooks and flush what was
         // recorded; the folder is offered for recovery on the next start.
         if let tauri::RunEvent::Exit = event {

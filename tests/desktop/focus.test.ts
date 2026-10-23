@@ -444,24 +444,24 @@ const SHAPES = {
 /** Where source point p lands on the canvas with zoom z active. */
 function onCanvas(z: CameraZoom, p: { x: number; y: number }, canvas: { width: number; height: number }, fit: "fit" | "fill") {
   const clip = newClip("c", "s", 0, 10);
-  const view = clipView(clip, HD, canvas, fit);
+  const view = clipView(clip, HD, canvas, { fit });
   const win = targetWindow(z, clip.crop, view);
-  const box = videoBox(clip, HD, canvas, fit);
+  const box = videoBox(clip, HD, canvas, { fit });
   return { win, view, at: sourceToCanvas(p, cameraCrop(clip.crop, win), box, clip.transform, canvas) };
 }
 
 test("fit and landscape fill see the whole window; framing is unchanged there", () => {
   for (const canvas of Object.values(SHAPES)) {
-    assert.deepEqual(clipView(newClip("c", "s", 0, 10), HD, canvas, "fit"), FULL_VIEW);
+    assert.deepEqual(clipView(newClip("c", "s", 0, 10), HD, canvas, { fit: "fit" }), FULL_VIEW);
   }
-  assert.deepEqual(clipView(newClip("c", "s", 0, 10), HD, SHAPES.landscape, "fill"), FULL_VIEW);
+  assert.deepEqual(clipView(newClip("c", "s", 0, 10), HD, SHAPES.landscape, { fit: "fill" }), FULL_VIEW);
   const z = zoom({ x: 0.05, y: 0.9, zoom: 2.5 });
   assert.deepEqual(targetWindow(z, FULL_CROP, FULL_VIEW), targetWindow(z, FULL_CROP));
 });
 
 test("portrait and square fill keep a focus point near the frame edge on the canvas", () => {
   for (const [name, canvas] of [["portrait", SHAPES.portrait], ["square", SHAPES.square]] as const) {
-    const view = clipView(newClip("c", "s", 0, 10), HD, canvas, "fill");
+    const view = clipView(newClip("c", "s", 0, 10), HD, canvas, { fit: "fill" });
     assert.ok(view.x0 > 0 && view.x1 < 1 && view.y0 === 0 && view.y1 === 1, `${name}: sides are cut`);
     for (const x of [0.04, 0.12, 0.2, 0.8, 0.88, 0.96]) {
       for (const y of [0.05, 0.5, 0.95]) {
@@ -489,14 +489,14 @@ test("portrait and square fill keep a focus point near the frame edge on the can
   // Without the view, the same zoom puts an edge click off a portrait canvas.
   const clip = newClip("c", "s", 0, 10);
   const blind = targetWindow(zoom({ x: 0.13, y: 0.5, zoom: 2 }), clip.crop);
-  const at = sourceToCanvas({ x: 0.13, y: 0.5 }, cameraCrop(clip.crop, blind), videoBox(clip, HD, SHAPES.portrait, "fill"), clip.transform, SHAPES.portrait);
+  const at = sourceToCanvas({ x: 0.13, y: 0.5 }, cameraCrop(clip.crop, blind), videoBox(clip, HD, SHAPES.portrait, { fit: "fill" }), clip.transform, SHAPES.portrait);
   assert.ok(at && at.x < 0, "regression guard: the old framing lost this click");
 });
 
 test("a moved clip's visible part follows its position; rotated clips use the whole window", () => {
   const clip = newClip("c", "s", 0, 10);
-  close(clipView({ ...clip, transform: { ...clip.transform, x: 0.25 } }, HD, SHAPES.landscape, "fit").x0, 0.25);
-  assert.deepEqual(clipView({ ...clip, transform: { ...clip.transform, rotation: 90 } }, HD, SHAPES.portrait, "fill"), FULL_VIEW);
+  close(clipView({ ...clip, transform: { ...clip.transform, x: 0.25 } }, HD, SHAPES.landscape, { fit: "fit" }).x0, 0.25);
+  assert.deepEqual(clipView({ ...clip, transform: { ...clip.transform, rotation: 90 } }, HD, SHAPES.portrait, { fit: "fill" }), FULL_VIEW);
 });
 
 test("portrait fill: export camera rows and pointer rings are the preview's values", () => {
@@ -516,7 +516,7 @@ test("portrait fill: export camera rows and pointer rings are the preview's valu
   const lay = layout(p, 30);
   const rows = cameraPayload(p, lay, { s }, canvas)[0]!;
   assert.ok(rows.length > 10);
-  const track = new CameraCache().track(p.zooms, p.clips[0], clipView(p.clips[0], s, canvas, "fill"))!;
+  const track = new CameraCache().track(p.zooms, p.clips[0], clipView(p.clips[0], s, canvas, { fit: "fill" }))!;
   for (const [t, x, y, sz] of rows) {
     const w = evalCamera(track, t);
     close(x, w.x, 1e-4);
@@ -548,8 +548,8 @@ test("every suggested zoom keeps its clicks inside the zoomed view, in every out
   for (const [name, canvas] of Object.entries(SHAPES)) {
     for (const fit of ["fit", "fill"] as const) {
       const clip = newClip("c", "s", 0, 250);
-      const view = clipView(clip, HD, canvas, fit);
-      const box = videoBox(clip, HD, canvas, fit);
+      const view = clipView(clip, HD, canvas, { fit });
+      const box = videoBox(clip, HD, canvas, { fit });
       const track = buildCameraTrack(zooms, "s", clip.crop, view);
       for (const g of targets) {
         const z = zooms.find((zz) => g.t >= zz.start + zz.easeIn && g.t <= zz.end - zz.easeOut);

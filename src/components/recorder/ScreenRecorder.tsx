@@ -45,11 +45,9 @@ import {
   type ShortcutStatus,
 } from "@/lib/platform/recorder";
 import {
-  EDITOR_MAX_VIDEO_BYTES,
-  RecordingTooLargeError,
   loadRecordingBundle,
-  readTrackFile,
   recoverRecording,
+  trackUrl,
   type RecordingBundle,
 } from "@/lib/recorder/bundle";
 import { formatDuration } from "@/lib/recorder/clock";
@@ -618,10 +616,10 @@ export default function ScreenRecorder({
       return;
     }
     // Straight to the editor; the review screen is the fallback when that
-    // isn't possible (too large or unreadable). An open project stays in
-    // the editor's Recent projects.
+    // isn't possible (unreadable). An open project stays in the editor's
+    // Recent projects.
     const screenTrack = result.manifest.tracks.find((t) => t.kind === "screen");
-    if (opts.autoOpen && screenTrack && screenTrack.bytes > 0 && screenTrack.bytes <= EDITOR_MAX_VIDEO_BYTES) {
+    if (opts.autoOpen && screenTrack && screenTrack.bytes > 0) {
       {
         setStep("review");
         setBusy("Opening in the editor…");
@@ -629,7 +627,7 @@ export default function ScreenRecorder({
           onOpenInEditor(await loadRecordingBundle(result.path, result.manifest));
           return;
         } catch (e) {
-          setError({ message: e instanceof RecordingTooLargeError ? e.message : errorText(e, "Couldn't open the recording.") });
+          setError({ message: errorText(e, "Couldn't open the recording.") });
         } finally {
           setBusy(null);
         }
@@ -638,14 +636,11 @@ export default function ScreenRecorder({
     setFinished(result);
     setStep("review");
     setPreviewUrl(null);
-    const screen = result.manifest.tracks.find((t) => t.kind === "screen");
-    if (screen && screen.bytes > 0 && screen.bytes <= EDITOR_MAX_VIDEO_BYTES) {
-      try {
-        const file = await readTrackFile(result.path, result.manifest, "screen");
-        if (file) setPreviewUrl(URL.createObjectURL(file));
-      } catch (e) {
-        console.error("[recorder] preview failed", e);
-      }
+    // Streamed from the recording folder, so any length previews.
+    try {
+      setPreviewUrl(await trackUrl(result.path, result.manifest, "screen"));
+    } catch (e) {
+      console.error("[recorder] preview failed", e);
     }
   }, [onOpenInEditor]);
 
@@ -906,7 +901,7 @@ export default function ScreenRecorder({
       onOpenInEditor(bundle);
       backToSetup();
     } catch (e) {
-      setError({ message: e instanceof RecordingTooLargeError ? e.message : errorText(e, "Couldn't open the recording.") });
+      setError({ message: errorText(e, "Couldn't open the recording.") });
     } finally {
       setBusy(null);
     }
@@ -1203,8 +1198,8 @@ export default function ScreenRecorder({
                       ]}
                     />
                     <p className="text-xs text-muted">
-                      {source ? `${outW}×${outH} at ${outFps} fps · ` : ""}about {Math.max(1, Math.round(mbPerMin))} MB per minute. The editor opens recordings up to 300 MB
-                      (about {Math.max(1, Math.floor(300 / Math.max(1, mbPerMin)))} min at these settings) and exports up to 10 minutes.
+                      {source ? `${outW}×${outH} at ${outFps} fps · ` : ""}about {Math.max(1, Math.round(mbPerMin))} MB per minute. The editor opens recordings of any size and exports up to
+                      10 minutes.
                     </p>
                   </Section>
                 </div>
@@ -1425,7 +1420,6 @@ export default function ScreenRecorder({
               <p className="break-all text-xs text-muted">Saving to {outputPath}</p>
               {source && <LivePreview stream={source.stream} className="mx-auto max-h-[45vh] w-full rounded-xl border border-border bg-black object-contain" />}
               {elapsed > EXPORT_MAX_MS && <Note tone="warn">Past 10 minutes: the recording keeps saving, but the editor exports videos up to 10 minutes.</Note>}
-              {sizes.screen > EDITOR_MAX_VIDEO_BYTES && <Note tone="warn">Over 300 MB: the recording keeps saving, but it&apos;s too large to open in the editor.</Note>}
               {warnings.map((w) => (
                 <Note key={w} tone="warn">
                   {w}
@@ -1443,9 +1437,7 @@ export default function ScreenRecorder({
                     <video src={previewUrl} controls className="w-full rounded-xl border border-border bg-black" />
                   ) : (
                     <div className="flex aspect-video items-center justify-center rounded-xl border border-border bg-surface-2 p-6 text-center text-sm text-muted">
-                      {(finished.manifest.tracks.find((t) => t.kind === "screen")?.bytes ?? 0) > EDITOR_MAX_VIDEO_BYTES
-                        ? "Too large to preview here. Use Show in folder to play it."
-                        : "Loading preview…"}
+                      Loading preview…
                     </div>
                   )}
                 </div>

@@ -8,12 +8,13 @@ import SignInModal from "@/components/SignInModal";
 import ThemeToggle from "@/components/ThemeToggle";
 import { trackEvent, useToolView } from "@/lib/analytics";
 import { createClient } from "@/lib/supabase/client";
-import { apiFetch, confirmAction, IS_DESKTOP, openNotices, showDesktopError } from "@/lib/platform";
+import { apiFetch, confirmAction, IS_DESKTOP, openNotices, saveExportFile, showDesktopError, watchOpenedProjectFiles } from "@/lib/platform";
 import { createClock, useClockTime, type Clock } from "@/lib/editor/clock";
 import { useProjectHistory } from "@/lib/editor/history";
 import {
   generateThumbnails,
   generateWaveform,
+  MAX_WAVE_FILE_BYTES,
   loadAudioMeta,
   loadVideoMeta,
   normalizeImage,
@@ -36,7 +37,10 @@ import {
   type ProjectInfo,
   type ProjectSummary,
 } from "@/lib/editor/projectStore";
+import { createProjectFile, PROJECT_FILE_EXT, ProjectFileError, projectFileName, readProjectFile } from "@/lib/editor/projectFile";
 import { useOverlayRasters } from "@/lib/editor/rasters";
+import { sourceFile, sourceInput, sourceName, sourceSize } from "@/lib/editor/sourceFile";
+import { chooseVideoOnDisk, diskMediaUrl, openDiskMedia } from "@/lib/platform/media";
 import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
 import { DEFAULT_TEXT } from "@/lib/editor/textRaster";
 import {
@@ -68,13 +72,15 @@ import {
   type EffectClip,
   type EffectType,
   type Look,
+  type DiskMedia,
   type MediaSource,
   type Overlay,
   type Project,
   type Selection,
   type TextStyle,
+  type Transcript,
 } from "@/lib/editor/types";
-import { ApiError, ContentBlockedError, probeVideo } from "@/lib/toolsApi";
+import { ApiError, cleanAudio, ContentBlockedError, probeVideo } from "@/lib/toolsApi";
 import type { RecordingBundle } from "@/lib/recorder/bundle";
 import { recordingToSources } from "@/lib/recorder/editorImport";
 import { planRecordingProject, type ImportedTrack } from "@/lib/recorder/importPlan";
@@ -97,6 +103,8 @@ import ExportDialog from "./ExportDialog";
 import { ActionButton, ClipPanel, PanelShell, TransitionPanel } from "./Inspector";
 import OverlayLayer from "./OverlayLayer";
 import RecentProjects from "./RecentProjects";
+import TranscriptPanel from "./TranscriptPanel";
+import { cutWords, transcriptCurrent } from "@/lib/editor/wordEdit";
 import {
   AudioAddPanel,
   AudioPanel,
@@ -152,7 +160,7 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const EMPTY: Project = { clips: [], overlays: [], audio: [], effects: [], canvas: DEFAULT_CANVAS };
 const RATES = [0.5, 1, 1.5, 2];
 
-type Tool = "text" | "captions" | "elements" | "audio" | "effects" | "filters" | "adjust" | "canvas" | "layers" | "focus" | "tutorial";
+type Tool = "text" | "captions" | "transcript" | "elements" | "audio" | "effects" | "filters" | "adjust" | "canvas" | "layers" | "focus" | "tutorial";
 type Dialogs = { kind: "cleanup"; clipId: string; frameTime: number } | { kind: "export" } | null;
 type ClipboardItem = { kind: "overlay"; item: Overlay } | { kind: "audio"; item: AudioClip } | { kind: "effect"; item: EffectClip };
 
@@ -165,6 +173,8 @@ export interface IncomingRecording {
 
 /** Desktop-only props:
  *  - `onRecord` adds "Record screen" buttons that open the recorder,
+ *  - `onImageTools` adds "Image tools" buttons (background removal,
+ *    sharpening, frame grabs),
  *  - `incomingRecording` opens a recording as a new project and reports
  *    the outcome through `onRecordingImported`,
  *  - `suspended` turns the editor's keyboard shortcuts off while the
@@ -172,11 +182,13 @@ export interface IncomingRecording {
  */
 export default function VideoEditor({
   onRecord,
+  onImageTools,
   incomingRecording,
   onRecordingImported,
   suspended = false,
 }: {
   onRecord?: () => void;
+  onImageTools?: () => void;
   incomingRecording?: IncomingRecording | null;
   onRecordingImported?: (key: number, error: string | null) => void;
   suspended?: boolean;
@@ -212,6 +224,9 @@ export default function VideoEditor({
   const [isDragOver, setIsDragOver] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const projectFileInput = useRef<HTMLInputElement>(null);
+  /** What the start screen's spinner says while a file opens. */
+  const [opening, setOpening] = useState<string | null>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const thumbJobs = useRef(new Map<string, AbortController>()); // thumbnail + "wave:" jobs
   const waveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -234,7 +249,7 @@ export default function VideoEditor({
   const keepForRecovery = useCallback(
     (src: MediaSource) =>
       void saveSource(src).then((ok) => {
-        if (!ok) say(`"${src.file.name}" couldn't be saved on this device (storage may be full), so this project can't be reopened after closing. Export before you close WipeClip.`);
+        if (!ok) say(`"${sourceName(src)}" couldn't be saved on this device (storage may be full), so this project can't be reopened after closing. Export before you close WipeClip.`);
       }),
     [say]
   );
@@ -347,7 +362,11 @@ export default function VideoEditor({
       thumbJobs.current.set(key, controller);
       waveQueue.current = waveQueue.current.then(async () => {
         if (controller.signal.aborted) return;
-        const wave = await generateWaveform(src.file, controller.signal);
+        // A disk source over the limit isn't read at all just to be skipped.
+        if (sourceSize(src) > MAX_WAVE_FILE_BYTES) return;
+        const file = await sourceFile(src).catch(() => null);
+        if (!file || controller.signal.aborted) return;
+        const wave = await generateWaveform(file, controller.signal);
         if (wave && !controller.signal.aborted) setWaves((w) => ({ ...w, [src.id]: wave }));
       });
     }
@@ -374,33 +393,86 @@ export default function VideoEditor({
     [reset, clock]
   );
 
+  /** Opens a .wipeclip project file as a new project in the list. Its
+   * videos are slices of the picked file, then stored like any project's. */
+  const openProjectFile = useCallback(
+    async (file: File) => {
+      setImportError(null);
+      await saveNow();
+      setOpening("Opening project file…");
+      setPhase("probing");
+      try {
+        const opened = await readProjectFile(file);
+        await clearLastExport();
+        setPendingExport(null);
+        startProject(opened.sources, opened.project, newProjectInfo(opened.name));
+        opened.sources.forEach(keepForRecovery);
+      } catch (e) {
+        console.error("[editor] project file open failed", e);
+        setImportError({ message: e instanceof ProjectFileError ? e.message : "Couldn't open this project file." });
+        setInfo(null);
+        setPhase("import");
+        void refreshRecents();
+      } finally {
+        setOpening(null);
+      }
+    },
+    [startProject, keepForRecovery, saveNow, refreshRecents]
+  );
+
+  // Project files double-clicked in the OS (desktop), once startup
+  // housekeeping is done; one at a time, each becomes a new project.
+  const openProjectFileRef = useRef(openProjectFile);
+  useEffect(() => {
+    openProjectFileRef.current = openProjectFile;
+  }, [openProjectFile]);
+  const ready = phase !== "loading";
+  useEffect(() => {
+    if (!ready) return;
+    return watchOpenedProjectFiles(
+      (file) => openProjectFileRef.current(file),
+      (message) => setImportError({ message })
+    );
+  }, [ready]);
+
+  /** Opens a video as a new project: a File (website, or dropped on the
+   * desktop app), or a video picked in the desktop app's open dialog, which
+   * stays where it is on disk - streamed for playback, read by path by the
+   * local engine, kept by path in the project - so it has no size limit. */
   const importFile = useCallback(
-    async (file: File | undefined) => {
-      if (!file) return;
+    async (input: File | DiskMedia | null | undefined) => {
+      if (!input) return;
+      const file = input instanceof File ? input : null;
+      if (file?.name.toLowerCase().endsWith(`.${PROJECT_FILE_EXT}`)) return openProjectFile(file);
       trackEvent("file_selected", { tool: TOOL });
       setImportError(null);
-      if (!file.type.startsWith("video/")) {
+      if (file && !file.type.startsWith("video/")) {
         setImportError({ message: "Please choose a video file (MP4, MOV or WebM)." });
         return;
       }
-      if (file.size > MAX_BYTES) {
-        setImportError({ message: "That file is over the 300MB limit. Try a shorter or smaller video." });
+      if (file && file.size > MAX_BYTES) {
+        setImportError({
+          message: IS_DESKTOP
+            ? "That file is over 300MB. Click the box below to pick it instead: videos picked there are edited where they are, at any size."
+            : "That file is over the 300MB limit. Try a shorter or smaller video.",
+        });
         return;
       }
       // Opening a video starts a new project; an open one stays in Recent projects.
       await saveNow();
       setPhase("probing");
-      const url = URL.createObjectURL(file);
+      const url = file ? URL.createObjectURL(file) : await diskMediaUrl((input as DiskMedia).path);
       try {
         // Browser decode check (codec support, display size, exact
         // duration) and the server's own validation + content screening,
         // in parallel. The server check is the one that counts.
-        const [meta, probe] = await Promise.all([loadVideoMeta(url), probeVideo(file)]);
+        const [meta, probe] = await Promise.all([loadVideoMeta(url), probeVideo(input)]);
         URL.revokeObjectURL(probe.previewUrl);
         const src: MediaSource = {
           id: newId("src"),
           kind: "original",
           file,
+          ...(file ? {} : { disk: input as DiskMedia }),
           url,
           duration: meta.duration,
           width: meta.width,
@@ -410,10 +482,10 @@ export default function VideoEditor({
         };
         await clearLastExport();
         setPendingExport(null);
-        startProject([src], { ...EMPTY, clips: [newClip(newId("clip"), src.id, 0, meta.duration)] }, newProjectInfo(nameFromFile(file.name)));
+        startProject([src], { ...EMPTY, clips: [newClip(newId("clip"), src.id, 0, meta.duration)] }, newProjectInfo(nameFromFile(input.name)));
         keepForRecovery(src);
       } catch (e) {
-        URL.revokeObjectURL(url);
+        if (file) URL.revokeObjectURL(url);
         console.error("[editor] import failed", e);
         let message = "Couldn't open this video. It may be damaged or in an unsupported format.";
         let blocked = false;
@@ -433,7 +505,7 @@ export default function VideoEditor({
         void refreshRecents();
       }
     },
-    [startProject, keepForRecovery, saveNow, refreshRecents]
+    [startProject, keepForRecovery, saveNow, refreshRecents, openProjectFile]
   );
 
   /** Opens a screen recording as a new project, entirely locally: the
@@ -494,6 +566,26 @@ export default function VideoEditor({
     queueMicrotask(() => void importRecording(bundle).then((error) => onRecordingImported?.(key, error)));
   }, [incomingRecording, phase, importRecording, onRecordingImported]);
 
+  /** Makes a reopened project's disk sources playable again. One that was
+   * moved or deleted is found again by the user (relinked: same source, new
+   * path). false if one wasn't found. */
+  const linkDiskSources = useCallback(async (srcs: MediaSource[]): Promise<boolean> => {
+    const onDisk = srcs.filter((s) => s.disk);
+    if (onDisk.length === 0) return true;
+    const status = await openDiskMedia(onDisk.map((s) => s.disk!.path));
+    for (const s of onDisk) {
+      if (!status.get(s.disk!.path)?.ok) {
+        const ask = `"${s.disk!.name}" isn't where it was (${s.disk!.path}). It may have been moved, renamed or deleted. Find it to keep editing this project.`;
+        if (!(await confirmAction(ask, { title: "Video not found", okLabel: "Find video" }))) return false;
+        const found = await chooseVideoOnDisk(s.disk!.name);
+        if (!found) return false;
+        s.disk = found;
+      }
+      s.url = await diskMediaUrl(s.disk!.path);
+    }
+    return true;
+  }, []);
+
   const openSaved = useCallback(
     async (id: string) => {
       setImportError(null);
@@ -502,9 +594,20 @@ export default function VideoEditor({
         setImportError({ message: saved.problem });
         return;
       }
+      let linked = false;
+      try {
+        linked = await linkDiskSources(saved.sources);
+      } catch (e) {
+        console.error("[editor] relinking failed", e);
+      }
+      if (!linked) {
+        saved.sources.forEach((s) => s.file && URL.revokeObjectURL(s.url));
+        setImportError({ message: `"${saved.info.name}" can't open until its videos are found. Open it again to look for them.` });
+        return;
+      }
       startProject(saved.sources, saved.project, saved.info);
     },
-    [startProject]
+    [startProject, linkDiskSources]
   );
 
   const removeSaved = useCallback(
@@ -840,35 +943,43 @@ export default function VideoEditor({
     [addSource, addOverlay, baseOverlay, canvasSize, say]
   );
 
-  // --- auto captions -------------------------------------------------------
+  // --- auto captions and the transcript ---------------------------------------
+  /** The timeline's speech as a word-timed transcript (null: no sound). */
+  const transcribeTimeline = useCallback(async (): Promise<Transcript | null> => {
+    setBusy("Preparing audio…");
+    const samples = await buildSpeechAudio(lay, project, sources);
+    if (!samples) return null;
+    setBusy("Loading speech model…");
+    const res = await transcribe(samples, captionOpts.language, ({ stage, value }) =>
+      setBusy(
+        stage === "download"
+          ? `Downloading speech model (first time only)… ${Math.round(value * 100)}%`
+          : stage === "prepare"
+            ? "Preparing speech model…"
+            : `Transcribing speech on your device… ${Math.round(value * 100)}%`
+      )
+    );
+    return { language: res.language, words: res.words, total: lay.total };
+  }, [lay, project, sources, captionOpts.language]);
+
   const runCaptions = useCallback(async () => {
     setPlaying(false);
     setCaptioning(true);
-    setBusy("Preparing audio…");
     try {
-      const samples = await buildSpeechAudio(lay, project, sources);
-      if (!samples) {
+      const transcript = await transcribeTimeline();
+      if (!transcript) {
         say("There's no sound in your clips to caption.");
         return;
       }
-      setBusy("Loading speech model…");
-      const res = await transcribe(samples, captionOpts.language, ({ stage, value }) =>
-        setBusy(
-          stage === "download"
-            ? `Downloading speech model (first time only)… ${Math.round(value * 100)}%`
-            : stage === "prepare"
-              ? "Preparing speech model…"
-              : `Transcribing speech on your device… ${Math.round(value * 100)}%`
-        )
-      );
-      const chunks = groupWords(res.words, captionOpts.maxWords, lineCharsFor(canvasSize), lay.total);
+      const chunks = groupWords(transcript.words, captionOpts.maxWords, lineCharsFor(canvasSize), lay.total);
       if (chunks.length === 0) {
         say("No speech was found in your clips.");
         return;
       }
       const caps = captionOverlays(chunks, captionOpts.style, captionOpts.y);
-      // One undo step; regenerating replaces earlier captions.
-      apply((p) => ({ ...p, overlays: [...p.overlays.filter((o) => !o.caption), ...caps] }));
+      // One undo step; regenerating replaces earlier captions. The words
+      // are kept too, for editing by text (Transcript).
+      apply((p) => ({ ...p, overlays: [...p.overlays.filter((o) => !o.caption), ...caps], transcript }));
       say(`Added ${caps.length} captions. Click one to edit its text.`);
     } catch (e) {
       console.error("[captions]", e);
@@ -877,7 +988,49 @@ export default function VideoEditor({
       setBusy(null);
       setCaptioning(false);
     }
-  }, [lay, project, sources, captionOpts, canvasSize, apply, say]);
+  }, [transcribeTimeline, captionOpts, canvasSize, lay.total, apply, say]);
+
+  const runTranscript = useCallback(async () => {
+    setPlaying(false);
+    setCaptioning(true);
+    try {
+      const transcript = await transcribeTimeline();
+      if (!transcript) {
+        say("There's no sound in your clips to transcribe.");
+        return;
+      }
+      apply((p) => ({ ...p, transcript }));
+      say(transcript.words.length ? `Transcribed ${transcript.words.length} words.` : "No speech was found in your clips.");
+    } catch (e) {
+      console.error("[transcript]", e);
+      say("Transcribing failed. Check your connection and try again.");
+    } finally {
+      setBusy(null);
+      setCaptioning(false);
+    }
+  }, [transcribeTimeline, apply, say]);
+
+  /** Cuts the transcript words `indices` out of the video (one undo step);
+   * captions, if any, are rebuilt from the words that are left. */
+  const cutByWords = useCallback(
+    (indices: number[]) => {
+      const res = cutWords(project, lay.fps, indices);
+      if (!res.ok) {
+        say(res.error);
+        return;
+      }
+      let next = res.project;
+      if (next.transcript && project.overlays.some((o) => o.caption)) {
+        const total = layout(next, lay.fps).total;
+        const chunks = groupWords(next.transcript.words, captionOpts.maxWords, lineCharsFor(canvasSize), total);
+        next = { ...next, overlays: [...next.overlays.filter((o) => !o.caption), ...captionOverlays(chunks, captionOpts.style, captionOpts.y)] };
+      }
+      apply(() => next);
+      setSelection(null);
+      say(`Cut ${res.removed.toFixed(1)} s. Undo brings it back.`);
+    },
+    [project, lay.fps, captionOpts, canvasSize, apply, say]
+  );
 
   const restyleCaptions = useCallback(
     (opts: CaptionOptions) =>
@@ -975,6 +1128,65 @@ export default function VideoEditor({
     [lay, apply, say]
   );
 
+  /** Desktop: the clip's sound, cleaned up on the local engine (noise
+   * reduced, loudness evened out), on its own audio track in place of the
+   * clip's own - like Extract audio, so preview and export play the same
+   * file. Undo brings the original back. */
+  const cleanUpAudio = useCallback(
+    async (clipId: string) => {
+      const laid = lay.clips.find((c) => c.clip.id === clipId);
+      const src = laid && sources[laid.clip.sourceId];
+      if (!laid || !src) return;
+      if (laid.clip.freeze !== null || laid.clip.reverse) {
+        say("Freeze frames and reversed clips have no audio to clean up.");
+        return;
+      }
+      if (laid.clip.speed !== 1) {
+        say("Set the clip's speed to 1× before cleaning up its audio.");
+        return;
+      }
+      setPlaying(false);
+      setBusy("Cleaning up audio…");
+      try {
+        const blob = await cleanAudio(sourceInput(src), laid.clip.start, laid.clip.end, { denoise: 0.6, level: true });
+        const file = new File([blob], `clean-${sourceName(src).replace(/.[^.]+$/, "")}.m4a`, { type: "audio/mp4" });
+        const cleaned: MediaSource = {
+          id: newId("snd"),
+          kind: "audio",
+          file,
+          url: URL.createObjectURL(file),
+          duration: laid.clip.end - laid.clip.start,
+          width: 0,
+          height: 0,
+          fps: 0,
+          hasAudio: true,
+        };
+        addSource(cleaned);
+        const track: AudioClip = {
+          id: newId("aud"),
+          sourceId: cleaned.id,
+          label: `Cleaned audio from clip ${laid.index + 1}`,
+          start: laid.start,
+          offset: 0,
+          duration: laid.duration,
+          volume: laid.clip.volume || 1,
+          fadeIn: 0,
+          fadeOut: 0,
+          muted: false,
+        };
+        apply((p) => ({ ...updateClip(p, clipId, { volume: 0 }), audio: [...p.audio, track] }));
+        setSelection({ kind: "audio", id: track.id });
+        say("Cleaned-up audio is on its own track. Undo brings the original back.");
+      } catch (e) {
+        console.error("[editor] audio cleanup failed", e);
+        say(e instanceof Error && e.message ? e.message : "This clip's audio couldn't be cleaned up.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [lay, sources, apply, say, addSource]
+  );
+
   const addEffect = useCallback(
     (type: EffectType) => {
       const e: EffectClip = { id: newId("fx"), type, ...placeAt(2), intensity: 50 };
@@ -1056,7 +1268,7 @@ export default function VideoEditor({
     addOverlay,
     baseOverlay: baseOverlay as never,
     importImage,
-    fileName: original?.file.name ?? "wipeclip",
+    fileName: (original && sourceName(original)) || "wipeclip",
     onClose: () => setTool(null),
   });
   const [modelCached, setModelCached] = useState<boolean | null>(null);
@@ -1075,7 +1287,7 @@ export default function VideoEditor({
         say("No visible captions to export.");
         return;
       }
-      const name = `${(original?.file.name ?? "captions").replace(/\.[^.]+$/, "")}.${format}`;
+      const name = `${((original && sourceName(original)) || "captions").replace(/\.[^.]+$/, "")}.${format}`;
       const text = format === "srt" ? toSrt(cues) : format === "vtt" ? toVtt(cues) : toPlainTranscript(cues);
       try {
         const r = await saveTextFile(name, text);
@@ -1259,6 +1471,24 @@ export default function VideoEditor({
     [apply, say, addSource]
   );
 
+  /** Saves the open project as a .wipeclip file the user can move to
+   * another computer (projectFile.ts). */
+  const saveProjectFile = useCallback(async () => {
+    if (!info) return;
+    setPlaying(false);
+    setBusy("Saving project file…");
+    try {
+      const blob = await createProjectFile(info, project, Object.values(sources));
+      const res = await saveExportFile(blob, projectFileName(info.name), "project");
+      if (res.status === "saved") say(IS_DESKTOP ? `Saved ${res.path}` : "Project file downloaded.");
+    } catch (e) {
+      console.error("[editor] project file save failed", e);
+      say(e instanceof Error && e.message ? `Couldn't save the project file: ${e.message}` : "Couldn't save the project file.");
+    } finally {
+      setBusy(null);
+    }
+  }, [info, project, sources, say]);
+
   /** Back to the start screen. The project is saved first and stays in
    * Recent projects, so nothing needs confirming. */
   const closeProject = useCallback(async () => {
@@ -1364,7 +1594,7 @@ export default function VideoEditor({
           <input
             value={info.name}
             onChange={(e) => setInfo({ ...info, name: e.target.value })}
-            onBlur={() => !info.name.trim() && setInfo({ ...info, name: nameFromFile(original.file.name) })}
+            onBlur={() => !info.name.trim() && setInfo({ ...info, name: nameFromFile(sourceName(original)) })}
             onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
             aria-label="Project name"
             maxLength={120}
@@ -1386,6 +1616,14 @@ export default function VideoEditor({
             </ToolButton>
             <button
               type="button"
+              onClick={saveProjectFile}
+              title="Save this project, with its videos, as one .wipeclip file"
+              className="hidden rounded-full px-3 py-2 text-xs font-semibold text-muted hover:text-foreground sm:inline"
+            >
+              Save file
+            </button>
+            <button
+              type="button"
               onClick={closeProject}
               title="Back to your projects. This one is saved."
               className="hidden rounded-full px-3 py-2 text-xs font-semibold text-muted hover:text-foreground sm:inline"
@@ -1404,6 +1642,18 @@ export default function VideoEditor({
             className="inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold text-muted hover:text-foreground"
           >
             <span className="h-2 w-2 rounded-full bg-rose-500" aria-hidden /> Record
+          </button>
+        )}
+        {onImageTools && (
+          <button
+            type="button"
+            onClick={() => {
+              setPlaying(false);
+              onImageTools();
+            }}
+            className="hidden rounded-full px-3 py-2 text-xs font-semibold text-muted hover:text-foreground sm:inline"
+          >
+            Image tools
           </button>
         )}
         <ThemeToggle />
@@ -1445,7 +1695,7 @@ export default function VideoEditor({
             {phase === "probing" ? (
               <div className="mt-8 flex flex-col items-center gap-4 rounded-[1.75rem] border border-border bg-surface-2/70 p-12 text-center" role="status">
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent-2/20 border-t-accent-2" />
-                <p className="text-sm font-medium text-foreground">Checking your video…</p>
+                <p className="text-sm font-medium text-foreground">{opening ?? "Checking your video…"}</p>
               </div>
             ) : phase === "loading" ? (
               <div className="mt-8 h-48 animate-pulse rounded-[1.75rem] bg-surface-2/70" />
@@ -1461,11 +1711,24 @@ export default function VideoEditor({
                     e.target.value = "";
                   }}
                 />
+                <input
+                  ref={projectFileInput}
+                  type="file"
+                  accept={`.${PROJECT_FILE_EXT}`}
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void openProjectFile(f);
+                    e.target.value = "";
+                  }}
+                />
                 <button
                   type="button"
                   onClick={() => {
                     trackEvent("upload_clicked", { tool: TOOL });
-                    fileInput.current?.click();
+                    // Desktop: the OS dialog, so the video is edited where it is.
+                    if (IS_DESKTOP) void chooseVideoOnDisk().then(importFile, (e) => setImportError({ message: String(e) }));
+                    else fileInput.current?.click();
                   }}
                   onDragOver={(e) => {
                     e.preventDefault();
@@ -1485,8 +1748,15 @@ export default function VideoEditor({
                     <UploadIcon width={24} height={24} />
                   </span>
                   <span className="text-base font-semibold text-foreground">Drop a video here, or click to browse</span>
-                  <span className="mt-1 text-xs text-muted sm:text-sm">MP4, MOV, WebM · up to 300MB · up to 10 minutes</span>
+                  <span className="mt-1 text-xs text-muted sm:text-sm">
+                    {IS_DESKTOP ? "MP4, MOV, WebM · any size, edited where it is · exports up to 10 minutes" : "MP4, MOV, WebM · up to 300MB · up to 10 minutes"}
+                  </span>
                 </button>
+                <p className="mt-2 text-center text-xs text-muted">
+                  <button type="button" onClick={() => projectFileInput.current?.click()} className="underline hover:text-foreground">
+                    Open a project file (.{PROJECT_FILE_EXT})
+                  </button>
+                </p>
                 {onRecord && (
                   <button
                     type="button"
@@ -1494,6 +1764,15 @@ export default function VideoEditor({
                     className="btn-secondary mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-semibold"
                   >
                     <span className="h-2.5 w-2.5 rounded-full bg-rose-500" aria-hidden /> Record your screen
+                  </button>
+                )}
+                {onImageTools && (
+                  <button
+                    type="button"
+                    onClick={onImageTools}
+                    className="btn-secondary mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-semibold"
+                  >
+                    Image tools: remove a background, sharpen a photo, grab a frame
                   </button>
                 )}
               </>
@@ -1577,6 +1856,23 @@ export default function VideoEditor({
         onUploadBackground={(f) => void uploadBackground(f)}
         onClose={() => setTool(null)}
         gesture={gesture}
+      />
+    );
+  } else if (tool === "transcript") {
+    panel = (
+      <TranscriptPanel
+        transcript={project.transcript}
+        current={transcriptCurrent(project.transcript, lay)}
+        busy={captioning}
+        clock={clock}
+        hasCaptions={project.overlays.some((o) => o.caption)}
+        onSeek={(t) => {
+          setPlaying(false);
+          seek(t);
+        }}
+        onTranscribe={() => void runTranscript()}
+        onDelete={cutByWords}
+        onClose={() => setTool(null)}
       />
     );
   } else if (tool === "captions") {
@@ -1716,6 +2012,7 @@ export default function VideoEditor({
             source={src}
             onChange={change}
             onExtractAudio={() => extractAudio(selectedClip.clip.id)}
+            onCleanAudio={IS_DESKTOP ? () => void cleanUpAudio(selectedClip.clip.id) : undefined}
             onOpenLook={() => openLook("filters")}
             gesture={gesture}
           />
@@ -2095,6 +2392,7 @@ export default function VideoEditor({
             <span className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden />
             {toolBtn("text", "Text", <TextIcon />, "Add text (T)")}
             {toolBtn("captions", "Captions", <CaptionsIcon />, "Auto captions from speech")}
+            {toolBtn("transcript", "Transcript", <TextIcon />, "Edit by text: delete words to cut them out")}
             {toolBtn("audio", "Audio", <MusicIcon />, "Music and audio")}
             {toolBtn("elements", "Elements", <ElementsIcon />, "Stickers and images")}
             {toolBtn("effects", "Effects", <EffectIcon />, "Timed effects")}

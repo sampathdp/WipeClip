@@ -58,7 +58,7 @@ export function maskRect(
     if (!laid || !src) return null;
     const clip = laid.clip;
     const s = sourceTimeAt(laid, Math.min(t, laid.start + laid.duration));
-    const box = videoBox(clip, src, canvas, project.canvas.fit);
+    const box = videoBox(clip, src, canvas, project.canvas);
     const cam = caches.camera.track(project.zooms, clip, visibleView(box, clip.transform));
     const crop = cam ? cameraCrop(clip.crop, evalCamera(cam, s)) : clip.crop;
     return { clip, s, crop, box };

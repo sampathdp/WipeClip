@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { Clock } from "@/lib/editor/clock";
 import { gradeOf, isNeutralColor } from "@/lib/editor/look";
-import { DIP_AUDIO, locate, sourceTimeAt, videoBox, type Layout } from "@/lib/editor/timeline";
+import { DIP_AUDIO, frameShadow, locate, sourceTimeAt, videoBox, type Layout } from "@/lib/editor/timeline";
 import type { AudioClip, Canvas, Clip, Crop, EffectClip, MediaSource, Project } from "@/lib/editor/types";
 import { CameraCache, cameraCrop, clipView, evalCamera } from "@/lib/editor/camera";
 import { PointerCache, pointerScene } from "@/lib/editor/pointer";
@@ -78,6 +78,9 @@ export default function PreviewPlayer({
 }) {
   const slotA = useRef<HTMLVideoElement>(null);
   const slotB = useRef<HTMLVideoElement>(null);
+  /** Drop shadows under each slot's video (CanvasFrame.shadow). */
+  const shadowA = useRef<HTMLDivElement>(null);
+  const shadowB = useRef<HTMLDivElement>(null);
   const dipRef = useRef<HTMLDivElement>(null);
   const fxRef = useRef<HTMLDivElement>(null);
   const blurBgRef = useRef<HTMLCanvasElement>(null);
@@ -229,11 +232,11 @@ export default function PreviewPlayer({
       const crops: (Crop | null)[] = needs.map((need) => {
         if (!need) return null;
         const clip = lay.clips[need.index].clip;
-        const view = clipView(clip, sources[clip.sourceId], canvasSize, canvas.fit);
+        const view = clipView(clip, sources[clip.sourceId], canvasSize, canvas);
         const cam = caches.current.camera.track(project?.zooms, clip, view);
         return cam ? cameraCrop(clip.crop, evalCamera(cam, need.time)) : clip.crop;
       });
-      applyComposite(els as HTMLVideoElement[], needs, crops, loc, lay, sources, canvas, canvasSize, stageW, stageH, dipRef.current, volume, muted);
+      applyComposite(els as HTMLVideoElement[], [shadowA.current, shadowB.current], needs, crops, loc, lay, sources, canvas, canvasSize, stageW, stageH, dipRef.current, volume, muted);
       drawBlurBackground(blurBgRef.current, canvas, loc ? els[loc.primary.index % 2]! : null, loc ? crops[loc.primary.index % 2] : null);
       if (maskWrapRef.current && maskCanvasRef.current) {
         drawMasks(maskWrapRef.current, maskCanvasRef.current, project?.masks ?? [], t, lay, project ?? ({} as Project), sources, canvasSize, caches.current, loc ? els[loc.primary.index % 2]! : null);
@@ -338,6 +341,8 @@ export default function PreviewPlayer({
             // eslint-disable-next-line @next/next/no-img-element
             <img src={bgImage.url} alt="" className="absolute inset-0 h-full w-full object-cover" draggable={false} />
           )}
+          <div ref={shadowA} className="pointer-events-none absolute" style={{ visibility: "hidden" }} aria-hidden />
+          <div ref={shadowB} className="pointer-events-none absolute" style={{ visibility: "hidden" }} aria-hidden />
           <video ref={slotA} playsInline preload="auto" className="pointer-events-none absolute" style={{ visibility: "hidden" }} aria-hidden />
           <video ref={slotB} playsInline preload="auto" className="pointer-events-none absolute" style={{ visibility: "hidden" }} aria-hidden />
           <div ref={dipRef} className="pointer-events-none absolute inset-0" style={{ opacity: 0 }} />
@@ -366,6 +371,7 @@ export default function PreviewPlayer({
 
 function applyComposite(
   els: HTMLVideoElement[],
+  shadows: (HTMLDivElement | null)[],
   needs: (Need | null)[],
   crops: (Crop | null)[],
   loc: ReturnType<typeof locate>,
@@ -432,14 +438,16 @@ function applyComposite(
 
   for (let slot = 0; slot < 2; slot++) {
     const el = els[slot];
+    const sh = shadows[slot];
     const need = needs[slot];
     if (!need) {
       el.style.visibility = "hidden";
+      if (sh) sh.style.visibility = "hidden";
       continue;
     }
     const clip = lay.clips[need.index].clip;
     const src = sources[clip.sourceId];
-    const b = src ? videoBox(clip, src, canvasSize, canvas.fit) : { w: 1, h: 1 };
+    const b = src ? videoBox(clip, src, canvasSize, canvas) : { w: 1, h: 1 };
     const g = gradeOf(clip.look);
     const bw = b.w * W;
     const bh = b.h * H;
@@ -459,13 +467,35 @@ function applyComposite(
     el.style.top = `${clip.transform.y * H - bh / 2 - c.y * fh}px`;
     const cropped = c.x > 0 || c.y > 0 || c.w < 1 || c.h < 1;
     const pct = (v: number) => `${(v * 100).toFixed(3)}%`;
-    el.style.clipPath = cropped ? `inset(${pct(c.y)} ${pct(1 - c.x - c.w)} ${pct(1 - c.y - c.h)} ${pct(c.x)})` : "";
+    // Canvas frame: rounded corners on the visible box (same radius as the
+    // export's alpha mask, editor.py _rounded_mask).
+    const radius = Math.min(0.1, Math.max(0, canvas.frame?.radius ?? 0)) * Math.min(W, H);
+    const round = radius > 0 ? ` round ${radius.toFixed(2)}px` : "";
+    el.style.clipPath = cropped || round ? `inset(${pct(c.y)} ${pct(1 - c.x - c.w)} ${pct(1 - c.y - c.h)} ${pct(c.x)}${round})` : "";
     el.style.transformOrigin = `${pct(c.x + c.w / 2)} ${pct(c.y + c.h / 2)}`;
     el.style.objectFit = "fill";
     el.style.visibility = extra[slot].visible ? "visible" : "hidden";
     el.style.zIndex = need.role === "incoming" ? "2" : "1";
     el.style.transform = `${extra[slot].transform} rotate(${clip.transform.rotation}deg)`;
     el.style.opacity = String(extra[slot].opacity * g.opacity);
+    const shadow = frameShadow(canvas.frame);
+    if (sh) {
+      if (!shadow || !extra[slot].visible) {
+        sh.style.visibility = "hidden";
+      } else {
+        // The visible box itself, under the video, moving with it.
+        sh.style.visibility = "visible";
+        sh.style.left = `${clip.transform.x * W - bw / 2}px`;
+        sh.style.top = `${clip.transform.y * H - bh / 2}px`;
+        sh.style.width = `${bw}px`;
+        sh.style.height = `${bh}px`;
+        sh.style.borderRadius = `${radius}px`;
+        sh.style.boxShadow = `0 ${(shadow.dy * H).toFixed(2)}px ${(shadow.blur * H).toFixed(2)}px rgba(0,0,0,${shadow.alpha.toFixed(3)})`;
+        sh.style.transform = el.style.transform;
+        sh.style.opacity = el.style.opacity;
+        sh.style.zIndex = el.style.zIndex;
+      }
+    }
     const filters: string[] = [];
     if (!isNeutralColor(clip.look) || g.sharpness > 0) filters.push(`url(#look-${clip.id})`);
     if (g.blur > 0) filters.push(`blur(${(g.blur * H).toFixed(2)}px)`);
