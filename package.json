@@ -13,6 +13,7 @@
     "desktop:dev": "node desktop/scripts/tauri.mjs dev",
     "desktop:build": "node desktop/scripts/tauri.mjs build",
     "desktop:frontend:dev": "next dev desktop --port 3100",
+    "desktop:release": "node desktop/scripts/release.mjs",
     "desktop:frontend:build": "next build desktop && node desktop/scripts/check-bundle.mjs",
     "desktop:test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "desktop:test:js": "node --experimental-strip-types --no-warnings --test \"tests/desktop/*.test.*\"",

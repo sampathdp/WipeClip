@@ -158,12 +158,17 @@ The app checks `https://github.com/sampathdp/wipeclip-releases/releases/latest/d
 
 Update bundles are signed with a minisign key, separate from code signing. The public key is in `tauri.conf.json` (`plugins.updater.pubkey`). The private key and its password were generated on the release maintainer's machine (`~/.tauri/wipeclip-updater.key`, `~/.tauri/wipeclip-updater.password`) and must exist **only** there, in a password manager backup, and as repository secrets `TAURI_SIGNING_PRIVATE_KEY` (the key file's contents) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. **If the key is lost, installed apps can never be updated again** - users would have to reinstall by hand.
 
-Releasing a version:
+Releasing a version is one command, from a clean `master`:
 
-1. Bump `version` in `src-tauri/tauri.conf.json` and `package.json`, commit, push.
-2. `git tag desktop-v<version> && git push origin desktop-v<version>`, then in GitHub: Actions > Desktop > Run workflow, pick the tag under "Use workflow from" (not `master`; only a tag run makes a release) and run it.
-3. `desktop.yml` builds both platforms with the signing key, then `desktop/scripts/update-manifest.mjs` checks that the tag matches the version, renames the assets and writes `latest.json`, and a **draft** release is created in the releases repo with the Windows installer, the macOS DMG and update tarball, fixed-name copies of both installers, and `latest.json`.
-4. Check the draft (install it on a test machine), then publish it. Only published, non-prerelease releases count as "latest", so users are offered the update and the website's download buttons serve it from that moment.
+```sh
+npm run desktop:release -- patch      # or minor, major, or an exact version like 0.2.0
+```
+
+1. `desktop/scripts/release.mjs` sets the version in `package.json` (and its lock), `src-tauri/tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, commits, tags `desktop-v<version>` and pushes both.
+2. The tag push starts `desktop.yml`, which builds both platforms with the signing key; `desktop/scripts/update-manifest.mjs` checks that the tag matches the version, renames the assets and writes `latest.json`.
+3. When every platform has built, the release is **published** in the releases repo (Windows installer, macOS DMG and update tarball, fixed-name copies of both installers, `latest.json`) as the latest release. Installed apps show the update banner on their next check (launch, or every 6 hours), and the website's download buttons serve it. If any platform fails, nothing is published.
+
+There's no manual check before users get it, so try the build first when a change is risky: run the workflow by hand on `master` (Actions > Desktop > Run workflow) and install the artifact.
 
 Releases live in a separate **public** repository, `sampathdp/wipeclip-releases` (`RELEASES_REPO` in `desktop.yml`, which must match `plugins.updater.endpoints`): the updater and the website's download buttons fetch release assets without authentication, and this code repository can stay private. One-time setup:
 

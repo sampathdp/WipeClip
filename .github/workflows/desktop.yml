@@ -1,17 +1,19 @@
 name: Desktop
 
 # Builds the WipeClip desktop app (Tauri) on real Windows and macOS runners.
-# See docs/desktop/README.md. Runs only when started by hand (Actions >
-# Desktop > Run workflow), uploading the installers as workflow artifacts.
-# Started on a tag desktop-v<version> (picked under "Use workflow from"), it
-# also creates a *draft* release with the signed
-# installers and latest.json (the app's update feed) in the public releases
-# repo (RELEASES_REPO; this code repo can stay private); publishing the draft
-# is what offers the update and the download to users. See
-# docs/desktop/RELEASE.md (Updates).
+# See docs/desktop/README.md. Started by hand (Actions > Desktop > Run
+# workflow) it uploads the installers as workflow artifacts. Pushing a tag
+# desktop-v<version> (npm run desktop:release -- <version>) runs it on its
+# own and, once every platform has built, *publishes* a release with the
+# signed installers and latest.json (the app's update feed) in the public
+# releases repo (RELEASES_REPO; this code repo can stay private): installed
+# apps offer the update and the website serves the download from then on,
+# with no manual step. See docs/desktop/RELEASE.md (Updates).
 
 on:
   workflow_dispatch: {}
+  push:
+    tags: ["desktop-v*"]
 
 jobs:
   build:
@@ -158,14 +160,15 @@ jobs:
       - name: Release assets and update feed
         run: node desktop/scripts/update-manifest.mjs artifacts release "${GITHUB_REF_NAME}" "${RELEASES_REPO}"
 
-      # A draft: users get nothing until it is published on GitHub.
+      # Published at once as the latest release: installed apps see it on
+      # their next update check. Only reached when every platform built.
       # RELEASES_TOKEN: a fine-grained token with Contents read/write on the
       # releases repo only (this job's own token can't write to another repo).
-      - name: Draft release
+      - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then echo "::error::RELEASES_TOKEN secret is missing - see docs/desktop/RELEASE.md (Updates)."; exit 1; fi
-          gh release create "${GITHUB_REF_NAME}" release/* --repo "${RELEASES_REPO}" --draft \
+          gh release create "${GITHUB_REF_NAME}" release/* --repo "${RELEASES_REPO}" --latest \
             --title "WipeClip ${GITHUB_REF_NAME#desktop-v}" \
             --notes "WipeClip ${GITHUB_REF_NAME#desktop-v} for Windows and macOS. Download the installer below, or let the app update itself."
