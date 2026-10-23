@@ -14,6 +14,7 @@
 import { newId } from "./timeline.ts";
 import { migrateProject, type MediaSource, type Project } from "./types.ts";
 import { buildZip, readZip, ZipError } from "./zip.ts";
+import { sourceFile, sourceName, sourceType } from "./sourceFile.ts";
 
 export const PROJECT_FILE_EXT = "wipeclip";
 const FORMAT = "wipeclip-project";
@@ -56,7 +57,7 @@ export function projectFileName(name: string): string {
   return `${safe || "project"}.${PROJECT_FILE_EXT}`;
 }
 
-const mediaPath = (s: MediaSource) => `media/${s.id}/${s.file.name.replace(/[\u0000-\u001f/\\]+/g, "_") || "file"}`;
+const mediaPath = (s: MediaSource) => `media/${s.id}/${sourceName(s).replace(/[\u0000-\u001f/\\]+/g, "_") || "file"}`;
 
 /** Source ids the project refers to, so a file can't open with a clip or
  * layer pointing at nothing. */
@@ -92,13 +93,14 @@ export async function createProjectFile(info: { name: string; createdAt: number 
   // Only what the project uses: undo history (and so unused AI-cleaned
   // versions) isn't saved in the file.
   const kept = sources.filter((s) => used.has(s.id));
-  const entries = kept.map((s) => ({ name: mediaPath(s), data: s.file as Blob }));
+  // Sources that stay on disk are read here, to go into the file.
+  const entries = await Promise.all(kept.map(async (s) => ({ name: mediaPath(s), data: (await sourceFile(s)) as Blob })));
   const sourceEntries: SourceEntry[] = kept.map((s) => {
     const entry: SourceEntry = {
       id: s.id,
       kind: s.kind,
-      name: s.file.name,
-      type: s.file.type,
+      name: sourceName(s),
+      type: sourceType(s),
       duration: s.duration,
       width: s.width,
       height: s.height,
@@ -215,7 +217,7 @@ export async function readProjectFile(file: Blob): Promise<OpenedProjectFile> {
   const fresh = new Map(sources.map((s) => [s.id, newId("src")]));
   for (const s of sources) {
     s.id = fresh.get(s.id)!;
-    s.url = URL.createObjectURL(s.file);
+    s.url = URL.createObjectURL(s.file!);
   }
   const name = typeof m.name === "string" && m.name.trim() ? m.name.trim().slice(0, 120) : "Imported project";
   return { name, project: remapSources(project, fresh), sources };

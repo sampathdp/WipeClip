@@ -129,7 +129,7 @@ export interface Waveform {
 
 const WAVE_RATE = 50;
 const WAVE_SAMPLE_RATE = 8000; // decode low-rate: plenty for drawing, ~6x less memory
-const MAX_WAVE_FILE_BYTES = 400 * 1024 * 1024;
+export const MAX_WAVE_FILE_BYTES = 400 * 1024 * 1024;
 
 /** Peak envelope of a file's audio for the timeline. Unlike the helpers
  * above this does read the whole file into memory (decodeAudioData needs

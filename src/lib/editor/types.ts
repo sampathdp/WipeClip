@@ -377,8 +377,13 @@ export interface MediaSource {
   id: string;
   /** "layer": a video imported for a picture-in-picture layer. */
   kind: "original" | "cleaned" | "audio" | "image" | "layer" | "take";
-  file: File;
-  url: string; // object URL
+  /** The file's contents; null for a source that stays on disk (`disk`),
+   * whose bytes are read only when needed (sourceFile.ts). */
+  file: File | null;
+  /** Desktop: the file on the user's disk this source is edited in place
+   * from (src-tauri/src/media.rs). */
+  disk?: DiskMedia;
+  url: string; // object URL, or the asset protocol URL of a disk source
   duration: number; // 0 for images
   width: number; // display size; 0 for audio
   height: number;
@@ -386,6 +391,15 @@ export interface MediaSource {
   hasAudio: boolean;
   /** Set on sources that came from a desktop screen recording. */
   recording?: RecordingAttachment;
+}
+
+/** A file that stays where it is on the user's disk (desktop app). */
+export interface DiskMedia {
+  path: string;
+  name: string;
+  size: number;
+  /** Media type from the extension, e.g. "video/mp4". */
+  type: string;
 }
 
 /** What a recorded source keeps from its recording (src/lib/recorder/

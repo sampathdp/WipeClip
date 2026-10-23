@@ -63,6 +63,12 @@ impl RecordingState {
         self.sessions.lock().ok()?.get(id).map(|s| s.dir.clone())
     }
 
+    /// A recording folder this session made, opened or found, so its media
+    /// may be played and edited in place (src/media.rs).
+    pub fn is_known_folder(&self, dir: &Path) -> bool {
+        self.known.lock().map(|k| k.contains(dir)).unwrap_or(false)
+    }
+
     /// A recording is being written (started and not yet finished).
     pub fn is_recording(&self) -> bool {
         self.sessions.lock().map(|s| !s.is_empty()).unwrap_or(true)

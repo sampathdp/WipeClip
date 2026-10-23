@@ -1,4 +1,6 @@
 import { apiFetch, localEngine, type LocalEngine } from "@/lib/platform";
+import type { DiskMedia } from "@/lib/editor/types";
+import { readDiskFile } from "@/lib/platform/media";
 
 export const TOOLS_API_URL =
   process.env.NEXT_PUBLIC_TOOLS_API_URL ?? "http://localhost:8001";
@@ -154,18 +156,31 @@ function forgetExpiredUpload(file: File, res: Response): void {
   }
 }
 
+/** A video to send: its contents, or (desktop app) a file that stays on
+ * disk, which the local engine reads by path and the cloud backend only
+ * gets once it has been read. */
+export type MediaInput = File | DiskMedia;
+
+const isDisk = (m: MediaInput): m is DiskMedia => !(m instanceof Blob);
+/** Bytes for the cloud backend: a disk file is read here. */
+const asFile = (m: MediaInput): Promise<File> => (isDisk(m) ? readDiskFile(m) : Promise.resolve(m));
+
 export async function probeVideo(
-  file: File
+  input: MediaInput
 ): Promise<{ info: VideoInfo; previewUrl: string }> {
   const engine = await localEngine();
   let res: Response;
+  // Only set when uploaded (the upload caches are keyed by File).
+  let file: File | null = null;
   if (engine) {
     // Desktop app: checked on this machine - no upload, no ticket.
     const body = new FormData();
-    body.append("file", file);
+    if (isDisk(input)) body.append("path", input.path);
+    else body.append("file", input);
     res = await fetch(`${engine.url}/api/video/probe`, { method: "POST", body, headers: engineHeaders(engine) });
   } else {
     assertBackendEnabled();
+    file = await asFile(input);
     const body = new FormData();
     await appendVideo(body, file);
     body.append("ticket", await uploadTicket(file));
@@ -175,8 +190,10 @@ export async function probeVideo(
     });
   }
 
-  forgetExpiredUpload(file, res);
-  if (res.status === 403) uploadTickets.delete(file);
+  if (file) {
+    forgetExpiredUpload(file, res);
+    if (res.status === 403) uploadTickets.delete(file);
+  }
   if (!res.ok) {
     await throwApiError(res, "Could not read that video.");
   }
@@ -226,7 +243,7 @@ async function getTicket(route: string, payload: Record<string, unknown> & { loc
  * range's length is billed instead.
  */
 export async function processVideo(
-  file: File,
+  input: MediaInput,
   region: Region,
   resolution: Resolution,
   duration: number,
@@ -246,18 +263,21 @@ export async function processVideo(
   const engine = await localEngine();
   if (engine) {
     try {
-      ({ ticket } = await getTicket("/api/process", { resolution, filename: file.name, duration: seconds, local: true }, failed, signal));
+      ({ ticket } = await getTicket("/api/process", { resolution, filename: input.name, duration: seconds, local: true }, failed, signal));
       target = engine.url;
       headers = engineHeaders(engine);
-      body.append("file", file);
+      if (isDisk(input)) body.append("path", input.path);
+      else body.append("file", input);
     } catch (e) {
       if (!(e instanceof PlanRequiredError)) throw e;
     }
   }
+  let file: File | null = null;
   if (!ticket) {
     // Upload before the ticket spends any credits (usually already done by
     // probeVideo for this same File).
     assertBackendEnabled();
+    file = await asFile(input);
     await appendVideo(body, file, signal);
     ({ ticket } = await getTicket("/api/process", { resolution, filename: file.name, duration: seconds }, failed, signal));
   }
@@ -284,8 +304,10 @@ export async function processVideo(
   });
 
   // The backend deletes a direct upload once a job on it succeeds.
-  if (res.ok) directUploads.delete(file);
-  forgetExpiredUpload(file, res);
+  if (file) {
+    if (res.ok) directUploads.delete(file);
+    forgetExpiredUpload(file, res);
+  }
   if (!res.ok) {
     await throwApiError(res, failed);
   }
@@ -302,9 +324,9 @@ export async function processVideo(
  */
 export async function exportEditorProject(
   project: unknown,
-  sources: File[],
+  sources: MediaInput[],
   overlays: Blob[],
-  audios: File[],
+  audios: MediaInput[],
   background: File | null,
   resolution: Resolution,
   signal?: AbortSignal
@@ -318,9 +340,19 @@ export async function exportEditorProject(
   body.append("ticket", ticket);
   // Byte-for-byte the string the ticket was issued for (it carries its hash).
   body.append("project", projectJson);
-  for (const source of sources) body.append("sources", source, source.name);
+  // The local engine reads disk files by path (source_paths/audio_paths,
+  // in order, null = the next uploaded file); the cloud gets every file.
+  const files = async (field: string, list: MediaInput[]) => {
+    if (engine && list.some(isDisk)) body.append(`${field.slice(0, -1)}_paths`, JSON.stringify(list.map((m) => (isDisk(m) ? m.path : null))));
+    for (const m of list) {
+      if (engine && isDisk(m)) continue;
+      const f = await asFile(m);
+      body.append(field, f, f.name);
+    }
+  };
+  await files("sources", sources);
   overlays.forEach((image, i) => body.append("overlays", image, `layer-${i}.png`));
-  for (const audio of audios) body.append("audios", audio, audio.name);
+  await files("audios", audios);
   if (background) body.append("background", background, background.name);
 
   const res = engine

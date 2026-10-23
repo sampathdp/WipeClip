@@ -25,7 +25,9 @@ export function loadRaster(o: Overlay, sources: Record<string, MediaSource>): Pr
   if (o.kind === "shape") return rasterizeShape(o.shape);
   const src = sources[o.sourceId];
   if (!src) return Promise.reject(new Error(o.kind === "video" ? "Missing video" : "Missing image"));
-  return Promise.resolve({ blob: src.file, url: src.url, width: src.width, height: src.height });
+  // Only image layers' blobs are exported; video layers go as sources, and
+  // only videos stay on disk (file null), so they never need this blob.
+  return Promise.resolve({ blob: src.file ?? new Blob(), url: src.url, width: src.width, height: src.height });
 }
 
 /** Rasters for the given overlays, filled in as they become ready. Text is

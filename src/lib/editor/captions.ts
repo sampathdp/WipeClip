@@ -7,6 +7,7 @@ import { DEFAULT_TEXT } from "./textRaster";
 import { newId, type Layout } from "./timeline";
 import type { AnimIn, MediaSource, Overlay, Project, TextStyle } from "./types";
 import { clippedSpans, type AudioSpan } from "./audioAnalysis";
+import { sourceFile, sourceName, sourceSize } from "./sourceFile";
 
 const RATE = 16000; // what Whisper works at
 const MAX_DECODE_BYTES = 400 * 1024 * 1024; // decodeAudioData holds the whole file
@@ -58,12 +59,12 @@ export async function buildSpeechMix(
   const decode = (src: MediaSource) => {
     let p = decoded.get(src.id);
     if (!p) {
-      if (src.file.size > MAX_DECODE_BYTES) skipped.push(src.file.name || "a large file");
+      if (sourceSize(src) > MAX_DECODE_BYTES) skipped.push(sourceName(src) || "a large file");
       p =
-        src.file.size > MAX_DECODE_BYTES
+        sourceSize(src) > MAX_DECODE_BYTES
           ? Promise.resolve(null)
-          : src.file
-              .arrayBuffer()
+          : sourceFile(src)
+              .then((f) => f.arrayBuffer())
               .then((bytes) => new OfflineAudioContext(1, 1, RATE).decodeAudioData(bytes))
               .catch(() => null);
       decoded.set(src.id, p);

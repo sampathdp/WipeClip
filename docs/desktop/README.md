@@ -110,7 +110,7 @@ Output goes to `src-tauri/target/release/bundle/`.
 
 ## Behaviour notes
 
-- **Import** uses the WebView's own file picker, which is the native OS open dialog in both WebView2 and WKWebView. The picked file stays disk-backed, so a 300 MB video isn't copied into memory just to open it. The existing type, size, codec and server checks apply unchanged. Drag and drop works as on the website.
+- **Import**: clicking the start screen's box opens the OS dialog through the app (`media_choose`); the video is then edited where it is on disk, at any size (see RELEASE.md, Projects). Drag and drop works as on the website (the dropped file is kept in app storage, up to 300 MB). Codec and server checks apply unchanged.
 - **Export** renders on the local engine. "Save MP4…" opens the save dialog (the OS asks before replacing a file), writes to a hidden temporary file beside the target, flushes, and renames it into place. Failures delete the temporary file and keep the export in the dialog so you can pick another folder. Plan and branding rules come from the server, unchanged.
 - **Offline**: editing an already-open project and opening a new video work. AI cleanup, sign-in and export still need a connection for the plan check (the job ticket); a banner says so.
 - **Auto captions** download the Whisper model from Hugging Face on first use, as on the website.

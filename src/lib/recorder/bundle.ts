@@ -1,6 +1,8 @@
 /** Reading a recording folder back: for the review screen, for opening it
  * in the editor, and for recovering one the app didn't get to finalize.
  */
+import type { DiskMedia } from "@/lib/editor/types";
+import { diskMediaUrl, mediaTypeFor, openDiskMedia } from "@/lib/platform/media";
 import { recordingRead, recordingUpdateManifest, type FoundRecording } from "@/lib/platform/recorder";
 import {
   decodeEvents,
@@ -12,25 +14,27 @@ import {
 } from "./format";
 import { fileTypeFor } from "./mime";
 
-/** Same limit as the editor's own import (VideoEditor MAX_BYTES): the
- * editor keeps sources in memory and export uploads them. */
-export const EDITOR_MAX_VIDEO_BYTES = 300 * 1024 * 1024;
-
 export interface RecordingBundle {
   path: string;
   manifest: RecordingManifest;
-  files: Partial<Record<TrackKind, File>>;
+  /** The tracks' files, edited in place on disk (no size limit: they're
+   * streamed, and the local engine reads them by path). */
+  files: Partial<Record<TrackKind, DiskMedia>>;
   events: InteractionEvent[];
 }
 
-export class RecordingTooLargeError extends Error {}
+/** A track file's full path in its recording folder. */
+export function trackPath(folder: string, file: string): string {
+  return `${folder}${folder.includes("\\") ? "\\" : "/"}${file}`;
+}
 
-export async function readTrackFile(path: string, manifest: RecordingManifest, kind: TrackKind): Promise<File | null> {
+/** The URL a track plays from, streamed from disk; null if it's empty or
+ * can't be opened. */
+export async function trackUrl(path: string, manifest: RecordingManifest, kind: TrackKind): Promise<string | null> {
   const track = manifest.tracks.find((t) => t.kind === kind);
   if (!track || track.bytes === 0) return null;
-  const bytes = await recordingRead(path, track.path);
-  if (bytes.byteLength === 0) return null;
-  return new File([bytes], track.path, { type: fileTypeFor(track.mimeType) });
+  const full = trackPath(path, track.path);
+  return (await openDiskMedia([full])).get(full)?.ok ? diskMediaUrl(full) : null;
 }
 
 export async function readEvents(path: string, manifest: RecordingManifest): Promise<InteractionEvent[]> {
@@ -44,22 +48,20 @@ export async function readEvents(path: string, manifest: RecordingManifest): Pro
   }
 }
 
-/** Everything the editor needs. Throws RecordingTooLargeError when the
- * screen video is over the editor's limit (it stays on disk either way). */
+/** Everything the editor needs. The media stays in the recording folder. */
 export async function loadRecordingBundle(path: string, manifest: RecordingManifest): Promise<RecordingBundle> {
   const screenTrack = manifest.tracks.find((t) => t.kind === "screen");
   if (!screenTrack || screenTrack.bytes === 0) throw new Error("This recording has no screen video.");
-  const tooBig = manifest.tracks.find((t) => t.hasVideo && t.bytes > EDITOR_MAX_VIDEO_BYTES);
-  if (tooBig) {
-    throw new RecordingTooLargeError(
-      `This recording's ${tooBig.kind === "webcam" ? "webcam video" : "video"} is ${Math.round(tooBig.bytes / 1024 / 1024)} MB; the editor opens videos up to 300 MB. It's saved in its folder - record shorter takes or at a lower quality to edit here.`
-    );
-  }
+  const tracks = manifest.tracks.filter((t) => t.bytes > 0);
+  const status = await openDiskMedia(tracks.map((t) => trackPath(path, t.path)));
   const files: RecordingBundle["files"] = {};
-  for (const t of manifest.tracks) {
-    const f = await readTrackFile(path, manifest, t.kind);
-    if (f) files[t.kind] = f;
+  for (const t of tracks) {
+    const full = trackPath(path, t.path);
+    const s = status.get(full);
+    if (!s?.ok) continue;
+    files[t.kind] = { path: full, name: t.path, size: s.size, type: mediaTypeFor(t.path) || fileTypeFor(t.mimeType) };
   }
+  if (!files.screen) throw new Error("This recording's video can't be opened.");
   return { path, manifest, files, events: await readEvents(path, manifest) };
 }
 

@@ -6,6 +6,7 @@ import { cameraPayload, pointerRows } from "./focusExport";
 import { maskRows } from "./masks";
 import { RING_SPRITE_R, pointerSprites } from "./pointerDraw";
 import type { MediaSource, Project } from "./types";
+import { sourceInput } from "./sourceFile";
 
 /** Serializes the project into the backend's export payload (see
  * api_video_export in backend/app/main.py):
@@ -174,9 +175,9 @@ export async function exportProject(
 
   return exportEditorProject(
     payload,
-    sourceIds.map((id) => sources[id].file),
+    sourceIds.map((id) => sourceInput(sources[id])),
     imageBlobs,
-    audioIds.map((id) => sources[id].file),
+    audioIds.map((id) => sourceInput(sources[id])),
     bgSource?.file ?? null,
     resolution,
     signal

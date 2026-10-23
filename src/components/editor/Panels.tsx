@@ -38,6 +38,7 @@ import GradeFilter from "./GradeFilter";
 import PremiumBadge from "./PremiumBadge";
 import { ActionButton, Field, PanelShell, SecondsInput, StickerLibrary } from "./Inspector";
 import { TrashIcon } from "./icons";
+import { sourceName } from "@/lib/editor/sourceFile";
 
 /** Brackets a continuous control (slider drag, color picker) as one undo step. */
 export interface Gesture {
@@ -1339,7 +1340,7 @@ export function LayersPanel({
                 ? (getStickerDef(o.stickerId)?.label ?? "Sticker")
                 : o.kind === "shape"
                   ? SHAPE_LABELS[o.shape.type]
-                  : (sources[o.sourceId]?.file.name ?? (o.kind === "video" ? "Video" : "Image"));
+                  : ((sources[o.sourceId] ? sourceName(sources[o.sourceId]) : undefined) ?? (o.kind === "video" ? "Video" : "Image"));
           const thumb = o.kind === "sticker" ? stickerThumbSrc(getStickerDef(o.stickerId)!) : o.kind === "image" ? sources[o.sourceId]?.url : null;
           return (
             <li

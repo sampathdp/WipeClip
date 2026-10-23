@@ -3,11 +3,13 @@
  * servers" approach as src/lib/resultCache.ts. A library of projects, each
  * reopened from the start screen's Recent projects. Source videos (original
  * + AI-cleaned segments, recordings) are written once each, when added, to
- * their own store under their globally unique id; the small project record
- * is what gets re-saved as the user edits. Best-effort throughout: private
+ * their own store under their globally unique id - except, in the desktop
+ * app, videos that stay on disk (`disk`), which are kept by path only; the
+ * small project record is what gets re-saved as the user edits. Best-effort throughout: private
  * browsing or a full quota just means no recovery, never a broken editor.
  */
 import { IS_DESKTOP } from "../platform/env.ts";
+import { sourceName, sourceSize, sourceType } from "./sourceFile.ts";
 import { newId } from "./timeline.ts";
 import { migrateProject, type MediaSource, type Project } from "./types.ts";
 
@@ -129,8 +131,8 @@ async function withDb<T>(fn: (db: IDBDatabase) => Promise<T>): Promise<T> {
 }
 
 function toMeta(s: MediaSource): SourceMeta {
-  const { id, kind, duration, width, height, fps, hasAudio, file } = s;
-  return { id, kind, duration, width, height, fps, hasAudio, name: file.name, type: file.type, size: file.size };
+  const { id, kind, duration, width, height, fps, hasAudio, disk } = s;
+  return { id, kind, duration, width, height, fps, hasAudio, name: sourceName(s), type: sourceType(s), size: sourceSize(s), ...(disk ? { disk } : {}) };
 }
 
 /** A recorded source's capture details and interaction events, stored once
@@ -144,7 +146,8 @@ const recordingKey = (id: string) => `${id}#recording`;
 export async function saveSource(source: MediaSource): Promise<boolean> {
   try {
     await withDb(async (db) => {
-      await run(db, SOURCE_STORE, "readwrite", (s) => s.put(source.file, source.id));
+      // A disk source is kept by path (in the project record), not copied.
+      if (!source.disk) await run(db, SOURCE_STORE, "readwrite", (s) => s.put(source.file, source.id));
       if (source.recording) await run(db, SOURCE_STORE, "readwrite", (s) => s.put(source.recording, recordingKey(source.id)));
     });
     return true;
@@ -226,6 +229,15 @@ export async function loadProject(id: string): Promise<RestoredProject | Project
       }
       const sources: MediaSource[] = [];
       for (const meta of record.sources) {
+        if (meta.disk) {
+          // Played from its path once the editor has checked it's still
+          // there (linkDiskSources); `url` is set then.
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars -- size is only for the project list
+          const { name, type, size, ...rest } = meta;
+          const recording = await run<MediaSource["recording"]>(db, SOURCE_STORE, "readonly", (s) => s.get(recordingKey(meta.id)));
+          sources.push({ ...rest, file: null, url: "", ...(recording ? { recording } : {}) });
+          continue;
+        }
         const blob = await run<Blob>(db, SOURCE_STORE, "readonly", (s) => s.get(meta.id));
         if (!blob) {
           sources.forEach((s) => URL.revokeObjectURL(s.url));

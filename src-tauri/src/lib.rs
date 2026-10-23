@@ -13,6 +13,7 @@ mod engine;
 mod export;
 mod input;
 mod links;
+mod media;
 mod opened;
 mod recording;
 mod secure_storage;
@@ -303,6 +304,7 @@ pub fn run() {
         .manage(engine::EngineState::default())
         .manage(updater::UpdateState::default())
         .manage(opened::OpenedState::default())
+        .manage(media::MediaState::default())
         .invoke_handler(tauri::generate_handler![
             engine::local_engine,
             system::system_memory,
@@ -338,6 +340,8 @@ pub fn run() {
             updater::update_install,
             opened::opened_files,
             opened::opened_file_read,
+            media::media_choose,
+            media::media_open,
             shortcuts::recorder_shortcuts,
             recording::recording_default_dir,
             recording::recording_choose_dir,

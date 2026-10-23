@@ -303,12 +303,47 @@ async def api_video_upload_url(ticket: str = Form(...), size: int = Form(...), e
     return await asyncio.to_thread(uploads.create_upload_url, extension, limit)
 
 
+def _local_file(raw: str, suffixes: set[str]) -> str:
+    """Desktop engine only: a file already on this machine, named by its
+    path and used where it is (never copied or changed). The app's editor
+    sends paths of videos the user picked or recorded, so large files
+    aren't uploaded to localhost; upload byte caps don't apply to them, the
+    duration limits and content screening do. Refused by the cloud backend."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=400, detail="File paths are only accepted by the desktop engine.")
+    p = Path(raw)
+    if not p.is_absolute() or p.suffix.lower() not in suffixes or not p.is_file():
+        raise HTTPException(status_code=400, detail="The video file can't be found. It may have been moved or deleted.")
+    return str(p)
+
+
+def _local_paths(raw: Optional[str], field: str) -> Optional[list[Optional[str]]]:
+    """`source_paths`/`audio_paths` of an export: a JSON list, one entry per
+    file in order, each a path (desktop engine) or null for the next file in
+    the matching upload list."""
+    if raw is None:
+        return None
+    try:
+        items = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid {field}") from exc
+    if not isinstance(items, list) or not all(i is None or isinstance(i, str) for i in items):
+        raise HTTPException(status_code=400, detail=f"Invalid {field}")
+    return items
+
+
 async def _receive_video(
-    file: Optional[UploadFile], upload_id: Optional[str], tmp: str, max_bytes: int = MAX_VIDEO_UPLOAD_BYTES
+    file: Optional[UploadFile],
+    upload_id: Optional[str],
+    tmp: str,
+    max_bytes: int = MAX_VIDEO_UPLOAD_BYTES,
+    path: Optional[str] = None,
 ) -> str:
     """Puts the job's video in `tmp` - from the bucket when the browser
     uploaded it there (`upload_id`), else from the request body - and
-    returns its path."""
+    returns its path. A local `path` (desktop engine) is returned as is."""
+    if path:
+        return _local_file(path, _VIDEO_SUFFIXES)
     if upload_id:
         in_path = os.path.join(tmp, f"input{uploads.suffix(upload_id)}")
         await asyncio.to_thread(uploads.download, upload_id, in_path, max_bytes)
@@ -325,6 +360,7 @@ async def api_video_probe(
     ticket: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     upload_id: Optional[str] = Form(None),
+    path: Optional[str] = Form(None),  # desktop engine: a file on this machine
 ):
     """Returns a representative preview frame (PNG) plus video metadata as
     response headers, so the frontend can let the user draw a cleanup
@@ -340,7 +376,7 @@ async def api_video_probe(
     else:
         limit = _upload_limit(tickets.verify(ticket or "", "upload"))
     with tempfile.TemporaryDirectory() as tmp:
-        in_path = await _receive_video(file, upload_id, tmp, limit)
+        in_path = await _receive_video(file, upload_id, tmp, limit, path)
         try:
             info, frame_png = video_pipeline.probe_video(in_path)
         except ValueError as exc:
@@ -380,6 +416,7 @@ async def api_video_process(
     ticket: str = Form(...),
     file: Optional[UploadFile] = File(None),
     upload_id: Optional[str] = Form(None),  # a direct upload, in place of `file`
+    path: Optional[str] = Form(None),  # desktop engine: a file on this machine, in place of `file`
     x: int = Form(...),
     y: int = Form(...),
     w: int = Form(...),
@@ -418,7 +455,7 @@ async def api_video_process(
         raise HTTPException(status_code=403, detail="Invalid job ticket.")
     await tickets.claim(ticket)
     try:
-        result = await _video_process(file, upload_id, x, y, w, h, start, end, resolution, quality, max_seconds)
+        result = await _video_process(file, upload_id, x, y, w, h, start, end, resolution, quality, max_seconds, path)
     except (Exception, asyncio.CancelledError):
         # Any failure, rejection (moderation, bad region) or disconnect: no
         # usable result, so the credits go back.
@@ -443,12 +480,13 @@ async def _video_process(
     resolution: str,
     quality: str,
     max_seconds: float = MAX_VIDEO_DURATION_SECONDS,
+    path: Optional[str] = None,
 ):
     if w < MIN_REGION_PX or h < MIN_REGION_PX:
         raise HTTPException(status_code=400, detail=f"Region too small; minimum {MIN_REGION_PX}px per side")
 
     with tempfile.TemporaryDirectory() as tmp:
-        in_path = await _receive_video(file, upload_id, tmp)
+        in_path = await _receive_video(file, upload_id, tmp, path=path)
         out_path = os.path.join(tmp, "output.mp4")
 
         try:
@@ -826,17 +864,21 @@ def _branding_overlay(tmp: str) -> tuple[str, int, int]:
 async def api_video_export(
     ticket: str = Form(...),
     project: str = Form(...),
-    sources: list[UploadFile] = File(...),
+    sources: list[UploadFile] = File(default=[]),
     overlays: list[UploadFile] = File(default=[]),
     audios: list[UploadFile] = File(default=[]),
     background: Optional[UploadFile] = File(None),
+    source_paths: Optional[str] = Form(None),
+    audio_paths: Optional[str] = Form(None),
 ):
     """Renders a browser-editor project (see app/pipeline/editor.py) into
     one MP4. `sources[0]` is the original upload and sets the frame rate and
     (with the canvas aspect) the output size; further sources are AI-cleaned
     segments. `overlays` are the PNGs for stickers/text/images, `audios`
     uploaded audio files, `background` an optional canvas background image.
-    `project` is the JSON timeline - see _EditorProject.
+    `project` is the JSON timeline - see _EditorProject. The desktop engine
+    also takes `source_paths`/`audio_paths` (see _local_paths): files on the
+    user's machine used in place, mixed in order with the uploads.
 
     Nothing the client says about a file is trusted: every video and audio
     file is re-probed (videos are moderation-screened too), every image is
@@ -857,9 +899,25 @@ async def api_video_export(
         raise HTTPException(status_code=403, detail="Invalid job ticket.")
     branding, compact = bool(job.get("branding")), bool(job.get("compact"))
     await tickets.claim(ticket)
-    if not sources or len(sources) > EDITOR_MAX_SOURCES:
+    # Each source/audio is ("upload", UploadFile) or ("path", str).
+    src_plan = _local_paths(source_paths, "source_paths")
+    aud_plan = _local_paths(audio_paths, "audio_paths")
+    if (src_plan is not None or aud_plan is not None) and not LOCAL_MODE:
+        raise HTTPException(status_code=400, detail="File paths are only accepted by the desktop engine.")
+
+    def merge(plan: Optional[list[Optional[str]]], uploads: list[UploadFile]) -> list[tuple[str, object]]:
+        if plan is None:
+            return [("upload", u) for u in uploads]
+        if sum(1 for p in plan if p is None) != len(uploads):
+            raise HTTPException(status_code=400, detail="Files don't match the list of paths")
+        queue = iter(uploads)
+        return [("upload", next(queue)) if p is None else ("path", p) for p in plan]
+
+    source_items = merge(src_plan, sources)
+    audio_items = merge(aud_plan, audios)
+    if not source_items or len(source_items) > EDITOR_MAX_SOURCES:
         raise HTTPException(status_code=400, detail="Invalid number of source videos")
-    if len(overlays) > EDITOR_MAX_STICKERS or len(audios) > EDITOR_MAX_AUDIO:
+    if len(overlays) > EDITOR_MAX_STICKERS or len(audio_items) > EDITOR_MAX_AUDIO:
         raise HTTPException(status_code=400, detail="Too many layers")
 
     try:
@@ -868,7 +926,7 @@ async def api_video_export(
         raise HTTPException(status_code=400, detail="Invalid project data") from exc
 
     for c in spec.clips:
-        if c.source >= len(sources):
+        if c.source >= len(source_items):
             raise HTTPException(status_code=400, detail="Clip refers to a missing source video")
         if c.transition and c.transition.type not in editor_pipeline.TRANSITIONS:
             raise HTTPException(status_code=400, detail="Unknown transition")
@@ -877,14 +935,14 @@ async def api_video_export(
     for o in spec.overlays:
         if (o.image is None) == (o.video is None):
             raise HTTPException(status_code=400, detail="Invalid layer")
-        if (o.image is not None and o.image >= len(overlays)) or (o.video is not None and o.video >= len(sources)):
+        if (o.image is not None and o.image >= len(overlays)) or (o.video is not None and o.video >= len(source_items)):
             raise HTTPException(status_code=400, detail="Layer refers to a missing file")
         if o.animIn not in editor_pipeline.ANIMS_IN or o.animOut not in editor_pipeline.ANIMS_OUT:
             raise HTTPException(status_code=400, detail="Unknown animation")
     for a in spec.audio:
         if (a.audio is None) == (a.video is None):
             raise HTTPException(status_code=400, detail="Invalid audio clip")
-        if (a.audio is not None and a.audio >= len(audios)) or (a.video is not None and a.video >= len(sources)):
+        if (a.audio is not None and a.audio >= len(audio_items)) or (a.video is not None and a.video >= len(source_items)):
             raise HTTPException(status_code=400, detail="Audio clip refers to a missing file")
     for e in spec.effects:
         if e.type not in editor_pipeline.EFFECTS:
@@ -901,12 +959,15 @@ async def api_video_export(
         total_bytes = 0
         source_paths: list[str] = []
         source_infos: list[editor_pipeline.MediaInfo] = []
-        for i, upload in enumerate(sources):
-            suffix = Path(upload.filename or "").suffix.lower()
-            path = os.path.join(tmp, f"source{i}{suffix if suffix in _VIDEO_SUFFIXES else '.mp4'}")
-            total_bytes += _save_upload(upload, path, MAX_VIDEO_UPLOAD_BYTES)
-            if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES:
-                raise HTTPException(status_code=400, detail="Project files are too large to export together")
+        for i, (kind, item) in enumerate(source_items):
+            if kind == "path":
+                path = _local_file(item, _VIDEO_SUFFIXES)
+            else:
+                suffix = Path(item.filename or "").suffix.lower()
+                path = os.path.join(tmp, f"source{i}{suffix if suffix in _VIDEO_SUFFIXES else '.mp4'}")
+                total_bytes += _save_upload(item, path, MAX_VIDEO_UPLOAD_BYTES)
+                if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES:
+                    raise HTTPException(status_code=400, detail="Project files are too large to export together")
             try:
                 info = editor_pipeline.probe_media(path)
                 # OpenCV's read also proves frames actually decode (probe_media
@@ -923,12 +984,16 @@ async def api_video_export(
 
         audio_paths: list[str] = []
         audio_durations: list[float] = []
-        for i, upload in enumerate(audios):
-            suffix = Path(upload.filename or "").suffix.lower()
-            path = os.path.join(tmp, f"audio{i}{suffix if suffix in _AUDIO_SUFFIXES else '.bin'}")
-            total_bytes += _save_upload(upload, path, EDITOR_MAX_AUDIO_BYTES)
-            if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES:
-                raise HTTPException(status_code=400, detail="Project files are too large to export together")
+        for i, (kind, item) in enumerate(audio_items):
+            if kind == "path":
+                # Extracted audio of a video on disk: the video file itself.
+                path = _local_file(item, _AUDIO_SUFFIXES | _VIDEO_SUFFIXES)
+            else:
+                suffix = Path(item.filename or "").suffix.lower()
+                path = os.path.join(tmp, f"audio{i}{suffix if suffix in _AUDIO_SUFFIXES else '.bin'}")
+                total_bytes += _save_upload(item, path, EDITOR_MAX_AUDIO_BYTES)
+                if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES:
+                    raise HTTPException(status_code=400, detail="Project files are too large to export together")
             try:
                 audio_durations.append(editor_pipeline.probe_audio(path))
             except ValueError as exc:

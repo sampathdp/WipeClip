@@ -123,7 +123,7 @@ Registered only while the recorder is open (shown in the recorder; "unavailable"
 - **macOS: the OS picker chooses the source.** The app can't preselect a display or window there, and can't hide its own window from a full-screen capture (use "Minimize WipeClip while recording"). On Windows the in-app picker and "Hide WipeClip from the recording" cover both.
 - Windows: minimized windows can't be recorded (they're listed but disabled until restored). A window that is resized while recording is letterboxed into the size it had at the start. Displays larger than 4096×2304 are scaled down to fit the H.264 encoder.
 - **Display identification** compares the capture's size with the connected displays. Two identical displays need the user to pick ("Which display is this?"); window captures store events in desktop coordinates plus active-window bounds.
-- **Editor limits apply**: the editor opens screen videos up to 300 MB and exports up to 10 minutes; longer or larger recordings save fine and the recorder warns.
+- **Editor limits apply**: recordings open in the editor at any size (they're edited in place in their folder, see RELEASE.md Projects); exports are up to 10 minutes, and longer recordings save fine with a warning.
 - Pause relies on `MediaRecorder` closing the gap in the file's timestamps. Verified on Windows/WebView2 (pause excluded from both clock and files, within one frame); verify on macOS (manual step 6).
 - Windows: input to elevated (administrator) windows and the secure desktop isn't visible to the hooks.
 - The chosen save location is remembered in the app's config folder (`recorder.json`, written only by the native side after the OS folder dialog); if the folder is gone the default Videos/WipeClip is used.

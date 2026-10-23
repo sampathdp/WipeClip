@@ -15,6 +15,7 @@ import Dialog from "./Dialog";
 import { ExportIcon } from "./icons";
 import PremiumBadge from "./PremiumBadge";
 import ToolFeedback from "@/components/ToolFeedback";
+import { sourceName } from "@/lib/editor/sourceFile";
 
 const TOOL = "video_editor";
 const TIERS: { key: Resolution; short: number }[] = [
@@ -123,7 +124,7 @@ export default function ExportDialog({
     }
   };
 
-  const filename = `wipeclip-${original.file.name.replace(/\.[^.]+$/, "")}-edit.mp4`;
+  const filename = `wipeclip-${sourceName(original).replace(/\.[^.]+$/, "")}-edit.mp4`;
 
   return (
     <Dialog title="Export video" onClose={state === "rendering" ? undefined : onClose}>

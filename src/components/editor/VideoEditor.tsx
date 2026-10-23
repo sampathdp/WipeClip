@@ -14,6 +14,7 @@ import { useProjectHistory } from "@/lib/editor/history";
 import {
   generateThumbnails,
   generateWaveform,
+  MAX_WAVE_FILE_BYTES,
   loadAudioMeta,
   loadVideoMeta,
   normalizeImage,
@@ -38,6 +39,8 @@ import {
 } from "@/lib/editor/projectStore";
 import { createProjectFile, PROJECT_FILE_EXT, ProjectFileError, projectFileName, readProjectFile } from "@/lib/editor/projectFile";
 import { useOverlayRasters } from "@/lib/editor/rasters";
+import { sourceFile, sourceName, sourceSize } from "@/lib/editor/sourceFile";
+import { chooseVideoOnDisk, diskMediaUrl, openDiskMedia } from "@/lib/platform/media";
 import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
 import { DEFAULT_TEXT } from "@/lib/editor/textRaster";
 import {
@@ -69,6 +72,7 @@ import {
   type EffectClip,
   type EffectType,
   type Look,
+  type DiskMedia,
   type MediaSource,
   type Overlay,
   type Project,
@@ -238,7 +242,7 @@ export default function VideoEditor({
   const keepForRecovery = useCallback(
     (src: MediaSource) =>
       void saveSource(src).then((ok) => {
-        if (!ok) say(`"${src.file.name}" couldn't be saved on this device (storage may be full), so this project can't be reopened after closing. Export before you close WipeClip.`);
+        if (!ok) say(`"${sourceName(src)}" couldn't be saved on this device (storage may be full), so this project can't be reopened after closing. Export before you close WipeClip.`);
       }),
     [say]
   );
@@ -351,7 +355,11 @@ export default function VideoEditor({
       thumbJobs.current.set(key, controller);
       waveQueue.current = waveQueue.current.then(async () => {
         if (controller.signal.aborted) return;
-        const wave = await generateWaveform(src.file, controller.signal);
+        // A disk source over the limit isn't read at all just to be skipped.
+        if (sourceSize(src) > MAX_WAVE_FILE_BYTES) return;
+        const file = await sourceFile(src).catch(() => null);
+        if (!file || controller.signal.aborted) return;
+        const wave = await generateWaveform(file, controller.signal);
         if (wave && !controller.signal.aborted) setWaves((w) => ({ ...w, [src.id]: wave }));
       });
     }
@@ -420,34 +428,44 @@ export default function VideoEditor({
     );
   }, [ready]);
 
+  /** Opens a video as a new project: a File (website, or dropped on the
+   * desktop app), or a video picked in the desktop app's open dialog, which
+   * stays where it is on disk - streamed for playback, read by path by the
+   * local engine, kept by path in the project - so it has no size limit. */
   const importFile = useCallback(
-    async (file: File | undefined) => {
-      if (!file) return;
-      if (file.name.toLowerCase().endsWith(`.${PROJECT_FILE_EXT}`)) return openProjectFile(file);
+    async (input: File | DiskMedia | null | undefined) => {
+      if (!input) return;
+      const file = input instanceof File ? input : null;
+      if (file?.name.toLowerCase().endsWith(`.${PROJECT_FILE_EXT}`)) return openProjectFile(file);
       trackEvent("file_selected", { tool: TOOL });
       setImportError(null);
-      if (!file.type.startsWith("video/")) {
+      if (file && !file.type.startsWith("video/")) {
         setImportError({ message: "Please choose a video file (MP4, MOV or WebM)." });
         return;
       }
-      if (file.size > MAX_BYTES) {
-        setImportError({ message: "That file is over the 300MB limit. Try a shorter or smaller video." });
+      if (file && file.size > MAX_BYTES) {
+        setImportError({
+          message: IS_DESKTOP
+            ? "That file is over 300MB. Click the box below to pick it instead: videos picked there are edited where they are, at any size."
+            : "That file is over the 300MB limit. Try a shorter or smaller video.",
+        });
         return;
       }
       // Opening a video starts a new project; an open one stays in Recent projects.
       await saveNow();
       setPhase("probing");
-      const url = URL.createObjectURL(file);
+      const url = file ? URL.createObjectURL(file) : await diskMediaUrl((input as DiskMedia).path);
       try {
         // Browser decode check (codec support, display size, exact
         // duration) and the server's own validation + content screening,
         // in parallel. The server check is the one that counts.
-        const [meta, probe] = await Promise.all([loadVideoMeta(url), probeVideo(file)]);
+        const [meta, probe] = await Promise.all([loadVideoMeta(url), probeVideo(input)]);
         URL.revokeObjectURL(probe.previewUrl);
         const src: MediaSource = {
           id: newId("src"),
           kind: "original",
           file,
+          ...(file ? {} : { disk: input as DiskMedia }),
           url,
           duration: meta.duration,
           width: meta.width,
@@ -457,10 +475,10 @@ export default function VideoEditor({
         };
         await clearLastExport();
         setPendingExport(null);
-        startProject([src], { ...EMPTY, clips: [newClip(newId("clip"), src.id, 0, meta.duration)] }, newProjectInfo(nameFromFile(file.name)));
+        startProject([src], { ...EMPTY, clips: [newClip(newId("clip"), src.id, 0, meta.duration)] }, newProjectInfo(nameFromFile(input.name)));
         keepForRecovery(src);
       } catch (e) {
-        URL.revokeObjectURL(url);
+        if (file) URL.revokeObjectURL(url);
         console.error("[editor] import failed", e);
         let message = "Couldn't open this video. It may be damaged or in an unsupported format.";
         let blocked = false;
@@ -541,6 +559,26 @@ export default function VideoEditor({
     queueMicrotask(() => void importRecording(bundle).then((error) => onRecordingImported?.(key, error)));
   }, [incomingRecording, phase, importRecording, onRecordingImported]);
 
+  /** Makes a reopened project's disk sources playable again. One that was
+   * moved or deleted is found again by the user (relinked: same source, new
+   * path). false if one wasn't found. */
+  const linkDiskSources = useCallback(async (srcs: MediaSource[]): Promise<boolean> => {
+    const onDisk = srcs.filter((s) => s.disk);
+    if (onDisk.length === 0) return true;
+    const status = await openDiskMedia(onDisk.map((s) => s.disk!.path));
+    for (const s of onDisk) {
+      if (!status.get(s.disk!.path)?.ok) {
+        const ask = `"${s.disk!.name}" isn't where it was (${s.disk!.path}). It may have been moved, renamed or deleted. Find it to keep editing this project.`;
+        if (!(await confirmAction(ask, { title: "Video not found", okLabel: "Find video" }))) return false;
+        const found = await chooseVideoOnDisk(s.disk!.name);
+        if (!found) return false;
+        s.disk = found;
+      }
+      s.url = await diskMediaUrl(s.disk!.path);
+    }
+    return true;
+  }, []);
+
   const openSaved = useCallback(
     async (id: string) => {
       setImportError(null);
@@ -549,9 +587,20 @@ export default function VideoEditor({
         setImportError({ message: saved.problem });
         return;
       }
+      let linked = false;
+      try {
+        linked = await linkDiskSources(saved.sources);
+      } catch (e) {
+        console.error("[editor] relinking failed", e);
+      }
+      if (!linked) {
+        saved.sources.forEach((s) => s.file && URL.revokeObjectURL(s.url));
+        setImportError({ message: `"${saved.info.name}" can't open until its videos are found. Open it again to look for them.` });
+        return;
+      }
       startProject(saved.sources, saved.project, saved.info);
     },
-    [startProject]
+    [startProject, linkDiskSources]
   );
 
   const removeSaved = useCallback(
@@ -1103,7 +1152,7 @@ export default function VideoEditor({
     addOverlay,
     baseOverlay: baseOverlay as never,
     importImage,
-    fileName: original?.file.name ?? "wipeclip",
+    fileName: (original && sourceName(original)) || "wipeclip",
     onClose: () => setTool(null),
   });
   const [modelCached, setModelCached] = useState<boolean | null>(null);
@@ -1122,7 +1171,7 @@ export default function VideoEditor({
         say("No visible captions to export.");
         return;
       }
-      const name = `${(original?.file.name ?? "captions").replace(/\.[^.]+$/, "")}.${format}`;
+      const name = `${((original && sourceName(original)) || "captions").replace(/\.[^.]+$/, "")}.${format}`;
       const text = format === "srt" ? toSrt(cues) : format === "vtt" ? toVtt(cues) : toPlainTranscript(cues);
       try {
         const r = await saveTextFile(name, text);
@@ -1429,7 +1478,7 @@ export default function VideoEditor({
           <input
             value={info.name}
             onChange={(e) => setInfo({ ...info, name: e.target.value })}
-            onBlur={() => !info.name.trim() && setInfo({ ...info, name: nameFromFile(original.file.name) })}
+            onBlur={() => !info.name.trim() && setInfo({ ...info, name: nameFromFile(sourceName(original)) })}
             onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
             aria-label="Project name"
             maxLength={120}
@@ -1549,7 +1598,9 @@ export default function VideoEditor({
                   type="button"
                   onClick={() => {
                     trackEvent("upload_clicked", { tool: TOOL });
-                    fileInput.current?.click();
+                    // Desktop: the OS dialog, so the video is edited where it is.
+                    if (IS_DESKTOP) void chooseVideoOnDisk().then(importFile, (e) => setImportError({ message: String(e) }));
+                    else fileInput.current?.click();
                   }}
                   onDragOver={(e) => {
                     e.preventDefault();
@@ -1569,7 +1620,9 @@ export default function VideoEditor({
                     <UploadIcon width={24} height={24} />
                   </span>
                   <span className="text-base font-semibold text-foreground">Drop a video here, or click to browse</span>
-                  <span className="mt-1 text-xs text-muted sm:text-sm">MP4, MOV, WebM · up to 300MB · up to 10 minutes</span>
+                  <span className="mt-1 text-xs text-muted sm:text-sm">
+                    {IS_DESKTOP ? "MP4, MOV, WebM · any size, edited where it is · exports up to 10 minutes" : "MP4, MOV, WebM · up to 300MB · up to 10 minutes"}
+                  </span>
                 </button>
                 <p className="mt-2 text-center text-xs text-muted">
                   <button type="button" onClick={() => projectFileInput.current?.click()} className="underline hover:text-foreground">
