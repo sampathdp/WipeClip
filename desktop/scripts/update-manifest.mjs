@@ -6,9 +6,15 @@
 //
 // Copies into <out dir>, under release asset names that say version and
 // architecture: the Windows installer (which is also its update bundle), the
-// macOS update tarball and the DMG, plus latest.json.
+// macOS update tarball and the DMG, plus latest.json. The installers also get
+// a copy under a fixed name (STABLE_NAMES), so the website's download links
+// - .../releases/latest/download/<name> - always serve the newest release.
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
+
+/** Version-free installer names for the website's download buttons
+ * (NEXT_PUBLIC_DOWNLOAD_WINDOWS_URL / _MAC_URL, src/lib/download.ts). */
+const STABLE_NAMES = { windows: "WipeClip-Windows-x64-setup.exe", mac: "WipeClip-macOS-AppleSilicon.dmg" };
 
 const [src, out, tag, repo] = process.argv.slice(2);
 if (!src || !out || !tag || !repo) {
@@ -49,9 +55,13 @@ const add = (target, file, asset) => {
   };
 };
 
-add("windows-x86_64", one(/^WipeClip_.*_x64-setup\.exe$/, "Windows installer"), `WipeClip_${version}_x64-setup.exe`);
+const winInstaller = one(/^WipeClip_.*_x64-setup\.exe$/, "Windows installer");
+const dmg = one(/^WipeClip_.*\.dmg$/, "macOS DMG");
+add("windows-x86_64", winInstaller, `WipeClip_${version}_x64-setup.exe`);
 add("darwin-aarch64", one(/^WipeClip\.app\.tar\.gz$/, "macOS update bundle"), `WipeClip_${version}_aarch64.app.tar.gz`);
-copyFileSync(one(/^WipeClip_.*\.dmg$/, "macOS DMG"), path.join(out, `WipeClip_${version}_aarch64.dmg`));
+copyFileSync(dmg, path.join(out, `WipeClip_${version}_aarch64.dmg`));
+copyFileSync(winInstaller, path.join(out, STABLE_NAMES.windows));
+copyFileSync(dmg, path.join(out, STABLE_NAMES.mac));
 
 const manifest = {
   version,
