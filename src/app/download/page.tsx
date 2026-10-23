@@ -128,7 +128,7 @@ const FAQS = [
   },
   {
     q: 'Why does Windows say "Windows protected your PC"?',
-    a: "Windows shows this for new apps it hasn't seen many downloads of yet. Click More info, then Run anyway, and the installer starts. Once installed, the app updates itself.",
+    a: "Windows and Edge warn about new apps they haven't seen many downloads of yet. In Edge's downloads list, click ⋯ > Keep > Show more > Keep anyway. When the installer opens, click More info > Run anyway. Once installed, the app updates itself.",
   },
   {
     q: "Is there still an online editor?",

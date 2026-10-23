@@ -18,7 +18,7 @@ export const DESKTOP_DOWNLOADS = [
     requirements: "Windows 10 (21H2 or later) or Windows 11",
     url: process.env.NEXT_PUBLIC_DOWNLOAD_WINDOWS_URL ?? `${LATEST_RELEASE}/WipeClip-Windows-x64-setup.exe`,
     /** The installer isn't code-signed yet, so SmartScreen warns on first run. */
-    note: 'If Windows shows "Windows protected your PC", click More info, then Run anyway.',
+    note: 'New app, so your browser or Windows may warn you. In Edge, click ⋯ > Keep > Show more > Keep anyway. If Windows says "Windows protected your PC", click More info > Run anyway.',
   },
   {
     os: "mac",
