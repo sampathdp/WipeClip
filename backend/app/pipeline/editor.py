@@ -50,7 +50,6 @@ client.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
 import math
 import os
 import re
@@ -58,6 +57,9 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING
+
+import numpy as np
 
 from app.config import VIDEO_ENCODE_CRF, VIDEO_ENCODE_PRESET
 from app.pipeline import look as look_pipeline
@@ -432,6 +434,24 @@ def _rounded_box(w: int, h: int, r: float, supersample: int = 4) -> "Image.Image
     return big.resize((w, h), Image.Resampling.LANCZOS)
 
 
+def _gradient_image(tmp: str, w: int, h: int, top: str, bottom: str) -> str:
+    """Top-to-bottom gradient as the preview draws it (CSS linear-gradient
+    "to bottom": each row's color interpolated in sRGB at its center).
+    ffmpeg's own `gradients` source doesn't blend a vertical line evenly
+    (it jumps to the second color near the top). One file per size and pair
+    of colors, shared by every clip of the render."""
+    from PIL import Image
+
+    path = os.path.join(tmp, f"gradient-{w}x{h}-{top.lstrip('#')}-{bottom.lstrip('#')}.png")
+    if not os.path.exists(path):
+        c0 = np.array([int(top[i : i + 2], 16) for i in (1, 3, 5)], dtype=np.float64)
+        c1 = np.array([int(bottom[i : i + 2], 16) for i in (1, 3, 5)], dtype=np.float64)
+        t = ((np.arange(h) + 0.5) / h)[:, None]
+        rows = np.rint(c0 + (c1 - c0) * t).astype(np.uint8)
+        Image.fromarray(np.repeat(rows[:, None, :], w, axis=1), "RGB").save(path)
+    return path
+
+
 def frame_shadow(shadow: float) -> tuple[float, float, float] | None:
     """(offset down, CSS blur radius, opacity) in canvas-height units, as
     frameShadow() in src/lib/editor/timeline.ts. None for no shadow."""
@@ -771,10 +791,8 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
                 f"[{bg_idx}:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,fps={_num(fps)}[bg{i}]"
             )
         elif plan.background == "gradient":
-            graph.append(
-                f"gradients=s={W}x{H}:c0={plan.color}:c1={plan.color2}:x0=0:y0=0:x1=0:y1={H}:"
-                f"speed=0:r={_num(fps)}:d={d}[bg{i}]"
-            )
+            grad_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", d, "-i", _gradient_image(tmp, W, H, plan.color, plan.color2))
+            graph.append(f"[{grad_idx}:v]format=rgb24,setsar=1,fps={_num(fps)}[bg{i}]")
         else:
             graph.append(f"color=c={plan.color}:s={W}x{H}:r={_num(fps)}:d={d}[bg{i}]")
 

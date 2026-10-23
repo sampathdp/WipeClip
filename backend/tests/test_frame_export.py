@@ -74,6 +74,19 @@ class FrameExportTest(unittest.TestCase):
         self.assertTrue((shadow[far] > 235).all(), "and fades out away from it")
         self.assertGreater(shadow[H // 2, W // 2][2], 200, "the video itself is unchanged")
 
+    def test_gradient_background_blends_like_css(self) -> None:
+        # The preview's CSS linear-gradient(to bottom): sRGB interpolation at
+        # each row's center. (ffmpeg's `gradients` jumped to the second color.)
+        plan = base_plan(self.src, scale=0.3)
+        plan.background, plan.color, plan.color2 = "gradient", "#7c5cff", "#22d3ee"
+        out = os.path.join(self.dir.name, "gradient.mp4")
+        render(plan, out)
+        img = frame_at(out, 1.0).astype(int)[:, :, ::-1]  # RGB
+        c0, c1 = np.array([0x7C, 0x5C, 0xFF]), np.array([0x22, 0xD3, 0xEE])
+        for y in range(0, H, 9):
+            css = c0 + (c1 - c0) * (y + 0.5) / H
+            self.assertLessEqual(np.abs(img[y, 10] - css).max(), 6, f"row {y}: {img[y, 10]} vs {css.round()}")
+
     def test_plan_round_trip_keeps_the_frame(self) -> None:
         plan = base_plan(self.src)
         plan.frame_padding, plan.frame_radius, plan.frame_shadow = 0.1, 0.04, 0.5
