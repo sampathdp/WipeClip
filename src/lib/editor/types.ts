@@ -382,6 +382,22 @@ export interface Project {
   /** Review items from silence and interaction analysis, or user marks. */
   suggestions?: EditSuggestion[];
   chapters?: Chapter[];
+  /** Word-timed transcript of the timeline's speech, for editing by text
+   * (wordEdit.ts). Kept in sync by ripple cuts and inserts; `total` is the
+   * timeline length it matches, so other edits show it's out of date. */
+  transcript?: Transcript;
+}
+
+export interface TranscriptWord {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface Transcript {
+  language: string;
+  words: TranscriptWord[];
+  total: number;
 }
 
 /** An imported or generated file. Kept outside Project (and so outside
@@ -524,6 +540,7 @@ export function migrateProject(raw: unknown): Project {
     ),
     suggestions: (p.suggestions as EditSuggestion[] | undefined) ?? [],
     chapters: (p.chapters as Chapter[] | undefined) ?? [],
+    ...(p.transcript ? { transcript: p.transcript as Transcript } : {}),
   };
 }
 

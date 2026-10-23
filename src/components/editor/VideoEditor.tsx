@@ -78,6 +78,7 @@ import {
   type Project,
   type Selection,
   type TextStyle,
+  type Transcript,
 } from "@/lib/editor/types";
 import { ApiError, cleanAudio, ContentBlockedError, probeVideo } from "@/lib/toolsApi";
 import type { RecordingBundle } from "@/lib/recorder/bundle";
@@ -102,6 +103,8 @@ import ExportDialog from "./ExportDialog";
 import { ActionButton, ClipPanel, PanelShell, TransitionPanel } from "./Inspector";
 import OverlayLayer from "./OverlayLayer";
 import RecentProjects from "./RecentProjects";
+import TranscriptPanel from "./TranscriptPanel";
+import { cutWords, transcriptCurrent } from "@/lib/editor/wordEdit";
 import {
   AudioAddPanel,
   AudioPanel,
@@ -157,7 +160,7 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const EMPTY: Project = { clips: [], overlays: [], audio: [], effects: [], canvas: DEFAULT_CANVAS };
 const RATES = [0.5, 1, 1.5, 2];
 
-type Tool = "text" | "captions" | "elements" | "audio" | "effects" | "filters" | "adjust" | "canvas" | "layers" | "focus" | "tutorial";
+type Tool = "text" | "captions" | "transcript" | "elements" | "audio" | "effects" | "filters" | "adjust" | "canvas" | "layers" | "focus" | "tutorial";
 type Dialogs = { kind: "cleanup"; clipId: string; frameTime: number } | { kind: "export" } | null;
 type ClipboardItem = { kind: "overlay"; item: Overlay } | { kind: "audio"; item: AudioClip } | { kind: "effect"; item: EffectClip };
 
@@ -940,35 +943,43 @@ export default function VideoEditor({
     [addSource, addOverlay, baseOverlay, canvasSize, say]
   );
 
-  // --- auto captions -------------------------------------------------------
+  // --- auto captions and the transcript ---------------------------------------
+  /** The timeline's speech as a word-timed transcript (null: no sound). */
+  const transcribeTimeline = useCallback(async (): Promise<Transcript | null> => {
+    setBusy("Preparing audio…");
+    const samples = await buildSpeechAudio(lay, project, sources);
+    if (!samples) return null;
+    setBusy("Loading speech model…");
+    const res = await transcribe(samples, captionOpts.language, ({ stage, value }) =>
+      setBusy(
+        stage === "download"
+          ? `Downloading speech model (first time only)… ${Math.round(value * 100)}%`
+          : stage === "prepare"
+            ? "Preparing speech model…"
+            : `Transcribing speech on your device… ${Math.round(value * 100)}%`
+      )
+    );
+    return { language: res.language, words: res.words, total: lay.total };
+  }, [lay, project, sources, captionOpts.language]);
+
   const runCaptions = useCallback(async () => {
     setPlaying(false);
     setCaptioning(true);
-    setBusy("Preparing audio…");
     try {
-      const samples = await buildSpeechAudio(lay, project, sources);
-      if (!samples) {
+      const transcript = await transcribeTimeline();
+      if (!transcript) {
         say("There's no sound in your clips to caption.");
         return;
       }
-      setBusy("Loading speech model…");
-      const res = await transcribe(samples, captionOpts.language, ({ stage, value }) =>
-        setBusy(
-          stage === "download"
-            ? `Downloading speech model (first time only)… ${Math.round(value * 100)}%`
-            : stage === "prepare"
-              ? "Preparing speech model…"
-              : `Transcribing speech on your device… ${Math.round(value * 100)}%`
-        )
-      );
-      const chunks = groupWords(res.words, captionOpts.maxWords, lineCharsFor(canvasSize), lay.total);
+      const chunks = groupWords(transcript.words, captionOpts.maxWords, lineCharsFor(canvasSize), lay.total);
       if (chunks.length === 0) {
         say("No speech was found in your clips.");
         return;
       }
       const caps = captionOverlays(chunks, captionOpts.style, captionOpts.y);
-      // One undo step; regenerating replaces earlier captions.
-      apply((p) => ({ ...p, overlays: [...p.overlays.filter((o) => !o.caption), ...caps] }));
+      // One undo step; regenerating replaces earlier captions. The words
+      // are kept too, for editing by text (Transcript).
+      apply((p) => ({ ...p, overlays: [...p.overlays.filter((o) => !o.caption), ...caps], transcript }));
       say(`Added ${caps.length} captions. Click one to edit its text.`);
     } catch (e) {
       console.error("[captions]", e);
@@ -977,7 +988,49 @@ export default function VideoEditor({
       setBusy(null);
       setCaptioning(false);
     }
-  }, [lay, project, sources, captionOpts, canvasSize, apply, say]);
+  }, [transcribeTimeline, captionOpts, canvasSize, lay.total, apply, say]);
+
+  const runTranscript = useCallback(async () => {
+    setPlaying(false);
+    setCaptioning(true);
+    try {
+      const transcript = await transcribeTimeline();
+      if (!transcript) {
+        say("There's no sound in your clips to transcribe.");
+        return;
+      }
+      apply((p) => ({ ...p, transcript }));
+      say(transcript.words.length ? `Transcribed ${transcript.words.length} words.` : "No speech was found in your clips.");
+    } catch (e) {
+      console.error("[transcript]", e);
+      say("Transcribing failed. Check your connection and try again.");
+    } finally {
+      setBusy(null);
+      setCaptioning(false);
+    }
+  }, [transcribeTimeline, apply, say]);
+
+  /** Cuts the transcript words `indices` out of the video (one undo step);
+   * captions, if any, are rebuilt from the words that are left. */
+  const cutByWords = useCallback(
+    (indices: number[]) => {
+      const res = cutWords(project, lay.fps, indices);
+      if (!res.ok) {
+        say(res.error);
+        return;
+      }
+      let next = res.project;
+      if (next.transcript && project.overlays.some((o) => o.caption)) {
+        const total = layout(next, lay.fps).total;
+        const chunks = groupWords(next.transcript.words, captionOpts.maxWords, lineCharsFor(canvasSize), total);
+        next = { ...next, overlays: [...next.overlays.filter((o) => !o.caption), ...captionOverlays(chunks, captionOpts.style, captionOpts.y)] };
+      }
+      apply(() => next);
+      setSelection(null);
+      say(`Cut ${res.removed.toFixed(1)} s. Undo brings it back.`);
+    },
+    [project, lay.fps, captionOpts, canvasSize, apply, say]
+  );
 
   const restyleCaptions = useCallback(
     (opts: CaptionOptions) =>
@@ -1805,6 +1858,23 @@ export default function VideoEditor({
         gesture={gesture}
       />
     );
+  } else if (tool === "transcript") {
+    panel = (
+      <TranscriptPanel
+        transcript={project.transcript}
+        current={transcriptCurrent(project.transcript, lay)}
+        busy={captioning}
+        clock={clock}
+        hasCaptions={project.overlays.some((o) => o.caption)}
+        onSeek={(t) => {
+          setPlaying(false);
+          seek(t);
+        }}
+        onTranscribe={() => void runTranscript()}
+        onDelete={cutByWords}
+        onClose={() => setTool(null)}
+      />
+    );
   } else if (tool === "captions") {
     panel = (
       <CaptionsPanel
@@ -2322,6 +2392,7 @@ export default function VideoEditor({
             <span className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden />
             {toolBtn("text", "Text", <TextIcon />, "Add text (T)")}
             {toolBtn("captions", "Captions", <CaptionsIcon />, "Auto captions from speech")}
+            {toolBtn("transcript", "Transcript", <TextIcon />, "Edit by text: delete words to cut them out")}
             {toolBtn("audio", "Audio", <MusicIcon />, "Music and audio")}
             {toolBtn("elements", "Elements", <ElementsIcon />, "Stickers and images")}
             {toolBtn("effects", "Effects", <EffectIcon />, "Timed effects")}

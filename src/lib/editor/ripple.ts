@@ -127,10 +127,18 @@ export function rippleCut(project: Project, lay: Layout, from: number, to: numbe
     if (!chapters.some((x) => Math.abs(x.t - t) < 0.5)) chapters.push({ ...ch, t });
   }
 
+  // Words in the cut go; later ones move up (a word the cut runs into is
+  // trimmed, like the other timed items).
+  const transcript = project.transcript && {
+    ...project.transcript,
+    total: project.transcript.total - d,
+    words: project.transcript.words.map((w) => cutPlain(w, t0, t1)).filter((w): w is NonNullable<typeof w> => !!w),
+  };
+
   return {
     ok: true,
     removed: d,
-    project: { ...project, clips, overlays, audio, effects, masks, suggestions, chapters },
+    project: { ...project, clips, overlays, audio, effects, masks, suggestions, chapters, ...(transcript ? { transcript } : {}) },
   };
 }
 
@@ -195,6 +203,10 @@ export function rippleInsert(
       masks: (project.masks ?? []).map(shift),
       suggestions: (project.suggestions ?? []).map(shift),
       chapters: (project.chapters ?? []).map((c) => (c.t >= at ? { ...c, t: c.t + duration } : c)),
+      // The inserted material has no words yet; later words move along.
+      ...(project.transcript
+        ? { transcript: { ...project.transcript, total: project.transcript.total + duration, words: project.transcript.words.map(shift) } }
+        : {}),
     },
   };
 }
