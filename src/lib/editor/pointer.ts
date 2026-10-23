@@ -258,7 +258,7 @@ export function pointerScene(
   const track = caches.pointer.track(src, style.smoothing);
   if (!track || !src) return none;
   const s = sourceTimeAt(laid, Math.min(t, laid.start + laid.duration));
-  const box = videoBox(clip, src, canvasSize, project.canvas.fit);
+  const box = videoBox(clip, src, canvasSize, project.canvas);
   const cam = caches.camera.track(project.zooms, clip, visibleView(box, clip.transform));
   const crop = cam ? cameraCrop(clip.crop, evalCamera(cam, s)) : clip.crop;
   const place = (p: { x: number; y: number }) => sourceToCanvas(p, crop, box, clip.transform, canvasSize);

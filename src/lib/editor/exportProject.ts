@@ -143,6 +143,7 @@ export async function exportProject(
     canvas: {
       aspect: project.canvas.aspect,
       fit: project.canvas.fit,
+      ...(project.canvas.frame ? { frame: project.canvas.frame } : {}),
       background: {
         type: bg.type === "image" && !bgSource ? "color" : bg.type,
         color: bg.type === "color" || bg.type === "gradient" ? bg.color : "#000000",

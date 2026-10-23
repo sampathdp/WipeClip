@@ -330,6 +330,11 @@ class ExportPlan:
     audio: list[PlanAudio] = field(default_factory=list)
     effects: list[PlanEffect] = field(default_factory=list)
     fit: str = "fit"  # "fit" | "fill"
+    # Canvas frame (types.ts CanvasFrame): inset per side as a fraction of
+    # the canvas, corner radius as a fraction of its short side, shadow 0..1.
+    frame_padding: float = 0.0
+    frame_radius: float = 0.0
+    frame_shadow: float = 0.0
     background: str = "color"  # "color" | "gradient" | "blur" | "image"
     color: str = "#000000"
     color2: str = "#000000"
@@ -414,6 +419,58 @@ def _even(v: float) -> int:
 def _atempo(speed: float) -> str:
     # atempo accepts 0.5..100 per instance; editor speeds are 0.5..2.
     return f"atempo={_num(speed)}" if abs(speed - 1) > 1e-6 else "anull"
+
+
+def _rounded_box(w: int, h: int, r: float, supersample: int = 4) -> "Image.Image":
+    """White w x h rounded rectangle on black (mode L), antialiased."""
+    from PIL import Image, ImageDraw
+
+    big = Image.new("L", (w * supersample, h * supersample), 0)
+    ImageDraw.Draw(big).rounded_rectangle(
+        (0, 0, w * supersample - 1, h * supersample - 1), radius=max(0.0, r) * supersample, fill=255
+    )
+    return big.resize((w, h), Image.Resampling.LANCZOS)
+
+
+def frame_shadow(shadow: float) -> tuple[float, float, float] | None:
+    """(offset down, CSS blur radius, opacity) in canvas-height units, as
+    frameShadow() in src/lib/editor/timeline.ts. None for no shadow."""
+    s = max(0.0, min(1.0, shadow))
+    return (0.02 * s, 0.06, 0.6 * s) if s > 0 else None
+
+
+def _frame_mask(tmp: str, i: int, w: int, h: int, radius: float) -> str:
+    """Alpha mask that rounds the video box's corners (preview: clip-path
+    inset(... round r))."""
+    path = os.path.join(tmp, f"frame-mask{i}.png")
+    _rounded_box(w, h, radius).save(path)
+    return path
+
+
+def _frame_shadow_image(tmp: str, i: int, w: int, h: int, radius: float, H: int, shadow: float) -> str | None:
+    """RGBA drop shadow centered on the video box, like CSS box-shadow
+    "0 dy blur rgba(0,0,0,a)": offset in the box's own (rotated) frame, a
+    Gaussian of sigma = blur / 2, and nothing under the box itself."""
+    from PIL import Image, ImageChops, ImageFilter
+
+    params = frame_shadow(shadow)
+    if params is None:
+        return None
+    dy_u, blur_u, alpha = params
+    dy, sigma = dy_u * H, blur_u * H / 2
+    pad = int(math.ceil(3 * sigma + abs(dy))) + 2
+    size = (w + 2 * pad, h + 2 * pad)
+    shape = Image.new("L", size, 0)
+    shape.paste(_rounded_box(w, h, radius), (pad, pad + int(round(dy))))
+    blurred = shape.filter(ImageFilter.GaussianBlur(sigma)).point(lambda v: int(v * alpha))
+    box = Image.new("L", size, 0)
+    box.paste(_rounded_box(w, h, radius), (pad, pad))
+    alpha_img = ImageChops.multiply(blurred, ImageChops.invert(box))
+    img = Image.new("RGBA", size, (0, 0, 0, 0))
+    img.putalpha(alpha_img)
+    path = os.path.join(tmp, f"frame-shadow{i}.png")
+    img.save(path)
+    return path
 
 
 class _Inputs:
@@ -669,7 +726,8 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
         box_w, box_h = W, W / src_ar
     else:
         box_w, box_h = H * src_ar, H
-    box_w, box_h = _even(box_w * clip.scale), _even(box_h * clip.scale)
+    inset = 1 - 2 * max(0.0, min(0.2, plan.frame_padding))
+    box_w, box_h = _even(box_w * clip.scale * inset), _even(box_h * clip.scale * inset)
     pre.append(f"scale={box_w}:{box_h}:flags=lanczos,setsar=1")
     if clip.adjust["blur"] > 0:
         pre.append(f"gblur=sigma={_num(clip.adjust['blur'] / 100 * 0.02 * H)}")
@@ -720,11 +778,34 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
         else:
             graph.append(f"color=c={plan.color}:s={W}x{H}:r={_num(fps)}:d={d}[bg{i}]")
 
+    # Canvas frame: rounded corners (alpha mask), then the shadow on the
+    # background under where the video lands, turned and faded with it.
+    radius = max(0.0, min(0.1, plan.frame_radius)) * min(W, H)
+    if radius > 0.5:
+        mask_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", d, "-i", _frame_mask(tmp, i, box_w, box_h, radius))
+        graph.append(f"[{mask_idx}:v]format=gray,setsar=1[fm{i}]")
+        graph.append(f"[{fg_in}]format=rgba[fr{i}]")
+        graph.append(f"[fr{i}][fm{i}]alphamerge[fa{i}]")
+        fg_in = f"fa{i}"
+        if not post:
+            post.append("format=rgba")
+    shadow_path = _frame_shadow_image(tmp, i, box_w, box_h, radius, H, plan.frame_shadow)
+    if shadow_path:
+        sh_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", d, "-i", shadow_path)
+        sh_post = ["format=rgba"] + [f for f in post if f.startswith(("rotate", "colorchannelmixer"))]
+        graph.append(f"[{sh_idx}:v]{','.join(sh_post)},setsar=1[fs{i}]")
+        graph.append(
+            f"[bg{i}][fs{i}]overlay=x='{_num(clip.x * W)}-overlay_w/2':y='{_num(clip.y * H)}-overlay_h/2':format=auto[bs{i}]"
+        )
+        bg_label = f"bs{i}"
+    else:
+        bg_label = f"bg{i}"
+
     if post:
         graph.append(f"[{fg_in}]{','.join(post)}[cf{i}]")
         fg_in = f"cf{i}"
     graph.append(
-        f"[bg{i}][{fg_in}]overlay=x='{_num(clip.x * W)}-overlay_w/2':y='{_num(clip.y * H)}-overlay_h/2':"
+        f"[{bg_label}][{fg_in}]overlay=x='{_num(clip.x * W)}-overlay_w/2':y='{_num(clip.y * H)}-overlay_h/2':"
         f"format=auto:eof_action=repeat,format=yuv420p,setsar=1,"
         f"tpad=stop_mode=clone:stop_duration={d},trim=duration={d},setpts=PTS-STARTPTS,settb=AVTB,fps={_num(fps)}[v{i}]"
     )

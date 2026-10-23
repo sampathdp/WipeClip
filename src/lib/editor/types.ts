@@ -212,9 +212,24 @@ export interface EffectClip {
 
 export type CanvasAspect = "original" | "16:9" | "9:16" | "1:1" | "4:5" | "4:3";
 
+/** The main video as a card on the background (screen recordings): an
+ * inset from the canvas edges, rounded corners and a drop shadow. Absent
+ * = none. Preview (PreviewPlayer) and export (editor.py _clip_graph) use
+ * the same numbers. */
+export interface CanvasFrame {
+  /** Inset on each side, 0..0.2 of the canvas: the video box shrinks by
+   * 1 - 2 * padding. */
+  padding: number;
+  /** Corner radius, 0..0.1 of the canvas's short side. */
+  radius: number;
+  /** Shadow strength, 0..1. */
+  shadow: number;
+}
+
 export interface Canvas {
   aspect: CanvasAspect;
   fit: "fit" | "fill";
+  frame?: CanvasFrame;
   background:
     | { type: "color"; color: string }
     | { type: "gradient"; color: string; color2: string }

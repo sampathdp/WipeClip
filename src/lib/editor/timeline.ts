@@ -3,6 +3,7 @@ import type {
   AnimOut,
   AudioClip,
   CanvasAspect,
+  CanvasFrame,
   Clip,
   EffectClip,
   EffectType,
@@ -359,12 +360,32 @@ export function formatTime(seconds: number, precise = false): string {
 /** The clip's on-canvas box as fractions of canvas width/height: the
  * (cropped) source's aspect contained in (fit) or covering (fill) the
  * canvas, times the clip's scale. Same rule as _clip_video_chain() in editor.py. */
+/** What of the canvas decides the main video's box. */
+export interface BoxLayout {
+  fit: "fit" | "fill";
+  frame?: CanvasFrame;
+}
+
+/** How much the canvas frame (CanvasFrame.padding) shrinks the video box. */
+export function frameInset(frame: CanvasFrame | undefined): number {
+  return 1 - 2 * Math.min(0.2, Math.max(0, frame?.padding ?? 0));
+}
+
+/** Shadow geometry shared by preview and export, in canvas-height units:
+ * offset down, blur (CSS blur radius; the export's sigma is half of it)
+ * and opacity. null when there's no shadow. */
+export function frameShadow(frame: CanvasFrame | undefined): { dy: number; blur: number; alpha: number } | null {
+  const s = Math.min(1, Math.max(0, frame?.shadow ?? 0));
+  return s > 0 ? { dy: 0.02 * s, blur: 0.06, alpha: 0.6 * s } : null;
+}
+
 export function videoBox(
   clip: Clip,
   src: { width: number; height: number },
   canvas: { width: number; height: number },
-  fit: "fit" | "fill"
+  layout: BoxLayout
 ): { w: number; h: number } {
+  const { fit } = layout;
   const srcAr = (src.width * clip.crop.w) / Math.max(1, src.height * clip.crop.h);
   const canvasAr = canvas.width / canvas.height;
   let w: number;
@@ -376,6 +397,6 @@ export function videoBox(
     h = 1;
     w = srcAr / canvasAr;
   }
-  const s = clip.transform.scale;
+  const s = clip.transform.scale * frameInset(layout.frame);
   return { w: w * s, h: h * s };
 }

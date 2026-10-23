@@ -793,9 +793,18 @@ class _EditorBackground(BaseModel):
     color2: str = Field("#000000", pattern=_HEX_COLOR)
 
 
+class _EditorFrame(BaseModel):
+    """The main video as a card (src/lib/editor/types.ts CanvasFrame)."""
+
+    padding: float = Field(0, ge=0, le=0.2)
+    radius: float = Field(0, ge=0, le=0.1)
+    shadow: float = Field(0, ge=0, le=1)
+
+
 class _EditorCanvas(BaseModel):
     aspect: str = "original"
     fit: str = "fit"
+    frame: Optional[_EditorFrame] = None
     background: _EditorBackground = Field(default_factory=_EditorBackground)
 
 
@@ -1114,6 +1123,9 @@ async def api_video_export(
                 with_audio=False,
                 clips=plan_clips,
                 fit=canvas.fit,
+                frame_padding=canvas.frame.padding if canvas.frame else 0.0,
+                frame_radius=canvas.frame.radius if canvas.frame else 0.0,
+                frame_shadow=canvas.frame.shadow if canvas.frame else 0.0,
                 background=canvas.background.type,
                 color=canvas.background.color,
                 color2=canvas.background.color2,
