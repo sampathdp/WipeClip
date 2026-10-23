@@ -120,8 +120,14 @@ jobs:
 
       # TAURI_SIGNING_PRIVATE_KEY signs the update bundles (not the code
       # signing certificate). Required for release tags.
+      # NEXT_PUBLIC_*: the public values from desktop/.env.example, set as
+      # repository variables (they're compiled into the app, so not secrets).
       - name: Build
         env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_TOOLS_API_URL: ${{ vars.NEXT_PUBLIC_TOOLS_API_URL }}
+          NEXT_PUBLIC_DESKTOP_SITE_ORIGIN: ${{ vars.NEXT_PUBLIC_DESKTOP_SITE_ORIGIN || 'https://www.wipeclip.co' }}
           WIPECLIP_REQUIRE_ENGINE: "1"
           WIPECLIP_REQUIRE_UPDATER: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && '1' || '' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
