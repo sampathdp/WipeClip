@@ -1,6 +1,54 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Anything matched here never gets committed. A file that was committed
+# before its rule existed stays tracked until `git rm --cached <file>`.
 
-# dependencies
+# --- Secrets: never commit ----------------------------------------------------
+# Environment files with real values. The *.example templates are the only
+# ones committed; copy them and fill in locally.
+.env*
+!.env*.example
+
+# Keys, certificates and credentials, anywhere in the tree.
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.cer
+*.crt
+*.der
+*.jks
+*.keystore
+*.mobileprovision
+*.ppk
+id_rsa*
+id_ed25519*
+*.password
+*secret*.json
+*credentials*.json
+*service-account*.json
+*serviceaccount*.json
+client_secret*.json
+*-key.json
+
+# Desktop updater signing key (docs/desktop/RELEASE.md, Updates): only on the
+# maintainer's machine, in a password manager and as GitHub secrets.
+.tauri/
+Wipeclip Password/
+wipeclip-updater.*
+
+# Package registry tokens.
+.npmrc
+.pypirc
+
+# Hosting and cloud CLI state.
+.vercel
+.gcloud/
+
+# Local Claude Code settings (personal permissions).
+.claude/settings.local.json
+
+# --- Dependencies -------------------------------------------------------------
 /node_modules
 /.pnp
 .pnp.*
@@ -10,57 +58,52 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
-
-# next.js
+# --- Build output -------------------------------------------------------------
 /.next/
 /out/
-
-# production
 /build
+/coverage
+*.tsbuildinfo
+next-env.d.ts
 
-# misc
-.DS_Store
-*.pem
+# Desktop app (see docs/desktop)
+/desktop/.next/
+/desktop/out/
+/src-tauri/target/
+/src-tauri/gen/
+/src-tauri/tauri.generated.conf.json
+/src-tauri/resources/engine/
+/src-tauri/resources/THIRD-PARTY-NOTICES.txt
 
-# debug
+# Backend (Python)
+backend/.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+backend/build/
+backend/dist/
+backend/app/models/
+backend/tmp/*
+!backend/tmp/restart.txt
+
+# --- Logs and local data ------------------------------------------------------
+*.log
+logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
-!.env*.example
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-# backend (Python)
-backend/.venv
-backend/**/__pycache__
-backend/*.egg-info
-backend/app/models/
-backend/*.log
-
-# local dev logs
-dev-run.log
-backend-restart*.log
-dev.log
-
-# desktop app (see docs/desktop)
-/desktop/.next/
-/desktop/out/
-/src-tauri/target/
-/src-tauri/tauri.generated.conf.json
-/src-tauri/gen/
-
-# newsletter send logs and previews (contain account ids)
+# Newsletter send logs and previews (contain account ids)
 /newsletter-logs/
-/src-tauri/resources/engine/
-/src-tauri/resources/THIRD-PARTY-NOTICES.txt
+
+# --- OS and editors -----------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+.idea/
