@@ -6,6 +6,7 @@ import ImageCompareSlider from "./ImageCompareSlider";
 import ToolFeedback from "./ToolFeedback";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import SignInModal from "./SignInModal";
+import { saveImageLink } from "@/lib/platform";
 import { createClient } from "@/lib/supabase/client";
 import { clearPendingResult, loadPendingResult, savePendingResult } from "@/lib/resultCache";
 import { trackEvent, useToolView } from "@/lib/analytics";
@@ -384,7 +385,10 @@ export default function PhotoSharpenerDemo() {
                   <a
                     href={resultUrl}
                     download={`sharpened-${file.name.replace(/\.[^.]+$/, "")}.png`}
-                    onClick={() => trackEvent("download_clicked", { tool: TOOL })}
+                    onClick={(e) => {
+                      trackEvent("download_clicked", { tool: TOOL });
+                      saveImageLink(e, resultUrl, `sharpened-${file.name.replace(/\.[^.]+$/, "")}.png`);
+                    }}
                     className="flex-1 rounded-full bg-emerald-500 hover:bg-emerald-400 px-6 py-3.5 text-center text-sm font-bold text-black shadow-[0_0_25px_rgba(16,185,129,0.4)] transition-all flex items-center justify-center gap-2"
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">

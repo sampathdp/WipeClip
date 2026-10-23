@@ -8,6 +8,7 @@ import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import { IMAGE_CREDIT_COST } from "@/lib/credits";
 import { allowFrameGrab, ApiError, AuthRequiredError, type ToolQuality } from "@/lib/toolsApi";
 import SignInModal from "./SignInModal";
+import { saveExportFile } from "@/lib/platform";
 
 interface Capture {
   id: string;
@@ -165,13 +166,9 @@ async function downscaled(url: string): Promise<Blob> {
   return blob;
 }
 
+/** A browser download on the website, the Save dialog in the desktop app. */
 function saveBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  void saveExportFile(blob, filename, "image").catch((err) => console.error("[frame grab] save failed", err));
 }
 
 /** Client-side: the video file is never uploaded anywhere, a frame is

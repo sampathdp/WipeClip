@@ -170,6 +170,8 @@ export interface IncomingRecording {
 
 /** Desktop-only props:
  *  - `onRecord` adds "Record screen" buttons that open the recorder,
+ *  - `onImageTools` adds "Image tools" buttons (background removal,
+ *    sharpening, frame grabs),
  *  - `incomingRecording` opens a recording as a new project and reports
  *    the outcome through `onRecordingImported`,
  *  - `suspended` turns the editor's keyboard shortcuts off while the
@@ -177,11 +179,13 @@ export interface IncomingRecording {
  */
 export default function VideoEditor({
   onRecord,
+  onImageTools,
   incomingRecording,
   onRecordingImported,
   suspended = false,
 }: {
   onRecord?: () => void;
+  onImageTools?: () => void;
   incomingRecording?: IncomingRecording | null;
   onRecordingImported?: (key: number, error: string | null) => void;
   suspended?: boolean;
@@ -1528,6 +1532,18 @@ export default function VideoEditor({
             <span className="h-2 w-2 rounded-full bg-rose-500" aria-hidden /> Record
           </button>
         )}
+        {onImageTools && (
+          <button
+            type="button"
+            onClick={() => {
+              setPlaying(false);
+              onImageTools();
+            }}
+            className="hidden rounded-full px-3 py-2 text-xs font-semibold text-muted hover:text-foreground sm:inline"
+          >
+            Image tools
+          </button>
+        )}
         <ThemeToggle />
         <div className="hidden sm:block">
           <AuthStatus />
@@ -1636,6 +1652,15 @@ export default function VideoEditor({
                     className="btn-secondary mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-semibold"
                   >
                     <span className="h-2.5 w-2.5 rounded-full bg-rose-500" aria-hidden /> Record your screen
+                  </button>
+                )}
+                {onImageTools && (
+                  <button
+                    type="button"
+                    onClick={onImageTools}
+                    className="btn-secondary mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-semibold"
+                  >
+                    Image tools: remove a background, sharpen a photo, grab a frame
                   </button>
                 )}
               </>

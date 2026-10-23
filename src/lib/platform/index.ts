@@ -107,12 +107,12 @@ export async function memoryBudgetGb(): Promise<number | null> {
 
 export type SaveResult = { status: "saved"; path: string } | { status: "cancelled" };
 
-/** Saves an exported video, or with kind "project" a project file
- * (.wipeclip). Website: the usual browser download. Desktop: the OS save
+/** Saves an exported video, with kind "project" a project file
+ * (.wipeclip), or with kind "image" a PNG (the image tools). Website: the usual browser download. Desktop: the OS save
  * dialog picks the destination first, then the bytes are written beside it
  * under a temporary name and renamed into place, so a failed write never
  * leaves a half-written file under the chosen name. */
-export async function saveExportFile(blob: Blob, suggestedName: string, kind: "video" | "project" = "video"): Promise<SaveResult> {
+export async function saveExportFile(blob: Blob, suggestedName: string, kind: "video" | "project" | "image" = "video"): Promise<SaveResult> {
   if (!IS_DESKTOP) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -241,4 +241,16 @@ export function watchOpenedProjectFiles(onFile: (file: File) => Promise<void>, o
 export async function notifyIfAway(title: string, body: string): Promise<void> {
   if (!IS_DESKTOP) return;
   await invoke<boolean>("notify_if_away", { title, body }).catch((err) => console.warn("[desktop] notification failed", err));
+}
+
+/** Desktop: saves an image tool's result (a blob: URL) through the Save
+ * dialog. For a download link's onClick: on the website it does nothing
+ * and the link downloads as usual. */
+export function saveImageLink(e: { preventDefault: () => void }, url: string, filename: string): void {
+  if (!IS_DESKTOP) return;
+  e.preventDefault();
+  void fetch(url)
+    .then((r) => r.blob())
+    .then((blob) => saveExportFile(blob, filename, "image"))
+    .catch((err) => showDesktopError("Couldn't save the image", err instanceof Error ? err.message : String(err)));
 }

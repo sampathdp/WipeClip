@@ -435,7 +435,7 @@ export async function removeBackground(file: File, quality: ToolQuality): Promis
 
   assertBackendEnabled();
 
-  const res = await fetch("/api/remove-background", {
+  const res = await apiFetch("/api/remove-background", {
     method: "POST",
     body,
   });
@@ -462,7 +462,7 @@ export async function sharpenImage(file: File, strength: SharpenStrength, qualit
 
   assertBackendEnabled();
 
-  const res = await fetch("/api/sharpen-image", {
+  const res = await apiFetch("/api/sharpen-image", {
     method: "POST",
     body,
   });

@@ -29,8 +29,8 @@ pub struct ExportState {
     saved: Mutex<HashSet<PathBuf>>,
 }
 
-/// What is being saved: an exported video, or a project file
-/// (src/lib/editor/projectFile.ts). Decides the dialog's title and filter
+/// What is being saved: an exported video, a project file
+/// (src/lib/editor/projectFile.ts), or an image tool's PNG result. Decides the dialog's title and filter
 /// and the extension the file must end in.
 struct SaveKind {
     title: &'static str,
@@ -41,11 +41,13 @@ struct SaveKind {
 
 const VIDEO: SaveKind = SaveKind { title: "Save exported video", filter: "MP4 video", ext: "mp4", fallback: "wipeclip-export" };
 const PROJECT: SaveKind = SaveKind { title: "Save project file", filter: "WipeClip project", ext: "wipeclip", fallback: "project" };
+const IMAGE: SaveKind = SaveKind { title: "Save image", filter: "PNG image", ext: "png", fallback: "image" };
 
 fn save_kind(kind: Option<&str>) -> Result<&'static SaveKind, String> {
     match kind.unwrap_or("video") {
         "video" => Ok(&VIDEO),
         "project" => Ok(&PROJECT),
+        "image" => Ok(&IMAGE),
         _ => Err("Unknown file kind.".into()),
     }
 }
@@ -220,6 +222,8 @@ mod tests {
     fn save_kinds() {
         assert_eq!(save_kind(None).unwrap().ext, "mp4");
         assert_eq!(save_kind(Some("project")).unwrap().ext, "wipeclip");
+        assert_eq!(save_kind(Some("image")).unwrap().ext, "png");
+        assert_eq!(clean_file_name("no-bg-cat", &IMAGE), "no-bg-cat.png");
         assert!(save_kind(Some("exe")).is_err());
     }
 

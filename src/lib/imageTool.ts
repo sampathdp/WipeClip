@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { createServiceClient, getRequestAuth, isSupabaseConfigured } from "@/lib/supabase/server";
 import { IMAGE_CREDIT_COST } from "@/lib/credits";
 import { BACKEND_DISABLED, BACKEND_DISABLED_MESSAGE, TOOLS_API_URL } from "@/lib/toolsApi";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
@@ -44,10 +44,8 @@ export async function gateFreeTool(
   if (!isSupabaseConfigured()) {
     return { ok: false, response: errorResponse("server_error", "Accounts aren't configured yet.", 501) };
   }
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Cookie session on the website, bearer token from the desktop app.
+  const { user } = await getRequestAuth(request);
 
   if (quality === "preview") {
     if (!(await checkRateLimit(`free-preview:${tool}:${rateLimitKeyFor(request, user?.id)}`, FREE_PREVIEWS_PER_DAY, DAY_MS))) {

@@ -34,3 +34,13 @@ test("DESKTOP_DEV_ORIGINS adds the dev server origin", () => {
     delete process.env.DESKTOP_DEV_ORIGINS;
   }
 });
+
+test("every route the desktop app calls answers preflights and adds CORS", async () => {
+  const { readFileSync } = await import("node:fs");
+  const routes = ["process", "export", "credits", "referrals/claim", "remove-background", "sharpen-image", "frame-grab"];
+  for (const r of routes) {
+    const src = readFileSync(new URL(`../../src/app/api/${r}/route.ts`, import.meta.url), "utf8");
+    assert.match(src, /export function OPTIONS/, `${r}: OPTIONS`);
+    assert.match(src, /withCors\(/, `${r}: withCors`);
+  }
+});
