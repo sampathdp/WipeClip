@@ -81,6 +81,11 @@ from app.config import (
     EDITOR_MAX_CAMERA_ROWS,
     EDITOR_MAX_CLIPS,
     EDITOR_MAX_EFFECTS,
+    EDITOR_MAX_KEYFRAMES,
+    EDITOR_MAX_GIF_SECONDS,
+    EDITOR_MAX_DUCK_REGIONS,
+    EDITOR_MAX_SPRITE_STATES,
+    EDITOR_MAX_KEYFRAME_SPAN,
     EDITOR_MAX_FPS,
     EDITOR_MAX_FREEZE_SECONDS,
     EDITOR_MAX_MASK_ROWS,
@@ -653,10 +658,22 @@ class _EditorAdjust(BaseModel):
     opacity: float = Field(100, ge=0, le=100)
 
 
+class _EditorLut(BaseModel):
+    """An imported 3D LUT (src/lib/editor/lut.ts): size^3 RGB triplets, red
+    fastest, 0..1."""
+
+    size: int = Field(ge=2, le=33)
+    data: list[float] = Field(max_length=33**3 * 3)
+    intensity: float = Field(100, ge=0, le=100)
+
+
 class _EditorLook(BaseModel):
     filter: str = "original"
     intensity: float = Field(100, ge=0, le=100)
     adjust: _EditorAdjust = Field(default_factory=_EditorAdjust)
+    # Curves as [r, g, b] tables (src/lib/editor/curves.ts).
+    curve: Optional[list[list[float]]] = Field(None, min_length=3, max_length=3)
+    lut: Optional[_EditorLut] = None
 
 
 class _EditorTransform(BaseModel):
@@ -671,6 +688,19 @@ class _EditorCrop(BaseModel):
     y: float = Field(0, ge=0, le=0.9)
     w: float = Field(1, ge=0.05, le=1)
     h: float = Field(1, ge=0.05, le=1)
+
+
+class _EditorKeyframe(BaseModel):
+    """One keyframe (src/lib/editor/keyframes.ts): clip-local seconds on
+    clips, timeline seconds on layers."""
+
+    t: float = Field(ge=-EDITOR_MAX_KEYFRAME_SPAN, le=EDITOR_MAX_KEYFRAME_SPAN)
+    x: float = Field(ge=-3, le=4)
+    y: float = Field(ge=-3, le=4)
+    scale: float = Field(ge=0.01, le=20)
+    rotation: float = Field(ge=-3600, le=3600)
+    opacity: float = Field(1, ge=0, le=1)
+    ease: str = "smooth"
 
 
 class _EditorClip(BaseModel):
@@ -689,6 +719,12 @@ class _EditorClip(BaseModel):
     look: _EditorLook = Field(default_factory=_EditorLook)
     # Focus zoom rows [t, x, y, s] in clip time (see PlanClip.camera).
     camera: Optional[list[list[float]]] = Field(None, max_length=EDITOR_MAX_CAMERA_ROWS)
+    keyframes: list[_EditorKeyframe] = Field(default_factory=list, max_length=EDITOR_MAX_KEYFRAMES)
+    # Speed curve: speeds of equal source pieces (src/lib/editor/speed.ts).
+    ramp: list[float] = Field(default_factory=list, max_length=64)
+    # Shape mask: index into `overlays` of its grayscale PNG.
+    mask: Optional[int] = Field(None, ge=0, lt=EDITOR_MAX_STICKERS)
+    stabilize: float = Field(0, ge=0, le=100)
 
 
 class _EditorPointerCursor(BaseModel):
@@ -766,6 +802,15 @@ class _EditorMask(BaseModel):
     rows: list[list[float]] = Field(min_length=1, max_length=EDITOR_MAX_MASK_ROWS)
 
 
+def _check_keyframes(kfs: list[_EditorKeyframe]) -> None:
+    if any(k.ease not in editor_pipeline.EASES for k in kfs) or any(b.t < a.t for a, b in zip(kfs, kfs[1:])):
+        raise HTTPException(status_code=400, detail="Invalid keyframes")
+
+
+def _keyframe_dicts(kfs: list[_EditorKeyframe]) -> list[dict]:
+    return [k.model_dump() for k in kfs]
+
+
 def _mask_plan(m: _EditorMask, total: float) -> editor_pipeline.PlanMask | None:
     if m.mode not in editor_pipeline.MASK_MODES:
         raise HTTPException(status_code=400, detail="Unknown mask type")
@@ -776,6 +821,21 @@ def _mask_plan(m: _EditorMask, total: float) -> editor_pipeline.PlanMask | None:
         rows.append((r[0], r[1], r[2], r[3], r[4]))
     end = min(m.end, total)
     return editor_pipeline.PlanMask(m.mode, m.start, end, m.strength, m.color, rows) if end - m.start >= 0.02 else None
+
+
+class _EditorKey(BaseModel):
+    color: str = Field(pattern=_HEX_COLOR)
+    similarity: float = Field(ge=0, le=100)
+    smoothness: float = Field(ge=0, le=100)
+
+
+class _EditorSprite(BaseModel):
+    """Animated text: the image is a cols x rows grid of states, state k
+    shown from times[k] (timeline seconds; src/lib/editor/textAnim.ts)."""
+
+    cols: int = Field(ge=1, le=64)
+    rows: int = Field(ge=1, le=64)
+    times: list[float] = Field(min_length=1, max_length=EDITOR_MAX_SPRITE_STATES)
 
 
 class _EditorOverlay(BaseModel):
@@ -794,6 +854,19 @@ class _EditorOverlay(BaseModel):
     opacity: float = Field(1, ge=0, le=1)
     animIn: str = "none"
     animOut: str = "none"
+    blend: str = "normal"
+    key: Optional[_EditorKey] = None  # video layers; images come keyed
+    keyframes: list[_EditorKeyframe] = Field(default_factory=list, max_length=EDITOR_MAX_KEYFRAMES)
+    sprite: Optional[_EditorSprite] = None
+    mask: Optional[int] = Field(None, ge=0, lt=EDITOR_MAX_STICKERS)  # video layers: mask PNG index
+
+
+class _EditorDuck(BaseModel):
+    """Auto-ducking (src/lib/editor/ducking.ts): lowered by `amount` during
+    each [start, end] region of speech, timeline seconds."""
+
+    amount: float = Field(ge=0, le=1)
+    regions: list[list[float]] = Field(max_length=EDITOR_MAX_DUCK_REGIONS)
 
 
 class _EditorAudio(BaseModel):
@@ -807,6 +880,8 @@ class _EditorAudio(BaseModel):
     volume: float = Field(1, ge=0, le=2)
     fadeIn: float = Field(0, ge=0, le=10)
     fadeOut: float = Field(0, ge=0, le=10)
+    duck: Optional[_EditorDuck] = None
+    voice: str = "none"
 
 
 class _EditorEffect(BaseModel):
@@ -850,6 +925,10 @@ class _EditorProject(BaseModel):
     # probed average (often ~15 fps) is far below the capture rate; without
     # this, zooms and click rings would render at that average.
     fps: Optional[float] = Field(None, ge=1, le=EDITOR_MAX_FPS)
+    # "mp4" | "gif" | "audio" (editor_pipeline.OUTPUT_FORMATS), and the
+    # MP4's quality (QUALITY_CRF).
+    format: str = "mp4"
+    quality: str = "standard"
 
 
 _VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
@@ -994,6 +1073,16 @@ async def api_video_export(
             raise HTTPException(status_code=400, detail="Unknown transition")
         if c.look.filter not in editor_pipeline.FILTER_IDS:
             raise HTTPException(status_code=400, detail="Unknown filter")
+        if c.look.curve and any(not (2 <= len(t) <= 256) or not all(math.isfinite(v) and 0 <= v <= 1 for v in t) for t in c.look.curve):
+            raise HTTPException(status_code=400, detail="Invalid curves")
+        lut = c.look.lut
+        if lut and (len(lut.data) != lut.size**3 * 3 or not all(math.isfinite(v) and 0 <= v <= 1 for v in lut.data)):
+            raise HTTPException(status_code=400, detail="Invalid LUT")
+        _check_keyframes(c.keyframes)
+        if c.mask is not None and c.mask >= len(overlays):
+            raise HTTPException(status_code=400, detail="Clip mask is missing")
+        if c.ramp and (c.freeze is not None or c.reverse or not all(math.isfinite(s) and 0.1 <= s <= 10 for s in c.ramp)):
+            raise HTTPException(status_code=400, detail="Invalid speed curve")
     for o in spec.overlays:
         if (o.image is None) == (o.video is None):
             raise HTTPException(status_code=400, detail="Invalid layer")
@@ -1001,14 +1090,33 @@ async def api_video_export(
             raise HTTPException(status_code=400, detail="Layer refers to a missing file")
         if o.animIn not in editor_pipeline.ANIMS_IN or o.animOut not in editor_pipeline.ANIMS_OUT:
             raise HTTPException(status_code=400, detail="Unknown animation")
+        if o.blend not in editor_pipeline.BLEND_MODES:
+            raise HTTPException(status_code=400, detail="Unknown blend mode")
+        _check_keyframes(o.keyframes)
+        if o.mask is not None and (o.video is None or o.mask >= len(overlays)):
+            raise HTTPException(status_code=400, detail="Layer mask is missing")
+        sp = o.sprite
+        if sp and (
+            o.image is None
+            or len(sp.times) > sp.cols * sp.rows
+            or not _finite(sp.times, len(sp.times))
+            or any(b < a for a, b in zip(sp.times, sp.times[1:]))
+        ):
+            raise HTTPException(status_code=400, detail="Invalid text animation")
     for a in spec.audio:
         if (a.audio is None) == (a.video is None):
             raise HTTPException(status_code=400, detail="Invalid audio clip")
         if (a.audio is not None and a.audio >= len(audio_items)) or (a.video is not None and a.video >= len(source_items)):
             raise HTTPException(status_code=400, detail="Audio clip refers to a missing file")
+        if a.voice not in editor_pipeline.VOICE_FX:
+            raise HTTPException(status_code=400, detail="Unknown voice effect")
+        if a.duck and any(not _finite(r, 2) or r[1] < r[0] for r in a.duck.regions):
+            raise HTTPException(status_code=400, detail="Invalid ducking")
     for e in spec.effects:
         if e.type not in editor_pipeline.EFFECTS:
             raise HTTPException(status_code=400, detail="Unknown effect")
+    if spec.format not in editor_pipeline.OUTPUT_FORMATS or spec.quality not in editor_pipeline.QUALITY_CRF:
+        raise HTTPException(status_code=400, detail="Unknown export format")
     canvas = spec.canvas
     if canvas.aspect != "original" and canvas.aspect not in _CANVAS_ASPECTS:
         raise HTTPException(status_code=400, detail="Unknown canvas size")
@@ -1141,7 +1249,15 @@ async def api_video_export(
                         filter=c.look.filter,
                         intensity=c.look.intensity,
                         adjust=c.look.adjust.model_dump(),
+                        curve=c.look.curve or [],
+                        lut_size=c.look.lut.size if c.look.lut else 0,
+                        lut_data=c.look.lut.data if c.look.lut else [],
+                        lut_intensity=c.look.lut.intensity if c.look.lut else 0.0,
                         camera=_camera_rows(c.camera) if c.camera and c.freeze is None else [],
+                        keyframes=_keyframe_dicts(c.keyframes),
+                        ramp=list(c.ramp),
+                        mask_path=overlay_images[c.mask][0] if c.mask is not None else None,
+                        stabilize=c.stabilize if c.freeze is None else 0.0,
                     )
                 )
 
@@ -1162,6 +1278,8 @@ async def api_video_export(
             )
             if spec.pointer and (spec.pointer.cursorRows or spec.pointer.ringRows):
                 plan.pointer = _pointer_plan(spec.pointer, overlay_images)
+            plan.output_format = spec.format
+            plan.crf = editor_pipeline.QUALITY_CRF[spec.quality]
             if compact:
                 plan.crf = EDITOR_COMPACT_CRF
                 plan.audio_bitrate = EDITOR_COMPACT_AUDIO_BITRATE
@@ -1193,12 +1311,23 @@ async def api_video_export(
                         )
                 else:
                     path, iw, ih = overlay_images[o.image]  # type: ignore[index]
+                    if o.sprite:
+                        # Sized and placed as one cell of the grid.
+                        iw, ih = max(1, iw // o.sprite.cols), max(1, ih // o.sprite.rows)
                 plan.overlays.append(
                     editor_pipeline.PlanOverlay(
                         image_path=path, image_width=iw, image_height=ih, start=start, end=end,
                         x=o.x, y=o.y, width=o.width, rotation=o.rotation, opacity=o.opacity,
                         anim_in=o.animIn, anim_out=o.animOut,
-                        video=o.video is not None, offset=o.offset,
+                        video=o.video is not None, offset=o.offset, blend=o.blend,
+                        key_color=o.key.color if o.key and o.video is not None else None,
+                        key_similarity=o.key.similarity if o.key else 0.0,
+                        key_smoothness=o.key.smoothness if o.key else 0.0,
+                        keyframes=_keyframe_dicts(o.keyframes),
+                        sprite_cols=o.sprite.cols if o.sprite else 1,
+                        sprite_rows=o.sprite.rows if o.sprite else 1,
+                        sprite_times=list(o.sprite.times) if o.sprite else [],
+                        mask_path=overlay_images[o.mask][0] if o.mask is not None else None,
                     )
                 )
             if branding:
@@ -1233,12 +1362,22 @@ async def api_video_export(
                     editor_pipeline.PlanAudio(
                         path=path, start=a.start, offset=a.offset, duration=duration,
                         volume=a.volume, fade_in=min(a.fadeIn, duration / 2), fade_out=min(a.fadeOut, duration / 2),
+                        voice=a.voice,
+                        duck_amount=a.duck.amount if a.duck else 0.0,
+                        duck_regions=[(r[0], r[1]) for r in a.duck.regions] if a.duck else [],
                     )
                 )
             plan.audio.extend(layer_audio)
             plan.with_audio = bool(plan.audio) or any(c.source_has_audio for c in plan.clips)
+            if plan.output_format == "audio" and not plan.with_audio:
+                raise HTTPException(status_code=400, detail="This project has no sound to export.")
+            if plan.output_format == "gif":
+                plan.with_audio = False
+                if total > EDITOR_MAX_GIF_SECONDS:
+                    raise HTTPException(status_code=400, detail=f"GIFs can be up to {int(EDITOR_MAX_GIF_SECONDS)} seconds long. Trim the video or export an MP4.")
 
-            out_path = os.path.join(tmp, "export.mp4")
+            out_name, out_type = editor_pipeline.OUTPUT_FORMATS[plan.output_format]
+            out_path = os.path.join(tmp, out_name)
             plan_json = editor_pipeline.plan_to_json(plan)
             # Full re-encode of the timeline plus per-clip decode seeks; layers,
             # effects and grading add compositing work on top.
@@ -1257,7 +1396,7 @@ async def api_video_export(
                     },
                 ) from exc
 
-            return _stream_result(out_path, "video/mp4")
+            return _stream_result(out_path, out_type)
     except progress.Cancelled as exc:
         raise HTTPException(status_code=409, detail={"code": "cancelled", "message": "Export cancelled."}) from exc
     finally:

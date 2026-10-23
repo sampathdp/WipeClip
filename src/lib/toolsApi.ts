@@ -62,7 +62,9 @@ async function throwApiError(res: Response, fallback: string): Promise<never> {
       ? detail.map((d) => (typeof d?.msg === "string" ? d.msg : JSON.stringify(d))).join("; ")
       : detail?.message;
   const code = typeof detail === "object" && !Array.isArray(detail) ? detail?.code : undefined;
-  const msg = message || fallback;
+  // No message (a proxy's HTML or plain-text error page): keep the status,
+  // or there's nothing to go on when a user reports it.
+  const msg = message || `${fallback} (error ${res.status})`;
   if (code === "content_blocked") throw new ContentBlockedError(msg, code);
   if (code === "insufficient_credits") throw new InsufficientCreditsError(msg, code);
   if (code === "preview_limit") throw new PreviewLimitError(msg, code);

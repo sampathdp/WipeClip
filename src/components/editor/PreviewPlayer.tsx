@@ -9,6 +9,13 @@ import { CameraCache, cameraCrop, clipView, evalCamera } from "@/lib/editor/came
 import { PointerCache, pointerScene } from "@/lib/editor/pointer";
 import { drawScene } from "@/lib/editor/pointerDraw";
 import { drawMasks } from "@/lib/editor/maskDraw";
+import { clipKeyTime, clipTransformAt } from "@/lib/editor/keyframes";
+import { sourceToLocal, speedAt } from "@/lib/editor/speed";
+import { duckGain } from "@/lib/editor/ducking";
+import { AudioFxRouter } from "@/lib/editor/voiceFx";
+import { shapeMaskUrl } from "@/lib/editor/shapeMask";
+import { LutRenderer, lutNow } from "@/lib/editor/lut";
+import { sourceFile } from "@/lib/editor/sourceFile";
 import GradeFilter from "./GradeFilter";
 
 interface Need {
@@ -87,12 +94,19 @@ export default function PreviewPlayer({
   const pixelRef = useRef<HTMLCanvasElement>(null);
   const noiseRef = useRef<HTMLCanvasElement>(null);
   const scanRef = useRef<HTMLDivElement>(null);
+  const vignetteRef = useRef<HTMLDivElement>(null);
+  const letterboxRef = useRef<HTMLDivElement>(null);
   const rgbOffsets = useRef<{ r: SVGFEOffsetElement | null; b: SVGFEOffsetElement | null; g: SVGFEOffsetElement | null }>({ r: null, b: null, g: null });
   const flashRef = useRef<SVGFEComponentTransferElement | null>(null);
   const pointerRef = useRef<HTMLCanvasElement>(null);
   const maskWrapRef = useRef<HTMLDivElement>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement>(null);
   const caches = useRef({ camera: new CameraCache(), pointer: new PointerCache() });
+  const audioFx = useRef<AudioFxRouter | null>(null);
+  // Per slot: the WebGL canvas that stands in for the video when its clip
+  // has an imported LUT (lut.ts).
+  const lutRenderers = useRef<(LutRenderer | null)[]>([null, null]);
+  useEffect(() => () => audioFx.current?.close(), []);
   const state = useRef({ lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project });
   const playPending = useRef([false, false]);
   const audioPool = useRef(new Map<string, HTMLAudioElement>());
@@ -164,7 +178,7 @@ export default function PreviewPlayer({
           const clip = lay.clips[need.index].clip;
           const src = sources[clip.sourceId];
           if (!src) continue;
-          el.playbackRate = rate * clip.speed;
+          el.playbackRate = rate * speedAt(clip, need.time - clip.start);
           ensureSrc(el, src.url);
           const drift = Math.abs(el.currentTime - need.time);
           const driven = seekDriven(clip);
@@ -199,7 +213,7 @@ export default function PreviewPlayer({
         const primaryEl = els[loc.primary.index % 2]!;
         const clipLay = lay.clips[loc.primary.index];
         const wall = t + dt * rate;
-        const fromElement = clipLay.start + (primaryEl.currentTime - clipLay.clip.start) / clipLay.clip.speed;
+        const fromElement = clipLay.start + sourceToLocal(clipLay.clip, primaryEl.currentTime - clipLay.clip.start);
         const elementUsable = !seekDriven(clipLay.clip) && !primaryEl.paused && !primaryEl.seeking && !primaryEl.ended;
         t = elementUsable && Math.abs(fromElement - wall) < 0.3 ? Math.max(t, fromElement) : wall;
         if (t >= lay.total) {
@@ -236,7 +250,27 @@ export default function PreviewPlayer({
         const cam = caches.current.camera.track(project?.zooms, clip, view);
         return cam ? cameraCrop(clip.crop, evalCamera(cam, need.time)) : clip.crop;
       });
-      applyComposite(els as HTMLVideoElement[], [shadowA.current, shadowB.current], needs, crops, loc, lay, sources, canvas, canvasSize, stageW, stageH, dipRef.current, volume, muted);
+      applyComposite(els as HTMLVideoElement[], [shadowA.current, shadowB.current], needs, crops, loc, lay, sources, canvas, canvasSize, stageW, stageH, dipRef.current, volume, muted, t);
+      for (let slot = 0; slot < 2; slot++) {
+        const el = els[slot]!;
+        const need = needs[slot];
+        const lutRef = need ? lay.clips[need.index].clip.look.lut : undefined;
+        const lutSrc = lutRef ? sources[lutRef.sourceId] : undefined;
+        const lut = lutRef && lutSrc ? lutNow(lutSrc.id, () => sourceFile(lutSrc)) : null;
+        let r = lutRenderers.current[slot];
+        if (lut && !r) {
+          r = lutRenderers.current[slot] = new LutRenderer();
+          r.canvas.className = "pointer-events-none absolute";
+          el.after(r.canvas);
+        }
+        if (r && lut && lutRef && r.render(el, lut, lutRef.intensity / 100)) {
+          // Same box, transform, crop and filters as the video, which hides.
+          r.canvas.style.cssText = el.style.cssText;
+          el.style.opacity = "0";
+        } else if (r) {
+          r.canvas.style.display = "none";
+        }
+      }
       drawBlurBackground(blurBgRef.current, canvas, loc ? els[loc.primary.index % 2]! : null, loc ? crops[loc.primary.index % 2] : null);
       if (maskWrapRef.current && maskCanvasRef.current) {
         drawMasks(maskWrapRef.current, maskCanvasRef.current, project?.masks ?? [], t, lay, project ?? ({} as Project), sources, canvasSize, caches.current, loc ? els[loc.primary.index % 2]! : null);
@@ -251,9 +285,11 @@ export default function PreviewPlayer({
         pixel: pixelRef.current,
         noise: noiseRef.current,
         scan: scanRef.current,
+        vignette: vignetteRef.current,
+        letterbox: letterboxRef.current,
         source: loc ? els[loc.primary.index % 2]! : null,
       });
-      syncAudio(pool, audio, sources, t, playing && !stalled, rate, volume, muted, ensureSrc);
+      syncAudio(pool, audio, sources, t, playing && !stalled, rate, volume, muted, ensureSrc, (audioFx.current ??= new AudioFxRouter()));
 
       clock.set(t);
       raf = requestAnimationFrame(tick);
@@ -330,7 +366,11 @@ export default function PreviewPlayer({
         className="relative overflow-hidden rounded-xl bg-black shadow-lg ring-1 ring-border"
         style={box ?? { width: 0, height: 0 }}
       >
-        <div ref={fxRef} className="absolute inset-0 overflow-hidden" style={{ transformOrigin: "50% 50%" }}>
+        {/* Its own stacking context, so its z-indexed layers stay inside it
+            and the masks, pointer and text/stickers stack above in DOM
+            order without z-indexes - which lets a layer's blend mode
+            (mix-blend-mode) reach the video under it. */}
+        <div ref={fxRef} className="absolute inset-0 isolate overflow-hidden" style={{ transformOrigin: "50% 50%" }}>
           {/* Canvas background */}
           {bg.type === "color" && <div className="absolute inset-0" style={{ background: bg.color }} />}
           {bg.type === "gradient" && (
@@ -353,16 +393,18 @@ export default function PreviewPlayer({
             className="pointer-events-none absolute inset-0"
             style={{ display: "none", zIndex: 6, backgroundImage: "repeating-linear-gradient(to bottom, rgba(0,0,0,0.6) 0 1px, transparent 1px 4px)" }}
           />
+          <div ref={vignetteRef} className="pointer-events-none absolute inset-0" style={{ display: "none", zIndex: 6 }} />
+          <div ref={letterboxRef} className="pointer-events-none absolute inset-0 box-border border-x-0 border-solid border-black" style={{ display: "none", zIndex: 6 }} />
         </div>
         {/* Reconstructed cursor and click rings: above the video, not
             moved by timed effects, below text/stickers - same order as the
             export (effects, pointer, overlays). */}
         {/* Privacy masks: over the video and its effects, under the pointer
             and text/stickers - the export order. */}
-        <div ref={maskWrapRef} className="pointer-events-none absolute inset-0 z-[7] overflow-hidden" aria-hidden>
+        <div ref={maskWrapRef} className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
           <canvas ref={maskCanvasRef} className="absolute inset-0 h-full w-full" />
         </div>
-        <canvas ref={pointerRef} className="pointer-events-none absolute inset-0 z-[8] h-full w-full" aria-hidden />
+        <canvas ref={pointerRef} className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden />
         {children}
       </div>
     </div>
@@ -383,12 +425,14 @@ function applyComposite(
   H: number,
   dip: HTMLDivElement | null,
   volume: number,
-  muted: boolean
+  muted: boolean,
+  t: number
 ) {
   const smooth = (p: number) => p * p * (3 - 2 * p);
-  const extra: { transform: string; opacity: number; filter: string; visible: boolean; vol: number }[] = [
-    { transform: "", opacity: 1, filter: "", visible: true, vol: 1 },
-    { transform: "", opacity: 1, filter: "", visible: true, vol: 1 },
+  // `mask` is a CSS mask image in stage coordinates (wipes, circles).
+  const extra: { transform: string; opacity: number; filter: string; visible: boolean; vol: number; mask: string }[] = [
+    { transform: "", opacity: 1, filter: "", visible: true, vol: 1, mask: "" },
+    { transform: "", opacity: 1, filter: "", visible: true, vol: 1, mask: "" },
   ];
   if (dip) dip.style.opacity = "0";
 
@@ -433,6 +477,40 @@ function applyComposite(
         extra[n].opacity = p;
         break;
       }
+      case "slideup":
+        extra[o].transform = `translateY(${-p * H}px)`;
+        extra[n].transform = `translateY(${(1 - p) * H}px)`;
+        break;
+      case "slidedown":
+        extra[o].transform = `translateY(${p * H}px)`;
+        extra[n].transform = `translateY(${-(1 - p) * H}px)`;
+        break;
+      // Wipes: the hard edge of ffmpeg's xfade wipes, sweeping in the
+      // named direction.
+      case "wipeleft":
+        extra[n].mask = `linear-gradient(to right, transparent ${(1 - p) * 100}%, #000 ${(1 - p) * 100}%)`;
+        break;
+      case "wiperight":
+        extra[n].mask = `linear-gradient(to right, #000 ${p * 100}%, transparent ${p * 100}%)`;
+        break;
+      case "wipeup":
+        extra[n].mask = `linear-gradient(to bottom, transparent ${(1 - p) * 100}%, #000 ${(1 - p) * 100}%)`;
+        break;
+      case "wipedown":
+        extra[n].mask = `linear-gradient(to bottom, #000 ${p * 100}%, transparent ${p * 100}%)`;
+        break;
+      // xfade's circles: a soft ring one half-diagonal (z) wide, centered on
+      // the canvas, that sweeps across the frame during the middle third.
+      case "circleopen":
+      case "circleclose": {
+        const z = Math.hypot(W / 2, H / 2);
+        const open = loc.incoming.type === "circleopen";
+        const r0 = Math.max(0, (open ? 3 * p - 1.5 : 1.5 - 3 * p) * z);
+        const r1 = Math.max(r0 + 0.01, (open ? 3 * p - 0.5 : 2.5 - 3 * p) * z);
+        const [a, b] = open ? ["#000", "transparent"] : ["transparent", "#000"];
+        extra[n].mask = `radial-gradient(circle at 50% 50%, ${a} ${r0.toFixed(1)}px, ${b} ${r1.toFixed(1)}px)`;
+        break;
+      }
     }
   }
 
@@ -445,7 +523,9 @@ function applyComposite(
       if (sh) sh.style.visibility = "hidden";
       continue;
     }
-    const clip = lay.clips[need.index].clip;
+    const laid = lay.clips[need.index];
+    // Keyframed clips: this frame's transform stands in for the static one.
+    const clip = laid.clip.keyframes?.length ? { ...laid.clip, transform: clipTransformAt(laid.clip, clipKeyTime(laid, t)) } : laid.clip;
     const src = sources[clip.sourceId];
     const b = src ? videoBox(clip, src, canvasSize, canvas) : { w: 1, h: 1 };
     const g = gradeOf(clip.look);
@@ -463,8 +543,15 @@ function applyComposite(
     el.style.maxHeight = "none";
     el.style.width = `${fw}px`;
     el.style.height = `${fh}px`;
-    el.style.left = `${clip.transform.x * W - bw / 2 - c.x * fw}px`;
-    el.style.top = `${clip.transform.y * H - bh / 2 - c.y * fh}px`;
+    const left = clip.transform.x * W - bw / 2 - c.x * fw;
+    const top = clip.transform.y * H - bh / 2 - c.y * fh;
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    // A transition mask covers the whole stage, shifted onto the element
+    // (the clip's own rotation isn't undone - close enough for a wipe).
+    // The clip's shape mask covers its box: the kept part of the frame.
+    const shape = clip.mask ? shapeMaskUrl(clip.mask, bw / Math.max(1, bh)) : "";
+    setMask(el, extra[slot].mask, W, H, left, top, shape ? { url: shape, w: bw, h: bh, x: c.x * fw, y: c.y * fh } : null);
     const cropped = c.x > 0 || c.y > 0 || c.w < 1 || c.h < 1;
     const pct = (v: number) => `${(v * 100).toFixed(3)}%`;
     // Canvas frame: rounded corners on the visible box (same radius as the
@@ -494,6 +581,7 @@ function applyComposite(
         sh.style.transform = el.style.transform;
         sh.style.opacity = el.style.opacity;
         sh.style.zIndex = el.style.zIndex;
+        setMask(sh, extra[slot].mask, W, H, clip.transform.x * W - bw / 2, clip.transform.y * H - bh / 2, shape ? { url: shape, w: bw, h: bh, x: 0, y: 0 } : null);
       }
     }
     const filters: string[] = [];
@@ -505,6 +593,44 @@ function applyComposite(
     // HTML media volume can't exceed 1, so >100% clip volume previews at 100%.
     el.volume = Math.min(1, Math.max(0, volume * clip.volume * extra[slot].vol));
   }
+}
+
+/** CSS masks of a clip element: the transition's (stage-sized, shifted
+ * onto the element) and/or the clip's shape mask (box-sized, at the box),
+ * intersected when both apply. */
+function setMask(
+  el: HTMLElement,
+  mask: string,
+  W: number,
+  H: number,
+  left: number,
+  top: number,
+  shape: { url: string; w: number; h: number; x: number; y: number } | null
+) {
+  const layers: { image: string; size: string; pos: string }[] = [];
+  if (mask) layers.push({ image: mask, size: `${W}px ${H}px`, pos: `${-left}px ${-top}px` });
+  if (shape) layers.push({ image: `url("${shape.url}")`, size: `${shape.w}px ${shape.h}px`, pos: `${shape.x}px ${shape.y}px` });
+  const s = el.style;
+  const image = layers.map((l) => l.image).join(", ");
+  s.maskImage = image;
+  s.webkitMaskImage = image;
+  if (!layers.length) return;
+  s.maskSize = s.webkitMaskSize = layers.map((l) => l.size).join(", ");
+  s.maskPosition = s.webkitMaskPosition = layers.map((l) => l.pos).join(", ");
+  s.maskRepeat = s.webkitMaskRepeat = "no-repeat";
+  s.maskComposite = "intersect";
+  (s as CSSStyleDeclaration & { webkitMaskComposite: string }).webkitMaskComposite = "source-in";
+}
+
+/** ffmpeg's vignette factor cos(angle * d)^4 (d = distance from the center
+ * over the half-diagonal) as a black gradient, sampled every 10%. */
+function vignetteGradient(angle: number): string {
+  const stops: string[] = [];
+  for (let i = 0; i <= 10; i++) {
+    const c = Math.cos(Math.min(Math.PI / 2, angle * (i / 10)));
+    stops.push(`rgba(0,0,0,${(1 - c ** 4).toFixed(3)}) ${i * 10}%`);
+  }
+  return `radial-gradient(circle farthest-corner at 50% 50%, ${stops.join(", ")})`;
 }
 
 function drawBlurBackground(c: HTMLCanvasElement | null, canvas: Canvas, src: HTMLVideoElement | null, crop: Crop | null) {
@@ -526,6 +652,10 @@ function drawBlurBackground(c: HTMLCanvasElement | null, canvas: Canvas, src: HT
   ctx.drawImage(src, src.videoWidth * k.x, src.videoHeight * k.y, sw, sh, (c.width - w) / 2, (c.height - h) / 2, w, h);
 }
 
+/** Effects that read as "on" by default: full strength from 50% intensity
+ * (the default), half strength at 0. Same as _full_at_50 in editor.py. */
+const fullAt50 = (k: number) => Math.min(1, 0.5 + k);
+
 /** Preview counterparts of _effect_filters() in editor.py. Blur, flash,
  * RGB split, shake, zoom and pixelate follow the export's math; grain,
  * noise, VHS and glitch noise are visual approximations of ffmpeg's noise. */
@@ -541,6 +671,8 @@ function applyEffects(
     pixel: HTMLCanvasElement | null;
     noise: HTMLCanvasElement | null;
     scan: HTMLDivElement | null;
+    vignette: HTMLDivElement | null;
+    letterbox: HTMLDivElement | null;
     source: HTMLVideoElement | null;
   }
 ) {
@@ -552,6 +684,8 @@ function applyEffects(
   let scan = 0;
   let pixel = 0;
   let flash = 0;
+  let vignette = 0;
+  let bars = 0;
   for (const e of effects) {
     if (t < e.start || t >= e.end) continue;
     const k = Math.max(0, Math.min(1, e.intensity / 100));
@@ -601,6 +735,30 @@ function applyEffects(
         transforms.push(`scale(${1 + z * Math.sin((Math.PI * (t - e.start)) / Math.max(0.01, e.end - e.start))})`);
         break;
       }
+      case "bw":
+        filters.push(`saturate(${1 - fullAt50(k)})`);
+        break;
+      case "sepia":
+        filters.push(`sepia(${fullAt50(k)})`);
+        break;
+      case "invert":
+        filters.push(`invert(${fullAt50(k)})`);
+        break;
+      case "hue":
+        filters.push(`hue-rotate(${(360 * (0.25 + 1.75 * k) * (t - e.start)).toFixed(1)}deg)`);
+        break;
+      case "vignette":
+        vignette = Math.max(vignette, 0.4 + k);
+        break;
+      case "letterbox":
+        bars = Math.max(bars, 0.06 + 0.08 * k);
+        break;
+      case "strobe":
+        if (Math.floor((t - e.start) * 2 * (4 + 8 * k)) % 2 === 0) flash = Math.max(flash, 0.6);
+        break;
+      case "mirror":
+        transforms.push("scaleX(-1)");
+        break;
     }
   }
   if (rgb > 0) {
@@ -620,6 +778,14 @@ function applyEffects(
   if (nodes.scan) {
     nodes.scan.style.display = scan > 0 ? "block" : "none";
     nodes.scan.style.opacity = String(scan * 1.6);
+  }
+  if (nodes.vignette) {
+    nodes.vignette.style.display = vignette > 0 ? "block" : "none";
+    if (vignette > 0) nodes.vignette.style.background = vignetteGradient(vignette);
+  }
+  if (nodes.letterbox) {
+    nodes.letterbox.style.display = bars > 0 ? "block" : "none";
+    nodes.letterbox.style.borderTopWidth = nodes.letterbox.style.borderBottomWidth = `${(bars * H).toFixed(1)}px`;
   }
   const nc = nodes.noise;
   if (nc) {
@@ -666,7 +832,8 @@ function syncAudio(
   rate: number,
   volume: number,
   muted: boolean,
-  ensureSrc: (el: HTMLMediaElement, url: string) => void
+  ensureSrc: (el: HTMLMediaElement, url: string) => void,
+  fx: AudioFxRouter
 ) {
   const live = new Set<string>();
   for (const a of audio) {
@@ -692,8 +859,17 @@ function syncAudio(
     if (el.readyState >= 1 && !el.seeking && Math.abs(el.currentTime - want) > (playing ? 0.25 : 0.05)) el.currentTime = want;
     const fadeIn = a.fadeIn > 0 ? Math.min(1, local / a.fadeIn) : 1;
     const fadeOut = a.fadeOut > 0 ? Math.min(1, (a.duration - local) / a.fadeOut) : 1;
-    el.muted = muted || a.muted;
-    el.volume = Math.min(1, Math.max(0, volume * a.volume * fadeIn * fadeOut));
+    const level = Math.max(0, volume * a.volume * fadeIn * fadeOut * duckGain(a, t));
+    const gain = fx.apply(el, a.voice ?? "none");
+    if (gain) {
+      // Routed through Web Audio (voice effect): the gain node sets the level.
+      el.muted = false;
+      el.volume = 1;
+      gain.gain.value = muted || a.muted ? 0 : level;
+    } else {
+      el.muted = muted || a.muted;
+      el.volume = Math.min(1, level);
+    }
     el.playbackRate = rate;
     if (playing && el.paused) el.play().catch(() => {});
     if (!playing && !el.paused) el.pause();

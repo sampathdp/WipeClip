@@ -6,7 +6,11 @@ import { rasterKey } from "@/lib/editor/rasters";
 import type { RasterSticker } from "@/lib/editor/stickers";
 import { overlayWidth } from "@/lib/editor/textRaster";
 import { overlayFrame } from "@/lib/editor/timeline";
-import type { Overlay } from "@/lib/editor/types";
+import { overlayValues } from "@/lib/editor/keyframes";
+import { spriteIndex } from "@/lib/editor/textAnim";
+import { shapeMaskUrl } from "@/lib/editor/shapeMask";
+import { drawKeyedFrame } from "@/lib/editor/chromaKey";
+import type { ChromaKey, Overlay } from "@/lib/editor/types";
 
 type Drag =
   | { kind: "move"; id: string; px: number; py: number; x: number; y: number }
@@ -124,7 +128,9 @@ export default function OverlayLayer({
   };
 
   return (
-    <div ref={outerRef} className="absolute inset-0 z-10 flex items-center justify-center">
+    // No z-index: it stacks above the masks and pointer by DOM order, and
+    // a z-index would isolate the layers' blend modes from the video.
+    <div ref={outerRef} className="absolute inset-0 flex items-center justify-center">
       <div
         ref={boxRef}
         className="relative touch-none select-none"
@@ -142,23 +148,25 @@ export default function OverlayLayer({
         )}
         {overlays.map((o) => {
           if (o.hidden) return null;
-          const frame = overlayFrame(o, time);
+          const v = overlayValues(o, time);
+          const frame = overlayFrame({ ...o, opacity: v.opacity }, time);
           const img = rasters.byKey[rasterKey(o)] ?? rasters.byId[o.id];
           if (!frame || !img) return null;
           const selected = o.id === selectedId;
-          const w = overlayWidth(o, img, canvasSize) * size.width;
+          const w = overlayWidth(o, img, canvasSize) * size.width * v.scale;
           const h = (w * img.height) / img.width;
           return (
             <div
               key={o.id}
               className="absolute"
               style={{
-                left: o.x * size.width,
-                top: o.y * size.height,
+                left: v.x * size.width,
+                top: v.y * size.height,
                 width: w,
                 height: h,
-                transform: `translate(-50%, -50%) translate(${frame.dx * size.width}px, ${frame.dy * size.height}px) rotate(${o.rotation}deg) scale(${frame.scale})`,
+                transform: `translate(-50%, -50%) translate(${frame.dx * size.width}px, ${frame.dy * size.height}px) rotate(${v.rotation + frame.rotate}deg) scale(${frame.scale})`,
                 opacity: frame.opacity,
+                mixBlendMode: o.blend && o.blend !== "normal" ? (o.blend === "add" ? "plus-lighter" : o.blend) : undefined,
                 pointerEvents: o.locked ? "none" : undefined,
               }}
             >
@@ -168,11 +176,26 @@ export default function OverlayLayer({
                   sourceTime={o.offset + (time - o.start)}
                   gain={o.volume}
                   playback={playback}
+                  chromaKey={o.key ?? null}
+                  mask={o.mask ? shapeMaskUrl(o.mask, w / Math.max(1, h)) : null}
                   className={`h-full w-full cursor-move object-fill ${selected ? "" : "hover:outline hover:outline-1 hover:outline-white/60"}`}
                   onPointerDown={(e) => {
                     onSelect(o.id);
                     const p = toCanvas(e);
-                    begin(e, { kind: "move", id: o.id, px: p.x, py: p.y, x: o.x, y: o.y });
+                    begin(e, { kind: "move", id: o.id, px: p.x, py: p.y, x: v.x, y: v.y });
+                  }}
+                />
+              ) : img.sprite ? (
+                <SpriteCell
+                  url={img.url}
+                  sprite={img.sprite}
+                  index={spriteIndex(img.sprite.times, time - o.start)}
+                  className={`h-full w-full cursor-move ${selected ? "" : "hover:outline hover:outline-1 hover:outline-white/60"}`}
+                  onDoubleClick={() => o.kind === "text" && onEditText(o.id)}
+                  onPointerDown={(e) => {
+                    onSelect(o.id);
+                    const p = toCanvas(e);
+                    begin(e, { kind: "move", id: o.id, px: p.x, py: p.y, x: v.x, y: v.y });
                   }}
                 />
               ) : (
@@ -186,7 +209,7 @@ export default function OverlayLayer({
                   onPointerDown={(e) => {
                     onSelect(o.id);
                     const p = toCanvas(e);
-                    begin(e, { kind: "move", id: o.id, px: p.x, py: p.y, x: o.x, y: o.y });
+                    begin(e, { kind: "move", id: o.id, px: p.x, py: p.y, x: v.x, y: v.y });
                   }}
                 />
               )}
@@ -201,8 +224,8 @@ export default function OverlayLayer({
                     onPointerDown={(e) => {
                       const r = boxRef.current!.getBoundingClientRect();
                       const p = toCanvas(e);
-                      const dist = Math.hypot((p.x - o.x) * r.width, (p.y - o.y) * r.height);
-                      begin(e, { kind: "resize", id: o.id, cx: o.x, cy: o.y, dist, start: o.kind === "text" ? o.text.size : o.width });
+                      const dist = Math.hypot((p.x - v.x) * r.width, (p.y - v.y) * r.height);
+                      begin(e, { kind: "resize", id: o.id, cx: v.x, cy: v.y, dist, start: (o.kind === "text" ? o.text.size : o.width) * v.scale });
                     }}
                   />
                   {/* Corner handle, not one floating above the box: that got clipped
@@ -215,8 +238,8 @@ export default function OverlayLayer({
                     onPointerDown={(e) => {
                       const r = boxRef.current!.getBoundingClientRect();
                       const p = toCanvas(e);
-                      const a0 = (Math.atan2((p.y - o.y) * r.height, (p.x - o.x) * r.width) * 180) / Math.PI;
-                      begin(e, { kind: "rotate", id: o.id, cx: o.x, cy: o.y, a0, r0: o.rotation });
+                      const a0 = (Math.atan2((p.y - v.y) * r.height, (p.x - v.x) * r.width) * 180) / Math.PI;
+                      begin(e, { kind: "rotate", id: o.id, cx: v.x, cy: v.y, a0, r0: v.rotation });
                     }}
                   >
                     ↻
@@ -231,6 +254,38 @@ export default function OverlayLayer({
   );
 }
 
+/** One cell of an animated text's sprite sheet (textAnim.ts): the sheet,
+ * scaled so a cell fills the box, shifted to the current cell. */
+function SpriteCell({
+  url,
+  sprite,
+  index,
+  className,
+  onDoubleClick,
+  onPointerDown,
+}: {
+  url: string;
+  sprite: { cols: number; rows: number };
+  index: number;
+  className: string;
+  onDoubleClick: () => void;
+  onPointerDown: (e: React.PointerEvent) => void;
+}) {
+  return (
+    <div
+      className={className}
+      onDoubleClick={onDoubleClick}
+      onPointerDown={onPointerDown}
+      style={{
+        backgroundImage: `url("${url}")`,
+        backgroundSize: `${sprite.cols * 100}% ${sprite.rows * 100}%`,
+        backgroundPosition: `${sprite.cols > 1 ? ((index % sprite.cols) / (sprite.cols - 1)) * 100 : 0}% ${sprite.rows > 1 ? (Math.floor(index / sprite.cols) / (sprite.rows - 1)) * 100 : 0}%`,
+        backgroundRepeat: "no-repeat",
+      }}
+    />
+  );
+}
+
 /** A video layer's <video>, kept on the playhead like the audio tracks in
  * PreviewPlayer: re-seeked on a real jump, otherwise left to play. Only
  * mounted while the layer is on screen; pausing on unmount matters, since a
@@ -241,17 +296,36 @@ function OverlayVideo({
   sourceTime,
   gain,
   playback,
+  chromaKey,
+  mask,
   className,
   onPointerDown,
 }: {
+  /** Shape mask image (data URL) over the layer. */
+  mask: string | null;
   url: string;
   sourceTime: number;
   gain: number;
   playback: { playing: boolean; rate: number; volume: number; muted: boolean };
+  chromaKey: ChromaKey | null;
   className: string;
   onPointerDown: (e: React.PointerEvent) => void;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
+  const keyed = useRef<HTMLCanvasElement>(null);
+
+  // Keyed: the video stays mounted (it plays the sound and decodes) but
+  // hidden, and a canvas shows each frame with the key color removed.
+  useEffect(() => {
+    if (!chromaKey) return;
+    let raf = 0;
+    const draw = () => {
+      if (ref.current && keyed.current) drawKeyedFrame(ref.current, keyed.current, chromaKey);
+      raf = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(raf);
+  }, [chromaKey]);
   const { playing, rate, volume, muted } = playback;
 
   useEffect(() => {
@@ -272,7 +346,8 @@ function OverlayVideo({
     return () => el?.pause();
   }, []);
 
-  return (
+  const maskStyle = mask ? { maskImage: `url("${mask}")`, WebkitMaskImage: `url("${mask}")`, maskSize: "100% 100%", WebkitMaskSize: "100% 100%" } : undefined;
+  const video = (
     <video
       ref={ref}
       src={url}
@@ -280,8 +355,16 @@ function OverlayVideo({
       preload="auto"
       draggable={false}
       aria-hidden
-      className={className}
-      onPointerDown={onPointerDown}
+      className={chromaKey ? "pointer-events-none absolute inset-0 h-full w-full opacity-0" : className}
+      style={chromaKey ? undefined : maskStyle}
+      onPointerDown={chromaKey ? undefined : onPointerDown}
     />
+  );
+  if (!chromaKey) return video;
+  return (
+    <>
+      {video}
+      <canvas ref={keyed} className={`relative ${className}`} style={maskStyle} onPointerDown={onPointerDown} aria-hidden />
+    </>
   );
 }

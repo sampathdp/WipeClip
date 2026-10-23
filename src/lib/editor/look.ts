@@ -1,4 +1,5 @@
 import type { Adjustments, FilterId, Look } from "./types";
+import { curvesActive } from "./curves.ts";
 
 /** Color math shared by the preview and the export. MUST stay identical to
  * backend/app/pipeline/look.py - the preview applies it as an SVG filter
@@ -112,7 +113,8 @@ export function isNeutralColor(look: Look): boolean {
   const a = look.adjust;
   return (
     (look.filter === "original" || look.intensity === 0) &&
-    !a.brightness && !a.contrast && !a.saturation && !a.exposure && !a.temperature && !a.tint && !a.highlights && !a.shadows
+    !a.brightness && !a.contrast && !a.saturation && !a.exposure && !a.temperature && !a.tint && !a.highlights && !a.shadows &&
+    !curvesActive(look.curves)
   );
 }
 

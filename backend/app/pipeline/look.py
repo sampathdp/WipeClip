@@ -98,15 +98,45 @@ def _apply_transfer(t: Transfer, v: np.ndarray, c: int) -> np.ndarray:
     return np.clip(t.lift + v3 * (1 - t.lift), 0, 1)
 
 
-def write_cube(path: str, stages: list[tuple[Transfer, tuple[float, ...]]], size: int = 33) -> None:
+def sample_lut(size: int, data: list[float], rgb: np.ndarray) -> np.ndarray:
+    """Trilinear lookup of 3 x N colors in a size^3 LUT (red fastest) -
+    sampleLut() in src/lib/editor/lut.ts, and the GPU's filtering."""
+    lut = np.asarray(data, dtype=np.float64).reshape(size, size, size, 3)  # [b][g][r]
+    f = np.clip(rgb, 0, 1) * (size - 1)
+    i0 = np.minimum(np.floor(f).astype(int), size - 2)
+    t = f - i0
+    out = np.zeros_like(rgb)
+    for dr in (0, 1):
+        for dg in (0, 1):
+            for db in (0, 1):
+                w = (t[0] if dr else 1 - t[0]) * (t[1] if dg else 1 - t[1]) * (t[2] if db else 1 - t[2])
+                out += w * lut[i0[2] + db, i0[1] + dg, i0[0] + dr].T
+    return out
+
+
+def write_cube(
+    path: str,
+    stages: list[tuple[Transfer, tuple[float, ...]]],
+    size: int = 33,
+    curve: list[list[float]] | None = None,
+    lut: tuple[int, list[float], float] | None = None,
+) -> None:
     """Bakes the grade into a .cube 3D LUT (red varies fastest, as the
-    format requires)."""
+    format requires): an imported LUT first (mixed in by its intensity),
+    then the filter and adjustment stages, then the curves - the preview's
+    order (WebGL LUT, then the SVG grade filter)."""
     axis = np.linspace(0.0, 1.0, size)
     b, g, r = np.meshgrid(axis, axis, axis, indexing="ij")
     rgb = np.stack([r.ravel(), g.ravel(), b.ravel()])  # 3 x N, red fastest
+    if lut:
+        lut_size, data, intensity = lut
+        k = max(0.0, min(1.0, intensity / 100))
+        rgb = rgb + (sample_lut(lut_size, data, rgb) - rgb) * k
     for t, m in stages:
         rgb = np.stack([_apply_transfer(t, rgb[c], c) for c in range(3)])
         rgb = np.clip(np.array(m, dtype=np.float64).reshape(3, 3) @ rgb, 0, 1)
+    if curve:
+        rgb = np.stack([np.interp(rgb[c], np.linspace(0.0, 1.0, len(curve[c])), curve[c]) for c in range(3)])
     with open(path, "w", encoding="ascii") as f:
         f.write(f"LUT_3D_SIZE {size}\n")
         np.savetxt(f, rgb.T, fmt="%.6f")

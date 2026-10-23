@@ -81,11 +81,83 @@ TRANSITIONS: dict[str, tuple[str, str]] = {
     "slideright": ("slideright", "blend"),
     "zoom": ("zoomin", "blend"),
     "blur": ("hblur", "blend"),
+    "slideup": ("slideup", "blend"),
+    "slidedown": ("slidedown", "blend"),
+    "wipeleft": ("wipeleft", "blend"),
+    "wiperight": ("wiperight", "blend"),
+    "wipeup": ("wipeup", "blend"),
+    "wipedown": ("wipedown", "blend"),
+    "circleopen": ("circleopen", "blend"),
+    "circleclose": ("circleclose", "blend"),
 }
 
-ANIMS_IN = ("none", "fade", "pop", "zoomin", "slideup", "slidedown", "slideleft", "slideright")
-ANIMS_OUT = ("none", "fade", "zoomout", "slideup", "slidedown", "slideleft", "slideright")
-EFFECTS = ("blur", "motionblur", "glitch", "vhs", "grain", "noise", "pixelate", "rgbsplit", "flash", "shake", "zoom")
+# Layer blend mode -> (ffmpeg blend mode, neutral color). The layer is
+# drawn onto a canvas of the neutral color - the one that leaves the video
+# unchanged in that mode - and the whole canvas is blended, so the area
+# around the layer (and its soft edges) stays as it was.
+BLEND_MODES: dict[str, tuple[str, str]] = {
+    "normal": ("normal", "black"),
+    "multiply": ("multiply", "white"),
+    "screen": ("screen", "black"),
+    "overlay": ("overlay", "0x808080"),
+    "darken": ("darken", "white"),
+    "lighten": ("lighten", "black"),
+    "add": ("addition", "black"),
+    "difference": ("difference", "black"),
+}
+
+EASES = ("linear", "smooth", "in", "out")
+
+# Export formats: an MP4, an animated GIF (no sound) or the sound alone (M4A).
+OUTPUT_FORMATS = {"mp4": ("export.mp4", "video/mp4"), "gif": ("export.gif", "image/gif"), "audio": ("export.m4a", "audio/mp4")}
+GIF_FPS = 15
+GIF_MAX_WIDTH = 640
+# Quality -> x264 CRF (lower = better, bigger).
+QUALITY_CRF = {"standard": VIDEO_ENCODE_CRF, "high": VIDEO_ENCODE_CRF - 3, "max": VIDEO_ENCODE_CRF - 6}
+
+# Must match DUCK_ATTACK / DUCK_RELEASE in src/lib/editor/ducking.ts.
+DUCK_ATTACK = 0.3
+DUCK_RELEASE = 0.5
+
+
+def duck_gain_expr(au: "PlanAudio", var: str) -> str:
+    """Gain of a ducked track as an expression of `var` (timeline seconds):
+    1 - amount * (trapezoid per region) - duckGain() in ducking.ts."""
+    points: list[dict] = []
+    for a, b in au.duck_regions:
+        points += [
+            {"t": a - DUCK_ATTACK, "v": 0.0, "ease": "linear"},
+            {"t": a, "v": 1.0, "ease": "linear"},
+            {"t": b, "v": 1.0, "ease": "linear"},
+            {"t": b + DUCK_RELEASE, "v": 0.0, "ease": "linear"},
+        ]
+    if not points or au.duck_amount <= 0:
+        return "1"
+    return f"(1-{_num(au.duck_amount)}*({keyframe_expr(points, 'v', var)}))"
+
+ANIMS_IN = ("none", "fade", "pop", "bounce", "spin", "zoomin", "slideup", "slidedown", "slideleft", "slideright")
+ANIMS_OUT = ("none", "fade", "pop", "spin", "zoomout", "slideup", "slidedown", "slideleft", "slideright")
+EFFECTS = (
+    "blur",
+    "motionblur",
+    "glitch",
+    "vhs",
+    "grain",
+    "noise",
+    "pixelate",
+    "rgbsplit",
+    "flash",
+    "shake",
+    "zoom",
+    "bw",
+    "sepia",
+    "invert",
+    "hue",
+    "vignette",
+    "letterbox",
+    "strobe",
+    "mirror",
+)
 FILTER_IDS = tuple(look_pipeline.FILTERS)
 
 # Must match ANIM_SECONDS / SLIDE_DISTANCE in src/lib/editor/timeline.ts so
@@ -94,6 +166,18 @@ ANIM_SECONDS = 0.35
 SLIDE_DISTANCE = 0.15  # fraction of canvas width (x) / height (y)
 
 AUDIO_RATE = 48000
+
+# Voice effects - the preview's Web Audio graphs in src/lib/editor/voiceFx.ts.
+# Pitch: resample to the new pitch, then atempo back to the length.
+VOICE_FX: dict[str, str] = {
+    "none": "",
+    "chipmunk": f"asetrate={AUDIO_RATE}*1.5,aresample={AUDIO_RATE},atempo=0.666667",
+    "deep": f"asetrate={AUDIO_RATE}*0.75,aresample={AUDIO_RATE},atempo=1.333333",
+    "robot": "aeval='val(ch)*sin(2*PI*50*t)':c=same",
+    "echo": "aecho=in_gain=1:out_gain=0.7:delays=250:decays=0.45",
+    "telephone": "highpass=f=300,lowpass=f=3400",
+    "radio": "highpass=f=500,lowpass=f=2800,volume=4,asoftclip=type=tanh,volume=0.5",
+}
 
 
 @dataclass
@@ -234,6 +318,27 @@ class PlanClip:
     # Focus zoom: (t, x, y, s) rows in clip time - the visible window of the
     # (cropped) frame, top-left x/y and size s, fractions. Empty = no zoom.
     camera: list[tuple[float, float, float, float]] = field(default_factory=list)
+    # Transform animation: {t, x, y, scale, rotation, ease} in clip time;
+    # replaces x/y/scale/rotation (see keyframe_expr).
+    keyframes: list[dict] = field(default_factory=list)
+    # Curves as [r, g, b] tables and an imported LUT (size^3 RGB, red
+    # fastest) - both baked into the clip's LUT with the grade (look.py).
+    curve: list[list[float]] = field(default_factory=list)
+    lut_size: int = 0
+    lut_data: list[float] = field(default_factory=list)
+    lut_intensity: float = 0.0
+    # Shape mask over the clip's box: a grayscale PNG, white = shown.
+    mask_path: str | None = None
+    # Stabilization strength 0..100 (0 = off) and, once analysed
+    # (prepare_stabilization), the motion file vidstabtransform reads.
+    stabilize: float = 0.0
+    stab_path: str | None = None
+    # Speed curve: the speeds of equal source pieces, played in order,
+    # instead of `speed` (src/lib/editor/speed.ts). Empty = constant.
+    ramp: list[float] = field(default_factory=list)
+    # Source seconds the clip covers; set by quantize_plan (which turns
+    # `duration` into timeline seconds).
+    source_length: float = 0.0
 
 
 _NEUTRAL_ADJUST = {
@@ -267,6 +372,20 @@ class PlanOverlay:
     anim_out: str = "none"
     video: bool = False  # image_path is a video, played from `offset`
     offset: float = 0.0
+    blend: str = "normal"  # key of BLEND_MODES
+    key_color: str | None = None  # chroma key (video layers), "#rrggbb"
+    key_similarity: float = 0.0  # 0..100
+    key_smoothness: float = 0.0  # 0..100
+    # Animation: {t, x, y, scale, rotation, opacity, ease} in timeline time;
+    # replaces x/y/rotation/opacity, and scale multiplies the size.
+    keyframes: list[dict] = field(default_factory=list)
+    # Shape mask (video layers; image layers carry it in their PNG).
+    mask_path: str | None = None
+    # Animated text: image_path is a grid of states (image_width/height are
+    # one cell), state k shown from sprite_times[k] (timeline seconds).
+    sprite_cols: int = 1
+    sprite_rows: int = 1
+    sprite_times: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -278,6 +397,11 @@ class PlanAudio:
     volume: float = 1.0
     fade_in: float = 0.0
     fade_out: float = 0.0
+    voice: str = "none"  # key of VOICE_FX
+    # Auto-ducking: lowered by duck_amount (0..1) during these timeline
+    # ranges, ramping over DUCK_ATTACK before and DUCK_RELEASE after.
+    duck_amount: float = 0.0
+    duck_regions: list[tuple[float, float]] = field(default_factory=list)
 
 
 @dataclass
@@ -343,6 +467,7 @@ class ExportPlan:
     background_image: str | None = None
     crf: int = VIDEO_ENCODE_CRF
     audio_bitrate: str = "192k"
+    output_format: str = "mp4"  # key of OUTPUT_FORMATS
     pointer: PlanPointer | None = None
     masks: list[PlanMask] = field(default_factory=list)
 
@@ -391,7 +516,13 @@ def quantize_plan(plan: ExportPlan) -> None:
     plan._quantized = True  # type: ignore[attr-defined]
     frame = 1.0 / plan.fps
     for clip in plan.clips:
-        clip.duration = max(1, round(clip.duration / clip.speed * plan.fps)) * frame
+        clip.source_length = clip.duration
+        if clip.ramp:
+            piece = clip.duration / len(clip.ramp)
+            timeline = sum(piece / s for s in clip.ramp)
+        else:
+            timeline = clip.duration / clip.speed
+        clip.duration = max(1, round(timeline * plan.fps)) * frame
     for i, clip in enumerate(plan.clips):
         if clip.transition is None or i == len(plan.clips) - 1:
             clip.transition = None
@@ -419,8 +550,38 @@ def _even(v: float) -> int:
 
 
 def _atempo(speed: float) -> str:
-    # atempo accepts 0.5..100 per instance; editor speeds are 0.5..2.
-    return f"atempo={_num(speed)}" if abs(speed - 1) > 1e-6 else "anull"
+    # atempo accepts 0.5..100 per instance, so slower speeds are a chain
+    # of halvings plus the rest.
+    if abs(speed - 1) <= 1e-6:
+        return "anull"
+    parts = []
+    while speed < 0.5:
+        parts.append("atempo=0.5")
+        speed /= 0.5
+    parts.append(f"atempo={_num(speed)}")
+    return ",".join(parts)
+
+
+def ramp_pts_expr(clip: PlanClip) -> str:
+    """Output time (seconds) of the frame at source time T - STARTT of a
+    speed-ramped clip: each source piece lasts piece / speed - the
+    piecewise-linear localToSource() inverse in src/lib/editor/speed.ts."""
+    piece = clip.source_length / len(clip.ramp)
+    x = "(T-STARTT)"
+    acc = [0.0]
+    for s in clip.ramp:
+        acc.append(acc[-1] + piece / s)
+
+    def seg(k: int) -> str:
+        return f"({_num(acc[k])}+({x}-{_num(k * piece)})/{_num(clip.ramp[k])})"
+
+    def build(lo: int, hi: int) -> str:
+        if lo == hi:
+            return seg(lo)
+        mid = (lo + hi + 1) // 2
+        return f"if(lt({x},{_num(mid * piece)}),{build(lo, mid - 1)},{build(mid, hi)})"
+
+    return build(0, len(clip.ramp) - 1)
 
 
 def _rounded_box(w: int, h: int, r: float, supersample: int = 4) -> "Image.Image":
@@ -553,6 +714,58 @@ def step_expr(times: list[float], values: list[float | int], var: str, fps: floa
         return f"if(lt({var},{_num(t2[mid] - half)}),{build(lo, mid - 1)},{build(mid, hi)})"
 
     return build(0, len(t2) - 1)
+
+
+def _ease_expr(kind: str, u: str) -> str:
+    """ease() in src/lib/editor/keyframes.ts."""
+    if kind == "smooth":
+        return f"({u}*{u}*(3-2*{u}))"
+    if kind == "in":
+        return f"({u}*{u})"
+    if kind == "out":
+        return f"({u}*(2-{u}))"
+    return u
+
+
+def keyframe_values(kfs: list[dict], key: str) -> list[float]:
+    return [float(k.get(key, 1.0)) for k in kfs]
+
+
+def keyframe_expr(kfs: list[dict], key: str, var: str) -> str:
+    """ffmpeg expression of `var` (seconds) for one animated value -
+    sampleKeyframes() in src/lib/editor/keyframes.ts: held before the first
+    and after the last keyframe, eased between neighbors. A balanced
+    if(lt()) tree over the keyframe times, like step_expr."""
+    vals = keyframe_values(kfs, key)
+    if all(v == vals[0] for v in vals):
+        return _num(vals[0])
+    times = [float(k["t"]) for k in kfs]
+
+    def seg(i: int) -> str:
+        a, b = vals[i], vals[i + 1]
+        if a == b or times[i + 1] - times[i] < 1e-6:
+            return _num(b if times[i + 1] - times[i] < 1e-6 else a)
+        u = f"(({var}-{_num(times[i])})/{_num(times[i + 1] - times[i])})"
+        return f"({_num(a)}+{_num(b - a)}*{_ease_expr(kfs[i].get('ease', 'smooth'), u)})"
+
+    # Region r: 0 = before the first keyframe, n = after the last, else
+    # between keyframes r-1 and r.
+    n = len(times)
+
+    def region(r: int) -> str:
+        if r == 0:
+            return _num(vals[0])
+        if r == n:
+            return _num(vals[-1])
+        return seg(r - 1)
+
+    def build(lo: int, hi: int) -> str:
+        if lo == hi:
+            return region(lo)
+        mid = (lo + hi + 1) // 2
+        return f"if(lt({var},{_num(times[mid - 1])}),{build(lo, mid - 1)},{build(mid, hi)})"
+
+    return build(0, n)
 
 
 def camera_geometry(x: float, y: float, s: float, box_w: int, box_h: int) -> tuple[int, int, int, int]:
@@ -714,6 +927,21 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
     d = _num(clip.duration)
     graph: list[str] = []
 
+    # Keyframes replace the static transform; a value that never changes
+    # is applied like a static one, the rest per frame of clip time t.
+    def animated(key: str, static: float) -> tuple[str | None, float]:
+        if not clip.keyframes:
+            return None, static
+        vals = keyframe_values(clip.keyframes, key)
+        return (keyframe_expr(clip.keyframes, key, "t") if len(set(vals)) > 1 else None), vals[0]
+
+    x_anim, pos_x = animated("x", clip.x)
+    y_anim, pos_y = animated("y", clip.y)
+    scale_anim, scale = animated("scale", clip.scale)
+    rot_anim, rotation = animated("rotation", clip.rotation)
+    x_pos = f"{W}*({x_anim})" if x_anim else _num(pos_x * W)
+    y_pos = f"{H}*({y_anim})" if y_anim else _num(pos_y * H)
+
     pre: list[str] = []
     if clip.freeze:
         # The first decoded frame, repeated for the whole hold with fresh
@@ -723,15 +951,21 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
         pre.append(f"trim=end_frame=1,loop=loop={frames}:size=1,setpts=N/({_num(fps)}*TB)")
     cropped = clip.crop_x > 0 or clip.crop_y > 0 or clip.crop_w < 1 or clip.crop_h < 1
     if cropped:
-        pre.append(
-            f"crop=w='trunc(iw*{_num(clip.crop_w)}/2)*2':h='trunc(ih*{_num(clip.crop_h)}/2)*2':"
-            f"x='iw*{_num(clip.crop_x)}':y='ih*{_num(clip.crop_y)}'"
-        )
-    if not clip.freeze:
+        pre.append(_crop_filter(clip))
+    if clip.stabilize > 0 and not clip.freeze:
+        # On the decoded (cropped) frames, the same sequence the analysis
+        # pass saw - before retiming changes the frame count.
+        pre.append(_stabilize_filter(clip))
+    if clip.ramp and not clip.freeze:
+        pre.append(f"setpts='({ramp_pts_expr(clip)})/TB'")
+    elif not clip.freeze:
         pre.append(f"setpts=(PTS-STARTPTS)/{_num(clip.speed)}")
-    if not look_pipeline.is_neutral_color(clip.filter, clip.intensity, clip.adjust):
+    lut = (clip.lut_size, clip.lut_data, clip.lut_intensity) if clip.lut_size and clip.lut_intensity > 0 else None
+    if not look_pipeline.is_neutral_color(clip.filter, clip.intensity, clip.adjust) or clip.curve or lut:
         cube = os.path.join(tmp, f"look{i}.cube")
-        look_pipeline.write_cube(cube, look_pipeline.grade_stages(clip.filter, clip.intensity, clip.adjust))
+        look_pipeline.write_cube(
+            cube, look_pipeline.grade_stages(clip.filter, clip.intensity, clip.adjust), curve=clip.curve or None, lut=lut
+        )
         # Forward slashes + escaped drive colon so the path survives filter
         # graph parsing on Windows too.
         cube_arg = _filter_path(cube)
@@ -747,7 +981,8 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
     else:
         box_w, box_h = H * src_ar, H
     inset = 1 - 2 * max(0.0, min(0.2, plan.frame_padding))
-    box_w, box_h = _even(box_w * clip.scale * inset), _even(box_h * clip.scale * inset)
+    box_scale = 1.0 if scale_anim else scale
+    box_w, box_h = _even(box_w * box_scale * inset), _even(box_h * box_scale * inset)
     pre.append(f"scale={box_w}:{box_h}:flags=lanczos,setsar=1")
     if clip.adjust["blur"] > 0:
         pre.append(f"gblur=sigma={_num(clip.adjust['blur'] / 100 * 0.02 * H)}")
@@ -758,13 +993,21 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
 
     opacity = max(0.0, min(1.0, clip.adjust["opacity"] / 100))
     post: list[str] = []
-    if abs(clip.rotation) > 0.01 or opacity < 0.999:
+    if abs(rotation) > 0.01 or rot_anim or scale_anim or opacity < 0.999:
         post.append("format=rgba")
-    if abs(clip.rotation) > 0.01:
-        rad = f"{_num(clip.rotation)}*PI/180"
+    if rot_anim:
+        # A box that fits every angle, so the center stays put. Filled with
+        # transparent black: c=none leaves the previous frame's pixels
+        # around the picture, which smears a turning picture into a disc.
+        post.append(f"rotate=a='({rot_anim})*PI/180':c=black@0:ow='hypot(iw,ih)':oh='hypot(iw,ih)'")
+    elif abs(rotation) > 0.01:
+        rad = f"{_num(rotation)}*PI/180"
         post.append(f"rotate=a={rad}:c=none:ow=rotw({rad}):oh=roth({rad})")
     if opacity < 0.999:
         post.append(f"colorchannelmixer=aa={_num(opacity)}")
+    if scale_anim:
+        # After rotating, so the rotate filter keeps one input size.
+        post.append(f"scale=w='max(2,trunc(iw*({scale_anim})/2)*2)':h='max(2,trunc(ih*({scale_anim})/2)*2)':eval=frame")
 
     needs_blur_bg = plan.background == "blur"
     chain = ",".join(pre)
@@ -798,23 +1041,32 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
 
     # Canvas frame: rounded corners (alpha mask), then the shadow on the
     # background under where the video lands, turned and faded with it.
+    # The clip's shape mask (src/lib/editor/shapeMask.ts) multiplies in.
     radius = max(0.0, min(0.1, plan.frame_radius)) * min(W, H)
-    if radius > 0.5:
-        mask_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", d, "-i", _frame_mask(tmp, i, box_w, box_h, radius))
-        graph.append(f"[{mask_idx}:v]format=gray,setsar=1[fm{i}]")
+    if radius > 0.5 or clip.mask_path:
+        masks = []
+        if radius > 0.5:
+            mask_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", d, "-i", _frame_mask(tmp, i, box_w, box_h, radius))
+            graph.append(f"[{mask_idx}:v]format=gray,setsar=1[fm{i}]")
+            masks.append(f"fm{i}")
+        if clip.mask_path:
+            sm_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", d, "-i", clip.mask_path)
+            graph.append(f"[{sm_idx}:v]scale={box_w}:{box_h}:flags=bicubic,format=gray,setsar=1[fsm{i}]")
+            masks.append(f"fsm{i}")
+        if len(masks) == 2:
+            graph.append(f"[fm{i}][fsm{i}]blend=all_mode=multiply[fmm{i}]")
+            masks = [f"fmm{i}"]
         graph.append(f"[{fg_in}]format=rgba[fr{i}]")
-        graph.append(f"[fr{i}][fm{i}]alphamerge[fa{i}]")
+        graph.append(f"[fr{i}][{masks[0]}]alphamerge[fa{i}]")
         fg_in = f"fa{i}"
         if not post:
             post.append("format=rgba")
     shadow_path = _frame_shadow_image(tmp, i, box_w, box_h, radius, H, plan.frame_shadow)
     if shadow_path:
         sh_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", d, "-i", shadow_path)
-        sh_post = ["format=rgba"] + [f for f in post if f.startswith(("rotate", "colorchannelmixer"))]
+        sh_post = ["format=rgba"] + [f for f in post if f.startswith(("rotate", "colorchannelmixer", "scale"))]
         graph.append(f"[{sh_idx}:v]{','.join(sh_post)},setsar=1[fs{i}]")
-        graph.append(
-            f"[bg{i}][fs{i}]overlay=x='{_num(clip.x * W)}-overlay_w/2':y='{_num(clip.y * H)}-overlay_h/2':format=auto[bs{i}]"
-        )
+        graph.append(f"[bg{i}][fs{i}]overlay=x='{x_pos}-overlay_w/2':y='{y_pos}-overlay_h/2':format=auto[bs{i}]")
         bg_label = f"bs{i}"
     else:
         bg_label = f"bg{i}"
@@ -823,15 +1075,85 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
         graph.append(f"[{fg_in}]{','.join(post)}[cf{i}]")
         fg_in = f"cf{i}"
     graph.append(
-        f"[{bg_label}][{fg_in}]overlay=x='{_num(clip.x * W)}-overlay_w/2':y='{_num(clip.y * H)}-overlay_h/2':"
+        f"[{bg_label}][{fg_in}]overlay=x='{x_pos}-overlay_w/2':y='{y_pos}-overlay_h/2':"
         f"format=auto:eof_action=repeat,format=yuv420p,setsar=1,"
         f"tpad=stop_mode=clone:stop_duration={d},trim=duration={d},setpts=PTS-STARTPTS,settb=AVTB,fps={_num(fps)}[v{i}]"
     )
     return graph
 
 
+def _crop_filter(clip: PlanClip) -> str:
+    return (
+        f"crop=w='trunc(iw*{_num(clip.crop_w)}/2)*2':h='trunc(ih*{_num(clip.crop_h)}/2)*2':"
+        f"x='iw*{_num(clip.crop_x)}':y='ih*{_num(clip.crop_y)}'"
+    )
+
+
+def _stabilize_filter(clip: PlanClip) -> str:
+    """vidstabtransform with the analysed motion, zoomed just enough to
+    hide the moving edges; deshake (one pass) when there's no analysis
+    (an ffmpeg without vidstab)."""
+    k = max(0.0, min(1.0, clip.stabilize / 100))
+    if clip.stab_path:
+        return f"vidstabtransform=input='{_filter_path(clip.stab_path)}':smoothing={int(round(5 + 45 * k))}:optzoom=1:interpol=bicubic"
+    r = int(round(16 + 48 * k))
+    return f"deshake=rx={r}:ry={r}"
+
+
+_VIDSTAB: bool | None = None
+
+
+def has_vidstab() -> bool:
+    global _VIDSTAB
+    if _VIDSTAB is None:
+        try:
+            out = subprocess.run([get_ffmpeg_path(), "-hide_banner", "-filters"], capture_output=True, text=True, timeout=30).stdout
+            _VIDSTAB = "vidstabdetect" in out
+        except (OSError, subprocess.SubprocessError):
+            _VIDSTAB = False
+    return _VIDSTAB
+
+
+def stabilize_analysis_args(clip: PlanClip, trf_path: str) -> list[str]:
+    """Pass 1: motion of the clip's frames (same range and crop as the
+    render) into `trf_path`."""
+    k = max(0.0, min(1.0, clip.stabilize / 100))
+    vf = [_crop_filter(clip)] if clip.crop_x > 0 or clip.crop_y > 0 or clip.crop_w < 1 or clip.crop_h < 1 else []
+    vf.append(f"vidstabdetect=result='{_filter_path(trf_path)}':shakiness={int(round(3 + 7 * k))}:accuracy=15")
+    length = clip.source_length or clip.duration * clip.speed
+    return ["-y", "-hide_banner", "-ss", _num(clip.start), "-t", _num(length), "-i", clip.source_path, "-vf", ",".join(vf), "-an", "-f", "null", "-"]
+
+
+async def prepare_stabilization(plan: ExportPlan, tmp: str, cancel: "threading.Event | None" = None) -> None:
+    """Runs the analysis pass for every stabilized clip (when this ffmpeg
+    has vidstab), so build_export_args can use vidstabtransform."""
+    quantize_plan(plan)
+    if not any(c.stabilize > 0 and not c.freeze for c in plan.clips) or not has_vidstab():
+        return
+    for i, clip in enumerate(plan.clips):
+        if clip.stabilize > 0 and not clip.freeze:
+            path = os.path.join(tmp, f"stab{i}.trf")
+            await _run_ffmpeg(stabilize_analysis_args(clip, path), cancel=cancel)
+            clip.stab_path = path
+
+
 def _clip_audio_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int) -> str:
     d = _num(clip.duration)
+    if clip.ramp and clip.source_has_audio:
+        # Each source piece at its own tempo, joined back together.
+        k = len(clip.ramp)
+        piece = clip.source_length / k
+        heads = "".join(f"[ra{i}_{n}]" for n in range(k))
+        parts = [
+            f"[{idx}:a:0]aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,asplit={k}{heads}"
+        ]
+        for n, s in enumerate(clip.ramp):
+            parts.append(
+                f"[ra{i}_{n}]atrim=start={_num(n * piece)}:end={_num((n + 1) * piece)},asetpts=PTS-STARTPTS,{_atempo(s)}[rb{i}_{n}]"
+            )
+        tails = "".join(f"[rb{i}_{n}]" for n in range(k))
+        parts.append(f"{tails}concat=n={k}:v=0:a=1,volume={_num(clip.volume)},apad,atrim=duration={d},asetpts=PTS-STARTPTS[a{i}]")
+        return ";".join(parts)
     src = f"[{idx}:a:0]" if clip.source_has_audio else f"anullsrc=r={AUDIO_RATE}:cl=stereo,"
     tempo = _atempo(clip.speed) if clip.source_has_audio else "anull"
     rev = "areverse," if clip.reverse and clip.source_has_audio else ""
@@ -839,6 +1161,13 @@ def _clip_audio_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int) -> str
         f"{src}aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,{rev}{tempo},"
         f"volume={_num(clip.volume)},apad,atrim=duration={d},asetpts=PTS-STARTPTS[a{i}]"
     )
+
+
+def _full_at_50(k: float) -> float:
+    """Strength of the "on by default" effects (black & white, sepia,
+    invert): full from 50% intensity, half at 0. Same as fullAt50 in
+    PreviewPlayer.tsx."""
+    return min(1.0, 0.5 + k)
 
 
 def _effect_filters(e: PlanEffect, W: int, H: int) -> str:
@@ -888,10 +1217,44 @@ def _effect_filters(e: PlanEffect, W: int, H: int) -> str:
             f"scale=w='trunc({W}*(1+{z}*{ramp})/2)*2':h=-2:eval=frame,"
             f"crop={W}:{H}:(in_w-{W})/2:(in_h-{H})/2,setsar=1"
         )
+    if e.type == "bw":
+        return f"eq=saturation={_num(1 - _full_at_50(k))}:{en}"
+    if e.type == "sepia":
+        # CSS sepia(a): the sepia matrix blended with identity by a.
+        x = 1 - _full_at_50(k)
+        m = (
+            (0.393 + 0.607 * x, 0.769 - 0.769 * x, 0.189 - 0.189 * x),
+            (0.349 - 0.349 * x, 0.686 + 0.314 * x, 0.168 - 0.168 * x),
+            (0.272 - 0.272 * x, 0.534 - 0.534 * x, 0.131 + 0.869 * x),
+        )
+        coeffs = ":".join(f"{ch}{src}={_num(m[i][j])}" for i, ch in enumerate("rgb") for j, src in enumerate("rgb"))
+        return f"colorchannelmixer={coeffs}:{en}"
+    if e.type == "invert":
+        a = _num(_full_at_50(k))
+        lut = f"'val+{a}*(negval-val)'"
+        return f"lutyuv=y={lut}:u={lut}:v={lut}:{en}"
+    if e.type == "hue":
+        return f"hue=h='{_num(360 * (0.25 + 1.75 * k))}*(t-{s})':{en}"
+    if e.type == "vignette":
+        return f"vignette=angle={_num(min(math.pi / 2, 0.4 + k))}:{en}"
+    if e.type == "letterbox":
+        bh = max(1, int(round(H * (0.06 + 0.08 * k))))
+        return f"drawbox=x=0:y=0:w=iw:h={bh}:color=black:t=fill:{en},drawbox=x=0:y=ih-{bh}:w=iw:h={bh}:color=black:t=fill:{en}"
+    if e.type == "strobe":
+        rate = _num(2 * (4 + 8 * k))
+        return f"eq=brightness='0.6*between(t,{s},{t_end})*(1-mod(floor((t-{s})*{rate}),2))':eval=frame"
+    if e.type == "mirror":
+        return f"hflip={en}"
     raise ValueError(f"unknown effect {e.type}")
 
 
-def _overlay_filters(o: PlanOverlay, input_idx: int, n: int, plan: ExportPlan, base_label: str) -> tuple[str, str]:
+# easeOutBack of {p} - backOut() in src/lib/editor/timeline.ts.
+_BACK_OUT = "(1+2.70158*pow({p}-1,3)+1.70158*pow({p}-1,2))"
+
+
+def _overlay_filters(
+    o: PlanOverlay, input_idx: int, n: int, plan: ExportPlan, base_label: str, mask_idx: int | None = None
+) -> tuple[str, str]:
     """Filter chain for one overlay input plus the overlay onto
     `base_label`; returns (chain, output label). Same geometry and
     animation curves as stickerFrame() in src/lib/editor/timeline.ts."""
@@ -902,37 +1265,75 @@ def _overlay_filters(o: PlanOverlay, input_idx: int, n: int, plan: ExportPlan, b
     s, a = _num(o.start), _num(anim)
     pin = f"min(1,max(0,(t-{s})/{a}))"
     pout = f"min(1,max(0,(t-{_num(o.end - anim)})/{a}))"
-    rad = f"{_num(o.rotation)}*PI/180"
+    kfs = o.keyframes
+    turning = bool(kfs) and len(set(keyframe_values(kfs, "rotation"))) > 1
+    rotation = keyframe_values(kfs, "rotation")[0] if kfs and not turning else o.rotation
+    rad = f"({keyframe_expr(kfs, 'rotation', 't')})*PI/180" if turning else f"{_num(rotation)}*PI/180"
 
-    parts = [f"format=rgba,scale={target_w}:{target_h}:flags=lanczos"]
+    parts = ["format=rgba"]
+    if o.sprite_times:
+        # The current state's cell, picked per frame by its own time.
+        cols = o.sprite_cols
+        k = step_expr(o.sprite_times, list(range(len(o.sprite_times))), "t", plan.fps)
+        parts.append(
+            f"crop=w=iw/{cols}:h=ih/{o.sprite_rows}:x='iw/{cols}*mod({k},{cols})':y='ih/{o.sprite_rows}*floor(({k})/{cols})'"
+        )
+    if o.key_color:
+        # Same math as applyKey() in src/lib/editor/chromaKey.ts.
+        parts.append(
+            f"colorkey=0x{o.key_color.lstrip('#')}:{_num(max(0.01, min(1.0, o.key_similarity / 100)))}:"
+            f"{_num(max(0.0, min(1.0, o.key_smoothness / 100)))}"
+        )
+    parts.append(f"scale={target_w}:{target_h}:flags=lanczos")
     if o.video:
         # Shift the trimmed input to start at the layer's timeline position,
         # at the output frame rate, so the time-based fades/animations and
         # `enable` below see timeline time.
         parts.insert(0, f"setpts=PTS-STARTPTS+{s}/TB,fps={_num(plan.fps)}")
-    if o.opacity < 0.999:
-        parts.append(f"colorchannelmixer=aa={_num(max(0.0, o.opacity))}")
-    if abs(o.rotation) > 0.01:
+    sized = len(parts)  # filters up to here run before the shape mask
+    opacities = keyframe_values(kfs, "opacity") if kfs else [o.opacity]
+    if len(set(opacities)) > 1:
+        # Animated opacity: alpha times the curve at the frame's time T.
+        parts.append(f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*({keyframe_expr(kfs, 'opacity', 'T')})'")
+    elif opacities[0] < 0.999:
+        parts.append(f"colorchannelmixer=aa={_num(max(0.0, opacities[0]))}")
+    spins = []
+    if o.anim_in == "spin":
+        spins.append(f"-PI*(1-{pin})")
+    if o.anim_out == "spin":
+        spins.append(f"+PI*{pout}")
+    if spins or turning:
+        # Per-frame angle in a box that fits every angle, so the layer's
+        # size (and its centered position) stays put while it turns. Filled
+        # with transparent black, not c=none (see _clip_video_chain).
+        parts.append(f"rotate=a='{rad}{''.join(spins)}':c=black@0:ow='hypot(iw,ih)':oh='hypot(iw,ih)'")
+    elif abs(rotation) > 0.01:
         parts.append(f"rotate=a={rad}:c=none:ow=rotw({rad}):oh=roth({rad})")
-    if o.anim_in in ("fade", "zoomin") or o.anim_in.startswith("slide"):
+    if o.anim_in in ("fade", "zoomin", "spin") or o.anim_in.startswith("slide"):
         parts.append(f"fade=t=in:st={s}:d={a}:alpha=1")
-    if o.anim_out in ("fade", "zoomout") or o.anim_out.startswith("slide"):
+    if o.anim_out in ("fade", "zoomout", "spin") or o.anim_out.startswith("slide"):
         parts.append(f"fade=t=out:st={_num(o.end - anim)}:d={a}:alpha=1")
     factors = []
-    if o.anim_in == "pop":
+    if o.anim_in in ("pop", "spin"):
         factors.append(f"max(0.02,{pin})")
+    if o.anim_in == "bounce":
+        factors.append(f"max(0.02,{_BACK_OUT.format(p=pin)})")
     if o.anim_in == "zoomin":
         factors.append(f"(0.6+0.4*{pin})")
+    if o.anim_out in ("pop", "spin"):
+        factors.append(f"max(0.02,1-{pout})")
     if o.anim_out == "zoomout":
         factors.append(f"(1-0.4*{pout})")
+    if kfs and keyframe_values(kfs, "scale") != [1.0] * len(kfs):
+        factors.append(f"({keyframe_expr(kfs, 'scale', 't')})")
     if factors:
         f = "*".join(factors)
         parts.append(f"scale=w='max(2,iw*{f})':h='max(2,ih*{f})':eval=frame")
 
     dx = _num(SLIDE_DISTANCE * W)
     dy = _num(SLIDE_DISTANCE * H)
-    x_expr = _num(o.x * W)
-    y_expr = _num(o.y * H)
+    x_expr = f"{W}*({keyframe_expr(kfs, 'x', 't')})" if kfs else _num(o.x * W)
+    y_expr = f"{H}*({keyframe_expr(kfs, 'y', 't')})" if kfs else _num(o.y * H)
     shifts_in = {"slideleft": ("+", "x"), "slideright": ("-", "x"), "slideup": ("+", "y"), "slidedown": ("-", "y")}
     shifts_out = {"slideleft": ("-", "x"), "slideright": ("+", "x"), "slideup": ("-", "y"), "slidedown": ("+", "y")}
     if o.anim_in in shifts_in:
@@ -945,11 +1346,33 @@ def _overlay_filters(o: PlanOverlay, input_idx: int, n: int, plan: ExportPlan, b
         x_expr, y_expr = (x_expr + term, y_expr) if axis == "x" else (x_expr, y_expr + term)
 
     in_label, out_label = f"ol{n}", f"oo{n}"
-    chain = (
-        f"[{input_idx}:v:0]{','.join(parts)}[{in_label}];"
-        f"[{base_label}][{in_label}]overlay=x='{x_expr}-overlay_w/2':y='{y_expr}-overlay_h/2':"
-        f"enable='between(t,{s},{_num(o.end)})':eval=frame:eof_action=pass:format=auto[{out_label}]"
-    )
+    if mask_idx is not None:
+        # Shape mask, in the layer's own frame: its alpha times the mask.
+        head = (
+            f"[{input_idx}:v:0]{','.join(parts[:sized])}[olp{n}];"
+            f"[{mask_idx}:v]scale={target_w}:{target_h}:flags=bicubic,format=gray[olm{n}];"
+            f"[olp{n}]split[olq{n}][olr{n}];[olq{n}]alphaextract[ola{n}];"
+            f"[ola{n}][olm{n}]blend=all_mode=multiply[olb{n}];[olr{n}][olb{n}]alphamerge"
+        )
+        rest = parts[sized:]
+        source = head + ("," + ",".join(rest) if rest else "")
+    else:
+        source = f"[{input_idx}:v:0]{','.join(parts)}"
+    place = f"overlay=x='{x_expr}-overlay_w/2':y='{y_expr}-overlay_h/2':enable='between(t,{s},{_num(o.end)})':eval=frame"
+    if o.blend != "normal":
+        # Layer on a neutral full canvas (see BLEND_MODES), blended in RGB -
+        # the preview's mix-blend-mode works on sRGB values too.
+        mode, neutral = BLEND_MODES[o.blend]
+        d = _num(timeline_duration(plan) + 0.1)
+        chain = (
+            f"{source}[{in_label}];"
+            f"color=c={neutral}:s={W}x{H}:r={_num(plan.fps)}:d={d},format=rgba[on{n}];"
+            f"[on{n}][{in_label}]{place}:eof_action=pass:format=rgb,format=gbrp[ob{n}];"
+            f"[{base_label}]format=gbrp[oa{n}];"
+            f"[oa{n}][ob{n}]blend=all_mode={mode}:enable='between(t,{s},{_num(o.end)})',format=yuv420p[{out_label}]"
+        )
+        return chain, out_label
+    chain = f"{source}[{in_label}];[{base_label}][{in_label}]{place}:eof_action=pass:format=auto[{out_label}]"
     return chain, out_label
 
 
@@ -966,7 +1389,7 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
 
     # A freeze only needs a moment of its source around the held frame.
     clip_idx = [
-        inputs.add("-ss", _num(c.start), "-t", _num(0.5 if c.freeze else c.duration * c.speed), "-i", c.source_path)
+        inputs.add("-ss", _num(c.start), "-t", _num(0.5 if c.freeze else (c.source_length or c.duration * c.speed)), "-i", c.source_path)
         for c in plan.clips
     ]
     for i, clip in enumerate(plan.clips):
@@ -1027,9 +1450,19 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
             # Looped still from t=0 so its timestamps line up with the output
             # timeline; eof_action=pass leaves the video untouched afterwards.
             idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end + 0.1), "-i", o.image_path)
-        chain, v_acc = _overlay_filters(o, idx, n, plan, v_acc)
+        mask_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end + 0.1), "-i", o.mask_path) if o.mask_path else None
+        chain, v_acc = _overlay_filters(o, idx, n, plan, v_acc, mask_idx)
         graph.append(chain)
-    graph.append(f"[{v_acc}]format=yuv420p[outv]")
+    if plan.output_format == "gif":
+        # A shared palette from the whole clip, at GIF size and frame rate.
+        graph.append(
+            f"[{v_acc}]fps={_num(min(fps, GIF_FPS))},scale='min({GIF_MAX_WIDTH},iw)':-2:flags=lanczos,split[ga][gb];"
+            f"[ga]palettegen=stats_mode=diff[gp];[gb][gp]paletteuse=dither=bayer:bayer_scale=4[outv]"
+        )
+    elif plan.output_format == "audio":
+        graph.append(f"[{v_acc}]nullsink")
+    else:
+        graph.append(f"[{v_acc}]format=yuv420p[outv]")
 
     if plan.with_audio and plan.audio:
         mix_inputs = [f"[{a_acc}]"]
@@ -1040,6 +1473,11 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
                 f"[{idx}:a:0]aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,"
                 f"atrim=duration={_num(au.duration)},asetpts=PTS-STARTPTS,volume={_num(au.volume)}"
             )
+            if VOICE_FX.get(au.voice):
+                chain += f",{VOICE_FX[au.voice]}"
+            if au.duck_amount > 0 and au.duck_regions:
+                # t is the track's own time here (before adelay).
+                chain += f",volume='{duck_gain_expr(au, f'(t+{_num(au.start)})')}':eval=frame"
             if au.fade_in > 0:
                 chain += f",afade=t=in:st=0:d={_num(au.fade_in)}"
             if au.fade_out > 0:
@@ -1059,6 +1497,14 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
     script = os.path.join(tmp, "graph.txt")
     with open(script, "w", encoding="utf-8") as f:
         f.write(";\n".join(graph))
+
+    if plan.output_format == "gif":
+        return ["-y", "-hide_banner", *inputs.args, "-filter_complex_script", script, "-map", "[outv]", "-loop", "0", "-t", _num(total), output_path]
+    if plan.output_format == "audio":
+        return [
+            "-y", "-hide_banner", *inputs.args, "-filter_complex_script", script,
+            "-map", f"[{a_acc}]", "-c:a", "aac", "-b:a", plan.audio_bitrate, "-t", _num(total), output_path,
+        ]  # fmt: skip
 
     args = ["-y", "-hide_banner", *inputs.args, "-filter_complex_script", script, "-map", "[outv]"]
     if plan.with_audio:
@@ -1089,9 +1535,12 @@ async def render_export(plan: ExportPlan, output_path: str, job: "JobProgress | 
     tmp = tempfile.mkdtemp(prefix="wipeclip-export-")
     try:
         if job is None:
+            await prepare_stabilization(plan, tmp)
             await _run_ffmpeg(build_export_args(plan, output_path, tmp))
             return
         job.check()
+        # Stabilization analysis runs while the phase still reads "checking".
+        await prepare_stabilization(plan, tmp, cancel=job.cancel)
         job.total = timeline_duration(plan)
         job.phase = "rendering"
 

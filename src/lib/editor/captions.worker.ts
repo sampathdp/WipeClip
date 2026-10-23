@@ -9,9 +9,11 @@
  * In:  { type: "init", device: "webgpu" | "wasm" }  "webgpu" = encoder on the GPU, decoder on the CPU
  *      { type: "detect", samples }                  - 16 kHz mono, up to 30 s
  *      { type: "transcribe", id, samples, language } - one segment, up to 30 s
+ *      { type: "nospeech", samples }                - 16 kHz mono, up to 30 s
  * Out: { type: "progress", stage: "download" | "prepare", value: 0..1 }
  *      { type: "ready", device }
  *      { type: "language", language }
+ *      { type: "nospeech", value }                    probability there's no speech, 0..1
  *      { type: "words", id, words: [{ start, end, text }] }  times within the segment
  *      { type: "error", message }
  */
@@ -88,18 +90,37 @@ async function load(device: Device): Promise<Device> {
   return "wasm";
 }
 
-/** Whisper's own language guess: the most likely language token right after
- * <|startoftranscript|>. */
-async function detectLanguage(model: AutomaticSpeechRecognitionPipeline, audio: Float32Array): Promise<string> {
+/** Whisper's scores for the token right after <|startoftranscript|>, where
+ * it picks a language - or says there's no speech. */
+async function firstTokenLogits(model: AutomaticSpeechRecognitionPipeline, audio: Float32Array) {
   const { input_features } = await model.processor(audio);
   const sot = model.tokenizer.convert_tokens_to_ids("<|startoftranscript|>");
   const out = await model.model({
     input_features,
     decoder_input_ids: new Tensor("int64", BigInt64Array.from([BigInt(sot)]), [1, 1]),
   });
-  const logits = (await out.logits.getData?.()) ?? out.logits.data;
+  const logits = ((await out.logits.getData?.()) ?? out.logits.data) as Float32Array;
   const vocab = out.logits.dims[out.logits.dims.length - 1];
-  const last = logits.length - vocab;
+  return { logits, last: logits.length - vocab, vocab };
+}
+
+/** Whisper's no-speech probability for up to 30 s of audio (the measure
+ * Whisper itself uses to skip silent and music-only windows). */
+async function noSpeech(model: AutomaticSpeechRecognitionPipeline, audio: Float32Array): Promise<number> {
+  const { logits, last, vocab } = await firstTokenLogits(model, audio);
+  const token = model.tokenizer.convert_tokens_to_ids("<|nocaptions|>") ?? model.tokenizer.convert_tokens_to_ids("<|nospeech|>");
+  if (token === undefined) return 0.5;
+  let max = -Infinity;
+  for (let i = 0; i < vocab; i++) max = Math.max(max, Number(logits[last + i]));
+  let sum = 0;
+  for (let i = 0; i < vocab; i++) sum += Math.exp(Number(logits[last + i]) - max);
+  return Math.exp(Number(logits[last + token]) - max) / sum;
+}
+
+/** Whisper's own language guess: the most likely language token right after
+ * <|startoftranscript|>. */
+async function detectLanguage(model: AutomaticSpeechRecognitionPipeline, audio: Float32Array): Promise<string> {
+  const { logits, last } = await firstTokenLogits(model, audio);
   let best = "en";
   let bestScore = -Infinity;
   for (const code of LANGUAGES) {
@@ -122,6 +143,8 @@ self.onmessage = async (e: MessageEvent) => {
       post({ type: "ready", device: loadedOn });
     } else if (m.type === "detect") {
       post({ type: "language", language: await detectLanguage(asr!, m.samples) });
+    } else if (m.type === "nospeech") {
+      post({ type: "nospeech", value: await noSpeech(asr!, m.samples) });
     } else if (m.type === "transcribe") {
       const samples: Float32Array = m.samples;
       const length = samples.length / 16000;

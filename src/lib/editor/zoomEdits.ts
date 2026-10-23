@@ -6,6 +6,7 @@
 import { sourceTimeOf, zoomSpans } from "./camera.ts";
 import type { LaidOutClip } from "./timeline.ts";
 import type { CameraZoom } from "./types.ts";
+import { effectiveSpeed } from "./speed.ts";
 
 /** Shortest zoom the editor creates by splitting or dragging, seconds. */
 export const MIN_ZOOM_LENGTH = 0.6;
@@ -81,7 +82,7 @@ export function dragZoom(
   const limit = Number.isFinite(sourceDuration) && sourceDuration > 0 ? sourceDuration : Infinity;
   if (mode === "move") {
     const len = ze - zs;
-    let d = (start - span.start) * (laid.clip.speed || 1) * (laid.clip.reverse ? -1 : 1);
+    let d = (start - span.start) * effectiveSpeed(laid.clip) * (laid.clip.reverse ? -1 : 1);
     d = Math.max(-zs, Math.min(limit - ze, d));
     zs += d;
     ze = zs + len;

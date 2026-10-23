@@ -291,6 +291,15 @@ EDITOR_MAX_FPS: float = 60.0
 EDITOR_MAX_AUDIO: int = 12  # audio clips (and uploaded audio files) per export
 EDITOR_MAX_AUDIO_BYTES: int = 50 * 1024 * 1024
 EDITOR_MAX_EFFECTS: int = 30
+# Keyframes per clip or layer, and how far (seconds) their times may reach.
+EDITOR_MAX_KEYFRAMES: int = 100
+EDITOR_MAX_KEYFRAME_SPAN: float = 24 * 3600.0
+# Longest animated GIF export (GIFs grow fast and play poorly when long).
+EDITOR_MAX_GIF_SECONDS: float = 60.0
+# Speech regions an audio track can duck under (src/lib/editor/ducking.ts).
+EDITOR_MAX_DUCK_REGIONS: int = 2000
+# States in an animated text's sprite sheet (src/lib/editor/textAnim.ts).
+EDITOR_MAX_SPRITE_STATES: int = 64
 # Focus zooms / pointer effects (desktop screen recordings): rows of
 # per-frame values the browser sends only where they change.
 EDITOR_MAX_CAMERA_ROWS: int = 100_000  # per clip

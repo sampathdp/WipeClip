@@ -11,6 +11,7 @@ import type {
   Project,
   TransitionType,
 } from "./types";
+import { clipTimelineLength, localToSource, rampPart } from "./speed.ts";
 
 /** Shortest clip any trim/split can produce. */
 export const MIN_CLIP_SECONDS = 0.2;
@@ -38,12 +39,22 @@ export const TRANSITION_LABELS: Record<TransitionType, { label: string; hint: st
   slideright: { label: "Slide Right", hint: "Next clip pushes in from the left" },
   zoom: { label: "Zoom", hint: "Zooms into the next clip" },
   blur: { label: "Blur", hint: "Blurs across to the next clip" },
+  slideup: { label: "Slide Up", hint: "Next clip pushes in from below" },
+  slidedown: { label: "Slide Down", hint: "Next clip pushes in from above" },
+  wipeleft: { label: "Wipe Left", hint: "Next clip is revealed from the right" },
+  wiperight: { label: "Wipe Right", hint: "Next clip is revealed from the left" },
+  wipeup: { label: "Wipe Up", hint: "Next clip is revealed from the bottom" },
+  wipedown: { label: "Wipe Down", hint: "Next clip is revealed from the top" },
+  circleopen: { label: "Circle Open", hint: "Next clip opens out from the center" },
+  circleclose: { label: "Circle Close", hint: "Picture closes in to the center" },
 };
 
 export const ANIM_IN_LABELS: Record<AnimIn, string> = {
   none: "None",
   fade: "Fade in",
   pop: "Pop",
+  bounce: "Bounce",
+  spin: "Spin in",
   zoomin: "Zoom in",
   slideup: "Slide up",
   slidedown: "Slide down",
@@ -53,6 +64,8 @@ export const ANIM_IN_LABELS: Record<AnimIn, string> = {
 export const ANIM_OUT_LABELS: Record<AnimOut, string> = {
   none: "None",
   fade: "Fade out",
+  pop: "Pop out",
+  spin: "Spin out",
   zoomout: "Zoom out",
   slideup: "Slide up",
   slidedown: "Slide down",
@@ -72,6 +85,14 @@ export const EFFECT_LABELS: Record<EffectType, string> = {
   flash: "Flash",
   shake: "Shake",
   zoom: "Zoom",
+  bw: "Black & White",
+  sepia: "Sepia",
+  invert: "Invert",
+  hue: "Color Cycle",
+  vignette: "Vignette",
+  letterbox: "Letterbox",
+  strobe: "Strobe",
+  mirror: "Mirror",
 };
 
 export const CANVAS_PRESETS: { label: string; hint: string; aspect: CanvasAspect }[] = [
@@ -131,7 +152,7 @@ export interface Layout {
 export function layout(project: Project, fps: number): Layout {
   const f = fps > 0 ? fps : 30;
   const q = (d: number) => Math.max(1, Math.round(d * f)) / f;
-  const durations = project.clips.map((c) => q((c.end - c.start) / (c.speed || 1)));
+  const durations = project.clips.map((c) => q(clipTimelineLength(c)));
   const clips: LaidOutClip[] = [];
   let t = 0;
   project.clips.forEach((clip, i) => {
@@ -157,7 +178,7 @@ export interface Located {
 export function sourceTimeAt(c: LaidOutClip, t: number): number {
   const { clip } = c;
   if (clip.freeze !== null) return clip.freeze;
-  const local = (t - c.start) * (clip.speed || 1);
+  const local = localToSource(clip, t - c.start);
   // Reversed: starts on the range's last frame (just inside `end`).
   return clip.reverse ? Math.max(clip.start, clip.end - 0.001 - local) : clip.start + local;
 }
@@ -201,6 +222,14 @@ export interface OverlayFrame {
   scale: number;
   dx: number; // fraction of canvas width
   dy: number; // fraction of canvas height
+  rotate: number; // degrees, added to the overlay's rotation
+}
+
+/** easeOutBack: overshoots past 1 and settles - the "bounce" entrance.
+ * Same curve as _BACK_OUT in editor.py. */
+export function backOut(p: number): number {
+  const c1 = 1.70158;
+  return 1 + (c1 + 1) * (p - 1) ** 3 + c1 * (p - 1) ** 2;
 }
 
 /** Overlay animation at timeline time `t` - mirrors _overlay_filters() in
@@ -216,11 +245,16 @@ export function overlayFrame(o: Pick<Overlay, "start" | "end" | "animIn" | "anim
   let scale = 1;
   let dx = 0;
   let dy = 0;
-  if (o.animIn === "fade" || o.animIn === "zoomin" || o.animIn.startsWith("slide")) opacity *= pin;
-  if (o.animOut === "fade" || o.animOut === "zoomout" || o.animOut.startsWith("slide")) opacity *= 1 - pout;
-  if (o.animIn === "pop") scale *= Math.max(0.02, pin);
+  let rotate = 0;
+  if (o.animIn === "fade" || o.animIn === "zoomin" || o.animIn === "spin" || o.animIn.startsWith("slide")) opacity *= pin;
+  if (o.animOut === "fade" || o.animOut === "zoomout" || o.animOut === "spin" || o.animOut.startsWith("slide")) opacity *= 1 - pout;
+  if (o.animIn === "pop" || o.animIn === "spin") scale *= Math.max(0.02, pin);
+  if (o.animIn === "bounce") scale *= Math.max(0.02, backOut(pin));
   if (o.animIn === "zoomin") scale *= 0.6 + 0.4 * pin;
+  if (o.animOut === "pop" || o.animOut === "spin") scale *= Math.max(0.02, 1 - pout);
   if (o.animOut === "zoomout") scale *= 1 - 0.4 * pout;
+  if (o.animIn === "spin") rotate -= 180 * (1 - pin);
+  if (o.animOut === "spin") rotate += 180 * pout;
   const D = SLIDE_DISTANCE;
   if (o.animIn === "slideleft") dx += D * (1 - pin);
   if (o.animIn === "slideright") dx -= D * (1 - pin);
@@ -230,7 +264,7 @@ export function overlayFrame(o: Pick<Overlay, "start" | "end" | "animIn" | "anim
   if (o.animOut === "slideright") dx += D * pout;
   if (o.animOut === "slideup") dy -= D * pout;
   if (o.animOut === "slidedown") dy += D * pout;
-  return { opacity, scale, dx, dy };
+  return { opacity, scale, dx, dy, rotate };
 }
 
 let idCounter = 0;
@@ -248,13 +282,15 @@ export function splitAt(project: Project, lay: Layout, time: number): Project | 
   const clip = project.clips[index];
   // Split by how far into the clip the playhead is, not by its source time:
   // a freeze has no source range and a reversed clip reads it backwards.
-  const local = (time - lay.clips[index].start) * (clip.speed || 1);
+  const local = localToSource(clip, time - lay.clips[index].start);
   if (local < MIN_CLIP_SECONDS || clip.end - clip.start - local < MIN_CLIP_SECONDS) return null;
   const cut = clip.reverse ? clip.end - local : clip.start + local;
   const first = clip.reverse ? { start: cut, end: clip.end } : { start: clip.start, end: cut };
   const second = clip.reverse ? { start: clip.start, end: cut } : { start: cut, end: clip.end };
-  const left: Clip = { ...clip, ...first, transition: null };
-  const right: Clip = { ...clip, ...second, id: newId("clip") };
+  // A speed curve is divided with the clip, each part keeping its piece.
+  const frac = local / (clip.end - clip.start);
+  const left: Clip = { ...clip, ...first, transition: null, ...(clip.ramp ? { ramp: rampPart(clip.ramp, 0, frac) } : {}) };
+  const right: Clip = { ...clip, ...second, id: newId("clip"), ...(clip.ramp ? { ramp: rampPart(clip.ramp, frac, 1) } : {}) };
   const clips = [...project.clips];
   clips.splice(index, 1, left, right);
   return { ...project, clips };

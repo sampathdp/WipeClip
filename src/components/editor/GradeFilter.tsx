@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import { gradeOf, matrixValues, transferTable } from "@/lib/editor/look";
+import { curveTables, curvesActive } from "@/lib/editor/curves";
 import type { Look } from "@/lib/editor/types";
 
 /** SVG version of look.ts's grade: transfer -> matrix -> transfer -> matrix,
@@ -8,6 +9,7 @@ import type { Look } from "@/lib/editor/types";
 export default function GradeFilter({ id, look }: { id: string; look: Look }) {
   const g = gradeOf(look);
   const a = g.sharpness * 0.6;
+  const curves = curvesActive(look.curves) ? curveTables(look.curves) : null;
   return (
     <filter id={id} colorInterpolationFilters="sRGB">
       {g.stages.map((st, i) => (
@@ -20,6 +22,13 @@ export default function GradeFilter({ id, look }: { id: string; look: Look }) {
           <feColorMatrix type="matrix" values={matrixValues(st.m)} />
         </Fragment>
       ))}
+      {curves && (
+        <feComponentTransfer>
+          <feFuncR type="table" tableValues={curves[0].join(" ")} />
+          <feFuncG type="table" tableValues={curves[1].join(" ")} />
+          <feFuncB type="table" tableValues={curves[2].join(" ")} />
+        </feComponentTransfer>
+      )}
       {a > 0 && <feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix={`0 ${-a} 0 ${-a} ${1 + 4 * a} ${-a} 0 ${-a} 0`} />}
     </filter>
   );

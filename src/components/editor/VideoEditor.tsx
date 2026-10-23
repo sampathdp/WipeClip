@@ -61,6 +61,7 @@ import {
   updateClip,
   updateEffect,
   updateOverlay,
+  type LaidOutClip,
 } from "@/lib/editor/timeline";
 import {
   DEFAULT_CANVAS,
@@ -94,9 +95,20 @@ import { SHAPE_LABELS } from "@/lib/editor/shapes";
 import { MaskPanel, TutorialPanel } from "./TutorialPanel";
 import { useTutorialTools } from "./useTutorialTools";
 import { captionCues, toPlainTranscript, toSrt, toVtt } from "@/lib/editor/transcript";
-import { speechModelCached } from "@/lib/editor/captions";
+import { buildSpeechMix, speechModelCached } from "@/lib/editor/captions";
+import { ANALYSIS_RATE } from "@/lib/editor/audioAnalysis";
 import { saveTextFile } from "@/lib/platform";
-import { buildSpeechAudio, captionOverlays, captionText, CAPTION_STYLES, groupWords, lineCharsFor, transcribe } from "@/lib/editor/captions";
+import {
+  buildSpeechAudio,
+  captionOverlays,
+  captionText,
+  CAPTION_STYLES,
+  groupWords,
+  lineCharsFor,
+  speechModelProbe,
+  transcribe,
+  type CaptionsProgress,
+} from "@/lib/editor/captions";
 import { TIER_LIMITS, toTier, type Tier } from "@/lib/entitlements";
 import AiCleanupDialog from "./AiCleanupDialog";
 import ExportDialog from "./ExportDialog";
@@ -123,8 +135,33 @@ import {
   type Gesture,
 } from "./Panels";
 import PreviewPlayer from "./PreviewPlayer";
+import { MAX_VOICEOVER_SECONDS, startVoiceover, type VoiceoverSession } from "@/lib/editor/voiceover";
+import {
+  animateClipPatch,
+  animateOverlayPatch,
+  clipKeyTime,
+  clipKeyTimeToLocal,
+  clipTransformAt,
+  overlayValues,
+} from "@/lib/editor/keyframes";
+import { PremiumLocked, type KeyframeControls } from "./Panels";
+import { activeRamp } from "@/lib/editor/speed";
+import { DEFAULT_DUCK_AMOUNT, speechRegions } from "@/lib/editor/ducking";
+import { BEAT_RATE, detectBeats } from "@/lib/editor/beats";
+import { renderSfx } from "@/lib/editor/sfx";
+import { parseCube } from "@/lib/editor/lut";
+import { asFontFile, customFontKey, registerFont } from "@/lib/editor/customFonts";
+import { EDITOR_FONT_CLASSES } from "./editorFonts";
+import {
+  clipAttributes,
+  layerAttributes,
+  pasteClipAttributes,
+  pasteLayerAttributes,
+  type ClipAttributes,
+  type LayerAttributes,
+} from "@/lib/editor/attributes";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
-import Timeline, { type ItemMode, type TimelineTrack } from "./Timeline";
+import Timeline, { type ItemMode, type TimelineTrack, type TrackToggle } from "./Timeline";
 import {
   AdjustIcon,
   CanvasIcon,
@@ -180,6 +217,14 @@ export interface IncomingRecording {
  *  - `suspended` turns the editor's keyboard shortcuts off while the
  *    recorder covers it.
  */
+const selIs = (sel: Selection, kind: string, id: string) => sel !== null && sel.kind === kind && "id" in sel && sel.id === id;
+
+/** Whole-track hide/lock switches: on when every layer has it. */
+const layerToggles = (layers: Overlay[]): TrackToggle[] => [
+  { kind: "hide", on: layers.length > 0 && layers.every((o) => o.hidden) },
+  { kind: "lock", on: layers.length > 0 && layers.every((o) => o.locked) },
+];
+
 export default function VideoEditor({
   onRecord,
   onImageTools,
@@ -343,10 +388,22 @@ export default function VideoEditor({
     if (save) await save();
   }, []);
 
+  // Text fonts: the self-hosted ones' variables on <html> (where the text
+  // rasterizer resolves them), and every uploaded font registered.
+  useEffect(() => {
+    document.documentElement.classList.add(...EDITOR_FONT_CLASSES);
+    return () => document.documentElement.classList.remove(...EDITOR_FONT_CLASSES);
+  }, []);
+  useEffect(() => {
+    for (const src of Object.values(sources)) {
+      if (src.kind === "font") void registerFont(src.id, () => sourceFile(src)).catch(() => {});
+    }
+  }, [sources]);
+
   // Thumbnails for every video source, generated once each in the background.
   useEffect(() => {
     for (const src of Object.values(sources)) {
-      if (src.kind === "audio" || src.kind === "image" || thumbJobs.current.has(src.id)) continue;
+      if (src.kind === "audio" || src.kind === "image" || src.kind === "lut" || src.kind === "font" || thumbJobs.current.has(src.id)) continue;
       const controller = new AbortController();
       thumbJobs.current.set(src.id, controller);
       void generateThumbnails(src.url, src.duration, (strip) => setThumbs((t) => ({ ...t, [src.id]: strip })), controller.signal);
@@ -655,6 +712,37 @@ export default function VideoEditor({
   const selectedOverlay = selection?.kind === "overlay" ? project.overlays.find((o) => o.id === selection.id) : undefined;
   const selectedAudio = selection?.kind === "audio" ? project.audio.find((a) => a.id === selection.id) : undefined;
   const selectedEffect = selection?.kind === "effect" ? project.effects.find((e) => e.id === selection.id) : undefined;
+  // Copied attributes (attributes.ts) - kept outside the project and its undo.
+  const [clipAttrs, setClipAttrs] = useState<ClipAttributes | null>(null);
+  const [layerAttrs, setLayerAttrs] = useState<LayerAttributes | null>(null);
+
+  // Edits of animated items land in a keyframe at the playhead (keyframes.ts).
+  const changeOverlay = useCallback(
+    (id: string, patch: Partial<Overlay>) =>
+      apply((p) => {
+        const o = p.overlays.find((x) => x.id === id);
+        return updateOverlay(p, id, o ? animateOverlayPatch(o, patch, clock.get()) : patch);
+      }),
+    [apply, clock]
+  );
+  const overlayKeys = (o: Overlay): KeyframeControls => ({
+    clock,
+    keyframes: o.keyframes,
+    keyTime: (t) => t - o.start,
+    seekKey: (k) => seek(o.start + k),
+    valuesAt: (k) => overlayValues(o, o.start + k),
+    range: [0, o.end - o.start],
+    onChange: (keyframes) => apply((p) => updateOverlay(p, o.id, { keyframes })),
+  });
+  const clipKeys = (c: LaidOutClip): KeyframeControls => ({
+    clock,
+    keyframes: c.clip.keyframes,
+    keyTime: (t) => clipKeyTime(c, Math.min(Math.max(t, c.start), c.start + c.duration - 1e-3)),
+    seekKey: (k) => seek(c.start + clipKeyTimeToLocal(c.clip, k)),
+    valuesAt: (k) => ({ ...clipTransformAt(c.clip, k), opacity: 1 }),
+    range: c.clip.freeze !== null ? [0, c.duration] : [c.clip.start, c.clip.end],
+    onChange: (keyframes) => apply((p) => updateClip(p, c.clip.id, { keyframes })),
+  });
   const zooms = useMemo(() => project.zooms ?? [], [project.zooms]);
   const selectedZoom = selection?.kind === "zoom" ? zooms.find((z) => z.id === selection.id) : undefined;
   const selectedMask = selection?.kind === "mask" ? (project.masks ?? []).find((m) => m.id === selection.id) : undefined;
@@ -946,19 +1034,19 @@ export default function VideoEditor({
   // --- auto captions and the transcript ---------------------------------------
   /** The timeline's speech as a word-timed transcript (null: no sound). */
   const transcribeTimeline = useCallback(async (): Promise<Transcript | null> => {
-    setBusy("Preparing audio…");
-    const samples = await buildSpeechAudio(lay, project, sources);
-    if (!samples) return null;
-    setBusy("Loading speech model…");
-    const res = await transcribe(samples, captionOpts.language, ({ stage, value }) =>
+    const progress = ({ stage, value }: CaptionsProgress) =>
       setBusy(
         stage === "download"
           ? `Downloading speech model (first time only)… ${Math.round(value * 100)}%`
           : stage === "prepare"
             ? "Preparing speech model…"
             : `Transcribing speech on your device… ${Math.round(value * 100)}%`
-      )
-    );
+      );
+    setBusy("Preparing audio…");
+    const samples = await buildSpeechAudio(lay, project, sources, speechModelProbe(progress));
+    if (!samples) return null;
+    setBusy("Loading speech model…");
+    const res = await transcribe(samples, captionOpts.language, progress);
     return { language: res.language, words: res.words, total: lay.total };
   }, [lay, project, sources, captionOpts.language]);
 
@@ -1053,8 +1141,9 @@ export default function VideoEditor({
     [importImage, apply]
   );
 
+  /** Adds an audio file as a track at `at` (default: the playhead). */
   const uploadAudio = useCallback(
-    async (file: File) => {
+    async (file: File, at?: number) => {
       if (!file.type.startsWith("audio/")) {
         say("Please choose an audio file (MP3, WAV, M4A, AAC or OGG).");
         return;
@@ -1069,7 +1158,7 @@ export default function VideoEditor({
         const duration = await loadAudioMeta(url);
         const src: MediaSource = { id: newId("snd"), kind: "audio", file, url, duration, width: 0, height: 0, fps: 0, hasAudio: true };
         addSource(src);
-        const start = Math.min(clock.get(), Math.max(0, lay.total - 0.5));
+        const start = Math.min(at ?? clock.get(), Math.max(0, lay.total - 0.5));
         const clip: AudioClip = {
           id: newId("aud"),
           sourceId: src.id,
@@ -1095,6 +1184,161 @@ export default function VideoEditor({
     [addSource, apply, clock, lay.total, say]
   );
 
+  // --- voiceover: records the mic while the timeline plays from the
+  // playhead; the take lands as an audio track where recording started.
+  const voice = useRef<{ session: VoiceoverSession; start: number } | null>(null);
+  const [recordingFrom, setRecordingFrom] = useState<number | null>(null);
+  const beginVoiceover = useCallback(async () => {
+    if (voice.current) return;
+    let session: VoiceoverSession;
+    try {
+      session = await startVoiceover();
+    } catch (e) {
+      const name = (e as DOMException)?.name;
+      say(
+        name === "NotAllowedError"
+          ? "Microphone access was blocked. Allow it in your browser's site settings and try again."
+          : name === "NotFoundError"
+            ? "No microphone was found."
+            : "The microphone couldn't be started."
+      );
+      return;
+    }
+    if (clock.get() >= lay.total - 0.25) clock.set(0);
+    const start = clock.get();
+    voice.current = { session, start };
+    setRecordingFrom(start);
+    setPlaying(true);
+  }, [clock, lay.total, say]);
+  const endVoiceover = useCallback(
+    async (keep = true) => {
+      const v = voice.current;
+      if (!v) return;
+      voice.current = null;
+      setRecordingFrom(null);
+      setPlaying(false);
+      if (!keep) {
+        v.session.cancel();
+        return;
+      }
+      try {
+        const file = await v.session.stop();
+        if (file) await uploadAudio(file, v.start);
+        else say("Nothing was recorded.");
+      } catch {
+        say("The recording couldn't be saved.");
+      }
+    },
+    [say, uploadAudio]
+  );
+  // Pausing (or reaching the end) ends the take; so does the length cap.
+  useEffect(() => {
+    if (!playing && recordingFrom !== null) void endVoiceover();
+  }, [playing, recordingFrom, endVoiceover]);
+  useEffect(() => {
+    if (recordingFrom === null) return;
+    const id = window.setTimeout(() => void endVoiceover(), MAX_VOICEOVER_SECONDS * 1000);
+    return () => window.clearTimeout(id);
+  }, [recordingFrom, endVoiceover]);
+  useEffect(() => () => voice.current?.session.cancel(), []);
+
+  // Auto-ducking: the speech regions of everything but this track.
+  const duckUnderSpeech = useCallback(
+    async (audioId: string) => {
+      setPlaying(false);
+      setBusy("Finding speech…");
+      try {
+        const others = { ...project, audio: project.audio.filter((x) => x.id !== audioId) };
+        const mix = await buildSpeechMix(lay, others, sources);
+        const regions = mix.samples ? speechRegions(mix.samples, ANALYSIS_RATE) : [];
+        if (!regions.length) {
+          say("No speech found to lower this track under.");
+          return;
+        }
+        apply((p) => updateAudio(p, audioId, { duck: { amount: p.audio.find((x) => x.id === audioId)?.duck?.amount ?? DEFAULT_DUCK_AMOUNT, regions } }));
+      } catch {
+        say("The speech couldn't be analysed.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [apply, lay, project, say, sources]
+  );
+
+  const findBeats = useCallback(
+    async (audioId: string) => {
+      const a = project.audio.find((x) => x.id === audioId);
+      const src = a ? sources[a.sourceId] : undefined;
+      if (!a || !src) return;
+      setBusy("Finding the beat…");
+      try {
+        const bytes = await (await sourceFile(src)).arrayBuffer();
+        const buf = await new OfflineAudioContext(1, 1, BEAT_RATE).decodeAudioData(bytes);
+        const { bpm, times } = detectBeats(buf.getChannelData(0));
+        if (!times.length) {
+          say("No steady beat was found in this track.");
+          return;
+        }
+        apply((p) => updateAudio(p, audioId, { beats: { bpm, times } }));
+        say(`${times.length} beats found (${Math.round(bpm)} BPM). Clips and layers now snap to them.`);
+      } catch {
+        say("This audio couldn't be analysed.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [apply, project.audio, say, sources]
+  );
+
+  // An uploaded font becomes a "font" source; the text layer uses it.
+  const uploadFont = useCallback(
+    async (overlayId: string, upload: File) => {
+      const file = asFontFile(upload);
+      if (!file) {
+        say("Please choose a font file (TTF, OTF, WOFF or WOFF2).");
+        return;
+      }
+      if (file.size > 20 * 1024 * 1024) {
+        say("That font file is over the 20MB limit.");
+        return;
+      }
+      const src: MediaSource = { id: newId("font"), kind: "font", file, url: URL.createObjectURL(file), duration: 0, width: 0, height: 0, fps: 0, hasAudio: false };
+      try {
+        await registerFont(src.id, () => Promise.resolve(file));
+      } catch {
+        say("That font couldn't be read by your browser.");
+        return;
+      }
+      addSource(src);
+      apply((p) => ({
+        ...p,
+        overlays: p.overlays.map((o) => (o.id === overlayId && o.kind === "text" ? { ...o, text: { ...o.text, font: customFontKey(src.id) } } : o)),
+      }));
+    },
+    [addSource, apply, say]
+  );
+
+  // A .cube LUT becomes a "lut" source the clip's look points at.
+  const importLut = useCallback(
+    async (clipId: string, file: File) => {
+      try {
+        parseCube(await file.text());
+      } catch (e) {
+        say(e instanceof Error ? e.message : "That LUT couldn't be read.");
+        return;
+      }
+      // Typed as text, which project files accept for LUTs.
+      const text = new File([file], file.name, { type: "text/plain" });
+      const src: MediaSource = { id: newId("lut"), kind: "lut", file: text, url: URL.createObjectURL(text), duration: 0, width: 0, height: 0, fps: 0, hasAudio: false };
+      addSource(src);
+      apply((p) => ({
+        ...p,
+        clips: p.clips.map((c) => (c.id === clipId ? { ...c, look: { ...c.look, lut: { sourceId: src.id, name: file.name, intensity: 100 } } } : c)),
+      }));
+    },
+    [addSource, apply, say]
+  );
+
   const extractAudio = useCallback(
     (clipId: string) => {
       const laid = lay.clips.find((c) => c.clip.id === clipId);
@@ -1103,7 +1347,7 @@ export default function VideoEditor({
         say("Freeze frames and reversed clips have no audio to extract.");
         return;
       }
-      if (laid.clip.speed !== 1) {
+      if (laid.clip.speed !== 1 || activeRamp(laid.clip)) {
         say("Set the clip's speed to 1× before extracting its audio.");
         return;
       }
@@ -1141,7 +1385,7 @@ export default function VideoEditor({
         say("Freeze frames and reversed clips have no audio to clean up.");
         return;
       }
-      if (laid.clip.speed !== 1) {
+      if (laid.clip.speed !== 1 || activeRamp(laid.clip)) {
         say("Set the clip's speed to 1× before cleaning up its audio.");
         return;
       }
@@ -1195,6 +1439,24 @@ export default function VideoEditor({
       setSelection({ kind: "effect", id: e.id });
     },
     [apply, placeAt]
+  );
+
+  /** Row-header switches: flip hide/lock/mute for every item on a track
+   * (all on -> all off, otherwise all on). */
+  const onTrackToggle = useCallback(
+    (track: string, kind: TrackToggle["kind"]) => {
+      apply((p) => {
+        if (track === "audio") {
+          const on = p.audio.length > 0 && p.audio.every((a) => a.muted);
+          return { ...p, audio: p.audio.map((a) => ({ ...a, muted: !on })) };
+        }
+        const mine = (o: Overlay) => (track === "text" ? o.kind === "text" : o.kind !== "text");
+        const field = kind === "lock" ? "locked" : "hidden";
+        const on = p.overlays.filter(mine).every((o) => o[field]);
+        return { ...p, overlays: p.overlays.map((o) => (mine(o) ? { ...o, [field]: !on } : o)) };
+      });
+    },
+    [apply]
   );
 
   const onItemChange = useCallback(
@@ -1676,6 +1938,138 @@ export default function VideoEditor({
     </header>
   );
 
+  // --- timeline tracks (hooks: must stay above the early return) -------------
+  // Each track is memoized on what it shows, so the timeline's memoized rows
+  // skip re-rendering tracks an edit didn't touch.
+  const textTrack = useMemo<TimelineTrack>(() => {
+    const layers = project.overlays.filter((o) => o.kind === "text");
+    return {
+      key: "text",
+      label: "Text",
+      tone: "border-sky-500/40 bg-sky-500/20",
+      toggles: layerToggles(layers),
+      items: layers.map((o) => ({
+        id: o.id,
+        start: o.start,
+        end: o.end,
+        label: o.kind === "text" ? o.text.content.split("\n")[0] || "Text" : "",
+        glyph: "T",
+        hidden: o.hidden,
+        locked: o.locked,
+        selected: selIs(selection, "overlay", o.id),
+        sel: { kind: "overlay", id: o.id },
+      })),
+    };
+  }, [project.overlays, selection]);
+  const elementsTrack = useMemo<TimelineTrack>(() => {
+    const layers = project.overlays.filter((o) => o.kind !== "text");
+    return {
+      key: "elements",
+      label: "Elements",
+      tone: "border-accent/40 bg-accent/20",
+      toggles: layerToggles(layers),
+      items: layers.map((o) => {
+        const def = o.kind === "sticker" ? getStickerDef(o.stickerId) : undefined;
+        return {
+          id: o.id,
+          start: o.start,
+          end: o.end,
+          label: o.kind === "sticker" ? (def?.label ?? "Sticker") : o.kind === "video" ? "Video" : o.kind === "shape" ? SHAPE_LABELS[o.shape.type] : "Image",
+          thumb:
+            o.kind === "image"
+              ? sources[o.sourceId]?.url
+              : o.kind === "video"
+                ? (thumbs[o.sourceId]?.urls[0] ?? null)
+                : def
+                  ? stickerThumbSrc(def)
+                  : null,
+          glyph: o.kind === "video" ? "▶" : def?.kind === "emoji" ? def.char : "★",
+          wave: o.kind === "video" ? { sourceId: o.sourceId, offset: o.offset, duration: o.end - o.start, gain: o.volume } : undefined,
+          hidden: o.hidden,
+          locked: o.locked,
+          selected: selIs(selection, "overlay", o.id),
+          sel: { kind: "overlay" as const, id: o.id },
+        };
+      }),
+    };
+  }, [project.overlays, selection, sources, thumbs]);
+  const audioTrack = useMemo<TimelineTrack>(
+    () => ({
+      key: "audio",
+      label: "Audio",
+      tone: "border-emerald-500/40 bg-emerald-500/20",
+      toggles: [{ kind: "mute", on: project.audio.length > 0 && project.audio.every((a) => a.muted) }],
+      // Music beats: markers the clips and layers snap to.
+      ticks: project.audio.flatMap((a) =>
+        (a.beats?.times ?? [])
+          .filter((b) => b >= a.offset && b < a.offset + a.duration)
+          .map((b) => ({ t: a.start + b - a.offset, className: "bg-emerald-300/70", title: "Beat", snap: true }))
+      ),
+      items: project.audio.map((a) => ({
+        id: a.id,
+        start: a.start,
+        end: a.start + a.duration,
+        label: `${a.muted ? "🔇 " : ""}${a.label}`,
+        glyph: "♪",
+        wave: { sourceId: a.sourceId, offset: a.offset, duration: a.duration, gain: a.muted ? 0 : a.volume },
+        selected: selIs(selection, "audio", a.id),
+        sel: { kind: "audio" as const, id: a.id },
+      })),
+    }),
+    [project.audio, selection]
+  );
+  const layClips = lay.clips;
+  const zoomTrack = useMemo<TimelineTrack | null>(() => {
+    if (!anyRecording && !zooms.length) return null;
+    // Recorded clicks as ticks behind the zooms.
+    const ticks: NonNullable<TimelineTrack["ticks"]> = [];
+    if (rawPointer && recSource) {
+      for (const c of layClips) {
+        if (c.clip.sourceId !== recSource.id) continue;
+        for (const k of rawPointer.clicks) {
+          const t = timelineTimeOf(c, k.t);
+          if (t !== null && ticks.length < 3000) ticks.push({ t, className: k.button === "left" ? "bg-cyan-400/80" : "bg-amber-400/80", title: `${k.button} click` });
+        }
+      }
+    }
+    return {
+      key: "zoom",
+      label: "Zoom",
+      tone: "border-violet-500/40 bg-violet-500/20",
+      items: zooms.flatMap((z) =>
+        zoomSpans(layClips, z).map((sp) => ({
+          id: `${z.id}#${sp.clipIndex}`,
+          start: sp.start,
+          end: sp.end,
+          label: `${z.zoom.toFixed(1)}× ${z.reason ?? "Zoom"}`,
+          glyph: "⌕",
+          hidden: !z.enabled,
+          selected: selIs(selection, "zoom", z.id),
+          sel: { kind: "zoom" as const, id: z.id },
+        }))
+      ),
+      ticks,
+    };
+  }, [anyRecording, zooms, rawPointer, recSource, layClips, selection]);
+  const effectsTrack = useMemo<TimelineTrack>(
+    () => ({
+      key: "effects",
+      label: "Effects",
+      tone: "border-amber-500/40 bg-amber-500/20",
+      items: project.effects.map((e) => ({
+        id: e.id,
+        start: e.start,
+        end: e.end,
+        label: EFFECT_LABELS[e.type],
+        glyph: EFFECT_ICONS[e.type],
+        selected: selIs(selection, "effect", e.id),
+        sel: { kind: "effect" as const, id: e.id },
+      })),
+    }),
+    [project.effects, selection]
+  );
+  const tracks = [textTrack, elementsTrack, audioTrack, ...(zoomTrack ? [zoomTrack] : []), effectsTrack];
+
   if (phase !== "edit" || !original) {
     return (
       <div className="flex min-h-dvh flex-col bg-background">
@@ -1831,6 +2225,7 @@ export default function VideoEditor({
         onClose={() => setTool(null)}
         gesture={gesture}
         premiumLocked={premiumLocked}
+        onImportLut={(file) => void importLut(lookClip.id, file)}
       />
     );
   } else if (tool === "text") {
@@ -1845,7 +2240,30 @@ export default function VideoEditor({
       />
     );
   } else if (tool === "audio") {
-    panel = <AudioAddPanel audio={project.audio} onUpload={(f) => void uploadAudio(f)} onSelect={(id) => select({ kind: "audio", id })} onClose={() => setTool(null)} />;
+    panel = (
+      <AudioAddPanel
+        audio={project.audio}
+        onUpload={(f) => void uploadAudio(f)}
+        onAddSfx={(def) =>
+          void renderSfx(def)
+            .then((f) => uploadAudio(f))
+            .catch(() => say("That sound couldn't be made in this browser."))
+        }
+        onSelect={(id) => select({ kind: "audio", id })}
+        onClose={() => {
+          void endVoiceover(false);
+          setTool(null);
+        }}
+        voiceover={{
+          recordingFrom,
+          clock,
+          level: () => voice.current?.session.level() ?? 0,
+          onStart: () => void beginVoiceover(),
+          onStop: () => void endVoiceover(),
+          onCancel: () => void endVoiceover(false),
+        }}
+      />
+    );
   } else if (tool === "effects") {
     panel = <EffectsAddPanel onAdd={addEffect} onClose={() => setTool(null)} premiumLocked={premiumLocked} />;
   } else if (tool === "canvas") {
@@ -1935,7 +2353,7 @@ export default function VideoEditor({
           const o = project.overlays.find((x) => x.id === id);
           if (o && (clock.get() < o.start || clock.get() >= o.end)) seek(o.start);
         }}
-        onChange={(id, patch) => apply((p) => updateOverlay(p, id, patch))}
+        onChange={changeOverlay}
         onRestack={(id, dir) => apply((p) => restackOverlay(p, id, dir))}
         onDelete={(id) => apply((p) => ({ ...p, overlays: p.overlays.filter((o) => o.id !== id) }))}
         onClose={() => setTool(null)}
@@ -1993,7 +2411,12 @@ export default function VideoEditor({
     );
   } else if (selectedClip && sources[selectedClip.clip.sourceId]) {
     const src = sources[selectedClip.clip.sourceId];
-    const change = (patch: Partial<Clip>) => apply((p) => updateClip(p, selectedClip.clip.id, patch));
+    const laidClip = selectedClip;
+    const change = (patch: Partial<Clip>) =>
+      apply((p) => {
+        const keyTime = clipKeys(laidClip).keyTime(clock.get());
+        return updateClip(p, laidClip.clip.id, animateClipPatch(laidClip.clip, patch, keyTime));
+      });
     panel = (
       <ClipPanelLive
         clock={clock}
@@ -2015,6 +2438,20 @@ export default function VideoEditor({
             onCleanAudio={IS_DESKTOP ? () => void cleanUpAudio(selectedClip.clip.id) : undefined}
             onOpenLook={() => openLook("filters")}
             gesture={gesture}
+            keys={clipKeys(selectedClip)}
+            attrs={{
+              onCopy: () => {
+                setClipAttrs(clipAttributes(selectedClip.clip));
+                say("Attributes copied. Select another clip and paste them.");
+              },
+              onPaste: clipAttrs ? () => apply((p) => ({ ...p, clips: p.clips.map((c) => (c.id === selectedClip.clip.id ? pasteClipAttributes(c, clipAttrs) : c)) })) : undefined,
+              onPasteAll: clipAttrs
+                ? () => {
+                    apply((p) => ({ ...p, clips: p.clips.map((c) => pasteClipAttributes(c, clipAttrs)) }));
+                    say("Pasted to every clip.");
+                  }
+                : undefined,
+            }}
           />
         }
       />
@@ -2036,7 +2473,23 @@ export default function VideoEditor({
         overlay={selectedOverlay}
         total={lay.total}
         sourceDuration={selectedOverlay.kind === "video" ? sources[selectedOverlay.sourceId]?.duration : undefined}
-        onChange={(patch) => apply((p) => updateOverlay(p, selectedOverlay.id, patch))}
+        onChange={(patch) => changeOverlay(selectedOverlay.id, patch)}
+        keys={overlayKeys(selectedOverlay)}
+        fonts={{
+          custom: Object.values(sources)
+            .filter((s) => s.kind === "font")
+            .map((s) => ({ key: customFontKey(s.id), label: (s.file?.name ?? "Font").replace(/\.[^.]+$/, "") })),
+          onUpload: (f) => void uploadFont(selectedOverlay.id, f),
+        }}
+        style={{
+          onCopy: () => {
+            setLayerAttrs(layerAttributes(selectedOverlay));
+            say("Style copied. Select another layer and paste it.");
+          },
+          onPaste: layerAttrs
+            ? () => apply((p) => ({ ...p, overlays: p.overlays.map((o) => (o.id === selectedOverlay.id ? pasteLayerAttributes(o, layerAttrs) : o)) }))
+            : undefined,
+        }}
         onDuplicate={duplicate}
         onDelete={deleteSelection}
         onRestack={(dir) => apply((p) => restackOverlay(p, selectedOverlay.id, dir))}
@@ -2052,6 +2505,8 @@ export default function VideoEditor({
         sourceDuration={sources[selectedAudio.sourceId]?.duration ?? selectedAudio.offset + selectedAudio.duration}
         total={lay.total}
         onChange={(patch) => apply((p) => updateAudio(p, selectedAudio.id, patch))}
+        onDuck={() => void duckUnderSpeech(selectedAudio.id)}
+        onBeats={() => void findBeats(selectedAudio.id)}
         onSplit={split}
         onDuplicate={duplicate}
         onDelete={deleteSelection}
@@ -2109,20 +2564,6 @@ export default function VideoEditor({
   }
 
   // --- timeline tracks ------------------------------------------------------------
-  const sel = selection;
-  const isSel = (kind: string, id: string) => sel !== null && sel.kind === kind && "id" in sel && sel.id === id;
-  // Recorded clicks as ticks on the Zoom track.
-  const clickTicks: NonNullable<TimelineTrack["ticks"]> = [];
-  if (rawPointer && recSource) {
-    for (const c of lay.clips) {
-      if (c.clip.sourceId !== recSource.id) continue;
-      for (const k of rawPointer.clicks) {
-        const t = timelineTimeOf(c, k.t);
-        if (t !== null && clickTicks.length < 3000)
-          clickTicks.push({ t, className: k.button === "left" ? "bg-cyan-400/80" : "bg-amber-400/80", title: `${k.button} click` });
-      }
-    }
-  }
   const masks = project.masks ?? [];
   const chapterList = [...(project.chapters ?? [])].sort((a, b) => a.t - b.t);
   const reviewItems = (project.suggestions ?? []).filter((s) => s.status === "pending");
@@ -2133,7 +2574,6 @@ export default function VideoEditor({
             key: "review",
             label: "Review",
             tone: "border-rose-500/40 bg-rose-500/15",
-            empty: "",
             items: reviewItems.map((s) => ({
               id: s.id,
               start: s.start,
@@ -2152,14 +2592,13 @@ export default function VideoEditor({
             key: "chapters",
             label: "Chapters",
             tone: "border-sky-500/40 bg-sky-500/10",
-            empty: "",
             items: chapterList.map((c, i) => ({
               id: c.id,
               start: c.t,
               end: chapterList[i + 1]?.t ?? lay.total,
               label: c.title,
               glyph: "§",
-              selected: isSel("chapter", c.id),
+              selected: selIs(selection, "chapter", c.id),
               sel: { kind: "chapter" as const, id: c.id },
             })),
           },
@@ -2171,7 +2610,6 @@ export default function VideoEditor({
             key: "privacy",
             label: "Privacy",
             tone: "border-amber-500/40 bg-amber-500/20",
-            empty: "",
             items: masks.map((m) => ({
               id: m.id,
               start: m.start,
@@ -2179,118 +2617,12 @@ export default function VideoEditor({
               label: m.label || { blur: "Blur", pixelate: "Pixelate", solid: "Mask" }[m.mode],
               glyph: "▦",
               hidden: !m.enabled,
-              selected: isSel("mask", m.id),
+              selected: selIs(selection, "mask", m.id),
               sel: { kind: "mask" as const, id: m.id },
             })),
           },
         ]
       : []),
-  ];
-  const tracks: TimelineTrack[] = [
-    {
-      key: "text",
-      label: "Text",
-      tone: "border-sky-500/40 bg-sky-500/20",
-      empty: "Press T to add text",
-      items: project.overlays
-        .filter((o) => o.kind === "text")
-        .map((o) => ({
-          id: o.id,
-          start: o.start,
-          end: o.end,
-          label: o.kind === "text" ? o.text.content.split("\n")[0] || "Text" : "",
-          glyph: "T",
-          hidden: o.hidden,
-          locked: o.locked,
-          selected: isSel("overlay", o.id),
-          sel: { kind: "overlay", id: o.id },
-        })),
-    },
-    {
-      key: "elements",
-      label: "Elements",
-      tone: "border-accent/40 bg-accent/20",
-      empty: "Stickers and images appear here",
-      items: project.overlays
-        .filter((o) => o.kind !== "text")
-        .map((o) => {
-          const def = o.kind === "sticker" ? getStickerDef(o.stickerId) : undefined;
-          return {
-            id: o.id,
-            start: o.start,
-            end: o.end,
-            label: o.kind === "sticker" ? (def?.label ?? "Sticker") : o.kind === "video" ? "Video" : o.kind === "shape" ? SHAPE_LABELS[o.shape.type] : "Image",
-            thumb:
-              o.kind === "image"
-                ? sources[o.sourceId]?.url
-                : o.kind === "video"
-                  ? (thumbs[o.sourceId]?.urls[0] ?? null)
-                  : def
-                    ? stickerThumbSrc(def)
-                    : null,
-            glyph: o.kind === "video" ? "▶" : def?.kind === "emoji" ? def.char : "★",
-            wave: o.kind === "video" ? { sourceId: o.sourceId, offset: o.offset, duration: o.end - o.start, gain: o.volume } : undefined,
-            hidden: o.hidden,
-            locked: o.locked,
-            selected: isSel("overlay", o.id),
-            sel: { kind: "overlay" as const, id: o.id },
-          };
-        }),
-    },
-    {
-      key: "audio",
-      label: "Audio",
-      tone: "border-emerald-500/40 bg-emerald-500/20",
-      empty: "Music and extracted audio appear here",
-      items: project.audio.map((a) => ({
-        id: a.id,
-        start: a.start,
-        end: a.start + a.duration,
-        label: `${a.muted ? "🔇 " : ""}${a.label}`,
-        glyph: "♪",
-        wave: { sourceId: a.sourceId, offset: a.offset, duration: a.duration, gain: a.muted ? 0 : a.volume },
-        selected: isSel("audio", a.id),
-        sel: { kind: "audio" as const, id: a.id },
-      })),
-    },
-    ...(anyRecording || zooms.length
-      ? [
-          {
-            key: "zoom",
-            label: "Zoom",
-            tone: "border-violet-500/40 bg-violet-500/20",
-            empty: recSource ? "Use Focus to suggest zooms from clicks, or add one at the playhead" : "Zooms appear here",
-            items: zooms.flatMap((z) =>
-              zoomSpans(lay.clips, z).map((sp) => ({
-                id: `${z.id}#${sp.clipIndex}`,
-                start: sp.start,
-                end: sp.end,
-                label: `${z.zoom.toFixed(1)}× ${z.reason ?? "Zoom"}`,
-                glyph: "⌕",
-                hidden: !z.enabled,
-                selected: isSel("zoom", z.id),
-                sel: { kind: "zoom" as const, id: z.id },
-              }))
-            ),
-            ticks: clickTicks,
-          },
-        ]
-      : []),
-    {
-      key: "effects",
-      label: "Effects",
-      tone: "border-amber-500/40 bg-amber-500/20",
-      empty: "Timed effects appear here",
-      items: project.effects.map((e) => ({
-        id: e.id,
-        start: e.start,
-        end: e.end,
-        label: EFFECT_LABELS[e.type],
-        glyph: EFFECT_ICONS[e.type],
-        selected: isSel("effect", e.id),
-        sel: { kind: "effect" as const, id: e.id },
-      })),
-    },
   ];
 
   const cleanupClip = dialog?.kind === "cleanup" ? project.clips.find((c) => c.id === dialog.clipId) : undefined;
@@ -2333,7 +2665,7 @@ export default function VideoEditor({
                   if (id) select({ kind: "overlay", id });
                   else if (selection?.kind === "overlay") setSelection(null);
                 }}
-                onChange={(id, patch) => apply((p) => updateOverlay(p, id, patch))}
+                onChange={changeOverlay}
                 onGestureStart={beginGesture}
                 onGestureEnd={endGesture}
                 onEditText={(id) => {
@@ -2430,6 +2762,7 @@ export default function VideoEditor({
               onClipChange={(id, patch) => apply((p) => updateClip(p, id, patch))}
               onItemChange={onItemChange}
               onMoveClip={(from, to) => apply((p) => moveClip(p, from, to))}
+              onTrackToggle={onTrackToggle}
               onGestureStart={beginGesture}
               onGestureEnd={endGesture}
             />
@@ -2437,7 +2770,7 @@ export default function VideoEditor({
         </main>
 
         <aside className="border-t border-border bg-surface/50 lg:w-80 lg:shrink-0 lg:overflow-hidden lg:border-l lg:border-t-0 xl:w-96" aria-label="Properties">
-          {panel}
+          <PremiumLocked.Provider value={premiumLocked}>{panel}</PremiumLocked.Provider>
         </aside>
       </div>
 

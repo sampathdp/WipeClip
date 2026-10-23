@@ -133,6 +133,9 @@ const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[
     features: [
       "Everything in Free",
       "All premium transitions, filters and effects",
+      "Green screen, blend modes, speed curves, LUTs and curves",
+      "Karaoke captions, auto-ducking, voice effects and stabilization",
+      "GIF, audio-only, high-quality and 60 fps exports",
       `Exports up to ${res(TIER_LIMITS.lite.maxResolution)}`,
       `${PLANS.lite.credits} bonus AI credits, plus ${FREE_DAILY_CREDITS} free every day`,
       ...cleanupLimit("lite"),

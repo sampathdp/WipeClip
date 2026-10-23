@@ -5,7 +5,7 @@ import Link from "next/link";
 import { canExportAt, premiumFeaturesUsed, TIER_LABELS, TIER_LIMITS, tierForResolution, type Tier } from "@/lib/entitlements";
 import { trackEvent } from "@/lib/analytics";
 import { PLANS } from "@/lib/credits";
-import { exportProject } from "@/lib/editor/exportProject";
+import { DEFAULT_OUTPUT, exportProject, OUTPUT_EXT, type ExportOutput } from "@/lib/editor/exportProject";
 import { saveLastExport } from "@/lib/editor/projectStore";
 import { canvasSize, formatTime } from "@/lib/editor/timeline";
 import type { MediaSource, Project } from "@/lib/editor/types";
@@ -23,6 +23,54 @@ const TIERS: { key: Resolution; short: number }[] = [
   { key: "1080p", short: 1080 },
   { key: "4k", short: 2160 },
 ];
+
+const GIF_MAX_SECONDS = 60; // EDITOR_MAX_GIF_SECONDS in backend/app/config.py
+
+/** File type, quality and frame rate of the export. */
+function OutputOptions({ output, onChange, total, locked }: { output: ExportOutput; onChange: (o: ExportOutput) => void; total: number; locked: boolean }) {
+  const select = "w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-sm text-foreground";
+  // Premium choices are marked for plans without them (entitlements.ts PREMIUM).
+  const pro = (label: string) => (locked ? `${label} · Premium` : label);
+  return (
+    <div className="grid grid-cols-3 gap-2 text-xs">
+      <label className="space-y-1">
+        <span className="font-semibold uppercase tracking-wider text-muted">Format</span>
+        <select className={select} value={output.format} onChange={(e) => onChange({ ...output, format: e.target.value as ExportOutput["format"] })}>
+          <option value="mp4">MP4 video</option>
+          <option value="gif" disabled={total > GIF_MAX_SECONDS}>
+            {pro("GIF")}
+            {total > GIF_MAX_SECONDS ? ` (max ${GIF_MAX_SECONDS}s)` : ""}
+          </option>
+          <option value="audio">{pro("Audio only (M4A)")}</option>
+        </select>
+      </label>
+      <label className="space-y-1">
+        <span className="font-semibold uppercase tracking-wider text-muted">Quality</span>
+        <select className={select} value={output.quality} disabled={output.format !== "mp4"} onChange={(e) => onChange({ ...output, quality: e.target.value as ExportOutput["quality"] })}>
+          <option value="standard">Standard</option>
+          <option value="high">{pro("High")}</option>
+          <option value="max">{pro("Best (bigger file)")}</option>
+        </select>
+      </label>
+      <label className="space-y-1">
+        <span className="font-semibold uppercase tracking-wider text-muted">Frame rate</span>
+        <select
+          className={select}
+          value={output.fps ?? ""}
+          disabled={output.format !== "mp4"}
+          onChange={(e) => onChange({ ...output, fps: e.target.value ? Number(e.target.value) : null })}
+        >
+          <option value="">Original</option>
+          {[24, 25, 30, 50, 60].map((f) => (
+            <option key={f} value={f}>
+              {f > 30 ? pro(`${f} fps`) : `${f} fps`}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
 
 /** Output size for a tier - mirrors api_video_export: short side capped
  * at the tier, never upscaled, even dimensions.
@@ -60,11 +108,14 @@ export default function ExportDialog({
   // A tier is only offered if it actually yields more pixels than the one below.
   const available = TIERS.filter((t, i) => i === 0 || shortSide > TIERS[i - 1].short);
   const allowed = (r: Resolution) => (isSignedIn ? canExportAt(tier, r) : r === "720p");
+  const [output, setOutput] = useState<ExportOutput>(DEFAULT_OUTPUT);
   const [resolution, setResolution] = useState<Resolution>(
     () => [...available].reverse().find((t) => allowed(t.key))?.key ?? "720p"
   );
   const limits = TIER_LIMITS[tier];
-  const premium = limits.premiumEffects ? [] : premiumFeaturesUsed(project);
+  const premium = limits.premiumEffects
+    ? []
+    : premiumFeaturesUsed({ ...project, format: output.format, quality: output.quality, fps: output.fps ?? undefined, fpsChosen: output.fps !== null });
   const [state, setState] = useState<"setup" | "rendering" | "done" | "error">(initialResult ? "done" : "setup");
   const [error, setError] = useState<{ message: string; upgrade?: boolean } | null>(null);
   const [result, setResult] = useState<{ blob: Blob; url: string } | null>(() =>
@@ -98,10 +149,18 @@ export default function ExportDialog({
     const hardStop = setTimeout(() => controller.abort(), 20 * 60 * 1000);
     trackEvent("processing_started", { tool: TOOL, resolution });
     try {
-      const blob = await exportProject(project, sources, originalId, isSignedIn ? resolution : "720p", controller.signal, (p) => {
-        setRender(p);
-        if (p.phase === "rendering") setRenderFrom((from) => from ?? Date.now() - started);
-      });
+      const blob = await exportProject(
+        project,
+        sources,
+        originalId,
+        isSignedIn ? resolution : "720p",
+        controller.signal,
+        (p) => {
+          setRender(p);
+          if (p.phase === "rendering") setRenderFrom((from) => from ?? Date.now() - started);
+        },
+        output
+      );
       setResult({ blob, url: URL.createObjectURL(blob) });
       setState("done");
       void notifyIfAway("Export finished", `"${filename}" is ready to save in WipeClip.`);
@@ -141,7 +200,7 @@ export default function ExportDialog({
     }
   };
 
-  const filename = `wipeclip-${sourceName(original).replace(/\.[^.]+$/, "")}-edit.mp4`;
+  const filename = `wipeclip-${sourceName(original).replace(/\.[^.]+$/, "")}-edit.${OUTPUT_EXT[output.format]}`;
 
   return (
     <Dialog title="Export video" onClose={state === "rendering" ? undefined : onClose}>
@@ -215,6 +274,7 @@ export default function ExportDialog({
               </p>
             )}
           </div>
+          <OutputOptions output={output} onChange={setOutput} total={total} locked={!limits.premiumEffects} />
           {limits.exportBranding && premium.length === 0 && (
             <p className="text-xs text-muted">
               Free exports include a small &quot;Made with WipeClip&quot; mark in the corner.{" "}
@@ -296,7 +356,14 @@ export default function ExportDialog({
 
       {state === "done" && result && (
         <div className="space-y-4">
-          <video src={result.url} controls playsInline className="max-h-[50dvh] w-full rounded-xl bg-black" />
+          {output.format === "gif" ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={result.url} alt="Exported GIF" className="max-h-[50dvh] w-full rounded-xl bg-black object-contain" />
+          ) : output.format === "audio" ? (
+            <audio src={result.url} controls className="w-full" />
+          ) : (
+            <video src={result.url} controls playsInline className="max-h-[50dvh] w-full rounded-xl bg-black" />
+          )}
           {isSignedIn && IS_DESKTOP ? (
             <DesktopSaveButton blob={result.blob} filename={filename} />
           ) : isSignedIn ? (

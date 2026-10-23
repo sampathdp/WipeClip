@@ -15,7 +15,15 @@ export type TransitionType =
   | "slideleft"
   | "slideright"
   | "zoom"
-  | "blur";
+  | "blur"
+  | "slideup"
+  | "slidedown"
+  | "wipeleft"
+  | "wiperight"
+  | "wipeup"
+  | "wipedown"
+  | "circleopen"
+  | "circleclose";
 
 export interface Transition {
   type: TransitionType;
@@ -53,10 +61,22 @@ export interface Adjustments {
   opacity: number;
 }
 
+/** Tone curves through (x, y) control points, 0..1 (curves.ts). */
+export interface Curves {
+  rgb: [number, number][];
+  r: [number, number][];
+  g: [number, number][];
+  b: [number, number][];
+}
+
 export interface Look {
   filter: FilterId;
   intensity: number; // 0..100
   adjust: Adjustments;
+  /** Applied after the filter and adjustments; absent = none. */
+  curves?: Curves;
+  /** An imported .cube LUT (a "lut" source), applied first (lut.ts). */
+  lut?: { sourceId: string; name: string; intensity: number } | null;
 }
 
 /** Placement of the video inside the canvas, on top of the fit mode:
@@ -68,6 +88,36 @@ export interface VideoTransform {
   y: number;
   scale: number;
   rotation: number;
+}
+
+export type KeyframeEase = "linear" | "smooth" | "in" | "out";
+
+/** A soft-edged shape that cuts out part of a clip or layer (shapeMask.ts).
+ * x/y (center) and w/h are fractions of the clip's box or the layer. */
+export interface ShapeMask {
+  shape: "circle" | "rect" | "linear" | "mirror";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation: number; // degrees
+  /** 0..1: edge softness, as a share of half the short side. */
+  feather: number;
+  /** Shows the outside instead. */
+  invert: boolean;
+}
+
+/** One keyframe of a clip's or layer's animation (see keyframes.ts). */
+export interface Keyframe {
+  /** Clips: source seconds. Layers: seconds from the layer's start. */
+  t: number;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+  opacity: number;
+  /** Curve towards the next keyframe. */
+  ease: KeyframeEase;
 }
 
 /** Part of the source frame to keep, as fractions of its width/height. */
@@ -98,12 +148,36 @@ export interface Clip {
   volume: number; // 0..2 (1 = original); 0 after "Extract audio"
   transform: VideoTransform;
   look: Look;
+  /** Animates transform (x, y, scale, rotation); absent/empty = static. */
+  keyframes?: Keyframe[];
+  /** Speed curve: speeds at evenly spaced points over the clip, used
+   * instead of `speed` (speed.ts). Absent = constant speed. */
+  ramp?: number[];
+  /** Shape mask over the clip's box; absent = none. */
+  mask?: ShapeMask | null;
+  /** Stabilization strength 1..100, applied by the export; absent = off. */
+  stabilize?: number;
 }
 
 // --- Overlays: stickers, text and images share one layer model ----------
 
-export type AnimIn = "none" | "fade" | "pop" | "zoomin" | "slideup" | "slidedown" | "slideleft" | "slideright";
-export type AnimOut = "none" | "fade" | "zoomout" | "slideup" | "slidedown" | "slideleft" | "slideright";
+export type AnimIn = "none" | "fade" | "pop" | "bounce" | "spin" | "zoomin" | "slideup" | "slidedown" | "slideleft" | "slideright";
+export type AnimOut = "none" | "fade" | "pop" | "spin" | "zoomout" | "slideup" | "slidedown" | "slideleft" | "slideright";
+
+/** How a layer mixes with what's under it - CSS mix-blend-mode in the
+ * preview, ffmpeg's blend filter in the export. */
+export type BlendMode = "normal" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "add" | "difference";
+
+/** Chroma key on an image or video layer (see chromaKey.ts). */
+export interface ChromaKey {
+  color: string;
+  /** 0..100: how far from the key color still turns transparent. */
+  similarity: number;
+  /** 0..100: width of the soft edge past that. */
+  smoothness: number;
+}
+
+export type TextAnim = "none" | "typewriter" | "words" | "karaoke";
 
 export interface TextStyle {
   content: string;
@@ -120,6 +194,10 @@ export interface TextStyle {
   align: "left" | "center" | "right";
   letterSpacing: number; // em
   lineHeight: number; // multiple of font size
+  /** Letter / word reveal or karaoke highlight (textAnim.ts); absent = none. */
+  anim?: TextAnim;
+  /** Karaoke: the current word's color. */
+  highlight?: string;
 }
 
 interface OverlayBase {
@@ -141,6 +219,17 @@ interface OverlayBase {
   caption?: boolean;
   /** A keyboard-shortcut indicator made from recorded shortcut events. */
   keystroke?: boolean;
+  /** Absent = normal. */
+  blend?: BlendMode;
+  /** Image and video layers only; absent = off. */
+  key?: ChromaKey | null;
+  /** Animates x, y, size (scale), rotation and opacity; absent/empty = static. */
+  keyframes?: Keyframe[];
+  /** Captions: when each word is spoken, seconds from the layer's start
+   * (timing for word-by-word and karaoke text). */
+  words?: { start: number; end: number }[];
+  /** Shape mask over the layer; absent = none. */
+  mask?: ShapeMask | null;
 }
 
 // --- Annotations: shapes drawn as PNGs like text (see shapes.ts) ----------
@@ -185,7 +274,20 @@ export interface AudioClip {
   fadeIn: number; // seconds
   fadeOut: number;
   muted: boolean;
+  /** What captions take this track for. "auto" (or unset): detected from
+   * the sound (speechDetect.ts); "speech" is captioned, "music" is not. */
+  captions?: "auto" | "speech" | "music";
+  /** Lowered by `amount` (0..1) while speech plays in `regions`
+   * (timeline seconds; ducking.ts). Absent = never lowered. */
+  duck?: { amount: number; regions: [number, number][] };
+  /** Voice effect (voiceFx.ts); absent = none. */
+  voice?: VoiceFx;
+  /** Detected beats (beats.ts), in seconds of the audio file, so trims
+   * keep them on the music. */
+  beats?: { bpm: number; times: number[] };
 }
+
+export type VoiceFx = "none" | "chipmunk" | "deep" | "robot" | "echo" | "telephone" | "radio";
 
 export type EffectType =
   | "blur"
@@ -198,7 +300,15 @@ export type EffectType =
   | "rgbsplit"
   | "flash"
   | "shake"
-  | "zoom";
+  | "zoom"
+  | "bw"
+  | "sepia"
+  | "invert"
+  | "hue"
+  | "vignette"
+  | "letterbox"
+  | "strobe"
+  | "mirror";
 
 export interface EffectClip {
   id: string;
@@ -407,7 +517,7 @@ export interface Transcript {
 export interface MediaSource {
   id: string;
   /** "layer": a video imported for a picture-in-picture layer. */
-  kind: "original" | "cleaned" | "audio" | "image" | "layer" | "take";
+  kind: "original" | "cleaned" | "audio" | "image" | "layer" | "take" | "lut" | "font";
   /** The file's contents; null for a source that stays on disk (`disk`),
    * whose bytes are read only when needed (sourceFile.ts). */
   file: File | null;

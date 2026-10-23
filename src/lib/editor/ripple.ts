@@ -15,6 +15,7 @@
  */
 import { newId, type Layout } from "./timeline.ts";
 import type { AudioClip, Chapter, Clip, EditSuggestion, EffectClip, Overlay, PrivacyMask, Project } from "./types.ts";
+import { activeRamp, localToSource, rampPart } from "./speed.ts";
 
 export type RippleResult = { ok: true; project: Project; removed: number } | { ok: false; error: string };
 
@@ -39,10 +40,13 @@ function transitionRegions(lay: Layout): [number, number][] {
 /** The part of `clip` that plays between `from` and `to` seconds into it
  * (timeline seconds, at the clip's speed). */
 function clipPart(clip: Clip, from: number, to: number): Clip {
-  const speed = clip.speed || 1;
   if (clip.freeze !== null) return { ...clip, start: 0, end: to - from };
-  if (clip.reverse) return { ...clip, start: clip.end - to * speed, end: clip.end - from * speed };
-  return { ...clip, start: clip.start + from * speed, end: clip.start + to * speed };
+  const a = localToSource(clip, from);
+  const b = localToSource(clip, to);
+  if (clip.reverse) return { ...clip, start: clip.end - b, end: clip.end - a };
+  const len = clip.end - clip.start;
+  const ramp = activeRamp(clip);
+  return { ...clip, start: clip.start + a, end: clip.start + b, ...(ramp ? { ramp: rampPart(ramp, a / len, b / len) } : {}) };
 }
 
 interface Timed {

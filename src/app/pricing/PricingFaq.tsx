@@ -24,7 +24,7 @@ const faqs = [
   },
   {
     q: "What do paid plans add?",
-    a: "Premium transitions, filters and effects, exports at higher resolutions up to 4K, and more credits for the AI tools. Recording and basic editing stay free.",
+    a: "Premium transitions, filters and effects; pro tools like green screen, blend modes, speed curves, LUTs, curves, karaoke captions, auto-ducking, voice effects, stabilization and custom fonts; GIF, audio-only, high-quality and 60 fps exports; resolutions up to 4K; and more credits for the AI tools. Recording, keyframes, voiceovers, sound effects and everyday editing stay free.",
   },
   {
     q: "What happens if I buy again before my plan ends?",

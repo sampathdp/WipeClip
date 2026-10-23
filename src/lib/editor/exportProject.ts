@@ -1,12 +1,31 @@
 import { exportEditorProject, type RenderProgress, type Resolution } from "@/lib/toolsApi";
 import { loadRaster, rasterKey } from "./rasters";
 import { overlayWidth } from "./textRaster";
-import { canvasSize, layout } from "./timeline";
+import { canvasSize, layout, videoBox } from "./timeline";
+import { shapeMaskBlob } from "./shapeMask";
+import { curveTables, curvesActive } from "./curves";
+import { EXPORT_LUT_SIZE, loadLut, resampleLut } from "./lut";
+import { sourceFile } from "./sourceFile";
 import { cameraPayload, pointerRows } from "./focusExport";
 import { maskRows } from "./masks";
 import { RING_SPRITE_R, pointerSprites } from "./pointerDraw";
-import type { MediaSource, Project } from "./types";
+import type { Clip, MediaSource, Overlay, Project } from "./types";
 import { sourceInput } from "./sourceFile";
+import { clipKeyTimeToLocal } from "./keyframes";
+import { activeRamp, rampSegments } from "./speed";
+
+/** What file the export makes: an MP4 (at a quality and, optionally, a
+ * frame rate), an animated GIF, or the sound alone (M4A). */
+export interface ExportOutput {
+  format: "mp4" | "gif" | "audio";
+  quality: "standard" | "high" | "max";
+  /** Frames per second; null = the original's. */
+  fps: number | null;
+}
+
+export const DEFAULT_OUTPUT: ExportOutput = { format: "mp4", quality: "standard", fps: null };
+
+export const OUTPUT_EXT: Record<ExportOutput["format"], string> = { mp4: "mp4", gif: "gif", audio: "m4a" };
 
 /** Serializes the project into the backend's export payload (see
  * api_video_export in backend/app/main.py):
@@ -29,7 +48,8 @@ export async function exportProject(
   originalId: string,
   resolution: Resolution,
   signal?: AbortSignal,
-  onProgress?: (p: RenderProgress) => void
+  onProgress?: (p: RenderProgress) => void,
+  output: ExportOutput = DEFAULT_OUTPUT
 ): Promise<Blob> {
   const original = sources[originalId];
   const canvas = canvasSize(project.canvas.aspect, original.width, original.height);
@@ -42,7 +62,8 @@ export async function exportProject(
   for (const clip of project.clips) addSourceRef(clip.sourceId);
 
   const overlays = project.overlays.filter((o) => !o.hidden);
-  const imageKeys: string[] = [];
+  // Raster key -> index in imageBlobs (which also holds mask PNGs).
+  const imageIndex = new Map<string, number>();
   const imageBlobs: Blob[] = [];
   const overlayPayload = [];
   for (const o of overlays) {
@@ -62,17 +83,20 @@ export async function exportProject(
         opacity: o.opacity,
         animIn: o.animIn,
         animOut: o.animOut,
+        ...blendKey(o),
+        ...(o.key ? { key: o.key } : {}),
+        ...overlayKeyframes(o),
+        ...planHints(o),
+        // Shape mask as a PNG at the layer's proportions.
+        ...(o.mask ? { mask: imageBlobs.push(await shapeMaskBlob(o.mask, sources[o.sourceId].width / Math.max(1, sources[o.sourceId].height))) - 1 } : {}),
       });
       continue;
     }
     const key = rasterKey(o);
     const raster = await loadRaster(o, sources);
-    if (!imageKeys.includes(key)) {
-      imageKeys.push(key);
-      imageBlobs.push(raster.blob);
-    }
+    if (!imageIndex.has(key)) imageIndex.set(key, imageBlobs.push(raster.blob) - 1);
     overlayPayload.push({
-      image: imageKeys.indexOf(key),
+      image: imageIndex.get(key)!,
       start: round(o.start),
       end: round(o.end),
       x: o.x,
@@ -82,6 +106,14 @@ export async function exportProject(
       opacity: o.opacity,
       animIn: o.animIn,
       animOut: o.animOut,
+      // Keyed images arrive already keyed (rasters.ts), so only the blend goes.
+      ...blendKey(o),
+      ...planHints(o),
+      // Animated text: the PNG is a grid of states (textAnim.ts).
+      ...(raster.sprite
+        ? { sprite: { cols: raster.sprite.cols, rows: raster.sprite.rows, times: raster.sprite.times.map((t) => round(o.start + t)) } }
+        : {}),
+      ...overlayKeyframes(o),
     });
   }
 
@@ -103,7 +135,31 @@ export async function exportProject(
       volume: a.volume,
       fadeIn: a.fadeIn,
       fadeOut: a.fadeOut,
+      ...(a.duck && a.duck.amount > 0 && a.duck.regions.length ? { duck: a.duck } : {}),
+      ...(a.voice && a.voice !== "none" ? { voice: a.voice } : {}),
     });
+  }
+
+  // Imported LUTs, resampled small enough for the project data.
+  const luts = new Map<string, { size: number; data: number[] }>();
+  for (const c of project.clips) {
+    const ref = c.look.lut;
+    const src = ref ? sources[ref.sourceId] : undefined;
+    if (!ref || !src || luts.has(src.id)) continue;
+    const lut = resampleLut(await loadLut(src.id, () => sourceFile(src)), EXPORT_LUT_SIZE);
+    luts.set(src.id, { size: lut.size, data: Array.from(lut.data, (v) => Math.round(v * 10000) / 10000) });
+  }
+
+  // Clip shape masks as PNGs at their boxes' proportions.
+  const clipMasks: (number | undefined)[] = [];
+  for (const c of project.clips) {
+    const src = sources[c.sourceId];
+    if (!c.mask || !src) {
+      clipMasks.push(undefined);
+      continue;
+    }
+    const box = videoBox(c, src, canvas, project.canvas);
+    clipMasks.push(imageBlobs.push(await shapeMaskBlob(c.mask, (box.w * canvas.width) / Math.max(1, box.h * canvas.height))) - 1);
   }
 
   const bg = project.canvas.background;
@@ -161,8 +217,22 @@ export async function exportProject(
       speed: c.speed,
       volume: c.volume,
       transform: c.transform,
-      look: c.look,
+      look: {
+        filter: c.look.filter,
+        intensity: c.look.intensity,
+        adjust: c.look.adjust,
+        // Curves as sampled tables, the LUT as its data (look.py bakes both).
+        ...(curvesActive(c.look.curves) ? { curve: curveTables(c.look.curves) } : {}),
+        ...(c.look.lut && luts.has(c.look.lut.sourceId) && c.look.lut.intensity > 0
+          ? { lut: { ...luts.get(c.look.lut.sourceId)!, intensity: c.look.lut.intensity } }
+          : {}),
+      },
       ...(camera[i] ? { camera: camera[i] } : {}),
+      ...clipKeyframes(c),
+      ...(clipMasks[i] !== undefined ? { mask: clipMasks[i], maskStyle: { shape: c.mask!.shape, invert: c.mask!.invert } } : {}),
+      ...(c.stabilize && c.freeze === null ? { stabilize: c.stabilize } : {}),
+      // Speed curve as its constant-speed pieces (speed.ts).
+      ...(activeRamp(c) ? { ramp: rampSegments(activeRamp(c)!) } : {}),
     })),
     overlays: overlayPayload,
     audio: audioPayload,
@@ -172,7 +242,10 @@ export async function exportProject(
     // Screen recordings are variable frame rate: the server's probe would
     // see their average (often ~15 fps) instead of the capture rate the
     // preview, zooms and click rings run at.
-    ...(original.recording && lay.fps > 0 ? { fps: lay.fps } : {}),
+    ...(output.fps ? { fps: output.fps } : original.recording && lay.fps > 0 ? { fps: lay.fps } : {}),
+    format: output.format,
+    quality: output.quality,
+    fpsChosen: output.fps !== null,
   };
 
   return exportEditorProject(
@@ -185,6 +258,42 @@ export async function exportProject(
     signal,
     onProgress
   );
+}
+
+/** Layer keyframes in timeline seconds. */
+function overlayKeyframes(o: Overlay) {
+  if (!o.keyframes?.length) return {};
+  return { keyframes: o.keyframes.map((k) => ({ ...k, t: round(o.start + k.t) })) };
+}
+
+const MIRROR_EASE = { linear: "linear", smooth: "smooth", in: "out", out: "in" } as const;
+
+/** Clip keyframes in clip-local seconds (the export's clip time). A
+ * reversed clip plays them backwards: the curve between two keyframes then
+ * runs from the later one, mirrored. */
+function clipKeyframes(c: Clip) {
+  if (!c.keyframes?.length) return {};
+  let kfs = c.keyframes.map((k) => ({ t: round(clipKeyTimeToLocal(c, k.t)), x: k.x, y: k.y, scale: k.scale, rotation: k.rotation, ease: k.ease }));
+  if (c.reverse && c.freeze === null) {
+    kfs = kfs.reverse().map((k, i, all) => ({ ...k, ease: i + 1 < all.length ? MIRROR_EASE[all[i + 1].ease] : k.ease }));
+  }
+  return { keyframes: kfs };
+}
+
+/** What the plan check (entitlements.ts premiumFeaturesUsed) can't read
+ * from the rendered layer: its mask's shape, a keyed image, the text
+ * animation and an uploaded font. The backend ignores these. */
+function planHints(o: Overlay) {
+  return {
+    ...(o.mask ? { maskStyle: { shape: o.mask.shape, invert: o.mask.invert } } : {}),
+    ...(o.kind === "image" && o.key ? { keyed: true } : {}),
+    ...(o.kind === "text" && o.text.anim && o.text.anim !== "none" ? { textAnim: o.text.anim } : {}),
+    ...(o.kind === "text" && o.text.font.startsWith("src:") ? { customFont: true } : {}),
+  };
+}
+
+function blendKey(o: Overlay): { blend?: string } {
+  return o.blend && o.blend !== "normal" ? { blend: o.blend } : {};
 }
 
 function round(n: number) {

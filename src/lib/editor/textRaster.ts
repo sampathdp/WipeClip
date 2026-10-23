@@ -1,5 +1,6 @@
 import type { RasterSticker } from "./stickers";
 import type { Overlay, TextStyle } from "./types";
+import { customFontFamily, fontReady, fontSourceId } from "./customFonts.ts";
 
 /** Text layers are rasterized in the browser to a PNG - the same PNG the
  * preview shows and the export composites - so fonts, outline, shadow and
@@ -14,7 +15,32 @@ export const TEXT_FONTS: Record<string, { label: string; css: string }> = {
   mono: { label: "Mono", css: "ui-monospace, Menlo, Consolas, monospace" },
   rounded: { label: "Rounded", css: "'Arial Rounded MT Bold', 'Trebuchet MS', sans-serif" },
   hand: { label: "Handwritten", css: "'Segoe Print', 'Comic Sans MS', 'Bradley Hand', cursive" },
+  // Self-hosted (src/components/editor/editorFonts.ts).
+  montserrat: { label: "Montserrat", css: "var(--font-montserrat), Arial, sans-serif" },
+  poppins: { label: "Poppins", css: "var(--font-poppins), Arial, sans-serif" },
+  bebas: { label: "Bebas Neue", css: "var(--font-bebas), Impact, sans-serif" },
+  anton: { label: "Anton", css: "var(--font-anton), Impact, sans-serif" },
+  oswald: { label: "Oswald", css: "var(--font-oswald), Arial, sans-serif" },
+  spacegrotesk: { label: "Space Grotesk", css: "var(--font-space-grotesk), Arial, sans-serif" },
+  playfair: { label: "Playfair", css: "var(--font-playfair), Georgia, serif" },
+  robotoslab: { label: "Roboto Slab", css: "var(--font-roboto-slab), Georgia, serif" },
+  lobster: { label: "Lobster", css: "var(--font-lobster), cursive" },
+  pacifico: { label: "Pacifico", css: "var(--font-pacifico), cursive" },
+  marker: { label: "Marker", css: "var(--font-marker), cursive" },
+  bangers: { label: "Comic", css: "var(--font-bangers), Impact, sans-serif" },
+  caveat: { label: "Caveat", css: "var(--font-caveat), cursive" },
+  dancing: { label: "Script", css: "var(--font-dancing), cursive" },
+  righteous: { label: "Retro", css: "var(--font-righteous), Arial, sans-serif" },
+  pixel: { label: "Pixel", css: "var(--font-pixel), monospace" },
 };
+
+/** CSS font-family of a text style's font: a built-in one, or an uploaded
+ * font (customFonts.ts). */
+export function fontCss(key: string): string {
+  const id = fontSourceId(key);
+  if (id) return `"${customFontFamily(id)}", Arial, sans-serif`;
+  return (TEXT_FONTS[key] ?? TEXT_FONTS.inter).css;
+}
 
 /** Font px the raster is drawn at; display size scales from this. */
 export const TEXT_RASTER_PX = 160;
@@ -100,8 +126,27 @@ export function rasterizeText(style: TextStyle): Promise<RasterSticker> {
 }
 
 async function draw(s: TextStyle): Promise<RasterSticker> {
+  const canvas = await drawTextCanvas(s);
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not render text"))), "image/png")
+  );
+  return { blob, url: URL.createObjectURL(blob), width: canvas.width, height: canvas.height };
+}
+
+/** What part of the text a frame of a text animation shows (textAnim.ts):
+ * only the first `chars` characters (typewriter, word by word), and/or word
+ * number `highlight` in the highlight color (karaoke). The layout - and so
+ * the canvas size - is the same for every state. */
+export interface TextState {
+  chars?: number;
+  highlight?: number;
+}
+
+/** The text drawn on a canvas at TEXT_RASTER_PX. */
+export async function drawTextCanvas(s: TextStyle, state: TextState = {}): Promise<HTMLCanvasElement> {
   const px = TEXT_RASTER_PX;
-  const family = resolveFamily((TEXT_FONTS[s.font] ?? TEXT_FONTS.inter).css);
+  await fontReady(s.font).catch(() => {});
+  const family = resolveFamily(fontCss(s.font));
   const font = `${s.italic ? "italic " : ""}${s.weight} ${px}px ${family}`;
   try {
     await document.fonts.load(font, s.content || "A");
@@ -141,30 +186,43 @@ async function draw(s: TextStyle): Promise<RasterSticker> {
 
   const left = margin + pad;
   ctx.lineJoin = "round";
+  let charsLeft = state.chars ?? Infinity;
+  let wordIndex = 0;
   lines.forEach((line, i) => {
     const lw = widths[i];
     const x = s.align === "left" ? left : s.align === "right" ? left + blockW - lw : left + (blockW - lw) / 2;
     const y = margin + pad + lineH * (i + 0.5);
-    if (s.shadow) {
-      ctx.shadowColor = "rgba(0,0,0,0.55)";
-      ctx.shadowBlur = px * 0.15;
-      ctx.shadowOffsetY = px * 0.04;
-    }
-    if (s.strokeWidth > 0) {
-      ctx.strokeStyle = s.strokeColor;
-      ctx.lineWidth = s.strokeWidth * px * 2;
-      ctx.strokeText(line, x, y);
+    // Partial lines keep the full line's position, so text appears in place.
+    const glyphs = Array.from(line);
+    const shown = charsLeft >= glyphs.length ? line : glyphs.slice(0, Math.max(0, charsLeft)).join("");
+    charsLeft -= glyphs.length;
+    const paint = (text: string, at: number, color: string) => {
+      if (!text) return;
+      if (s.shadow) {
+        ctx.shadowColor = "rgba(0,0,0,0.55)";
+        ctx.shadowBlur = px * 0.15;
+        ctx.shadowOffsetY = px * 0.04;
+      }
+      if (s.strokeWidth > 0) {
+        ctx.strokeStyle = s.strokeColor;
+        ctx.lineWidth = s.strokeWidth * px * 2;
+        ctx.strokeText(text, at, y);
+        ctx.shadowColor = "transparent";
+      }
+      ctx.fillStyle = color;
+      ctx.fillText(text, at, y);
       ctx.shadowColor = "transparent";
+    };
+    paint(shown, x, s.color);
+    // Karaoke: the current word again, on top, in the highlight color.
+    for (const m of line.matchAll(/\S+/g)) {
+      if (wordIndex === state.highlight && m.index! < shown.length) {
+        paint(m[0], x + ctx.measureText(line.slice(0, m.index)).width, s.highlight ?? "#facc15");
+      }
+      wordIndex++;
     }
-    ctx.fillStyle = s.color;
-    ctx.fillText(line, x, y);
-    ctx.shadowColor = "transparent";
   });
-
-  const blob = await new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not render text"))), "image/png")
-  );
-  return { blob, url: URL.createObjectURL(blob), width: w, height: h };
+  return canvas;
 }
 
 /** On-canvas width of an overlay as a fraction of canvas width. Stickers

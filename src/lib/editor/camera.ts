@@ -14,6 +14,7 @@
  */
 import { videoBox, type BoxLayout, type LaidOutClip } from "./timeline.ts";
 import type { CameraZoom, Clip, Crop, ZoomEase } from "./types.ts";
+import { localToSource, sourceToLocal } from "./speed.ts";
 
 /** Zooms closer than this pan straight from one focus to the next instead
  * of zooming out and back in. */
@@ -245,14 +246,14 @@ export function timelineTimeOf(c: LaidOutClip, s: number): number | null {
   const { clip } = c;
   if (clip.freeze !== null || s < clip.start || s > clip.end) return null;
   const local = clip.reverse ? clip.end - s : s - clip.start;
-  return c.start + local / (clip.speed || 1);
+  return c.start + sourceToLocal(clip, local);
 }
 
 /** Source time shown at timeline time `t` of laid clip `c`. */
 export function sourceTimeOf(c: LaidOutClip, t: number): number {
   const { clip } = c;
   if (clip.freeze !== null) return clip.freeze;
-  const local = (t - c.start) * (clip.speed || 1);
+  const local = localToSource(clip, t - c.start);
   return clip.reverse ? clip.end - local : clip.start + local;
 }
 

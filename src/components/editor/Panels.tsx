@@ -1,6 +1,10 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { useClockTime, type Clock } from "@/lib/editor/clock";
+import { voiceoverSupported } from "@/lib/editor/voiceover";
+import { DEFAULT_KEY } from "@/lib/editor/chromaKey";
+import { EASE_LABELS, KEYFRAME_SNAP, clipTransformAt, keyframeAt, overlayValues, upsertKeyframe, type KeyValues } from "@/lib/editor/keyframes";
 import { FILTERS, FILTER_ORDER } from "@/lib/editor/look";
 import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
 import { TEXT_FONTS, TEXT_TEMPLATES } from "@/lib/editor/textRaster";
@@ -20,18 +24,32 @@ import {
   type AnimIn,
   type AnimOut,
   type AudioClip,
+  type BlendMode,
   type Canvas,
   type CanvasFrame,
   type Clip,
   type Crop,
+  type Curves,
   type EffectClip,
   type EffectType,
+  type Keyframe,
+  type KeyframeEase,
   type Look,
   type MediaSource,
   type Overlay,
+  type ShapeMask,
   type ShapeStyle,
+  type TextAnim,
   type TextStyle,
+  type VoiceFx,
 } from "@/lib/editor/types";
+import { TEXT_ANIM_LABELS } from "@/lib/editor/textAnim";
+import { DEFAULT_DUCK_AMOUNT } from "@/lib/editor/ducking";
+import { VOICE_FX_LABELS } from "@/lib/editor/voiceFx";
+import { SFX, type SfxDef } from "@/lib/editor/sfx";
+import { DEFAULT_MASK, MASK_LABELS } from "@/lib/editor/shapeMask";
+import { DEFAULT_CURVES, IDENTITY_CURVE, curveFn, isIdentityCurve } from "@/lib/editor/curves";
+import { MAX_RAMP_SPEED, MIN_RAMP_SPEED, RAMP_PRESETS, clipTimelineLength } from "@/lib/editor/speed";
 import { CAPTION_POSITIONS, CAPTION_STYLES, type CaptionStyleId } from "@/lib/editor/captions";
 import { SHAPE_LABELS } from "@/lib/editor/shapes";
 import { isPremiumEffect, isPremiumFilter } from "@/lib/entitlements";
@@ -49,6 +67,21 @@ export interface Gesture {
 
 const inputCls =
   "w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-2/40";
+
+/** Whether the user's plan leaves out premium tools - set by the editor
+ * around its panel, read by the premium markers below. */
+export const PremiumLocked = createContext(false);
+
+/** Crown after a premium tool's title, for plans that don't include it. */
+function ProTag() {
+  return useContext(PremiumLocked) ? <PremiumBadge className="ml-1.5 inline-flex align-middle" /> : null;
+}
+
+/** A label marked premium (for <option>s and plain-text labels). */
+function useProLabel() {
+  const locked = useContext(PremiumLocked);
+  return (label: string, premium = true) => (locked && premium ? `${label} · Premium` : label);
+}
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return <p className="mb-2 mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted">{children}</p>;
@@ -244,7 +277,11 @@ export function ClipExtras({
   onCleanAudio,
   onOpenLook,
   gesture,
+  keys,
+  attrs,
 }: {
+  /** Copy this clip's look and settings / paste copied ones here or on every clip. */
+  attrs: { onCopy: () => void; onPaste?: () => void; onPasteAll?: () => void };
   clip: Clip;
   source: MediaSource;
   onChange: (patch: Partial<Clip>) => void;
@@ -253,8 +290,8 @@ export function ClipExtras({
   onCleanAudio?: () => void;
   onOpenLook: () => void;
   gesture: Gesture;
+  keys: KeyframeControls;
 }) {
-  const t = clip.transform;
   const frozen = clip.freeze !== null;
   const tooLongToReverse = clip.end - clip.start > MAX_REVERSE_SECONDS + 1e-6;
   return (
@@ -263,7 +300,10 @@ export function ClipExtras({
         <>
           <div>
             <SectionTitle>Speed</SectionTitle>
-            <Chips label="Speed" value={clip.speed} onChange={(speed) => onChange({ speed })} options={SPEEDS.map((s) => ({ value: s, label: `${s}×` }))} />
+            {!clip.ramp && (
+              <Chips label="Speed" value={clip.speed} onChange={(speed) => onChange({ speed })} options={SPEEDS.map((s) => ({ value: s, label: `${s}×` }))} />
+            )}
+            <SpeedCurve clip={clip} onChange={onChange} gesture={gesture} />
           </div>
           <SliderField
             label="Volume"
@@ -304,17 +344,223 @@ export function ClipExtras({
           </div>
         </>
       )}
-      <CropSection crop={clip.crop} source={source} onChange={(crop) => onChange({ crop })} gesture={gesture} />
-      <div>
-        <SectionTitle>Position &amp; size</SectionTitle>
-        <div className="space-y-3">
-          <SliderField label="X" value={Math.round(t.x * 100)} min={-50} max={150} neutral={50} format={(v) => `${v}%`} onChange={(v) => onChange({ transform: { ...t, x: v / 100 } })} gesture={gesture} />
-          <SliderField label="Y" value={Math.round(t.y * 100)} min={-50} max={150} neutral={50} format={(v) => `${v}%`} onChange={(v) => onChange({ transform: { ...t, y: v / 100 } })} gesture={gesture} />
-          <SliderField label="Scale" value={Math.round(t.scale * 100)} min={10} max={300} neutral={100} format={(v) => `${v}%`} onChange={(v) => onChange({ transform: { ...t, scale: v / 100 } })} gesture={gesture} />
-          <SliderField label="Rotation" value={Math.round(t.rotation)} min={-180} max={180} neutral={0} format={(v) => `${v}°`} onChange={(v) => onChange({ transform: { ...t, rotation: v } })} gesture={gesture} />
+      {!frozen && (
+        <div className="space-y-2">
+          <SectionTitle>
+            Stabilize
+            <ProTag />
+          </SectionTitle>
+          <label className="flex items-center justify-between text-xs font-medium text-foreground">
+            Smooth out camera shake
+            <input type="checkbox" checked={!!clip.stabilize} onChange={(e) => onChange({ stabilize: e.target.checked ? 50 : undefined })} />
+          </label>
+          {!!clip.stabilize && (
+            <>
+              <SliderField label="Strength" value={clip.stabilize} min={1} max={100} neutral={50} format={(v) => `${v}%`} onChange={(stabilize) => onChange({ stabilize })} gesture={gesture} />
+              <p className="text-[11px] text-muted">Applied when you export (the preview shows the original). Zooms in slightly to hide the moving edges.</p>
+            </>
+          )}
         </div>
-      </div>
+      )}
+      <CropSection crop={clip.crop} source={source} onChange={(crop) => onChange({ crop })} gesture={gesture} />
+      <ClipTransformFields clip={clip} onChange={onChange} gesture={gesture} keys={keys} />
+      <MaskSection mask={clip.mask} onChange={(mask) => onChange({ mask })} gesture={gesture} />
       <ActionButton onClick={onOpenLook}>Filters &amp; adjustments…</ActionButton>
+      <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+        <ActionButton onClick={attrs.onCopy} title="Copy this clip's filters, adjustments, LUT, curves, position, mask, speed and volume">
+          Copy attributes
+        </ActionButton>
+        {attrs.onPaste && <ActionButton onClick={attrs.onPaste}>Paste attributes</ActionButton>}
+        {attrs.onPasteAll && <ActionButton onClick={attrs.onPasteAll}>Paste to all clips</ActionButton>}
+      </div>
+    </div>
+  );
+}
+
+function ClipTransformFields({ clip, onChange, gesture, keys }: { clip: Clip; onChange: (patch: Partial<Clip>) => void; gesture: Gesture; keys: KeyframeControls }) {
+  const time = useClockTime(keys.clock);
+  const t = clip.keyframes?.length ? clipTransformAt(clip, keys.keyTime(time)) : clip.transform;
+  return (
+    <div>
+      <SectionTitle>Position &amp; size</SectionTitle>
+      <div className="space-y-3">
+        <SliderField label="X" value={Math.round(t.x * 100)} min={-50} max={150} neutral={50} format={(v) => `${v}%`} onChange={(v) => onChange({ transform: { ...t, x: v / 100 } })} gesture={gesture} />
+        <SliderField label="Y" value={Math.round(t.y * 100)} min={-50} max={150} neutral={50} format={(v) => `${v}%`} onChange={(v) => onChange({ transform: { ...t, y: v / 100 } })} gesture={gesture} />
+        <SliderField label="Scale" value={Math.round(t.scale * 100)} min={10} max={300} neutral={100} format={(v) => `${v}%`} onChange={(v) => onChange({ transform: { ...t, scale: v / 100 } })} gesture={gesture} />
+        <SliderField label="Rotation" value={Math.round(t.rotation)} min={-180} max={180} neutral={0} format={(v) => `${v}°`} onChange={(v) => onChange({ transform: { ...t, rotation: v } })} gesture={gesture} />
+      </div>
+      <KeyframeBar time={time} keys={keys} />
+    </div>
+  );
+}
+
+// --- Speed curve ------------------------------------------------------------------
+
+const RAMP_LOG = Math.log10(MAX_RAMP_SPEED);
+
+/** Speed ramp presets plus a curve whose points drag up and down
+ * (log scale, 0.1x..10x). */
+function SpeedCurve({ clip, onChange, gesture }: { clip: Clip; onChange: (patch: Partial<Clip>) => void; gesture: Gesture }) {
+  const proLabel = useProLabel();
+  const svgRef = useRef<SVGSVGElement>(null);
+  const drag = useRef<number | null>(null);
+  const points = clip.ramp;
+  const W = 240;
+  const H = 96;
+  const yOf = (s: number) => H / 2 - (Math.log10(s) / RAMP_LOG) * (H / 2 - 6);
+  const sOf = (y: number) => {
+    const v = Math.pow(10, ((H / 2 - y) / (H / 2 - 6)) * RAMP_LOG);
+    return Math.round(Math.min(MAX_RAMP_SPEED, Math.max(MIN_RAMP_SPEED, v)) * 100) / 100;
+  };
+  const xOf = (i: number, n: number) => 8 + (i / (n - 1)) * (W - 16);
+  const move = (e: React.PointerEvent) => {
+    if (drag.current === null || !points || !svgRef.current) return;
+    const r = svgRef.current.getBoundingClientRect();
+    const y = ((e.clientY - r.top) / r.height) * H;
+    onChange({ ramp: points.map((p, i) => (i === drag.current ? sOf(y) : p)) });
+  };
+  if (clip.reverse) return <p className="mt-2 text-[11px] text-muted">Speed curves don&apos;t apply to reversed clips.</p>;
+  return (
+    <div className="mt-3 space-y-2">
+      <Field label={proLabel("Speed curve")}>
+        <select
+          className={inputCls}
+          value={points ? (RAMP_PRESETS.find((p) => p.points.join() === points.join())?.id ?? "custom") : "none"}
+          onChange={(e) => {
+            const preset = RAMP_PRESETS.find((p) => p.id === e.target.value);
+            onChange({ ramp: preset ? preset.points : undefined });
+          }}
+        >
+          <option value="none">None (constant speed)</option>
+          {RAMP_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
+          {points && !RAMP_PRESETS.some((p) => p.points.join() === points.join()) && <option value="custom">Custom</option>}
+        </select>
+      </Field>
+      {points && (
+        <>
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${W} ${H}`}
+            className="w-full touch-none select-none rounded-lg border border-border bg-surface"
+            onPointerMove={move}
+            onPointerUp={() => {
+              if (drag.current !== null) gesture.onGestureEnd();
+              drag.current = null;
+            }}
+            role="img"
+            aria-label="Speed curve: drag the points up to speed up, down to slow down"
+          >
+            {[10, 1, 0.1].map((s) => (
+              <g key={s}>
+                <line x1={0} x2={W} y1={yOf(s)} y2={yOf(s)} stroke="currentColor" className="text-border" strokeDasharray={s === 1 ? undefined : "3 3"} />
+                <text x={W - 4} y={yOf(s) + (s === 10 ? 10 : -3)} textAnchor="end" fontSize="9" className="fill-current text-muted">
+                  {s}×
+                </text>
+              </g>
+            ))}
+            <polyline points={points.map((p, i) => `${xOf(i, points.length)},${yOf(p)}`).join(" ")} fill="none" stroke="currentColor" strokeWidth={2} className="text-accent-2" />
+            {points.map((p, i) => (
+              <circle
+                key={i}
+                cx={xOf(i, points.length)}
+                cy={yOf(p)}
+                r={6}
+                className="cursor-ns-resize fill-white stroke-accent-2"
+                strokeWidth={2}
+                onPointerDown={(e) => {
+                  (e.currentTarget.ownerSVGElement ?? e.currentTarget).setPointerCapture(e.pointerId);
+                  drag.current = i;
+                  gesture.onGestureStart();
+                }}
+              >
+                <title>{`${p}×`}</title>
+              </circle>
+            ))}
+          </svg>
+          <p className="text-[11px] text-muted">
+            Drag a point up to speed up, down to slow down. Plays for {clipTimelineLength(clip).toFixed(1)}s.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+// --- Keyframes ---------------------------------------------------------------------
+
+/** What the keyframe controls need from the editor for one clip or layer. */
+export interface KeyframeControls {
+  clock: Clock;
+  keyframes: Keyframe[] | undefined;
+  /** Keyframe time at timeline time `t`. */
+  keyTime: (t: number) => number;
+  /** Moves the playhead to keyframe time `k`. */
+  seekKey: (k: number) => void;
+  /** Current (unanimated or animated) values at keyframe time `k`. */
+  valuesAt: (k: number) => KeyValues;
+  /** Keyframe times outside [min, max] can't be added (off the item). */
+  range: [number, number];
+  onChange: (keyframes: Keyframe[] | undefined) => void;
+}
+
+function KeyframeBar({ time, keys }: { time: number; keys: KeyframeControls }) {
+  const kfs = keys.keyframes ?? [];
+  const k = keys.keyTime(time);
+  const here = keyframeAt(kfs, k);
+  const inRange = k >= keys.range[0] - KEYFRAME_SNAP && k <= keys.range[1] + KEYFRAME_SNAP;
+  const prev = [...kfs].reverse().find((f) => f.t < k - KEYFRAME_SNAP);
+  const next = kfs.find((f) => f.t > k + KEYFRAME_SNAP);
+  const navCls = "h-8 w-8 rounded-lg border border-border text-xs text-foreground disabled:opacity-40 hover:border-accent-2";
+  return (
+    <div className="mt-3 space-y-2 rounded-xl border border-border p-3">
+      <div className="flex items-center gap-2">
+        <button type="button" className={navCls} disabled={!prev} onClick={() => prev && keys.seekKey(prev.t)} title="Previous keyframe" aria-label="Previous keyframe">
+          ◀
+        </button>
+        <button
+          type="button"
+          disabled={!here && !inRange}
+          onClick={() => keys.onChange(here ? kfs.filter((f) => f !== here) : upsertKeyframe(kfs, k, keys.valuesAt(k)))}
+          className={`flex-1 rounded-lg border py-1.5 text-xs font-semibold disabled:opacity-40 ${here ? "border-accent-2 bg-accent-2/10 text-foreground" : "border-border text-foreground hover:border-accent-2"}`}
+        >
+          {here ? "◆ Remove keyframe" : "◇ Add keyframe"}
+        </button>
+        <button type="button" className={navCls} disabled={!next} onClick={() => next && keys.seekKey(next.t)} title="Next keyframe" aria-label="Next keyframe">
+          ▶
+        </button>
+      </div>
+      {here && (
+        <Field label="Curve to the next keyframe">
+          <select
+            className={inputCls}
+            value={here.ease}
+            onChange={(e) => keys.onChange(kfs.map((f) => (f === here ? { ...f, ease: e.target.value as KeyframeEase } : f)))}
+          >
+            {(Object.keys(EASE_LABELS) as KeyframeEase[]).map((ek) => (
+              <option key={ek} value={ek}>
+                {EASE_LABELS[ek]}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+      <p className="text-[11px] text-muted">
+        {kfs.length === 0
+          ? "Add a keyframe, move the playhead, then change the values above: each change makes a new keyframe and the motion is animated between them."
+          : `${kfs.length} keyframe${kfs.length === 1 ? "" : "s"}. Changes at the playhead update or add a keyframe.`}
+        {kfs.length > 0 && (
+          <>
+            {" "}
+            <button type="button" className="font-semibold text-accent-2 hover:underline" onClick={() => keys.onChange(undefined)}>
+              Remove animation
+            </button>
+          </>
+        )}
+      </p>
     </div>
   );
 }
@@ -345,8 +591,11 @@ export function LookPanel({
   onClose,
   gesture,
   premiumLocked = false,
+  onImportLut,
 }: {
   mode: "filters" | "adjust";
+  /** Imports a .cube file as this clip's LUT. */
+  onImportLut: (file: File) => void;
   look: Look;
   clipLabel: string;
   thumb?: string;
@@ -397,6 +646,7 @@ export function LookPanel({
               <SliderField label="Intensity" value={look.intensity} min={0} max={100} neutral={100} format={(v) => `${v}%`} onChange={(intensity) => onChange({ ...look, intensity })} gesture={gesture} />
             </div>
           )}
+          <LutSection look={look} onChange={onChange} onImport={onImportLut} gesture={gesture} />
         </>
       ) : (
         <div className="space-y-3.5">
@@ -412,7 +662,8 @@ export function LookPanel({
               gesture={gesture}
             />
           ))}
-          <ActionButton onClick={() => onChange({ ...look, adjust: NEUTRAL_ADJUST })}>Reset all</ActionButton>
+          <CurvesEditor curves={look.curves ?? DEFAULT_CURVES} onChange={(curves) => onChange({ ...look, curves })} gesture={gesture} />
+          <ActionButton onClick={() => onChange({ ...look, adjust: NEUTRAL_ADJUST, curves: undefined })}>Reset all</ActionButton>
         </div>
       )}
       <div className="mt-5 border-t border-border pt-4">
@@ -420,6 +671,164 @@ export function LookPanel({
         <p className="mt-2 text-[11px] text-muted">Changes apply to the selected clip (or the clip under the playhead).</p>
       </div>
     </PanelShell>
+  );
+}
+
+function LutSection({ look, onChange, onImport, gesture }: { look: Look; onChange: (look: Look) => void; onImport: (file: File) => void; gesture: Gesture }) {
+  const input = useRef<HTMLInputElement>(null);
+  const lut = look.lut;
+  return (
+    <div className="mt-5 space-y-3 border-t border-border pt-4">
+      <SectionTitle>
+        LUT
+        <ProTag />
+      </SectionTitle>
+      <input
+        ref={input}
+        type="file"
+        accept=".cube"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onImport(f);
+          e.target.value = "";
+        }}
+      />
+      {lut ? (
+        <>
+          <p className="truncate text-xs font-semibold text-foreground" title={lut.name}>
+            {lut.name}
+          </p>
+          <SliderField label="LUT strength" value={lut.intensity} min={0} max={100} neutral={100} format={(v) => `${v}%`} onChange={(intensity) => onChange({ ...look, lut: { ...lut, intensity } })} gesture={gesture} />
+          <div className="flex gap-2">
+            <ActionButton onClick={() => input.current?.click()}>Replace…</ActionButton>
+            <ActionButton onClick={() => onChange({ ...look, lut: null })} tone="danger">
+              Remove
+            </ActionButton>
+          </div>
+        </>
+      ) : (
+        <>
+          <ActionButton onClick={() => input.current?.click()}>Import a LUT (.cube)…</ActionButton>
+          <p className="text-[11px] text-muted">A 3D color LUT from a camera maker or color tool. It runs before the filter and adjustments.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+const CURVE_CHANNELS: { key: keyof Curves; label: string; color: string }[] = [
+  { key: "rgb", label: "RGB", color: "currentColor" },
+  { key: "r", label: "Red", color: "#ef4444" },
+  { key: "g", label: "Green", color: "#22c55e" },
+  { key: "b", label: "Blue", color: "#3b82f6" },
+];
+
+/** Tone curve editor: drag points, click the curve's area to add one,
+ * double-click a point to remove it. */
+function CurvesEditor({ curves, onChange, gesture }: { curves: Curves; onChange: (c: Curves) => void; gesture: Gesture }) {
+  const [channel, setChannel] = useState<keyof Curves>("rgb");
+  const svgRef = useRef<SVGSVGElement>(null);
+  const drag = useRef<number | null>(null);
+  const S = 200;
+  const pts = curves[channel];
+  const color = CURVE_CHANNELS.find((c) => c.key === channel)!.color;
+  const fn = curveFn(pts);
+  const path = Array.from({ length: 51 }, (_, i) => `${(i / 50) * S},${(1 - fn(i / 50)) * S}`).join(" ");
+  const toPoint = (e: React.PointerEvent): [number, number] => {
+    const r = svgRef.current!.getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    const y = Math.min(1, Math.max(0, 1 - (e.clientY - r.top) / r.height));
+    return [Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000];
+  };
+  const setPts = (next: [number, number][]) => onChange({ ...curves, [channel]: next });
+  return (
+    <div className="space-y-2 border-t border-border pt-4">
+      <div className="flex items-center justify-between">
+        <SectionTitle>
+          Curves
+          <ProTag />
+        </SectionTitle>
+        <div className="flex gap-1" role="tablist" aria-label="Curve channel">
+          {CURVE_CHANNELS.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              role="tab"
+              aria-selected={channel === c.key}
+              onClick={() => setChannel(c.key)}
+              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${channel === c.key ? "bg-accent-2/20 text-foreground" : "text-muted hover:text-foreground"}`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${S} ${S}`}
+        className="aspect-square w-full touch-none select-none rounded-lg border border-border bg-surface"
+        onPointerDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          const p = toPoint(e);
+          const next = [...pts, p].sort((a, b) => a[0] - b[0]);
+          drag.current = next.indexOf(p);
+          e.currentTarget.setPointerCapture(e.pointerId);
+          gesture.onGestureStart();
+          setPts(next);
+        }}
+        onPointerMove={(e) => {
+          const i = drag.current;
+          if (i === null) return;
+          const [px, y] = toPoint(e);
+          // End points keep their x; inner points stay between neighbors.
+          const x = i === 0 || i === pts.length - 1 ? pts[i][0] : Math.min(pts[i + 1][0] - 0.01, Math.max(pts[i - 1][0] + 0.01, px));
+          setPts(pts.map((p, k) => (k === i ? [x, y] : p)));
+        }}
+        onPointerUp={() => {
+          if (drag.current !== null) gesture.onGestureEnd();
+          drag.current = null;
+        }}
+        role="img"
+        aria-label={`${channel} curve`}
+      >
+        {[0.25, 0.5, 0.75].map((v) => (
+          <g key={v} className="text-border" stroke="currentColor" strokeWidth={0.5}>
+            <line x1={v * S} x2={v * S} y1={0} y2={S} />
+            <line y1={v * S} y2={v * S} x1={0} x2={S} />
+          </g>
+        ))}
+        <line x1={0} y1={S} x2={S} y2={0} stroke="currentColor" className="text-border" strokeDasharray="3 3" />
+        <polyline points={path} fill="none" stroke={color} strokeWidth={2} className="pointer-events-none text-foreground" />
+        {pts.map(([x, y], i) => (
+          <circle
+            key={i}
+            cx={x * S}
+            cy={(1 - y) * S}
+            r={5}
+            fill="white"
+            stroke={color === "currentColor" ? "#888" : color}
+            strokeWidth={2}
+            className="cursor-move"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              svgRef.current!.setPointerCapture(e.pointerId);
+              drag.current = i;
+              gesture.onGestureStart();
+            }}
+            onDoubleClick={() => i > 0 && i < pts.length - 1 && setPts(pts.filter((_, k) => k !== i))}
+          />
+        ))}
+      </svg>
+      <p className="text-[11px] text-muted">
+        Click to add a point, drag to shape, double-click a point to remove it.{" "}
+        {!isIdentityCurve(pts) && (
+          <button type="button" className="font-semibold text-accent-2 hover:underline" onClick={() => setPts(IDENTITY_CURVE)}>
+            Reset {CURVE_CHANNELS.find((c) => c.key === channel)!.label}
+          </button>
+        )}
+      </p>
+    </div>
   );
 }
 
@@ -607,7 +1016,8 @@ export function CaptionsPanel({
     <PanelShell title="Auto captions" onClose={onClose}>
       <div className="space-y-4">
         <p className="text-xs text-muted">
-          Turns the speech in your clips (and a screen recording&apos;s microphone) into timed text layers. Music tracks are ignored. Edit any
+          Turns the speech in your clips, a screen recording&apos;s microphone and added voiceovers into timed text layers. Added audio is
+          checked on your device and music is left out - set a track to Voice or Music in its panel if it&apos;s taken wrong. Edit any
           caption&apos;s text and timing afterwards like normal text. Speech recognition runs on your device - your audio is not uploaded.
         </p>
         <Field label="Language">
@@ -661,6 +1071,7 @@ export function CaptionsPanel({
                     }}
                   >
                     {CAPTION_STYLES[id].label}
+                    {id === "karaoke" && <ProTag />}
                   </span>
                 </button>
               );
@@ -767,8 +1178,16 @@ export function OverlayPanel({
   onClose,
   gesture,
   textAreaRef,
+  keys,
+  style,
+  fonts,
 }: {
   overlay: Overlay;
+  keys: KeyframeControls;
+  /** Uploaded fonts to offer, and uploading another. */
+  fonts: { custom: { key: string; label: string }[]; onUpload: (file: File) => void };
+  /** Copy this layer's style / paste a copied one here. */
+  style: { onCopy: () => void; onPaste?: () => void };
   total: number;
   /** Length of a video layer's source, to cap its end. */
   sourceDuration?: number;
@@ -781,6 +1200,7 @@ export function OverlayPanel({
   textAreaRef?: React.RefObject<HTMLTextAreaElement | null>;
 }) {
   const o = overlay;
+  const proLabel = useProLabel();
   const title =
     o.kind === "text"
       ? o.keystroke
@@ -854,7 +1274,17 @@ export function OverlayPanel({
                       {f.label}
                     </option>
                   ))}
+                  {fonts.custom.length > 0 && (
+                    <optgroup label="Your fonts">
+                      {fonts.custom.map((f) => (
+                        <option key={f.key} value={f.key}>
+                          {f.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
+                <FontUpload onUpload={fonts.onUpload} />
               </Field>
               <Field label="Weight">
                 <select className={inputCls} value={o.text.weight} onChange={(e) => setText({ weight: Number(e.target.value) as TextStyle["weight"] })}>
@@ -898,6 +1328,23 @@ export function OverlayPanel({
               <ColorField label="Outline" value={o.text.strokeColor} onChange={(strokeColor) => setText({ strokeColor })} gesture={gesture} />
               <ColorField label="Background" value={o.text.background} onChange={(background) => setText({ background })} gesture={gesture} />
             </div>
+            <Field label="Text animation">
+              <select className={inputCls} value={o.text.anim ?? "none"} onChange={(e) => setText({ anim: e.target.value as TextAnim })}>
+                {(Object.keys(TEXT_ANIM_LABELS) as TextAnim[]).map((k) => (
+                  <option key={k} value={k}>
+                    {proLabel(TEXT_ANIM_LABELS[k], k === "karaoke")}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {o.text.anim === "karaoke" && (
+              <ColorField label="Highlight" value={o.text.highlight ?? "#facc15"} onChange={(highlight) => setText({ highlight })} gesture={gesture} />
+            )}
+            {o.text.anim && o.text.anim !== "none" && o.text.anim !== "typewriter" && (
+              <p className="text-[11px] text-muted">
+                {o.words?.length ? "Follows when each word is spoken." : "Words are spread evenly over the layer's time. Auto captions follow the speech."}
+              </p>
+            )}
             <SliderField label="Outline width" value={Math.round(o.text.strokeWidth * 100)} min={0} max={15} neutral={0} onChange={(v) => setText({ strokeWidth: v / 100 })} gesture={gesture} />
             <SliderField label="Background opacity" value={Math.round(o.text.backgroundOpacity * 100)} min={0} max={100} neutral={0} format={(v) => `${v}%`} onChange={(v) => setText({ backgroundOpacity: v / 100 })} gesture={gesture} />
             <SliderField label="Letter spacing" value={Math.round(o.text.letterSpacing * 100)} min={-10} max={50} neutral={0} onChange={(v) => setText({ letterSpacing: v / 100 })} gesture={gesture} />
@@ -941,16 +1388,25 @@ export function OverlayPanel({
           </div>
         )}
 
+        <OverlayTransformFields overlay={o} onChange={onChange} gesture={gesture} keys={keys} />
+
         <div className="space-y-3">
-          <SectionTitle>Transform</SectionTitle>
-          <SliderField label="X" value={Math.round(o.x * 100)} min={-30} max={130} neutral={50} format={(v) => `${v}%`} onChange={(v) => onChange({ x: v / 100 })} gesture={gesture} />
-          <SliderField label="Y" value={Math.round(o.y * 100)} min={-30} max={130} neutral={50} format={(v) => `${v}%`} onChange={(v) => onChange({ y: v / 100 })} gesture={gesture} />
-          {o.kind !== "text" && (
-            <SliderField label="Size" value={Math.round(o.width * 100)} min={3} max={200} format={(v) => `${v}%`} onChange={(v) => onChange({ width: v / 100 })} gesture={gesture} />
-          )}
-          <SliderField label="Rotation" value={Math.round(o.rotation)} min={-180} max={180} neutral={0} format={(v) => `${v}°`} onChange={(v) => onChange({ rotation: v })} gesture={gesture} />
-          <SliderField label="Opacity" value={Math.round(o.opacity * 100)} min={0} max={100} neutral={100} format={(v) => `${v}%`} onChange={(v) => onChange({ opacity: v / 100 })} gesture={gesture} />
+          <SectionTitle>
+            Blend
+            <ProTag />
+          </SectionTitle>
+          <Field label="Blend mode">
+            <select className={inputCls} value={o.blend ?? "normal"} onChange={(e) => onChange({ blend: e.target.value as BlendMode })}>
+              {(Object.keys(BLEND_LABELS) as BlendMode[]).map((k) => (
+                <option key={k} value={k}>
+                  {BLEND_LABELS[k]}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {(o.kind === "image" || o.kind === "video") && <ChromaKeySection overlay={o} onChange={onChange} gesture={gesture} />}
         </div>
+        <MaskSection mask={o.mask} onChange={(mask) => onChange({ mask })} gesture={gesture} />
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Entrance">
@@ -985,6 +1441,10 @@ export function OverlayPanel({
           <ActionButton onClick={onDuplicate} title="Duplicate (Ctrl+D)">
             Duplicate
           </ActionButton>
+          <ActionButton onClick={style.onCopy} title="Copy the look, animation, mask and blend of this layer">
+            Copy style
+          </ActionButton>
+          {style.onPaste && <ActionButton onClick={style.onPaste}>Paste style</ActionButton>}
           <ActionButton onClick={onDelete} tone="danger">
             <TrashIcon width={14} height={14} /> Delete
           </ActionButton>
@@ -994,18 +1454,183 @@ export function OverlayPanel({
   );
 }
 
+function OverlayTransformFields({ overlay: o, onChange, gesture, keys }: { overlay: Overlay; onChange: (patch: Partial<Overlay>) => void; gesture: Gesture; keys: KeyframeControls }) {
+  const time = useClockTime(keys.clock);
+  const v = overlayValues(o, time);
+  return (
+    <div className="space-y-3">
+      <SectionTitle>Transform</SectionTitle>
+      <SliderField label="X" value={Math.round(v.x * 100)} min={-30} max={130} neutral={50} format={(n) => `${n}%`} onChange={(n) => onChange({ x: n / 100 })} gesture={gesture} />
+      <SliderField label="Y" value={Math.round(v.y * 100)} min={-30} max={130} neutral={50} format={(n) => `${n}%`} onChange={(n) => onChange({ y: n / 100 })} gesture={gesture} />
+      {o.kind !== "text" ? (
+        <SliderField label="Size" value={Math.round(o.width * v.scale * 100)} min={3} max={200} format={(n) => `${n}%`} onChange={(n) => onChange({ width: n / 100 })} gesture={gesture} />
+      ) : (
+        o.keyframes?.length ? (
+          <SliderField label="Scale" value={Math.round(v.scale * 100)} min={5} max={400} neutral={100} format={(n) => `${n}%`} onChange={(n) => onChange({ text: { ...o.text, size: (o.text.size * n) / 100 } } as Partial<Overlay>)} gesture={gesture} />
+        ) : null
+      )}
+      <SliderField label="Rotation" value={Math.round(v.rotation)} min={-180} max={180} neutral={0} format={(n) => `${n}°`} onChange={(n) => onChange({ rotation: n })} gesture={gesture} />
+      <SliderField label="Opacity" value={Math.round(v.opacity * 100)} min={0} max={100} neutral={100} format={(n) => `${n}%`} onChange={(n) => onChange({ opacity: n / 100 })} gesture={gesture} />
+      <KeyframeBar time={time} keys={keys} />
+    </div>
+  );
+}
+
+/** Shape mask controls, shared by clips and layers. */
+function MaskSection({ mask, onChange, gesture }: { mask: ShapeMask | null | undefined; onChange: (mask: ShapeMask | null) => void; gesture: Gesture }) {
+  const proLabel = useProLabel();
+  const m = mask;
+  const set = (patch: Partial<ShapeMask>) => m && onChange({ ...m, ...patch });
+  const pct = (v: number) => `${v}%`;
+  return (
+    <div className="space-y-3">
+      <SectionTitle>Mask</SectionTitle>
+      <Field label="Shape">
+        <select
+          className={inputCls}
+          value={m?.shape ?? "none"}
+          onChange={(e) => {
+            const shape = e.target.value as ShapeMask["shape"] | "none";
+            onChange(shape === "none" ? null : { ...(m ?? DEFAULT_MASK), shape, ...(shape === "linear" || shape === "mirror" ? { h: m?.h ?? 0.4 } : {}) });
+          }}
+        >
+          <option value="none">None</option>
+          {(Object.keys(MASK_LABELS) as ShapeMask["shape"][]).map((k) => (
+            <option key={k} value={k}>
+              {proLabel(MASK_LABELS[k], k === "linear" || k === "mirror")}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {m && (
+        <>
+          <SliderField label="Center X" value={Math.round(m.x * 100)} min={0} max={100} neutral={50} format={pct} onChange={(v) => set({ x: v / 100 })} gesture={gesture} />
+          <SliderField label="Center Y" value={Math.round(m.y * 100)} min={0} max={100} neutral={50} format={pct} onChange={(v) => set({ y: v / 100 })} gesture={gesture} />
+          {(m.shape === "circle" || m.shape === "rect") && (
+            <SliderField label="Width" value={Math.round(m.w * 100)} min={2} max={200} neutral={60} format={pct} onChange={(v) => set({ w: v / 100 })} gesture={gesture} />
+          )}
+          {m.shape !== "linear" && (
+            <SliderField label={m.shape === "mirror" ? "Band height" : "Height"} value={Math.round(m.h * 100)} min={2} max={200} neutral={60} format={pct} onChange={(v) => set({ h: v / 100 })} gesture={gesture} />
+          )}
+          <SliderField label="Rotation" value={Math.round(m.rotation)} min={-180} max={180} neutral={0} format={(v) => `${v}°`} onChange={(v) => set({ rotation: v })} gesture={gesture} />
+          <SliderField label="Feather" value={Math.round(m.feather * 100)} min={0} max={100} neutral={10} format={pct} onChange={(v) => set({ feather: v / 100 })} gesture={gesture} />
+          <label className="flex items-center justify-between text-xs font-medium text-foreground">
+            <span>
+              Invert (show the outside)
+              <ProTag />
+            </span>
+            <input type="checkbox" checked={m.invert} onChange={(e) => set({ invert: e.target.checked })} />
+          </label>
+        </>
+      )}
+    </div>
+  );
+}
+
+function FontUpload({ onUpload }: { onUpload: (file: File) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <input
+        ref={input}
+        type="file"
+        accept=".ttf,.otf,.woff,.woff2"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onUpload(f);
+          e.target.value = "";
+        }}
+      />
+      <button type="button" className="mt-1 text-[11px] font-semibold text-accent-2 hover:underline" onClick={() => input.current?.click()}>
+        Upload a font…
+        <ProTag />
+      </button>
+    </>
+  );
+}
+
+const BLEND_LABELS: Record<BlendMode, string> = {
+  normal: "Normal",
+  multiply: "Multiply",
+  screen: "Screen",
+  overlay: "Overlay",
+  darken: "Darken",
+  lighten: "Lighten",
+  add: "Add",
+  difference: "Difference",
+};
+
+type EyeDropperCtor = new () => { open: () => Promise<{ sRGBHex: string }> };
+
+function ChromaKeySection({ overlay: o, onChange, gesture }: { overlay: Overlay; onChange: (patch: Partial<Overlay>) => void; gesture: Gesture }) {
+  const key = o.key;
+  const dropper = typeof window !== "undefined" ? (window as unknown as { EyeDropper?: EyeDropperCtor }).EyeDropper : undefined;
+  return (
+    <div className="space-y-3 rounded-xl border border-border p-3">
+      <label className="flex items-center justify-between text-xs font-semibold text-foreground">
+        <span>
+          Remove a color (green screen)
+          <ProTag />
+        </span>
+        <input type="checkbox" checked={!!key} onChange={(e) => onChange({ key: e.target.checked ? DEFAULT_KEY : null })} />
+      </label>
+      {key && (
+        <>
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <ColorField label="Key color" value={key.color} onChange={(color) => onChange({ key: { ...key, color } })} gesture={gesture} />
+            </div>
+            {dropper && (
+              <button
+                type="button"
+                title="Pick the color from the screen"
+                className="h-8 rounded border border-border px-2 text-xs text-foreground hover:border-accent-2"
+                onClick={() =>
+                  new dropper()
+                    .open()
+                    .then((r) => onChange({ key: { ...key, color: r.sRGBHex.slice(0, 7) } }))
+                    .catch(() => {})
+                }
+              >
+                Pick
+              </button>
+            )}
+          </div>
+          <SliderField label="Strength" value={key.similarity} min={1} max={100} neutral={DEFAULT_KEY.similarity} onChange={(similarity) => onChange({ key: { ...key, similarity } })} gesture={gesture} />
+          <SliderField label="Edge softness" value={key.smoothness} min={0} max={100} neutral={DEFAULT_KEY.smoothness} onChange={(smoothness) => onChange({ key: { ...key, smoothness } })} gesture={gesture} />
+        </>
+      )}
+    </div>
+  );
+}
+
 // --- Audio --------------------------------------------------------------------
+
+export interface VoiceoverControls {
+  /** Timeline time the take started at; null when not recording. */
+  recordingFrom: number | null;
+  clock: Clock;
+  level: () => number;
+  onStart: () => void;
+  onStop: () => void;
+  onCancel: () => void;
+}
 
 export function AudioAddPanel({
   audio,
   onUpload,
   onSelect,
   onClose,
+  voiceover,
+  onAddSfx,
 }: {
   audio: AudioClip[];
   onUpload: (file: File) => void;
+  onAddSfx: (def: SfxDef) => void;
   onSelect: (id: string) => void;
   onClose: () => void;
+  voiceover: VoiceoverControls;
 }) {
   const input = useRef<HTMLInputElement>(null);
   return (
@@ -1025,6 +1650,26 @@ export function AudioAddPanel({
         + Upload music or audio
       </button>
       <p className="mt-2 text-[11px] text-muted">MP3, WAV, M4A, AAC or OGG, up to 50MB. Added at the playhead.</p>
+      <VoiceoverRecorder controls={voiceover} />
+      <SectionTitle>
+        <span className="mt-5 block">Sound effects</span>
+      </SectionTitle>
+      <div className="grid grid-cols-3 gap-2">
+        {SFX.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => onAddSfx(s)}
+            title={`Add ${s.label} at the playhead`}
+            className="flex flex-col items-center gap-1 rounded-xl border border-border bg-surface p-2.5 text-[11px] font-semibold text-foreground transition hover:border-accent-2"
+          >
+            <span className="text-lg leading-none" aria-hidden>
+              {s.icon}
+            </span>
+            {s.label}
+          </button>
+        ))}
+      </div>
       <SectionTitle>
         <span className="mt-5 block">Tracks</span>
       </SectionTitle>
@@ -1052,6 +1697,54 @@ export function AudioAddPanel({
   );
 }
 
+function VoiceoverRecorder({ controls }: { controls: VoiceoverControls }) {
+  const { recordingFrom, clock, level, onStart, onStop, onCancel } = controls;
+  const time = useClockTime(clock);
+  const [meter, setMeter] = useState(0);
+  useEffect(() => {
+    if (recordingFrom === null) return;
+    const id = window.setInterval(() => setMeter(level()), 80);
+    return () => window.clearInterval(id);
+  }, [recordingFrom, level]);
+
+  if (!voiceoverSupported()) return null;
+  if (recordingFrom === null) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={onStart}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-surface py-2.5 text-sm font-semibold text-foreground transition hover:border-accent-2"
+        >
+          <span className="h-2.5 w-2.5 rounded-full bg-red-500" aria-hidden /> Record voiceover
+        </button>
+        <p className="mt-2 text-[11px] text-muted">
+          Plays the video from the playhead while you talk. Pause or press Stop to finish. Use headphones so the video&apos;s sound isn&apos;t recorded too.
+        </p>
+      </>
+    );
+  }
+  return (
+    <div className="mt-3 rounded-xl border border-red-500/50 bg-red-500/10 p-3">
+      <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" aria-hidden />
+        Recording · <span className="font-mono">{formatTime(Math.max(0, time - recordingFrom), true)}</span>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-border" aria-hidden>
+        <div className="h-full bg-red-500 transition-[width] duration-75" style={{ width: `${Math.round(meter * 100)}%` }} />
+      </div>
+      <div className="mt-3 flex gap-2">
+        <button type="button" onClick={onStop} className="btn-primary flex-1 rounded-lg py-2 text-xs font-semibold">
+          ■ Stop and add
+        </button>
+        <button type="button" onClick={onCancel} className="flex-1 rounded-lg border border-border py-2 text-xs font-semibold text-muted hover:text-foreground">
+          Discard
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AudioPanel({
   clip,
   sourceDuration,
@@ -1062,10 +1755,16 @@ export function AudioPanel({
   onDelete,
   onClose,
   gesture,
+  onDuck,
+  onBeats,
 }: {
   clip: AudioClip;
   sourceDuration: number;
   total: number;
+  /** Finds the speech to duck under and turns ducking on. */
+  onDuck: () => void;
+  /** Detects the track's beats (timeline markers to snap to). */
+  onBeats: () => void;
   onChange: (patch: Partial<AudioClip>) => void;
   onSplit: () => void;
   onDuplicate: () => void;
@@ -1096,6 +1795,85 @@ export function AudioPanel({
             />
           </Field>
         </div>
+        <div>
+          <SectionTitle>Auto captions</SectionTitle>
+          <Chips
+            label="Auto captions"
+            value={a.captions ?? "auto"}
+            onChange={(captions) => onChange({ captions })}
+            options={[
+              { value: "auto", label: "Detect" },
+              { value: "speech", label: "Voice" },
+              { value: "music", label: "Music" },
+            ]}
+          />
+          <p className="mt-1.5 text-[11px] text-muted">Voice is captioned, music is not. Detect tells them apart from the sound.</p>
+        </div>
+        <div className="space-y-3">
+          <SectionTitle>
+            Lower under speech
+            <ProTag />
+          </SectionTitle>
+          {a.duck ? (
+            <>
+              <SliderField
+                label="Lower by"
+                value={Math.round(a.duck.amount * 100)}
+                min={10}
+                max={100}
+                neutral={Math.round(DEFAULT_DUCK_AMOUNT * 100)}
+                format={(v) => `${v}%`}
+                onChange={(v) => onChange({ duck: { ...a.duck!, amount: v / 100 } })}
+                gesture={gesture}
+              />
+              <p className="text-[11px] text-muted">
+                Lowered during {a.duck.regions.length} stretch{a.duck.regions.length === 1 ? "" : "es"} of speech.{" "}
+                <button type="button" className="font-semibold text-accent-2 hover:underline" onClick={onDuck}>
+                  Find speech again
+                </button>{" "}
+                ·{" "}
+                <button type="button" className="font-semibold text-accent-2 hover:underline" onClick={() => onChange({ duck: undefined })}>
+                  Turn off
+                </button>
+              </p>
+            </>
+          ) : (
+            <>
+              <ActionButton onClick={onDuck} title="Turn this track down automatically whenever someone speaks in the video or a voiceover">
+                Lower this track when someone speaks
+              </ActionButton>
+              <p className="text-[11px] text-muted">For background music under talking. Run it again after editing the speech.</p>
+            </>
+          )}
+        </div>
+        <div>
+          <SectionTitle>Beats</SectionTitle>
+          {a.beats ? (
+            <p className="text-[11px] text-muted">
+              {Math.round(a.beats.bpm)} BPM · {a.beats.times.length} beats marked on the timeline; clips and layers snap to them.{" "}
+              <button type="button" className="font-semibold text-accent-2 hover:underline" onClick={() => onChange({ beats: undefined })}>
+                Remove
+              </button>
+            </p>
+          ) : (
+            <ActionButton onClick={onBeats} title="Mark the music's beats on the timeline so cuts and layers snap to them">
+              Find the beat
+            </ActionButton>
+          )}
+        </div>
+        <div>
+          <SectionTitle>
+            Voice effect
+            <ProTag />
+          </SectionTitle>
+          <select className={inputCls} value={a.voice ?? "none"} onChange={(e) => onChange({ voice: e.target.value as VoiceFx })} aria-label="Voice effect">
+            {(Object.keys(VOICE_FX_LABELS) as VoiceFx[]).map((k) => (
+              <option key={k} value={k}>
+                {VOICE_FX_LABELS[k]}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="flex flex-wrap gap-2 border-t border-border pt-4">
           <ActionButton onClick={() => onChange({ muted: !a.muted })}>{a.muted ? "Unmute" : "Mute"}</ActionButton>
           <ActionButton onClick={onSplit} title="Split at the playhead (S)">
@@ -1125,6 +1903,14 @@ const EFFECT_ICONS: Record<EffectType, string> = {
   flash: "✦",
   shake: "〰",
   zoom: "⤢",
+  bw: "◑",
+  sepia: "☕",
+  invert: "◩",
+  hue: "🌈",
+  vignette: "◉",
+  letterbox: "▭",
+  strobe: "⚡",
+  mirror: "⇋",
 };
 
 export function EffectsAddPanel({

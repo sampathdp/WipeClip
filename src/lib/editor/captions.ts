@@ -5,9 +5,11 @@
 import { memoryBudgetGb } from "@/lib/platform";
 import { DEFAULT_TEXT } from "./textRaster";
 import { newId, type Layout } from "./timeline";
-import type { AnimIn, MediaSource, Overlay, Project, TextStyle } from "./types";
+import type { AnimIn, AudioClip, MediaSource, Overlay, Project, TextStyle } from "./types";
 import { clippedSpans, type AudioSpan } from "./audioAnalysis";
 import { sourceFile, sourceName, sourceSize } from "./sourceFile";
+import { RAMP_SEGMENTS, activeRamp, rampSegments } from "./speed";
+import { detectSpeech, probeWindows, speechVerdict } from "./speechDetect";
 
 const RATE = 16000; // what Whisper works at
 const MAX_DECODE_BYTES = 400 * 1024 * 1024; // decodeAudioData holds the whole file
@@ -20,16 +22,19 @@ export interface CaptionWord {
 
 /** The timeline's own speech, in timeline time, as 16 kHz mono samples:
  * every clip's sound at its speed and position, plus audio extracted from
- * videos. Uploaded music is left out (it only confuses transcription), as
- * are freeze frames and reversed clips. Null when nothing on the timeline
- * has sound.
+ * videos and the uploaded audio tracks that are speech (a voiceover, a
+ * voice note). Uploaded music is left out (it only confuses transcription),
+ * as are freeze frames and reversed clips. Null when nothing on the
+ * timeline has sound. `probe` lets the speech model help tell voice from
+ * music (speechModelProbe).
  */
 export async function buildSpeechAudio(
   lay: Layout,
   project: Project,
-  sources: Record<string, MediaSource>
+  sources: Record<string, MediaSource>,
+  probe?: SpeechProbe
 ): Promise<Float32Array | null> {
-  return (await buildSpeechMix(lay, project, sources)).samples;
+  return (await buildSpeechMix(lay, project, sources, { probe })).samples;
 }
 
 export interface SpeechMix {
@@ -42,6 +47,10 @@ export interface SpeechMix {
   skipped: string[];
 }
 
+/** Whisper's no-speech probability for each window (speechDetect.ts
+ * probeWindows), or null when the model can't be used. */
+export type SpeechProbe = (windows: Float32Array[]) => Promise<number[] | null>;
+
 /** buildSpeechAudio plus what the review needs: per-source clipping and
  * the sources that couldn't be decoded. `signal` stops before the
  * (slow) mixing step. */
@@ -49,12 +58,10 @@ export async function buildSpeechMix(
   lay: Layout,
   project: Project,
   sources: Record<string, MediaSource>,
-  opts: { withClipping?: boolean; signal?: AbortSignal } = {}
+  opts: { withClipping?: boolean; signal?: AbortSignal; probe?: SpeechProbe } = {}
 ): Promise<SpeechMix> {
+  if (lay.total <= 0) return { samples: null, clipping: [], skipped: [] };
   const skipped: string[] = [];
-  const clipping: AudioSpan[] = [];
-  if (lay.total <= 0) return { samples: null, clipping, skipped };
-  const ctx = new OfflineAudioContext(1, Math.ceil(lay.total * RATE), RATE);
   const decoded = new Map<string, Promise<AudioBuffer | null>>();
   const decode = (src: MediaSource) => {
     let p = decoded.get(src.id);
@@ -71,6 +78,78 @@ export async function buildSpeechMix(
     }
     return p;
   };
+  const abort = () => {
+    if (opts.signal?.aborted) throw new DOMException("Analysis cancelled", "AbortError");
+  };
+
+  // Which audio tracks are speech. Audio from a video or a screen
+  // recording (its microphone or system sound) is the narration; an
+  // uploaded file is whatever the user set, or detected from its sound.
+  const speech = new Set<string>();
+  const undecided: string[] = [];
+  for (const a of project.audio) {
+    const src = sources[a.sourceId];
+    if (a.muted || a.volume === 0 || !src) continue;
+    const recorded = src.recording?.trackKind === "microphone" || src.recording?.trackKind === "system-audio";
+    const mode = src.kind !== "audio" || recorded ? "speech" : (a.captions ?? "auto");
+    if (mode === "speech") speech.add(a.id);
+    if (mode !== "auto") continue;
+    const buf = await decode(src);
+    abort();
+    if (buf && (await isSpeechTrack(buf, a, opts.probe))) speech.add(a.id);
+    else undecided.push(a.id);
+    abort();
+  }
+
+  const first = await mixSpeech(lay, project, sources, opts, decode, abort, speech);
+  // A track taken for music is still the only voice when nothing else is
+  // audible (a silent screen capture with a voiceover): use it then.
+  if (undecided.length === 0 || (first.samples && !isSilent(first.samples))) return { ...first, skipped };
+  const second = await mixSpeech(lay, project, sources, opts, decode, abort, new Set([...speech, ...undecided]));
+  return { ...(second.samples ? second : first), skipped };
+}
+
+/** Whether an uploaded track's part on the timeline is speech: the
+ * signal's verdict, checked by the speech model when there's one
+ * (speechDetect.ts speechVerdict). */
+async function isSpeechTrack(buf: AudioBuffer, a: AudioClip, probe?: SpeechProbe): Promise<boolean> {
+  const rate = buf.sampleRate;
+  const from = Math.max(0, Math.floor(a.offset * rate));
+  const to = Math.min(buf.length, Math.ceil((a.offset + a.duration) * rate));
+  if (to <= from) return false;
+  const mono = new Float32Array(to - from);
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const data = buf.getChannelData(c);
+    for (let i = 0; i < mono.length; i++) mono[i] += data[from + i] / buf.numberOfChannels;
+  }
+  const signal = detectSpeech(mono);
+  // A clear voice needs no second opinion; anything else might be a voice
+  // under a music bed, which the model hears and the signal can't.
+  if (signal.score >= 0.75 || !probe) return speechVerdict(signal, null);
+  const windows = probeWindows(mono);
+  return speechVerdict(signal, windows.length ? await probe(windows) : null);
+}
+
+/** Whether no 100 ms frame of `samples` reaches speech loudness. */
+function isSilent(samples: Float32Array): boolean {
+  for (let at = 0; at < samples.length; at += FRAME) {
+    if (rms(samples, at, Math.min(samples.length, at + FRAME)) >= SILENCE_RMS) return false;
+  }
+  return true;
+}
+
+/** The clips' sound plus the `speech` audio tracks, mixed. */
+async function mixSpeech(
+  lay: Layout,
+  project: Project,
+  sources: Record<string, MediaSource>,
+  opts: { withClipping?: boolean },
+  decode: (src: MediaSource) => Promise<AudioBuffer | null>,
+  abort: () => void,
+  speech: Set<string>
+): Promise<SpeechMix> {
+  const clipping: AudioSpan[] = [];
+  const ctx = new OfflineAudioContext(1, Math.ceil(lay.total * RATE), RATE);
 
   let scheduled = 0;
   const play = (buf: AudioBuffer, when: number, offset: number, duration: number, rate: number, gain: number) => {
@@ -90,9 +169,6 @@ export async function buildSpeechMix(
       }
     }
   };
-  const abort = () => {
-    if (opts.signal?.aborted) throw new DOMException("Analysis cancelled", "AbortError");
-  };
 
   for (const lc of lay.clips) {
     const c = lc.clip;
@@ -100,22 +176,28 @@ export async function buildSpeechMix(
     if (c.freeze !== null || c.reverse || c.volume === 0 || !src?.hasAudio) continue;
     const buf = await decode(src);
     abort();
-    if (buf) play(buf, lc.start, c.start, c.end - c.start, c.speed, Math.min(1, c.volume));
+    const ramp = activeRamp(c);
+    if (buf && ramp) {
+      // A speed curve plays as its constant-speed pieces (speed.ts).
+      const piece = (c.end - c.start) / RAMP_SEGMENTS;
+      let when = lc.start;
+      for (const [k, s] of rampSegments(ramp).entries()) {
+        play(buf, when, c.start + k * piece, piece, s, Math.min(1, c.volume));
+        when += piece / s;
+      }
+    } else if (buf) play(buf, lc.start, c.start, c.end - c.start, c.speed, Math.min(1, c.volume));
   }
   for (const a of project.audio) {
     const src = sources[a.sourceId];
-    // Audio files are music unless they came from a screen recording (its
-    // microphone or system sound - the narration).
-    const recorded = src?.recording?.trackKind === "microphone" || src?.recording?.trackKind === "system-audio";
-    if (a.muted || a.volume === 0 || !src || (src.kind === "audio" && !recorded)) continue;
+    if (!src || !speech.has(a.id)) continue;
     const buf = await decode(src);
     abort();
     if (buf) play(buf, a.start, a.offset, a.duration, 1, Math.min(1, a.volume));
   }
-  if (scheduled === 0) return { samples: null, clipping, skipped };
+  if (scheduled === 0) return { samples: null, clipping, skipped: [] };
   const mixed = await ctx.startRendering();
   abort();
-  return { samples: mixed.getChannelData(0), clipping, skipped };
+  return { samples: mixed.getChannelData(0), clipping, skipped: [] };
 }
 
 /** The speech model (Whisper base, quantized): about 80 MB, downloaded from
@@ -287,6 +369,26 @@ async function getPool(onProgress: (p: CaptionsProgress) => void, forceCpu: bool
   return pool;
 }
 
+/** A SpeechProbe on the captions model (loading it if needed, with
+ * `onProgress`). Null answers - not a failed caption run - when the model
+ * can't be used: the signal alone then decides. */
+export function speechModelProbe(onProgress: (p: CaptionsProgress) => void): SpeechProbe {
+  return async (windows) => {
+    try {
+      const { workers } = await getPool(onProgress, false);
+      const out: number[] = [];
+      for (const w of windows) {
+        const part = w.slice();
+        out.push((await workers[0].request<{ value: number }>({ type: "nospeech", samples: part }, [part.buffer])).value);
+      }
+      return out;
+    } catch (err) {
+      console.warn("[captions] speech check unavailable, judging tracks by their sound", err);
+      return null;
+    }
+  };
+}
+
 const round = (t: number) => Math.round(t * 1000) / 1000;
 
 async function runOnPool(
@@ -355,6 +457,8 @@ export interface CaptionChunk {
   start: number;
   end: number;
   text: string; // may contain one line break
+  /** When each word of `text` is spoken, timeline seconds. */
+  words?: { start: number; end: number }[];
 }
 
 const MAX_GAP = 0.6; // a pause this long starts a new caption
@@ -393,7 +497,12 @@ export function groupWords(words: CaptionWord[], maxWords: number, lineChars: nu
     if (next - end < MAX_GAP) end = next;
     end = Math.min(next, total, Math.max(end, start + MIN_CAPTION_SECONDS));
     const ms = (t: number) => Math.round(t * 1000) / 1000;
-    return { start: ms(start), end: ms(end), text: wrap(g.map((w) => w.text).join(" "), lineChars) };
+    return {
+      start: ms(start),
+      end: ms(end),
+      text: wrap(g.map((w) => w.text).join(" "), lineChars),
+      words: g.map((w) => ({ start: ms(w.start), end: ms(w.end) })),
+    };
   });
 }
 
@@ -415,7 +524,7 @@ function wrap(text: string, chars: number): string {
 
 // --- Styles and layers ------------------------------------------------------
 
-export type CaptionStyleId = "clean" | "boxed" | "bold" | "yellow";
+export type CaptionStyleId = "clean" | "boxed" | "bold" | "yellow" | "karaoke" | "words";
 
 export const CAPTION_STYLES: Record<CaptionStyleId, { label: string; style: Partial<TextStyle>; upper?: boolean; animIn: AnimIn }> = {
   clean: { label: "Clean", style: { font: "inter", weight: 700, size: 0.05, shadow: true }, animIn: "none" },
@@ -434,6 +543,19 @@ export const CAPTION_STYLES: Record<CaptionStyleId, { label: string; style: Part
     label: "Yellow",
     style: { font: "jakarta", weight: 900, size: 0.055, color: "#facc15", strokeColor: "#000000", strokeWidth: 0.06, shadow: true },
     animIn: "pop",
+  },
+  // Follow the speech word by word (textAnim.ts, timed by the layer's words).
+  karaoke: {
+    label: "Karaoke",
+    style: { font: "jakarta", weight: 900, size: 0.055, strokeColor: "#000000", strokeWidth: 0.06, shadow: true, anim: "karaoke", highlight: "#facc15" },
+    upper: true,
+    animIn: "none",
+  },
+  words: {
+    label: "Word by word",
+    style: { font: "impact", weight: 900, size: 0.065, strokeColor: "#000000", strokeWidth: 0.08, shadow: false, anim: "words" },
+    upper: true,
+    animIn: "none",
   },
 };
 
@@ -470,5 +592,6 @@ export function captionOverlays(chunks: CaptionChunk[], styleId: CaptionStyleId,
     hidden: false,
     locked: false,
     text: captionText(c.text, styleId),
+    ...(c.words ? { words: c.words.map((w) => ({ start: round(w.start - c.start), end: round(w.end - c.start) })) } : {}),
   }));
 }

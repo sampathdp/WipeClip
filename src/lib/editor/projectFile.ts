@@ -23,7 +23,10 @@ export const PROJECT_FILE_VERSION = 1;
 const MAX_MANIFEST_BYTES = 50 << 20;
 const MAX_RECORDING_BYTES = 200 << 20;
 const MEDIA_TYPE = /^(video|audio|image)\/[\w.+-]+$/;
-const KINDS = new Set<MediaSource["kind"]>(["original", "cleaned", "audio", "image", "layer", "take"]);
+/** Imported LUTs (.cube) are plain text. */
+const LUT_TYPE = /^text\/plain$/;
+const FONT_TYPE = /^font\/(ttf|otf|woff2?)$/;
+const KINDS = new Set<MediaSource["kind"]>(["original", "cleaned", "audio", "image", "layer", "take", "lut", "font"]);
 
 export class ProjectFileError extends Error {}
 
@@ -63,8 +66,15 @@ const mediaPath = (s: MediaSource) => `media/${s.id}/${sourceName(s).replace(/[\
  * layer pointing at nothing. */
 export function referencedSources(p: Project): Set<string> {
   const ids = new Set<string>();
-  for (const c of p.clips) ids.add(c.sourceId);
-  for (const o of p.overlays) if ("sourceId" in o && typeof o.sourceId === "string") ids.add(o.sourceId);
+  for (const c of p.clips) {
+    ids.add(c.sourceId);
+    if (c.look.lut) ids.add(c.look.lut.sourceId);
+  }
+  for (const o of p.overlays) {
+    if ("sourceId" in o && typeof o.sourceId === "string") ids.add(o.sourceId);
+    // Uploaded fonts: "src:<id>".
+    if (o.kind === "text" && o.text.font.startsWith("src:")) ids.add(o.text.font.slice(4));
+  }
   for (const a of p.audio) ids.add(a.sourceId);
   if (p.canvas.background.type === "image") ids.add(p.canvas.background.sourceId);
   for (const z of p.zooms ?? []) if (z.sourceId) ids.add(z.sourceId);
@@ -79,8 +89,18 @@ export function remapSources(p: Project, map: Map<string, string>): Project {
   const to = (id: string) => map.get(id) ?? id;
   return {
     ...p,
-    clips: p.clips.map((c) => ({ ...c, sourceId: to(c.sourceId) })),
-    overlays: p.overlays.map((o) => ("sourceId" in o && typeof o.sourceId === "string" ? { ...o, sourceId: to(o.sourceId) } : o)),
+    clips: p.clips.map((c) => ({
+      ...c,
+      sourceId: to(c.sourceId),
+      ...(c.look.lut ? { look: { ...c.look, lut: { ...c.look.lut, sourceId: to(c.look.lut.sourceId) } } } : {}),
+    })),
+    overlays: p.overlays.map((o) =>
+      "sourceId" in o && typeof o.sourceId === "string"
+        ? { ...o, sourceId: to(o.sourceId) }
+        : o.kind === "text" && o.text.font.startsWith("src:")
+          ? { ...o, text: { ...o.text, font: `src:${to(o.text.font.slice(4))}` } }
+          : o
+    ),
     audio: p.audio.map((a) => ({ ...a, sourceId: to(a.sourceId) })),
     canvas: p.canvas.background.type === "image" ? { ...p.canvas, background: { ...p.canvas.background, sourceId: to(p.canvas.background.sourceId) } } : p.canvas,
     zooms: p.zooms?.map((z) => (z.sourceId ? { ...z, sourceId: to(z.sourceId) } : z)),
@@ -180,7 +200,7 @@ export async function readProjectFile(file: Blob): Promise<OpenedProjectFile> {
         KINDS.has(s.kind as MediaSource["kind"]) &&
         typeof s.name === "string" &&
         typeof s.type === "string" &&
-        MEDIA_TYPE.test(s.type) &&
+        (s.kind === "lut" ? LUT_TYPE : s.kind === "font" ? FONT_TYPE : MEDIA_TYPE).test(s.type) &&
         typeof s.path === "string" &&
         num(s.duration) &&
         num(s.width) &&
