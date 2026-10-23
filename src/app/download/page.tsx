@@ -127,6 +127,10 @@ const FAQS = [
     a: DESKTOP_DOWNLOADS.map((d) => `${d.label}: ${d.requirements}.`).join(" "),
   },
   {
+    q: 'Why does Windows say "Windows protected your PC"?',
+    a: "Windows shows this for new apps it hasn't seen many downloads of yet. Click More info, then Run anyway, and the installer starts. Once installed, the app updates itself.",
+  },
+  {
     q: "Is there still an online editor?",
     a: "No. The video editor now lives in the desktop app, alongside the screen recorder, focus zooms and on-device captions. The free photo tools on this site still run in your browser.",
   },
@@ -214,6 +218,11 @@ export default function DownloadPage() {
                 <DownloadButtons compact />
               </div>
               <p className="mt-4 text-xs text-muted">{DESKTOP_DOWNLOADS.map((d) => d.requirements).join(" · ")}</p>
+              {DESKTOP_DOWNLOADS.filter((d) => d.url && d.note).map((d) => (
+                <p key={d.os} className="mt-1 text-xs text-muted">
+                  {d.note}
+                </p>
+              ))}
             </Reveal>
             <Reveal delay={120} className="relative">
               <div aria-hidden className="absolute -inset-6 -z-10 rounded-[2.5rem] bg-gradient-to-tr from-accent/20 to-cyan-500/20 blur-2xl" />

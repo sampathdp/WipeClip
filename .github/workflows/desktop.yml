@@ -1,9 +1,10 @@
 name: Desktop
 
 # Builds the WipeClip desktop app (Tauri) on real Windows and macOS runners.
-# See docs/desktop/README.md. Runs on demand and on PRs touching desktop
-# code, uploading the installers as workflow artifacts. A pushed tag
-# desktop-v<version> also creates a *draft* release with the signed
+# See docs/desktop/README.md. Runs only when started by hand (Actions >
+# Desktop > Run workflow), uploading the installers as workflow artifacts.
+# Started on a tag desktop-v<version> (picked under "Use workflow from"), it
+# also creates a *draft* release with the signed
 # installers and latest.json (the app's update feed) in the public releases
 # repo (RELEASES_REPO; this code repo can stay private); publishing the draft
 # is what offers the update and the download to users. See
@@ -11,18 +12,6 @@ name: Desktop
 
 on:
   workflow_dispatch: {}
-  push:
-    tags: ["desktop-v*"]
-  pull_request:
-    branches: [master]
-    paths:
-      - "desktop/**"
-      - "src-tauri/**"
-      - "src/lib/platform/**"
-      - "src/lib/cors.ts"
-      - "tests/desktop/**"
-      - "backend/**"
-      - ".github/workflows/desktop.yml"
 
 jobs:
   build:

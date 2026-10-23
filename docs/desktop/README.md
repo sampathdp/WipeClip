@@ -106,7 +106,7 @@ Output goes to `src-tauri/target/release/bundle/`.
 
 ### CI
 
-`.github/workflows/desktop.yml` builds on `windows-latest` and `macos-latest` (on demand, and on PRs touching desktop code) and uploads the installer as a workflow artifact. It needs repository **variables** (not secrets) `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_TOOLS_API_URL`, and optionally `DESKTOP_SITE_ORIGIN`.
+`.github/workflows/desktop.yml` builds on `windows-latest` and `macos-latest` (only when started by hand: Actions > Desktop > Run workflow) and uploads the installer as a workflow artifact. It needs repository **variables** (not secrets) `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_TOOLS_API_URL`, and optionally `NEXT_PUBLIC_DESKTOP_SITE_ORIGIN`.
 
 ## Behaviour notes
 

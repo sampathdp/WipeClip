@@ -161,7 +161,7 @@ Update bundles are signed with a minisign key, separate from code signing. The p
 Releasing a version:
 
 1. Bump `version` in `src-tauri/tauri.conf.json` and `package.json`, commit, push.
-2. `git tag desktop-v<version> && git push origin desktop-v<version>`.
+2. `git tag desktop-v<version> && git push origin desktop-v<version>`, then in GitHub: Actions > Desktop > Run workflow, pick the tag under "Use workflow from" (not `master`; only a tag run makes a release) and run it.
 3. `desktop.yml` builds both platforms with the signing key, then `desktop/scripts/update-manifest.mjs` checks that the tag matches the version, renames the assets and writes `latest.json`, and a **draft** release is created in the releases repo with the Windows installer, the macOS DMG and update tarball, fixed-name copies of both installers, and `latest.json`.
 4. Check the draft (install it on a test machine), then publish it. Only published, non-prerelease releases count as "latest", so users are offered the update and the website's download buttons serve it from that moment.
 

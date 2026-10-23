@@ -77,6 +77,7 @@ export default function DownloadButtons({ compact = false }: { compact?: boolean
             <p className="mt-1 text-sm text-muted">{d.file}</p>
             <p className="mt-1 text-xs text-muted">{d.requirements}</p>
             <div className="mt-5 flex">{button}</div>
+            {d.url && d.note && <p className="mt-3 text-xs text-muted">{d.note}</p>}
           </div>
         );
       })}
