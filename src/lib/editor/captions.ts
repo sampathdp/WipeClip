@@ -2,6 +2,7 @@
  * 16 kHz mono, transcribes it with Whisper in a worker (captions.worker.ts),
  * and turns the word timings into caption text layers.
  */
+import { memoryBudgetGb } from "@/lib/platform";
 import { DEFAULT_TEXT } from "./textRaster";
 import { newId, type Layout } from "./timeline";
 import type { AnimIn, MediaSource, Overlay, Project, TextStyle } from "./types";
@@ -186,12 +187,12 @@ function speechSegments(samples: Float32Array, length = MAX_SEGMENT): [number, n
 }
 
 /** Workers to run side by side. Each holds its own model (~250 MB of
- * memory), so this is bounded by cores and, where the browser reports it,
- * by the device's memory. */
-function cpuWorkerCount(): number {
+ * memory, about 1 GB while transcribing), so this is bounded by cores and by
+ * the memory the machine can spare (memoryBudgetGb). */
+async function cpuWorkerCount(): Promise<number> {
   const cores = navigator.hardwareConcurrency || 2;
-  const memoryGb = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
-  return Math.max(1, Math.min(MAX_CPU_WORKERS, cores - 1, Math.floor(memoryGb / 1.5)));
+  const budgetGb = (await memoryBudgetGb()) ?? 2;
+  return Math.max(1, Math.min(MAX_CPU_WORKERS, cores - 1, Math.floor(budgetGb)));
 }
 
 /** A captions.worker.ts instance with promise-based requests on top of
@@ -266,7 +267,7 @@ async function getPool(onProgress: (p: CaptionsProgress) => void, forceCpu: bool
   const workers = [first];
   // The decoder runs on the CPU either way, so both modes use the pool.
   {
-    const extra = Array.from({ length: cpuWorkerCount() - 1 }, () => new ModelWorker());
+    const extra = Array.from({ length: (await cpuWorkerCount()) - 1 }, () => new ModelWorker());
     // Extra workers only add speed: one that fails to start is dropped.
     const started = await Promise.all(
       extra.map((w) =>

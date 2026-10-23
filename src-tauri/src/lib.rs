@@ -16,6 +16,7 @@ mod links;
 mod recording;
 mod secure_storage;
 mod shortcuts;
+mod system;
 mod updater;
 
 use serde::Serialize;
@@ -300,6 +301,7 @@ pub fn run() {
         .manage(updater::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
             engine::local_engine,
+            system::system_memory,
             desktop_capabilities,
             show_error,
             confirm_action,

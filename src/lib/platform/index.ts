@@ -86,6 +86,25 @@ export async function localEngine(): Promise<LocalEngine | null> {
   }
 }
 
+/** Memory this machine can give to heavy work, in GB: what's free now where
+ * the OS says (desktop on Windows), else half the total. The desktop app asks
+ * the OS (src-tauri/src/system.rs); the website only has
+ * navigator.deviceMemory (Chromium, rounded and capped at 8). null if unknown. */
+export async function memoryBudgetGb(): Promise<number | null> {
+  const GB = 1024 ** 3;
+  if (IS_DESKTOP) {
+    try {
+      const m = await invoke<{ totalBytes: number | null; availableBytes: number | null }>("system_memory");
+      if (m.availableBytes != null) return m.availableBytes / GB;
+      if (m.totalBytes != null) return m.totalBytes / GB / 2;
+    } catch (err) {
+      console.warn("[system] memory unknown", err);
+    }
+  }
+  const reported = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  return reported ? reported / 2 : null;
+}
+
 export type SaveResult = { status: "saved"; path: string } | { status: "cancelled" };
 
 /** Saves an exported video. Website: the usual browser download. Desktop:
