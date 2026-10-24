@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PLANS } from "./credits";
+import { languageAlternates, LOCALE_INFO, type Locale } from "./i18n";
 
 export const SITE_URL = "https://www.wipeclip.co";
 export const SITE_NAME = "WipeClip.co";
@@ -64,12 +65,15 @@ export function buildPageMetadata({
   path,
   ogTitle,
   ogDescription,
+  locale,
 }: {
   title: string;
   description: string;
   path: string;
   ogTitle?: string;
   ogDescription?: string;
+  /** Set on translated pages; English when omitted. */
+  locale?: Locale;
 }): Metadata {
   const socialTitle = ogTitle ?? title;
   const socialDescription = ogDescription ?? description;
@@ -77,14 +81,14 @@ export function buildPageMetadata({
   return {
     title,
     description,
-    alternates: { canonical: path },
+    alternates: { canonical: path, languages: languageAlternates(path) },
     openGraph: {
       type: "website",
       url: path,
       siteName: SITE_NAME,
       title: socialTitle,
       description: socialDescription,
-      locale: "en_US",
+      locale: locale ? LOCALE_INFO[locale].ogLocale : "en_US",
       images: [{ url: OG_IMAGE, width: 1200, height: 630, alt: socialTitle }],
     },
     twitter: {

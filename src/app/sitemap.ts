@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/seo";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
+import { languageAlternates, LOCALES, localizedPath, TRANSLATED_PATHS } from "@/lib/i18n";
 
 const siteUrl = SITE_URL;
 
@@ -104,6 +105,26 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.3,
     },
   ];
+  // Translated versions of the download and free tool pages.
+  for (const [enPath, slugs] of Object.entries(TRANSLATED_PATHS)) {
+    for (const locale of LOCALES) {
+      entries.push({
+        url: `${siteUrl}${localizedPath(locale, slugs[locale])}`,
+        lastModified: "2026-10-24",
+        changeFrequency: "weekly",
+        priority: enPath === "/download" ? 0.9 : 0.8,
+      });
+    }
+  }
+  // Every version of a translated page lists all its versions (hreflang).
+  for (const entry of entries) {
+    const languages = languageAlternates(entry.url.slice(siteUrl.length) || "/");
+    if (languages) {
+      entry.alternates = {
+        languages: Object.fromEntries(Object.entries(languages).map(([l, path]) => [l, `${siteUrl}${path}`])),
+      };
+    }
+  }
   if (AI_CLEANUP_ENABLED) return entries;
   return entries.filter((e) => !CLEANUP_PATHS.some((p) => e.url === `${siteUrl}${p}`));
 }

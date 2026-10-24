@@ -79,21 +79,26 @@ function loadPaddle(config: NonNullable<CheckoutConfig["paddle"]>): Promise<Padd
 
 /** Each plan's price as Paddle shows it in the visitor's country (local
  * currency and tax), keyed by plan. Paddle's own formatted strings, shown
- * as is - no price math or reformatting here. */
-async function localizedPrices(config: NonNullable<CheckoutConfig["paddle"]>): Promise<Partial<Record<PlanKey, string>>> {
+ * as is - no price math or reformatting here. `taxed` is true when those
+ * totals include sales tax or VAT (EU, UK and other VAT countries). */
+async function localizedPrices(
+  config: NonNullable<CheckoutConfig["paddle"]>,
+): Promise<{ totals: Partial<Record<PlanKey, string>>; taxed: boolean }> {
   const byPrice = Object.entries(config.priceIds) as [PlanKey, string][];
-  if (byPrice.length === 0) return {};
+  if (byPrice.length === 0) return { totals: {}, taxed: false };
   const paddle = await loadPaddle(config);
   const preview = await paddle.PricePreview({
     items: byPrice.map(([, priceId]) => ({ priceId, quantity: 1 })),
     ...(config.country ? { address: { countryCode: config.country } } : {}),
   });
   const totals: Partial<Record<PlanKey, string>> = {};
+  let taxed = false;
   for (const item of preview.data.details.lineItems) {
     const plan = byPrice.find(([, id]) => id === item.price.id)?.[0];
     if (plan) totals[plan] = item.formattedTotals.total;
+    if (Number(item.totals.tax) > 0) taxed = true;
   }
-  return totals;
+  return { totals, taxed };
 }
 
 /** While online checkout is being set up, buyers message us on WhatsApp
@@ -234,6 +239,7 @@ export default function PricingClient({ children }: { children?: React.ReactNode
   const [checkoutConfig, setCheckoutConfig] = useState<CheckoutConfig | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [localPrices, setLocalPrices] = useState<Partial<Record<PlanKey, string>>>({});
+  const [pricesTaxed, setPricesTaxed] = useState(false);
   const [promoCode, setPromoCode] = useState<string | null>(null);
   const [promoInput, setPromoInput] = useState("");
   const [promoError, setPromoError] = useState<string | null>(null);
@@ -267,7 +273,13 @@ export default function PricingClient({ children }: { children?: React.ReactNode
           setPromoError(c.promoError);
           if (!c.promo) rememberPromoCode(null);
           // Until the preview answers (or if it fails), cards show the USD list price.
-          if (c.paddle) localizedPrices(c.paddle).then(setLocalPrices).catch(() => {});
+          if (c.paddle)
+            localizedPrices(c.paddle)
+              .then(({ totals, taxed }) => {
+                setLocalPrices(totals);
+                setPricesTaxed(taxed);
+              })
+              .catch(() => {});
         })
         .catch(() => {});
       if (signedIn) {
@@ -532,6 +544,7 @@ export default function PricingClient({ children }: { children?: React.ReactNode
                     {plan && (
                       <p className="mt-1 text-[11px] text-muted">
                         {showLkr ? `Charged as ${formatLkr(plan.amountCents)} · ` : ""}
+                        {pricesTaxed ? "Incl. VAT / tax · " : ""}
                         One-time payment, no auto-renewal · {plan.credits} AI credits included
                       </p>
                     )}

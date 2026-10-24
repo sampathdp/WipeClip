@@ -5,10 +5,12 @@ export default function ToolGuide({
   title,
   steps,
   facts,
+  factsTitle = "At a glance",
 }: {
   title: string;
   steps: string[];
   facts: { label: string; value: string }[];
+  factsTitle?: string;
 }) {
   return (
     <section className="py-16">
@@ -27,7 +29,7 @@ export default function ToolGuide({
           </ol>
         </div>
         <div className="glass-card rounded-2xl border border-border/80 p-6">
-          <h3 className="font-display text-lg font-bold text-foreground">At a glance</h3>
+          <h3 className="font-display text-lg font-bold text-foreground">{factsTitle}</h3>
           <dl className="mt-4 space-y-3 text-sm">
             {facts.map((f) => (
               <div key={f.label} className="flex justify-between gap-4 border-b border-border/50 pb-3 last:border-0 last:pb-0">

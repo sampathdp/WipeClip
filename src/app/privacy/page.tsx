@@ -212,7 +212,9 @@ export default function PrivacyPage() {
 
       <H2>9. Your rights</H2>
       <P>
-        Depending on where you live, you may have the right to access the
+        If you are in the European Economic Area or the United Kingdom, the
+        GDPR and UK GDPR give you the rights below. Elsewhere, depending on
+        where you live, you may have the right to access the
         personal data we hold about you, correct it, delete it, receive a copy
         of it, or object to or restrict certain processing. To use any of these
         rights, or to delete your account, email us from the address on your

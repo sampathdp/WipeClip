@@ -56,6 +56,18 @@ const nextConfig: NextConfig = {
         source: "/:path*",
         headers: securityHeaders,
       },
+      // Files in public/ are served with max-age=0, so the CDN in front of
+      // the site revalidates the demo videos on every play. Their names
+      // aren't content-hashed, so browsers keep them a day, the edge a month.
+      {
+        source: "/:file(.*\\.(?:mp4|webp|png|svg|vtt))",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=86400, s-maxage=2592000, stale-while-revalidate=86400",
+          },
+        ],
+      },
     ];
   },
 };
