@@ -18,6 +18,9 @@ jobs:
 
       - run: npm ci
       - run: npm run lint
+      # PageProps/LayoutProps are global helpers generated into .next/types;
+      # a fresh checkout has none, so generate them before type-checking.
+      - run: npx next typegen
       - run: npx tsc --noEmit
 
   backend:
