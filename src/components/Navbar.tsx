@@ -3,9 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import AuthStatus from "./AuthStatus";
+import LanguageSwitcher from "./LanguageSwitcher";
 import Logo from "./Logo";
 import ThemeToggle from "./ThemeToggle";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
+import { IS_DESKTOP } from "@/lib/platform";
 
 const links = [
   { href: "/download", label: "Download" },
@@ -48,6 +50,8 @@ export default function Navbar() {
             </svg>
             <span className="hidden sm:inline">Free Tools</span>
           </Link>
+          {/* Translated pages are web-only. */}
+          {!IS_DESKTOP && <LanguageSwitcher />}
           <ThemeToggle />
           <AuthStatus />
           <button
