@@ -3,7 +3,8 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import VideoFrameGrabberDemo from "@/components/VideoFrameGrabberDemo";
 import ToolGuide from "@/components/ToolGuide";
-import { buildPageMetadata, faqJsonLd, jsonLdString } from "@/lib/seo";
+import { buildPageMetadata, faqJsonLd, jsonLdString, webApplicationJsonLd } from "@/lib/seo";
+import RelatedTools from "@/components/RelatedTools";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 const title = "Extract a Frame From Video - Free Screenshot Tool";
@@ -41,7 +42,10 @@ const faqs = [
 ];
 
 export default function Page() {
-  const jsonLd = { "@context": "https://schema.org", ...faqJsonLd(faqs) };
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [faqJsonLd(faqs), webApplicationJsonLd({ name: "Video Frame Grabber", path: "/extract-video-frame", description, free: true })],
+  };
 
   return (
     <div className="flex flex-1 flex-col">
@@ -118,6 +122,7 @@ export default function Page() {
             </div>
           </div>
         </section>
+        <RelatedTools current="/extract-video-frame" />
       </main>
       <Footer />
     </div>

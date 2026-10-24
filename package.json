@@ -9,6 +9,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "seo:check": "node scripts/seo-check.mjs",
     "newsletter": "node --experimental-strip-types --no-warnings --env-file=.env.local scripts/send-newsletter.ts",
     "desktop:dev": "node desktop/scripts/tauri.mjs dev",
     "desktop:build": "node desktop/scripts/tauri.mjs build",

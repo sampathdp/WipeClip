@@ -1,6 +1,8 @@
 import Link from "next/link";
 import Logo from "./Logo";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
+import { LOCALE_INFO, LOCALES } from "@/lib/i18n";
+import { GUIDES } from "@/lib/site-pages";
 
 export default function Footer() {
   return (
@@ -56,6 +58,25 @@ export default function Footer() {
               </Link>
             </>
           )}
+          <span className="text-border">&middot;</span>
+          <Link href="/tools" className="font-semibold transition-colors hover:text-foreground">
+            All tools
+          </Link>
+          {GUIDES.length > 0 && (
+            <>
+              <span className="text-border">&middot;</span>
+              <Link href="/guides" className="transition-colors hover:text-foreground">
+                Guides
+              </Link>
+            </>
+          )}
+          <span className="ml-auto flex gap-x-2">
+            {LOCALES.map((l) => (
+              <Link key={l} href={`/${l}`} hrefLang={l} className="transition-colors hover:text-foreground">
+                {LOCALE_INFO[l].name}
+              </Link>
+            ))}
+          </span>
         </div>
         <p className="mt-4 text-xs text-muted">
           For content you created or have the rights to edit only. Using

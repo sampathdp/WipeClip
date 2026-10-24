@@ -11,13 +11,10 @@ import ArticleByline from "@/components/guides/ArticleByline";
 import RelatedGuides from "@/components/guides/RelatedGuides";
 import QualityFactorsTable from "@/components/guides/QualityFactorsTable";
 import { buildPageMetadata, SITE_URL } from "@/lib/seo";
+import { getGuide } from "@/lib/site-pages";
 
-const title = "Does AI Cleanup Reduce Video Quality?";
-const description =
-  "Resolution isn't the same as visual quality. A clear look at how resolution, bitrate, codec, re-encoding, and reconstructed pixels actually affect a video after removing an unwanted object.";
 const path = "/guides/does-ai-cleanup-reduce-video-quality";
-const publishedDate = "2026-08-25";
-const updatedDate = "2026-10-01";
+const { title, description, published: publishedDate, updated: updatedDate } = getGuide(path);
 
 export const metadata: Metadata = buildPageMetadata({ title, description, path });
 
@@ -51,6 +48,7 @@ export default function Page() {
       <Breadcrumbs
         items={[
           { label: "Home", href: "/" },
+          { label: "Guides", href: "/guides" },
           { label: "Does AI Cleanup Reduce Quality?" },
         ]}
       />

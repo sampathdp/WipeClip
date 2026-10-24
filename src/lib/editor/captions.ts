@@ -200,19 +200,45 @@ async function mixSpeech(
   return { samples: mixed.getChannelData(0), clipping, skipped: [] };
 }
 
-/** The speech model (Whisper base, quantized): about 80 MB, downloaded from
- * Hugging Face on first use and kept in the browser/app cache. Audio never
- * leaves the device - only the model files are downloaded. */
-export const SPEECH_MODEL = { name: "Whisper base (multilingual)", sizeMb: 80, id: "onnx-community/whisper-base_timestamped" };
+export interface SpeechModel {
+  id: string; // word-level timestamps need the "_timestamped" export
+  sizeMb: number;
+  /** Whether it's the model meant for a WebGPU encoder. */
+  gpu: boolean;
+}
+
+/** The speech models, downloaded from Hugging Face on first use and kept in
+ * the browser/app cache. Audio never leaves the device - only the model
+ * files are downloaded. Measured on a 60 s talk: base (the model used
+ * before) got about one word in twelve wrong and invented text at a cut;
+ * small fixes most of that; large-v3-turbo was word-perfect with tighter
+ * timings, and with the encoder on the GPU it transcribes 60 s in ~20 s.
+ * On the CPU alone turbo took longer than the audio, so the CPU gets small. */
+const GPU_MODEL: SpeechModel = { id: "onnx-community/whisper-large-v3-turbo_timestamped", sizeMb: 700, gpu: true };
+const CPU_MODEL: SpeechModel = { id: "onnx-community/whisper-small_timestamped", sizeMb: 250, gpu: false };
+
+let chosen: Promise<SpeechModel> | null = null;
+
+/** The model this device will use: turbo with a usable WebGPU adapter,
+ * small otherwise. */
+export function speechModel(): Promise<SpeechModel> {
+  chosen ??= (async () => {
+    const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
+    const adapter = await gpu?.requestAdapter().catch(() => null);
+    return adapter ? GPU_MODEL : CPU_MODEL;
+  })();
+  return chosen;
+}
 
 /** Whether the model is already on this device, so the UI asks before the
  * first download instead of starting it silently. */
 export async function speechModelCached(): Promise<boolean> {
   try {
     if (typeof caches === "undefined") return false;
+    const { id } = await speechModel();
     const cache = await caches.open("transformers-cache");
     const keys = await cache.keys();
-    return keys.some((k) => k.url.includes(SPEECH_MODEL.id) && /\.onnx/.test(k.url));
+    return keys.some((k) => k.url.includes(id) && /\.onnx/.test(k.url));
   } catch {
     return false;
   }
@@ -269,13 +295,13 @@ function speechSegments(samples: Float32Array, length = MAX_SEGMENT): [number, n
   return out;
 }
 
-/** Workers to run side by side. Each holds its own model (~250 MB of
- * memory, about 1 GB while transcribing), so this is bounded by cores and by
- * the memory the machine can spare (memoryBudgetGb). */
+/** Workers to run side by side. Each holds its own model (about 1.5 GB of
+ * memory while transcribing), so this is bounded by cores and by the memory
+ * the machine can spare (memoryBudgetGb). */
 async function cpuWorkerCount(): Promise<number> {
   const cores = navigator.hardwareConcurrency || 2;
   const budgetGb = (await memoryBudgetGb()) ?? 2;
-  return Math.max(1, Math.min(MAX_CPU_WORKERS, cores - 1, Math.floor(budgetGb)));
+  return Math.max(1, Math.min(MAX_CPU_WORKERS, cores - 1, Math.floor(budgetGb / 1.5)));
 }
 
 /** A captions.worker.ts instance with promise-based requests on top of
@@ -323,8 +349,9 @@ type Device = "webgpu" | "wasm";
 let pool: { device: Device; workers: ModelWorker[] } | null = null;
 
 /** The worker pool, kept between runs: cpuWorkerCount() workers, with the
- * encoder on WebGPU when the browser has it. The first worker loads (and
- * caches) the model before the others start, so it's downloaded only once. */
+ * encoder on WebGPU when the browser has it (speechModel). The first worker
+ * loads (and caches) the model before the others start, so it's downloaded
+ * only once. */
 async function getPool(onProgress: (p: CaptionsProgress) => void, forceCpu: boolean) {
   if (pool && pool.workers.every((w) => !w.dead) && !(forceCpu && pool.device === "webgpu")) return pool;
   pool?.workers.forEach((w) => w.terminate());
@@ -333,9 +360,9 @@ async function getPool(onProgress: (p: CaptionsProgress) => void, forceCpu: bool
   let first = new ModelWorker();
   first.onProgress = onProgress;
   let device: Device = "wasm";
-  if (!forceCpu && "gpu" in navigator) {
+  if (!forceCpu && (await speechModel()).gpu) {
     try {
-      ({ device } = await first.request<{ device: Device }>({ type: "init", device: "webgpu" }));
+      ({ device } = await first.request<{ device: Device }>({ type: "init", device: "webgpu", model: GPU_MODEL.id }));
     } catch (err) {
       // A browser can list a GPU and still fail to use it (drivers,
       // blocklists); the CPU path then starts in a fresh worker.
@@ -345,7 +372,8 @@ async function getPool(onProgress: (p: CaptionsProgress) => void, forceCpu: bool
       first.onProgress = onProgress;
     }
   }
-  if (device === "wasm") await first.request({ type: "init", device: "wasm" });
+  const model = device === "webgpu" ? GPU_MODEL.id : CPU_MODEL.id;
+  if (device === "wasm") await first.request({ type: "init", device: "wasm", model });
   first.onProgress = null;
   const workers = [first];
   // The decoder runs on the CPU either way, so both modes use the pool.
@@ -354,7 +382,7 @@ async function getPool(onProgress: (p: CaptionsProgress) => void, forceCpu: bool
     // Extra workers only add speed: one that fails to start is dropped.
     const started = await Promise.all(
       extra.map((w) =>
-        w.request({ type: "init", device }).then(
+        w.request({ type: "init", device, model }).then(
           () => w,
           () => {
             w.terminate();
@@ -391,6 +419,15 @@ export function speechModelProbe(onProgress: (p: CaptionsProgress) => void): Spe
 
 const round = (t: number) => Math.round(t * 1000) / 1000;
 
+/** Whether there's sound around a word. Whisper invents words over silence
+ * ("Thank you." at the end of a segment); a real word is never silent
+ * (the margin covers timings that land a little early or late). */
+function audible(samples: Float32Array, w: CaptionWord): boolean {
+  const from = Math.max(0, Math.floor((w.start - 0.15) * RATE));
+  const to = Math.min(samples.length, Math.ceil((w.end + 0.15) * RATE));
+  return to > from && rms(samples, from, to) >= SILENCE_RMS;
+}
+
 async function runOnPool(
   samples: Float32Array,
   language: string,
@@ -425,7 +462,9 @@ async function runOnPool(
           [part.buffer]
         );
         const offset = s / RATE;
-        results[i] = words.map((x) => ({ ...x, start: round(x.start + offset), end: round(x.end + offset) }));
+        results[i] = words
+          .map((x) => ({ ...x, start: round(x.start + offset), end: round(x.end + offset) }))
+          .filter((x) => audible(samples, x));
         onProgress({ stage: "transcribe", value: ++done / segments.length });
       }
     })

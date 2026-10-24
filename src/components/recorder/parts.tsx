@@ -4,11 +4,48 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { normalizeRegion, type Point } from "@/lib/recorder/coords";
 import type { Rect } from "@/lib/recorder/format";
 
-export function Section({ title, hint, children }: { title: string; hint?: ReactNode; children: ReactNode }) {
+/** A settings card. `collapsible` makes the header a disclosure (open unless `defaultOpen` is false). */
+export function Section({
+  title,
+  hint,
+  children,
+  aside,
+  collapsible,
+  defaultOpen = true,
+}: {
+  title: string;
+  hint?: ReactNode;
+  children: ReactNode;
+  /** Shown at the right of the header, e.g. a summary of the current choice. */
+  aside?: ReactNode;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+}) {
+  const head = (
+    <>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold text-foreground">{title}</span>
+        {hint && <span className="mt-0.5 block text-xs text-muted">{hint}</span>}
+      </span>
+      {aside && <span className="shrink-0 text-xs text-muted">{aside}</span>}
+    </>
+  );
+  if (collapsible) {
+    return (
+      <details open={defaultOpen} className="group rounded-2xl border border-border bg-surface-2/50">
+        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-2xl p-4 hover:bg-surface-2/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 [&::-webkit-details-marker]:hidden">
+          {head}
+          <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={2} className="shrink-0 text-muted transition-transform group-open:rotate-180" aria-hidden>
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </summary>
+        <div className="space-y-3 px-4 pb-4">{children}</div>
+      </details>
+    );
+  }
   return (
     <section className="rounded-2xl border border-border bg-surface-2/50 p-4">
-      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-      {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
+      <h3 className="flex items-center gap-3">{head}</h3>
       <div className="mt-3 space-y-3">{children}</div>
     </section>
   );
@@ -29,16 +66,23 @@ export function Toggle({
 }) {
   return (
     <label className={`flex items-start gap-3 ${disabled ? "opacity-50" : "cursor-pointer"}`}>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm text-foreground">{label}</span>
+        {hint && <span className="block text-xs text-muted">{hint}</span>}
+      </span>
       <input
         type="checkbox"
-        className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
+        role="switch"
+        className="peer sr-only"
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
       />
-      <span className="min-w-0">
-        <span className="block text-sm text-foreground">{label}</span>
-        {hint && <span className="block text-xs text-muted">{hint}</span>}
+      <span
+        aria-hidden
+        className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-accent-2 ${checked ? "bg-accent-2" : "bg-surface-3"}`}
+      >
+        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${checked ? "left-[1.125rem]" : "left-0.5"}`} />
       </span>
     </label>
   );

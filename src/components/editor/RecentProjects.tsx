@@ -27,7 +27,9 @@ export default function RecentProjects({
   onOpen,
   onRename,
   onDelete,
+  className = "mt-6",
 }: {
+  className?: string;
   projects: ProjectSummary[];
   onOpen: (id: string) => void;
   onRename: (id: string, name: string) => void;
@@ -47,7 +49,7 @@ export default function RecentProjects({
   };
 
   return (
-    <section className="mt-6" aria-labelledby="recent-projects">
+    <section className={className} aria-labelledby="recent-projects">
       <h2 id="recent-projects" className="text-sm font-semibold text-foreground">
         Recent projects
       </h2>

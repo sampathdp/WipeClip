@@ -40,11 +40,11 @@ const nextConfig: NextConfig = {
     // compiled out of the website instead of shipped and skipped.
     NEXT_PUBLIC_WIPECLIP_DESKTOP: "0",
   },
-  experimental: {
-    // Tailwind output is small (~22 KiB), so shipping it inside the HTML
-    // beats a render-blocking stylesheet request on first visits.
-    inlineCss: true,
-  },
+  // experimental.inlineCss was on here, but the stylesheet has grown to
+  // ~155 KB raw and gets embedded three times per page (the <style> tag plus
+  // twice in the RSC payload): ~480 KB of every HTML response, re-sent on
+  // each page view. A separate, immutable-cached stylesheet costs one request
+  // on the first visit only.
   // The online editor was retired: the editor ships only as the Windows and
   // macOS app, so old links and search results land on its download page.
   async redirects() {
@@ -55,6 +55,18 @@ const nextConfig: NextConfig = {
       {
         source: "/:path*",
         headers: securityHeaders,
+      },
+      // Files in public/ are served with max-age=0, so the CDN in front of
+      // the site revalidates the demo videos on every play. Their names
+      // aren't content-hashed, so browsers keep them a day, the edge a month.
+      {
+        source: "/:file(.*\\.(?:mp4|webp|png|svg|vtt))",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=86400, s-maxage=2592000, stale-while-revalidate=86400",
+          },
+        ],
       },
     ];
   },

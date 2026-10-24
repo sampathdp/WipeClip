@@ -95,7 +95,7 @@ import { SHAPE_LABELS } from "@/lib/editor/shapes";
 import { MaskPanel, TutorialPanel } from "./TutorialPanel";
 import { useTutorialTools } from "./useTutorialTools";
 import { captionCues, toPlainTranscript, toSrt, toVtt } from "@/lib/editor/transcript";
-import { buildSpeechMix, speechModelCached } from "@/lib/editor/captions";
+import { buildSpeechMix, speechModel, speechModelCached, type SpeechModel } from "@/lib/editor/captions";
 import { ANALYSIS_RATE } from "@/lib/editor/audioAnalysis";
 import { saveTextFile } from "@/lib/platform";
 import {
@@ -1534,9 +1534,11 @@ export default function VideoEditor({
     onClose: () => setTool(null),
   });
   const [modelCached, setModelCached] = useState<boolean | null>(null);
+  const [captionModel, setCaptionModel] = useState<SpeechModel | null>(null);
   useEffect(() => {
     if (tool !== "captions") return;
     let cancelled = false;
+    void speechModel().then((m) => !cancelled && setCaptionModel(m));
     void speechModelCached().then((v) => !cancelled && setModelCached(v));
     return () => {
       cancelled = true;
@@ -2071,106 +2073,128 @@ export default function VideoEditor({
   const tracks = [textTrack, elementsTrack, audioTrack, ...(zoomTrack ? [zoomTrack] : []), effectsTrack];
 
   if (phase !== "edit" || !original) {
+    const showRecents = phase === "import" && recents.length > 0;
     return (
       <div className="flex min-h-dvh flex-col bg-background">
         {header}
-        <main className="flex flex-1 items-center justify-center p-4 sm:p-8">
-          <div className="glass-card w-full max-w-2xl rounded-[2rem] p-6 sm:p-10">
+        <main className="flex flex-1 items-center justify-center p-4 sm:p-6">
+          <div className={`glass-card w-full rounded-[2rem] p-6 sm:p-8 ${showRecents ? "max-w-5xl" : "max-w-2xl"}`}>
             <h1 className="font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
               Online <span className="text-gradient">Video Editor</span>
             </h1>
-            <p className="mt-2 text-sm text-muted sm:text-base">
+            <p className="mt-2 text-sm text-muted">
               Trim, cut and rearrange clips, add text, music, filters, effects, transitions and stickers, and clean up overlays with AI. Your
               original file is never changed.
             </p>
 
-            {phase === "import" && <RecentProjects projects={recents} onOpen={openSaved} onRename={renameSaved} onDelete={removeSaved} />}
-
-            {phase === "probing" ? (
-              <div className="mt-8 flex flex-col items-center gap-4 rounded-[1.75rem] border border-border bg-surface-2/70 p-12 text-center" role="status">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent-2/20 border-t-accent-2" />
-                <p className="text-sm font-medium text-foreground">{opening ?? "Checking your video…"}</p>
+            <div className={`mt-6 grid gap-6 ${showRecents ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,23rem)]" : ""}`}>
+              <div className="min-w-0">
+                {phase === "probing" ? (
+                  <div className="flex flex-col items-center gap-4 rounded-[1.75rem] border border-border bg-surface-2/70 p-12 text-center" role="status">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent-2/20 border-t-accent-2" />
+                    <p className="text-sm font-medium text-foreground">{opening ?? "Checking your video…"}</p>
+                  </div>
+                ) : phase === "loading" ? (
+                  <div className="h-48 animate-pulse rounded-[1.75rem] bg-surface-2/70" />
+                ) : (
+                  <>
+                    <input
+                      ref={fileInput}
+                      type="file"
+                      accept="video/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        void importFile(e.target.files?.[0]);
+                        e.target.value = "";
+                      }}
+                    />
+                    <input
+                      ref={projectFileInput}
+                      type="file"
+                      accept={`.${PROJECT_FILE_EXT}`}
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void openProjectFile(f);
+                        e.target.value = "";
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        trackEvent("upload_clicked", { tool: TOOL });
+                        // Desktop: the OS dialog, so the video is edited where it is.
+                        if (IS_DESKTOP) void chooseVideoOnDisk().then(importFile, (e) => setImportError({ message: String(e) }));
+                        else fileInput.current?.click();
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setIsDragOver(true);
+                      }}
+                      onDragLeave={() => setIsDragOver(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragOver(false);
+                        void importFile(e.dataTransfer.files[0]);
+                      }}
+                      className={`flex w-full flex-col items-center justify-center rounded-[1.75rem] border-2 border-dashed px-6 py-10 text-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+                        isDragOver ? "scale-[1.01] border-accent-2 bg-accent-2/10" : "border-border hover:border-accent-2/50 hover:bg-surface-2/40"
+                      }`}
+                    >
+                      <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-accent-2/30 bg-gradient-to-tr from-accent/20 to-accent-2/20 text-accent-2">
+                        <UploadIcon width={24} height={24} />
+                      </span>
+                      <span className="text-base font-semibold text-foreground">Drop a video here, or click to browse</span>
+                      <span className="mt-1 text-xs text-muted sm:text-sm">
+                        {IS_DESKTOP ? "MP4, MOV, WebM · any size, edited where it is · exports up to 10 minutes" : "MP4, MOV, WebM · up to 300MB · up to 10 minutes"}
+                      </span>
+                    </button>
+                    <p className="mt-2 text-center text-xs text-muted">
+                      <button type="button" onClick={() => projectFileInput.current?.click()} className="underline hover:text-foreground">
+                        Open a project file (.{PROJECT_FILE_EXT})
+                      </button>
+                    </p>
+                    {(onRecord || onImageTools) && (
+                      <div className={`mt-3 grid gap-3 ${onRecord && onImageTools ? "sm:grid-cols-2" : ""}`}>
+                        {onRecord && (
+                          <button
+                            type="button"
+                            onClick={onRecord}
+                            className="btn-secondary flex items-center gap-3 rounded-2xl px-4 py-3 text-left"
+                          >
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-500/15" aria-hidden>
+                              <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-sm font-semibold text-foreground">Record your screen</span>
+                              <span className="block truncate text-xs text-muted">Capture, then edit right here</span>
+                            </span>
+                          </button>
+                        )}
+                        {onImageTools && (
+                          <button
+                            type="button"
+                            onClick={onImageTools}
+                            className="btn-secondary flex items-center gap-3 rounded-2xl px-4 py-3 text-left"
+                          >
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-2/15 text-accent-2" aria-hidden>
+                              <SparkleIcon width={16} height={16} />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-sm font-semibold text-foreground">Image tools</span>
+                              <span className="block truncate text-xs text-muted">Remove a background, sharpen, grab a frame</span>
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
-            ) : phase === "loading" ? (
-              <div className="mt-8 h-48 animate-pulse rounded-[1.75rem] bg-surface-2/70" />
-            ) : (
-              <>
-                <input
-                  ref={fileInput}
-                  type="file"
-                  accept="video/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    void importFile(e.target.files?.[0]);
-                    e.target.value = "";
-                  }}
-                />
-                <input
-                  ref={projectFileInput}
-                  type="file"
-                  accept={`.${PROJECT_FILE_EXT}`}
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) void openProjectFile(f);
-                    e.target.value = "";
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    trackEvent("upload_clicked", { tool: TOOL });
-                    // Desktop: the OS dialog, so the video is edited where it is.
-                    if (IS_DESKTOP) void chooseVideoOnDisk().then(importFile, (e) => setImportError({ message: String(e) }));
-                    else fileInput.current?.click();
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setIsDragOver(true);
-                  }}
-                  onDragLeave={() => setIsDragOver(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setIsDragOver(false);
-                    void importFile(e.dataTransfer.files[0]);
-                  }}
-                  className={`mt-8 flex w-full flex-col items-center justify-center rounded-[1.75rem] border-2 border-dashed px-6 py-14 text-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
-                    isDragOver ? "scale-[1.01] border-accent-2 bg-accent-2/10" : "border-border hover:border-accent-2/50 hover:bg-surface-2/40"
-                  }`}
-                >
-                  <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-accent-2/30 bg-gradient-to-tr from-accent/20 to-accent-2/20 text-accent-2">
-                    <UploadIcon width={24} height={24} />
-                  </span>
-                  <span className="text-base font-semibold text-foreground">Drop a video here, or click to browse</span>
-                  <span className="mt-1 text-xs text-muted sm:text-sm">
-                    {IS_DESKTOP ? "MP4, MOV, WebM · any size, edited where it is · exports up to 10 minutes" : "MP4, MOV, WebM · up to 300MB · up to 10 minutes"}
-                  </span>
-                </button>
-                <p className="mt-2 text-center text-xs text-muted">
-                  <button type="button" onClick={() => projectFileInput.current?.click()} className="underline hover:text-foreground">
-                    Open a project file (.{PROJECT_FILE_EXT})
-                  </button>
-                </p>
-                {onRecord && (
-                  <button
-                    type="button"
-                    onClick={onRecord}
-                    className="btn-secondary mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-semibold"
-                  >
-                    <span className="h-2.5 w-2.5 rounded-full bg-rose-500" aria-hidden /> Record your screen
-                  </button>
-                )}
-                {onImageTools && (
-                  <button
-                    type="button"
-                    onClick={onImageTools}
-                    className="btn-secondary mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-semibold"
-                  >
-                    Image tools: remove a background, sharpen a photo, grab a frame
-                  </button>
-                )}
-              </>
-            )}
+              {showRecents && (
+                <RecentProjects className="min-w-0" projects={recents} onOpen={openSaved} onRename={renameSaved} onDelete={removeSaved} />
+              )}
+            </div>
 
             {importError && (
               <p className={`mt-4 text-center text-sm font-medium ${importError.blocked ? "text-rose-600" : "text-rose-600 dark:text-rose-400"}`} role="alert">
@@ -2187,20 +2211,21 @@ export default function VideoEditor({
                 )}
               </p>
             )}
-            <p className="mt-6 text-center text-xs text-muted">
+            <p className="mt-6 border-t border-border pt-4 text-center text-xs text-muted">
               {IS_DESKTOP ? "Editing happens on this computer." : "Editing happens in your browser."} Your video is only uploaded to check it and when you export{AI_CLEANUP_ENABLED ? " or run AI Cleanup" : ""}, and isn&apos;t stored.
+              {IS_DESKTOP && (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    className="underline hover:text-foreground"
+                    onClick={() => openNotices().catch((e) => showDesktopError("Couldn't open the licences", String(e)))}
+                  >
+                    Open-source licences
+                  </button>
+                </>
+              )}
             </p>
-            {IS_DESKTOP && (
-              <p className="mt-2 text-center text-xs text-muted">
-                <button
-                  type="button"
-                  className="underline hover:text-foreground"
-                  onClick={() => openNotices().catch((e) => showDesktopError("Couldn't open the licences", String(e)))}
-                >
-                  Open-source licences
-                </button>
-              </p>
-            )}
           </div>
         </main>
       </div>
@@ -2305,6 +2330,7 @@ export default function VideoEditor({
         onRemoveAll={() => apply((p) => ({ ...p, overlays: p.overlays.filter((o) => !o.caption) }))}
         onClose={() => setTool(null)}
         modelCached={modelCached}
+        model={captionModel}
         hidden={project.overlays.some((o) => o.caption) && project.overlays.filter((o) => o.caption).every((o) => o.hidden)}
         onToggleHidden={() =>
           apply((p) => {

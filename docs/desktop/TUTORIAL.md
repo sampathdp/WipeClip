@@ -45,7 +45,7 @@ Nothing is labeled a mistake. Each item shows time, explanation and confidence, 
 
 ## Captions
 
-Existing local Whisper captions with the additions above. The model is Whisper base (multilingual, quantized), about **80 MB**, downloaded from Hugging Face once and kept in the app/browser cache (`transformers-cache`). Transcription uses about 1 GB of memory and the CPU (WebGPU encoder where available). If the model isn't cached, the panel asks first ("Download model (80 MB)"). Audio is never uploaded. Correct text and timing on the caption layers (Text track); **SRT / WebVTT / Transcript** exports use the corrected captions; visible captions are burned into the video export as before.
+Existing local Whisper captions with the additions above. With a usable WebGPU adapter the model is Whisper large-v3-turbo (4-bit, about **700 MB**; encoder on the GPU, decoder on the CPU, ~20 s per minute of speech); without one it's Whisper small (8-bit, about **250 MB**, CPU). Either is downloaded from Hugging Face once and kept in the app/browser cache (`transformers-cache`). If the model isn't cached, the panel asks first, with its size. Words over silence are dropped (Whisper's "Thank you." hallucinations), punctuation tokens join their word, and word timings are capped so a word doesn't run into the following pause. Audio is never uploaded. Correct text and timing on the caption layers (Text track); **SRT / WebVTT / Transcript** exports use the corrected captions; visible captions are burned into the video export as before.
 
 ## Shortcut indicators
 
@@ -89,7 +89,7 @@ Source files are never modified.
 ## Limitations
 
 - No speech-content understanding: chapters and suggestions are based on timing, levels and interaction patterns only.
-- Whisper base accuracy is modest for heavy accents, technical jargon and noisy rooms; review the captions. Larger models aren't offered (size).
+- Without WebGPU, captions use Whisper small: clearly better than the old base model, but behind large-v3-turbo on heavy accents, jargon and noisy rooms; review the captions.
 - Silence detection is level-based; constant loud background music under speech defeats it (it's excluded from the speech mix only if it was added as a separate music track).
 - Privacy masks don't track moving content by themselves (only the pointer, crops and zooms). Scrolling content needs keyframing by hand (split the time range into several masks).
 - Shortcut indicators exist only if keyboard-shortcut recording was on.

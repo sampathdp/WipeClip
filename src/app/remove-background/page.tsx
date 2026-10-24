@@ -3,7 +3,8 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import BackgroundRemoverDemo from "@/components/BackgroundRemoverDemo";
 import ToolGuide from "@/components/ToolGuide";
-import { buildPageMetadata, faqJsonLd, jsonLdString } from "@/lib/seo";
+import { buildPageMetadata, faqJsonLd, jsonLdString, webApplicationJsonLd } from "@/lib/seo";
+import RelatedTools from "@/components/RelatedTools";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 
 const title = "Remove Background From Image - Free";
@@ -49,7 +50,10 @@ const faqs = [
 ];
 
 export default function Page() {
-  const jsonLd = { "@context": "https://schema.org", ...faqJsonLd(faqs) };
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [faqJsonLd(faqs), webApplicationJsonLd({ name: "Background Remover", path: "/remove-background", description, free: true })],
+  };
 
   return (
     <div className="flex flex-1 flex-col">
@@ -126,6 +130,7 @@ export default function Page() {
             </div>
           </div>
         </section>
+        <RelatedTools current="/remove-background" />
       </main>
       <Footer />
     </div>

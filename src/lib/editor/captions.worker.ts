@@ -6,7 +6,7 @@
  * is how several cores get used. Model files are downloaded once and kept
  * in the browser's cache.
  *
- * In:  { type: "init", device: "webgpu" | "wasm" }  "webgpu" = encoder on the GPU, decoder on the CPU
+ * In:  { type: "init", device: "webgpu" | "wasm", model }  "webgpu" = encoder on the GPU, decoder on the CPU
  *      { type: "detect", samples }                  - 16 kHz mono, up to 30 s
  *      { type: "transcribe", id, samples, language } - one segment, up to 30 s
  *      { type: "nospeech", samples }                - 16 kHz mono, up to 30 s
@@ -18,8 +18,6 @@
  *      { type: "error", message }
  */
 import { env, pipeline, Tensor, type AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers";
-
-const MODEL = "onnx-community/whisper-base_timestamped"; // word-level timestamps need the "_timestamped" export
 
 const LANGUAGES = [
   "en", "es", "fr", "de", "it", "pt", "nl", "ru", "uk", "pl", "tr", "ar", "hi", "si", "ta",
@@ -37,16 +35,17 @@ function post(msg: unknown) {
   (self as unknown as DedicatedWorkerGlobalScope).postMessage(msg);
 }
 
-/** Encoder precision for WebGPU, or null without a usable adapter. Half
- * precision where the GPU supports it: half the download, and faster. */
-async function gpuEncoderDtype(): Promise<"fp16" | "fp32" | null> {
+/** Encoder weights for WebGPU, or null without a usable adapter: 4-bit,
+ * with half-precision math where the GPU supports it (a third of the
+ * full-precision download, and word for word the same transcript). */
+async function gpuEncoderDtype(): Promise<"q4f16" | "q4" | null> {
   const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<{ features: Set<string> } | null> } }).gpu;
   const adapter = await gpu?.requestAdapter().catch(() => null);
   if (!adapter) return null;
-  return adapter.features.has("shader-f16") ? "fp16" : "fp32";
+  return adapter.features.has("shader-f16") ? "q4f16" : "q4";
 }
 
-async function load(device: Device): Promise<Device> {
+async function load(device: Device, model: string): Promise<Device> {
   const files = new Map<string, { loaded: number; total: number }>();
   const progress_callback = (p: { status: string; file?: string; loaded?: number; total?: number }) => {
     // Only the two .onnx weights matter; the small config files would make
@@ -75,14 +74,15 @@ async function load(device: Device): Promise<Device> {
     // fresh worker instead.
     const encoder = await gpuEncoderDtype();
     if (!encoder) throw new Error("WebGPU is not available");
-    asr = (await pipeline("automatic-speech-recognition", MODEL, {
+    asr = (await pipeline("automatic-speech-recognition", model, {
       device: { encoder_model: "webgpu", decoder_model_merged: "wasm" },
-      dtype: { encoder_model: encoder, decoder_model_merged: "q8" },
+      // 4-bit decoder: same words as 8-bit, ~40% faster per token (measured).
+      dtype: { encoder_model: encoder, decoder_model_merged: "q4" },
       progress_callback,
     })) as AutomaticSpeechRecognitionPipeline;
     return "webgpu";
   }
-  asr = (await pipeline("automatic-speech-recognition", MODEL, {
+  asr = (await pipeline("automatic-speech-recognition", model, {
     device: "wasm",
     dtype: "q8",
     progress_callback,
@@ -135,11 +135,40 @@ async function detectLanguage(model: AutomaticSpeechRecognitionPipeline, audio: 
 
 const round = (t: number) => Math.round(t * 1000) / 1000;
 
+/** Longest a word may stay on: Whisper's timings fold a following pause
+ * into the word before it ("this." running 2.7 s into silence). */
+const maxWordSeconds = (text: string) => Math.max(1.2, 0.15 * text.length);
+
+/** The pipeline's word chunks as caption words. Punctuation the model emits
+ * as a "word" of its own ("...", the "-page" of "90-page") joins the word
+ * before it, zero-length words get a sliver of time instead of being
+ * dropped, and no word runs on into the pause after it. */
+function toWords(chunks: { text: string; timestamp: [number, number | null] }[], length: number) {
+  const words: { start: number; end: number; text: string }[] = [];
+  for (const c of chunks) {
+    const text = c.text.trim();
+    if (!text) continue;
+    const prev = words[words.length - 1];
+    if (prev && /^\p{P}/u.test(c.text)) {
+      // A lone "..." after "this." would make "this....".
+      if (/\P{P}/u.test(text) || !/\p{P}$/u.test(prev.text)) prev.text += text;
+      continue;
+    }
+    if (/^\p{P}+$/u.test(text)) continue;
+    const start = c.timestamp[0];
+    if (start >= length) continue;
+    let end = Math.min(length, c.timestamp[1] ?? start + 0.3, start + maxWordSeconds(text));
+    if (end <= start) end = Math.min(length, start + 0.1);
+    words.push({ start: round(start), end: round(end), text });
+  }
+  return words;
+}
+
 self.onmessage = async (e: MessageEvent) => {
   const m = e.data;
   try {
     if (m.type === "init") {
-      if (!asr) loadedOn = await load(m.device);
+      if (!asr) loadedOn = await load(m.device, m.model);
       post({ type: "ready", device: loadedOn });
     } else if (m.type === "detect") {
       post({ type: "language", language: await detectLanguage(asr!, m.samples) });
@@ -153,14 +182,7 @@ self.onmessage = async (e: MessageEvent) => {
         task: "transcribe",
         return_timestamps: "word",
       })) as { chunks?: { text: string; timestamp: [number, number | null] }[] };
-      const words: { start: number; end: number; text: string }[] = [];
-      for (const c of res.chunks ?? []) {
-        const text = c.text.trim();
-        const start = c.timestamp[0];
-        const end = Math.min(length, c.timestamp[1] ?? start + 0.3);
-        if (text && end > start) words.push({ start: round(start), end: round(end), text });
-      }
-      post({ type: "words", id: m.id, words });
+      post({ type: "words", id: m.id, words: toWords(res.chunks ?? [], length) });
     }
   } catch (err) {
     post({ type: "error", message: err instanceof Error ? err.message : String(err) });

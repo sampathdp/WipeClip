@@ -972,6 +972,9 @@ export default function ScreenRecorder({
   // --- render ----------------------------------------------------------------------------
   const recordingActive = step === "countdown" || step === "recording";
   const unsupported = support && (!support.display || !support.recorder);
+  const keyLabel = (accelerator: string) =>
+    accelerator.replace("CommandOrControl", platform === "macos" ? "Cmd" : "Ctrl").replace("Alt", platform === "macos" ? "Option" : "Alt");
+  const startKey = shortcuts.find((s) => s.action === "toggle" && !s.error);
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-background" role="dialog" aria-modal="true" aria-label="Screen recorder">
@@ -984,9 +987,9 @@ export default function ScreenRecorder({
           onClick={onClose}
           disabled={recordingActive}
           title={recordingActive ? "Stop the recording first" : "Back to the editor"}
-          className="ml-auto inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-sm font-semibold text-muted hover:text-foreground disabled:opacity-40"
+          className="ml-auto inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-sm font-semibold text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-40"
         >
-          <CloseIcon /> Editor
+          <CloseIcon /> Back to editor
         </button>
       </header>
 
@@ -1037,14 +1040,18 @@ export default function ScreenRecorder({
                 </Note>
               )}
 
-              <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-                <div className="space-y-4">
-                  <Section title="1. What to record" hint="A whole display, a single app window, or an area you select on the preview.">
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+                <div className="min-w-0 space-y-4">
+                  <Section
+                    title="What to record"
+                    hint="A whole display, a single app window, or an area you select on the preview."
+                    aside={source && <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-600 dark:text-emerald-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />Ready</span>}
+                  >
                     {source ? (
                       <>
                         <RegionSelector stream={source.stream} region={region} onChange={setRegion} enabled={regionMode} />
                         <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-                          <span className="max-w-full truncate rounded-full border border-border px-2 py-0.5">
+                          <span className="min-w-0 max-w-full truncate rounded-full border border-border bg-surface px-3 py-1 font-semibold text-foreground">
                             {source.nativeSource
                               ? source.nativeSource.name
                               : source.surface === "monitor"
@@ -1054,34 +1061,38 @@ export default function ScreenRecorder({
                                   : source.surface === "browser"
                                     ? "Tab"
                                     : "Screen"}{" "}
-                            · {source.native.width}×{source.native.height}
+                            <span className="font-normal text-muted">
+                              · {source.native.width}×{source.native.height}
+                            </span>
                           </span>
-                          <button
-                            type="button"
-                            className="btn-secondary rounded-full px-3 py-1 font-semibold"
-                            onClick={() => {
-                              if (source.nativeSource) {
-                                stopStream(source.stream);
-                                setSource(null);
-                                setRegion(null);
-                                setRegionMode(false);
-                              } else void chooseSource();
-                            }}
-                          >
-                            Change
-                          </button>
-                          <button
-                            type="button"
-                            className={`rounded-full px-3 py-1 font-semibold ${regionMode ? "btn-primary" : "btn-secondary"}`}
-                            onClick={() => setRegionMode((v) => !v)}
-                          >
-                            {regionMode ? "Done selecting" : "Select area"}
-                          </button>
-                          {region && (
-                            <button type="button" className="underline" onClick={() => setRegion(null)}>
-                              Record everything
+                          <span className="ml-auto flex flex-wrap items-center gap-2">
+                            {region && (
+                              <button type="button" className="underline hover:text-foreground" onClick={() => setRegion(null)}>
+                                Record everything
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className={`rounded-full px-3 py-1 font-semibold ${regionMode ? "btn-primary" : "btn-secondary"}`}
+                              onClick={() => setRegionMode((v) => !v)}
+                            >
+                              {regionMode ? "Done selecting" : "Select area"}
                             </button>
-                          )}
+                            <button
+                              type="button"
+                              className="btn-secondary rounded-full px-3 py-1 font-semibold"
+                              onClick={() => {
+                                if (source.nativeSource) {
+                                  stopStream(source.stream);
+                                  setSource(null);
+                                  setRegion(null);
+                                  setRegionMode(false);
+                                } else void chooseSource();
+                              }}
+                            >
+                              Change source
+                            </button>
+                          </span>
                         </div>
                         {region && (
                           <p className="text-xs text-muted">
@@ -1100,7 +1111,7 @@ export default function ScreenRecorder({
                         {inputOn && source && !display && (
                           <p className="text-xs text-muted">
                             {source.surface === "window"
-                              ? "For a single window, mouse positions are saved in screen coordinates (with the active window's position, if enabled below)."
+                              ? "For a single window, mouse positions are saved in screen coordinates (with the active window's position, if enabled)."
                               : "The display couldn't be identified, so mouse positions are saved in screen coordinates."}
                           </p>
                         )}
@@ -1112,56 +1123,72 @@ export default function ScreenRecorder({
                         type="button"
                         disabled={!support?.display}
                         onClick={() => void chooseSource()}
-                        className="flex w-full flex-col items-center justify-center rounded-[1.25rem] border-2 border-dashed border-border px-6 py-12 text-center hover:border-accent-2/50 hover:bg-surface-2/40 disabled:opacity-50"
+                        className="flex w-full flex-col items-center justify-center rounded-[1.25rem] border-2 border-dashed border-border px-6 py-16 text-center hover:border-accent-2/50 hover:bg-surface-2/40 disabled:opacity-50"
                       >
+                        <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-accent-2/30 bg-accent-2/10 text-accent-2" aria-hidden>
+                          <svg viewBox="0 0 24 24" width={22} height={22} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="2" y="4" width="20" height="13" rx="2" />
+                            <path d="M8 21h8M12 17v4" />
+                          </svg>
+                        </span>
                         <span className="text-base font-semibold text-foreground">Choose a screen or window</span>
                         <span className="mt-1 text-xs text-muted">
                           {platform === "windows" ? "To include sound from your computer, pick an entire screen and tick “Share system audio”." : "Your system will ask which screen or window to share."}
                         </span>
                       </button>
                     )}
-                    <Toggle
-                      checked={hideCursor && (platform !== "windows" || (useNative && !!nativeSupport?.cursorControl))}
-                      onChange={setHideCursor}
-                      disabled={platform === "windows" && !(useNative && nativeSupport?.cursorControl)}
-                      label="Leave the mouse pointer out of the video"
-                      hint={
-                        useNative && nativeSupport?.cursorControl
-                          ? hideCursor
-                            ? "Left out - the editor can draw a smooth, resizable pointer from the recorded movement."
-                            : "The pointer is recorded in the video."
-                          : platform === "windows"
-                          ? "Not supported on this version of Windows: the system pointer is always in the video. Click highlights and zooms still work."
-                          : source
-                          ? source.cursorCaptured
-                            ? hideCursor
-                              ? "Not supported by this system - the pointer is in the video."
-                              : "The pointer is recorded in the video."
-                            : "Hidden - the editor can draw a smooth, resizable pointer from the recorded movement."
-                          : "Lets the editor draw a smooth pointer instead, where the system supports it. Applies when you choose the source."
-                      }
-                    />
-                    <Toggle
-                      checked={wantSystemAudio}
-                      onChange={setWantSystemAudio}
-                      label="Include system audio"
-                      hint={
-                        platform === "macos"
-                          ? "Not available on macOS with this recorder."
-                          : useNative
-                          ? "Everything you hear from this computer, saved as its own track."
-                          : source
-                            ? source.hasSystemAudio
-                              ? "Included - recorded as its own track."
-                              : "Not shared with the current source. Choose the source again to include it."
-                            : "Applies when you choose the source."
-                      }
-                      disabled={platform === "macos"}
-                    />
-                    {wantSystemAudio && systemAudioStream && <LevelMeter level={systemLevel} label="System audio level" />}
                   </Section>
 
-                  <Section title="2. Video">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Section title="Sound" hint="Each source is saved as its own track, in sync with the screen.">
+                      <Select
+                        label="Microphone"
+                        value={micId}
+                        onChange={(v) => void selectMic(v)}
+                        disabled={!support?.media}
+                        options={deviceOptions("audioinput", "Microphone")}
+                      />
+                      {micStream && <LevelMeter level={micLevel} label="Microphone level" />}
+                      {micStream && micLevel < 0.01 && <p className="text-xs text-muted">No sound yet - speak to check the level.</p>}
+                      <Toggle
+                        checked={wantSystemAudio}
+                        onChange={setWantSystemAudio}
+                        label="Computer sound"
+                        hint={
+                          platform === "macos"
+                            ? "Not available on macOS with this recorder."
+                            : useNative
+                            ? "Everything you hear from this computer."
+                            : source
+                              ? source.hasSystemAudio
+                                ? "Included."
+                                : "Not shared with the current source. Choose the source again to include it."
+                              : "Applies when you choose the source."
+                        }
+                        disabled={platform === "macos"}
+                      />
+                      {wantSystemAudio && systemAudioStream && <LevelMeter level={systemLevel} label="System audio level" />}
+                    </Section>
+
+                    <Section title="Camera" hint="Added as a picture-in-picture layer you can move or resize in the editor.">
+                      <Select
+                        label="Webcam"
+                        value={camId}
+                        onChange={(v) => void selectCam(v)}
+                        disabled={!support?.media}
+                        options={deviceOptions("videoinput", "Camera")}
+                      />
+                      {camStream ? (
+                        <LivePreview stream={camStream} mirror className="aspect-video w-full rounded-lg border border-border bg-black object-cover" />
+                      ) : (
+                        <div className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted">No camera</div>
+                      )}
+                    </Section>
+                  </div>
+                </div>
+
+                <div className="min-w-0 space-y-3">
+                  <Section collapsible title="Video" aside={source ? `${outW}×${outH} · ${outFps} fps` : undefined}>
                     <Select
                       label="Resolution"
                       value={resolution}
@@ -1198,44 +1225,76 @@ export default function ScreenRecorder({
                       ]}
                     />
                     <p className="text-xs text-muted">
-                      {source ? `${outW}×${outH} at ${outFps} fps · ` : ""}about {Math.max(1, Math.round(mbPerMin))} MB per minute. The editor opens recordings of any size and exports up to
-                      10 minutes.
+                      About {Math.max(1, Math.round(mbPerMin))} MB per minute. The editor opens recordings of any size and exports up to 10 minutes.
                     </p>
+                    <Toggle
+                      checked={hideCursor && (platform !== "windows" || (useNative && !!nativeSupport?.cursorControl))}
+                      onChange={setHideCursor}
+                      disabled={platform === "windows" && !(useNative && nativeSupport?.cursorControl)}
+                      label="Leave the pointer out of the video"
+                      hint={
+                        useNative && nativeSupport?.cursorControl
+                          ? hideCursor
+                            ? "The editor can draw a smooth, resizable pointer instead."
+                            : "The pointer is recorded in the video."
+                          : platform === "windows"
+                          ? "Not supported on this version of Windows: the system pointer is always in the video. Click highlights and zooms still work."
+                          : source
+                          ? source.cursorCaptured
+                            ? hideCursor
+                              ? "Not supported by this system - the pointer is in the video."
+                              : "The pointer is recorded in the video."
+                            : "Hidden - the editor can draw a smooth, resizable pointer instead."
+                          : "Lets the editor draw a smooth pointer instead, where the system supports it."
+                      }
+                    />
                   </Section>
-                </div>
 
-                <div className="space-y-4">
-                  <Section title="3. Microphone and camera" hint="Each is saved as its own track, in sync with the screen.">
+                  <Section collapsible title="While recording" aside={countdown ? `${countdown}s countdown` : "No countdown"}>
                     <Select
-                      label="Microphone"
-                      value={micId}
-                      onChange={(v) => void selectMic(v)}
-                      disabled={!support?.media}
-                      options={deviceOptions("audioinput", "Microphone")}
+                      label="Countdown"
+                      value={countdown}
+                      onChange={setCountdown}
+                      options={[
+                        { value: 0, label: "None" },
+                        { value: 3, label: "3 seconds" },
+                        { value: 5, label: "5 seconds" },
+                        { value: 10, label: "10 seconds" },
+                      ]}
                     />
-                    {micStream && <LevelMeter level={micLevel} label="Microphone level" />}
-                    {micStream && micLevel < 0.01 && <p className="text-xs text-muted">No sound yet - speak to check the level.</p>}
-                    <Select
-                      label="Webcam"
-                      value={camId}
-                      onChange={(v) => void selectCam(v)}
-                      disabled={!support?.media}
-                      options={deviceOptions("videoinput", "Camera")}
-                    />
-                    {camStream && <LivePreview stream={camStream} mirror className="w-40 rounded-lg border border-border bg-black" />}
-                    {camStream && <p className="text-xs text-muted">Placed as a picture-in-picture layer in the corner; move or resize it in the editor.</p>}
+                    <Toggle checked={hideWindow} onChange={setHideWindow} label="Minimize WipeClip while recording" hint="Use the hotkeys to control it." />
+                    {useNative && (
+                      <Toggle
+                        checked={showMini}
+                        onChange={setShowMini}
+                        label="Show a mini player"
+                        hint="A small window on top with the time, Pause and Stop. It never shows up in the video."
+                      />
+                    )}
+                    {useNative && (
+                      <Toggle
+                        checked={keepOut}
+                        onChange={setKeepOut}
+                        label="Hide WipeClip from the recording"
+                        hint="WipeClip stays on your screen but never shows up in the video."
+                      />
+                    )}
+                    <Toggle checked={autoOpen} onChange={setAutoOpen} label="Open in the editor when done" hint="Off: review it here first (preview, retake, save)." />
                   </Section>
 
                   <Section
-                    title="4. Mouse and keyboard"
-                    hint="Saved alongside the video (not drawn into it), for cursor effects and auto-zoom in the editor later."
+                    collapsible
+                    defaultOpen={false}
+                    title="Mouse and keyboard"
+                    hint="Saved alongside the video for cursor effects and auto zoom."
+                    aside={inputAvailable ? (inputOn ? "On" : "Off") : undefined}
                   >
                     {!inputAvailable ? (
                       <Note tone="info">Mouse and keyboard metadata isn&apos;t available on this system.</Note>
                     ) : (
                       <>
-                        <Toggle checked={inputOn} onChange={setInputOn} label="Record mouse and keyboard metadata" />
-                        <div className={`space-y-2 pl-7 ${inputOn ? "" : "pointer-events-none opacity-50"}`}>
+                        <Toggle checked={inputOn} onChange={setInputOn} label="Record mouse and keyboard metadata" hint="Not drawn into the video." />
+                        <div className={`space-y-3 border-l border-border pl-3 ${inputOn ? "" : "pointer-events-none opacity-50"}`}>
                           <Toggle checked={input.mouse} onChange={(v) => setInput({ ...input, mouse: v })} label="Pointer movement" />
                           <Toggle checked={input.clicks} onChange={(v) => setInput({ ...input, clicks: v })} label="Clicks" />
                           <Toggle checked={input.scroll} onChange={(v) => setInput({ ...input, scroll: v })} label="Scrolling" />
@@ -1250,7 +1309,7 @@ export default function ScreenRecorder({
                             checked={input.typing !== false}
                             onChange={(v) => setInput({ ...input, typing: v })}
                             label="Typing (for auto zoom)"
-                            hint="Only that you're typing and where the text cursor is, so the editor can zoom in on it. Which keys you press is never recorded."
+                            hint="Only that you're typing and where the text cursor is. Which keys you press is never recorded."
                             disabled={perms?.keyboard === "unsupported"}
                           />
                           {(input.keyboard === "shortcuts" || input.typing !== false) && perms?.keyboard === "denied" && (
@@ -1295,36 +1354,12 @@ export default function ScreenRecorder({
                     )}
                   </Section>
 
-                  <Section title="5. Recording">
-                    <Select
-                      label="Countdown"
-                      value={countdown}
-                      onChange={setCountdown}
-                      options={[
-                        { value: 0, label: "None" },
-                        { value: 3, label: "3 seconds" },
-                        { value: 5, label: "5 seconds" },
-                        { value: 10, label: "10 seconds" },
-                      ]}
-                    />
-                    <Toggle checked={hideWindow} onChange={setHideWindow} label="Minimize WipeClip while recording" hint="Use the hotkeys below to control it." />
-                    {useNative && (
-                      <Toggle
-                        checked={showMini}
-                        onChange={setShowMini}
-                        label="Show a mini player while recording"
-                        hint="A small window on top with what's being recorded, the time, Pause and Stop. It never shows up in the video."
-                      />
-                    )}
-                    {useNative && (
-                      <Toggle
-                        checked={keepOut}
-                        onChange={setKeepOut}
-                        label="Hide WipeClip from the recording"
-                        hint="WipeClip stays on your screen but never shows up in the video."
-                      />
-                    )}
-                    <Toggle checked={autoOpen} onChange={setAutoOpen} label="Open in the editor when recording stops" hint="Off: review it here first (preview, retake, save)." />
+                  <Section
+                    collapsible
+                    defaultOpen={freeBytes !== null && freeBytes < LOW_DISK_BYTES}
+                    title="Save location and hotkeys"
+                    aside={freeBytes !== null ? `${formatBytes(freeBytes)} free` : undefined}
+                  >
                     <div className="text-sm">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-foreground">Save to</span>
@@ -1345,13 +1380,17 @@ export default function ScreenRecorder({
                       <p className="mt-1 text-xs text-muted">Each recording gets its own new folder; existing recordings are never overwritten.</p>
                     </div>
                     {shortcuts.length > 0 && (
-                      <ul className="space-y-0.5 text-xs text-muted">
+                      <ul className="space-y-1.5 border-t border-border pt-3 text-xs text-muted">
                         {shortcuts.map((s) => (
-                          <li key={s.action} className="flex justify-between gap-2">
+                          <li key={s.action} className="flex items-center justify-between gap-2">
                             <span>{{ toggle: "Start / stop", pause: "Pause / resume", marker: "Add marker", screenshot: "Screenshot" }[s.action]}</span>
-                            <span className={s.error ? "text-amber-600 dark:text-amber-300" : "font-mono"} title={s.error ?? undefined}>
-                              {s.error ? "unavailable (in use)" : s.accelerator.replace("CommandOrControl", platform === "macos" ? "Cmd" : "Ctrl").replace("Alt", platform === "macos" ? "Option" : "Alt")}
-                            </span>
+                            {s.error ? (
+                              <span className="text-amber-600 dark:text-amber-300" title={s.error}>
+                                unavailable (in use)
+                              </span>
+                            ) : (
+                              <kbd className="rounded-md border border-border bg-surface px-1.5 py-0.5 font-mono text-[11px] text-foreground">{keyLabel(s.accelerator)}</kbd>
+                            )}
                           </li>
                         ))}
                       </ul>
@@ -1360,26 +1399,41 @@ export default function ScreenRecorder({
                 </div>
               </div>
 
-              <div className="sticky bottom-0 flex flex-wrap items-center gap-3 border-t border-border bg-background/95 py-3 backdrop-blur">
+              <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center gap-3 border-t border-border bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+                <div className="min-w-0 flex-1 text-xs text-muted">
+                  {source ? (
+                    <>
+                      <span className="font-semibold text-foreground">Ready to record.</span> {outW}×{outH} · {outFps} fps · {micStream ? "microphone on" : "no microphone"}
+                      {camStream ? " · webcam on" : ""}
+                    </>
+                  ) : (
+                    "Choose what to record to get started."
+                  )}
+                </div>
+                <button type="button" onClick={() => void openExisting()} className="btn-secondary rounded-full px-4 py-2.5 text-sm font-semibold">
+                  Open a recording…
+                </button>
                 <button
                   type="button"
                   disabled={!source || !saveDir || !!unsupported}
                   onClick={() => void begin()}
-                  className="btn-primary inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-sm font-semibold disabled:opacity-50"
+                  title={startKey ? `Start recording (${keyLabel(startKey.accelerator)})` : undefined}
+                  className="inline-flex items-center gap-2 rounded-full bg-rose-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-rose-600/20 hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <span className="h-2.5 w-2.5 rounded-full bg-rose-500" aria-hidden /> Start recording
+                  <span className="h-2.5 w-2.5 rounded-full bg-white" aria-hidden /> Start recording
+                  {startKey && <kbd className="ml-1 rounded bg-white/20 px-1.5 py-0.5 font-mono text-[10px]">{keyLabel(startKey.accelerator)}</kbd>}
                 </button>
-                <button type="button" onClick={() => void openExisting()} className="btn-secondary rounded-full px-4 py-2.5 text-sm font-semibold">
-                  Open a recording…
-                </button>
-                {!source && <span className="text-xs text-muted">Choose what to record first.</span>}
               </div>
             </>
           )}
 
           {step === "countdown" && (
-            <div className="flex flex-col items-center justify-center gap-4 py-24 text-center" role="status" aria-live="assertive">
-              <p className="font-display text-8xl font-bold tabular-nums text-foreground">{count}</p>
+            <div className="flex flex-col items-center justify-center gap-5 py-24 text-center" role="status" aria-live="assertive">
+              <div className="flex h-44 w-44 items-center justify-center rounded-full border-4 border-rose-500/30 bg-rose-500/10">
+                <p key={count} className="animate-pulse font-display text-8xl font-bold tabular-nums text-foreground">
+                  {count}
+                </p>
+              </div>
               <p className="text-sm text-muted">Recording starts in {count}… Press Esc to cancel.</p>
               <button type="button" className="btn-secondary rounded-full px-4 py-2 text-sm font-semibold" onClick={() => (countdownCancel.current = true)}>
                 Cancel
@@ -1388,8 +1442,8 @@ export default function ScreenRecorder({
           )}
 
           {step === "recording" && (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-border bg-surface-2/50 p-4">
+            <div className="mx-auto max-w-4xl space-y-4">
+              <div className="flex flex-col items-center gap-4 rounded-[1.75rem] border border-border bg-surface-2/50 p-6 text-center">
                 <span
                   className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold ${status === "paused" ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-rose-500/15 text-rose-600 dark:text-rose-400"}`}
                   role="status"
@@ -1397,28 +1451,33 @@ export default function ScreenRecorder({
                   <span className={`h-2 w-2 rounded-full ${status === "paused" ? "bg-amber-500" : "animate-pulse bg-rose-500"}`} aria-hidden />
                   {status === "paused" ? "Paused" : status === "stopping" ? "Saving…" : "Recording"}
                 </span>
-                <span className="font-display text-3xl font-bold tabular-nums text-foreground">{formatDuration(elapsed)}</span>
-                <span className="text-xs text-muted">{formatBytes(sizes.total)} written</span>
-                <div className="ml-auto flex flex-wrap gap-2">
-                  <button type="button" onClick={togglePause} disabled={status === "stopping"} className="btn-secondary rounded-full px-4 py-2 text-sm font-semibold">
+                <span className="font-display text-5xl font-bold tabular-nums text-foreground">{formatDuration(elapsed)}</span>
+                <span className="-mt-2 text-xs text-muted">{formatBytes(sizes.total)} written</span>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button type="button" onClick={togglePause} disabled={status === "stopping"} className="btn-secondary rounded-full px-5 py-2.5 text-sm font-semibold">
                     {status === "paused" ? "Resume" : "Pause"}
                   </button>
-                  <button type="button" onClick={addMarker} disabled={status === "stopping"} className="btn-secondary rounded-full px-4 py-2 text-sm font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => void stop()}
+                    disabled={status === "stopping"}
+                    className="inline-flex items-center gap-2 rounded-full bg-rose-600 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-rose-600/20 hover:bg-rose-500 disabled:opacity-50"
+                  >
+                    <span className="h-2.5 w-2.5 rounded-sm bg-white" aria-hidden /> Stop
+                  </button>
+                  <button type="button" onClick={addMarker} disabled={status === "stopping"} className="btn-secondary rounded-full px-4 py-2.5 text-sm font-semibold">
                     Marker
                   </button>
-                  <button type="button" onClick={() => void screenshot()} disabled={status === "stopping"} className="btn-secondary rounded-full px-4 py-2 text-sm font-semibold">
+                  <button type="button" onClick={() => void screenshot()} disabled={status === "stopping"} className="btn-secondary rounded-full px-4 py-2.5 text-sm font-semibold">
                     Screenshot
                   </button>
-                  <button type="button" onClick={() => void stop()} disabled={status === "stopping"} className="btn-primary rounded-full px-5 py-2 text-sm font-semibold">
-                    Stop
-                  </button>
-                  <button type="button" onClick={() => void cancelRecording()} disabled={status === "stopping"} className="rounded-full px-3 py-2 text-sm font-semibold text-rose-600 hover:underline dark:text-rose-400">
-                    Cancel
-                  </button>
                 </div>
+                <button type="button" onClick={() => void cancelRecording()} disabled={status === "stopping"} className="text-xs font-semibold text-muted hover:text-rose-600 hover:underline">
+                  Cancel and delete
+                </button>
               </div>
-              <p className="break-all text-xs text-muted">Saving to {outputPath}</p>
               {source && <LivePreview stream={source.stream} className="mx-auto max-h-[45vh] w-full rounded-xl border border-border bg-black object-contain" />}
+              <p className="break-all text-center text-xs text-muted">Saving to {outputPath}</p>
               {elapsed > EXPORT_MAX_MS && <Note tone="warn">Past 10 minutes: the recording keeps saving, but the editor exports videos up to 10 minutes.</Note>}
               {warnings.map((w) => (
                 <Note key={w} tone="warn">
@@ -1441,11 +1500,30 @@ export default function ScreenRecorder({
                     </div>
                   )}
                 </div>
-                <Section title="Recording saved">
-                  <p className="break-all text-xs text-muted">{finished.path}</p>
+                <Section
+                  title="Recording saved"
+                  aside={<span className="font-display text-base font-bold tabular-nums text-foreground">{formatDuration(finished.manifest.durationMs)}</span>}
+                >
+                  <button type="button" disabled={!!busy} onClick={() => void openInEditor()} className="btn-primary w-full rounded-full px-5 py-2.5 text-sm font-semibold">
+                    {busy ?? "Open in editor"}
+                  </button>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button type="button" onClick={save} className="btn-secondary rounded-full px-3 py-2 text-xs font-semibold">
+                      Save
+                    </button>
+                    <button type="button" onClick={() => void retake()} className="btn-secondary rounded-full px-3 py-2 text-xs font-semibold">
+                      Retake
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void recordingReveal(finished.path).catch((e) => setError({ message: errorText(e, "Couldn't open the folder.") }))}
+                      className="btn-secondary rounded-full px-3 py-2 text-xs font-semibold"
+                    >
+                      Show folder
+                    </button>
+                  </div>
+                  <p className="break-all border-t border-border pt-3 text-xs text-muted">{finished.path}</p>
                   <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                    <dt className="text-muted">Length</dt>
-                    <dd className="text-foreground">{formatDuration(finished.manifest.durationMs)}</dd>
                     {finished.manifest.tracks.map((t) => (
                       <div key={t.kind} className="contents">
                         <dt className="text-muted">{{ screen: "Screen", "system-audio": "System audio", microphone: "Microphone", webcam: "Webcam" }[t.kind]}</dt>
@@ -1476,24 +1554,6 @@ export default function ScreenRecorder({
                     </Note>
                   ))}
                 </Section>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" disabled={!!busy} onClick={() => void openInEditor()} className="btn-primary rounded-full px-5 py-2.5 text-sm font-semibold">
-                  {busy ?? "Open in editor"}
-                </button>
-                <button type="button" onClick={save} className="btn-secondary rounded-full px-4 py-2.5 text-sm font-semibold">
-                  Save
-                </button>
-                <button type="button" onClick={() => void retake()} className="btn-secondary rounded-full px-4 py-2.5 text-sm font-semibold">
-                  Retake
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void recordingReveal(finished.path).catch((e) => setError({ message: errorText(e, "Couldn't open the folder.") }))}
-                  className="rounded-full px-4 py-2.5 text-sm font-semibold text-muted hover:text-foreground"
-                >
-                  Show in folder
-                </button>
               </div>
               <ToolFeedback tool="screen_recorder" className="" />
             </div>

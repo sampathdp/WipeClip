@@ -980,6 +980,7 @@ export function CaptionsPanel({
   onRemoveAll,
   onClose,
   modelCached = true,
+  model,
   hidden = false,
   onToggleHidden,
   onResize,
@@ -988,6 +989,8 @@ export function CaptionsPanel({
 }: {
   /** null = still checking. When false, generating asks to download the model first. */
   modelCached?: boolean | null;
+  /** The speech model this device will download (captions.ts speechModel). */
+  model?: { sizeMb: number; gpu: boolean } | null;
   /** Every caption is hidden (toggled off). */
   hidden?: boolean;
   onToggleHidden?: () => void;
@@ -1091,11 +1094,13 @@ export function CaptionsPanel({
           <div className="space-y-2 rounded-xl border border-border bg-surface-2/60 p-3 text-xs text-muted">
             <p className="font-semibold text-foreground">Speech model needed (one time)</p>
             <p>
-              Whisper base, about 80 MB, downloaded from Hugging Face and kept on this device. Transcribing uses the CPU (or GPU where available)
-              and around 1 GB of memory; a 10-minute recording takes a few minutes.
+              {model?.gpu
+                ? `High-accuracy speech model, about ${model.sizeMb} MB, downloaded once and kept on this device. Transcribing runs on your graphics card and uses around 2 GB of memory; a 10-minute recording takes about 3 minutes.`
+                : `Speech model, about ${model?.sizeMb ?? 250} MB, downloaded once and kept on this device. Transcribing uses the CPU and around 1.5 GB of memory; a 10-minute recording takes several minutes.`}{" "}
+              Your audio never leaves this device.
             </p>
             <ActionButton tone="accent" onClick={() => setConsent(true)} disabled={busy}>
-              Download model (80 MB)
+              Download model ({model?.sizeMb ?? 250} MB)
             </ActionButton>
           </div>
         ) : (

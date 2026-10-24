@@ -34,6 +34,7 @@ ${page("/about", "About", "what WipeClip is, who makes it and how files are hand
 
 ## Free tools
 
+${page("/tools", "All tools", "every tool, what it does and whether it runs in the browser or the desktop app")}
 ${page("/remove-background", "Remove background from image", "transparent PNG from a photo; one free reduced-size result a day, full resolution for 1 credit")}
 ${page("/sharpen-image", "Sharpen a photo", "restores detail in soft photos; light, standard or strong; one free reduced-size result a day, full resolution for 1 credit")}
 ${page("/extract-video-frame", "Extract a frame from video", "PNG frames, runs in the browser with no upload; one free reduced-size download a day, full resolution for 1 credit")}

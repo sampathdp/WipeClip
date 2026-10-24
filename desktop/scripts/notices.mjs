@@ -270,9 +270,9 @@ export function buildNotices({ engine = false } = {}) {
       "Downloaded on first use (not included in the installer)",
       RULE,
       "",
-      "Auto captions download the Whisper base speech model (OpenAI, MIT licence; ONNX",
-      "conversion by onnx-community on Hugging Face) and the ONNX Runtime Web files, only",
-      "after you agree to the download.",
+      "Auto captions download a Whisper speech model - large-v3-turbo with a usable GPU,",
+      "small otherwise (OpenAI, MIT licence; ONNX conversion by onnx-community on Hugging",
+      "Face) - and the ONNX Runtime Web files, only after you agree to the download.",
       "",
     ].join("\n"),
   );
