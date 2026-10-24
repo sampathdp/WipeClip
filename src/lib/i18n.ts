@@ -3,13 +3,14 @@
  * own slugs, since people search in their own words ("hintergrund
  * entfernen", not "remove background"). */
 
-export const LOCALES = ["de", "fr", "es"] as const;
+export const LOCALES = ["de", "fr", "es", "it"] as const;
 export type Locale = (typeof LOCALES)[number];
 
 export const LOCALE_INFO: Record<Locale, { name: string; ogLocale: string }> = {
   de: { name: "Deutsch", ogLocale: "de_DE" },
   fr: { name: "Français", ogLocale: "fr_FR" },
   es: { name: "Español", ogLocale: "es_ES" },
+  it: { name: "Italiano", ogLocale: "it_IT" },
 };
 
 export function isLocale(value: string): value is Locale {
@@ -19,10 +20,10 @@ export function isLocale(value: string): value is Locale {
 /** English path -> its slug in each language. An empty slug is the
  * language's index page (/de, /fr). */
 export const TRANSLATED_PATHS: Record<string, Record<Locale, string>> = {
-  "/download": { de: "", fr: "", es: "" },
-  "/remove-background": { de: "hintergrund-entfernen", fr: "supprimer-arriere-plan", es: "quitar-fondo" },
-  "/sharpen-image": { de: "bild-schaerfen", fr: "rendre-photo-nette", es: "enfocar-foto" },
-  "/extract-video-frame": { de: "standbild-aus-video", fr: "extraire-image-video", es: "extraer-fotograma-video" },
+  "/download": { de: "", fr: "", es: "", it: "" },
+  "/remove-background": { de: "hintergrund-entfernen", fr: "supprimer-arriere-plan", es: "quitar-fondo", it: "rimuovere-sfondo" },
+  "/sharpen-image": { de: "bild-schaerfen", fr: "rendre-photo-nette", es: "enfocar-foto", it: "rendere-nitida-foto" },
+  "/extract-video-frame": { de: "standbild-aus-video", fr: "extraire-image-video", es: "extraer-fotograma-video", it: "estrarre-fotogramma-video" },
 };
 
 export function localizedPath(locale: Locale, slug: string): string {

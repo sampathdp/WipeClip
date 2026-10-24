@@ -26,6 +26,7 @@ export const UI: Record<Locale, { factsTitle: string; otherLanguages: string; fr
   de: { factsTitle: "Auf einen Blick", otherLanguages: "Diese Seite auf", freeTools: "Kostenlose Tools" },
   fr: { factsTitle: "En bref", otherLanguages: "Cette page en", freeTools: "Outils gratuits" },
   es: { factsTitle: "De un vistazo", otherLanguages: "Esta página en", freeTools: "Herramientas gratis" },
+  it: { factsTitle: "In breve", otherLanguages: "Questa pagina in", freeTools: "Strumenti gratuiti" },
 };
 
 /** Translations of the English pages, keyed by the same slugs as
@@ -595,6 +596,195 @@ export const PAGES: Record<Locale, Record<string, LocalizedPage>> = {
         {
           q: "¿Y si quiero editar todo el vídeo?",
           a: "Esta herramienta guarda un solo fotograma. Para cortar, subtitular o reordenar todo el clip, usa el editor de vídeo gratis de WipeClip.co para Windows y Mac.",
+        },
+      ],
+    },
+  },
+  it: {
+    "": {
+      enPath: "/download",
+      demo: "download",
+      title: "Registratore dello schermo ed editor video gratis per Windows e Mac",
+      description:
+        "Registra lo schermo, taglia le pause con un clic, aggiungi zoom automatici e sottotitoli. Gratis per Windows e macOS.",
+      badge: "Gratis per Windows e Mac",
+      h1: ["Registra lo schermo e ", "monta i tuoi video", " gratis"],
+      intro:
+        "WipeClip è un registratore dello schermo ed editor video gratuito per Windows e Mac. Gli zoom seguono automaticamente ogni clic, le pause si tagliano con un clic e i sottotitoli vengono creati sul tuo computer.",
+      guideTitle: "Come creare un video con WipeClip",
+      steps: [
+        "Scarica WipeClip per Windows o macOS e installa l'app.",
+        "Registra tutto lo schermo, una finestra o un'area. Audio di sistema, microfono e webcam vengono salvati su tracce separate.",
+        "Accetta gli zoom suggeriti sui tuoi clic oppure modificali.",
+        "Taglia le pause lunghe e i tempi morti, e genera i sottotitoli sul tuo computer.",
+        "Esporta un MP4 e i sottotitoli (.srt o .vtt) direttamente sul tuo disco.",
+      ],
+      facts: [
+        { label: "Sistemi", value: "Windows 10 (21H2+), Windows 11, macOS 11+" },
+        { label: "Prezzo", value: "Gratis, pass opzionali senza abbonamento" },
+        { label: "Registrazione", value: "Schermo, finestra o area" },
+        { label: "Sottotitoli", value: "Creati sul dispositivo, .srt e .vtt" },
+        { label: "Formati", value: "Orizzontale, verticale, quadrato" },
+      ],
+      faqTitle: "Domande frequenti su WipeClip",
+      faqs: [
+        {
+          q: "WipeClip è gratis?",
+          a: "Sì. Scaricare, registrare e montare è gratis. Accedendo ottieni esportazioni a piena risoluzione, che usano crediti. Ricevi crediti gratuiti ogni giorno, e i pass opzionali senza abbonamento sbloccano effetti premium e il 4K.",
+        },
+        {
+          q: "Quali sistemi sono supportati?",
+          a: "Windows 10 (21H2 o successivo), Windows 11 e macOS 11 o successivo.",
+        },
+        {
+          q: "Le mie registrazioni vengono caricate online?",
+          a: "No. Le registrazioni vengono salvate in una cartella sul tuo computer, e registrazione, montaggio, analisi e sottotitoli avvengono lì. Un video viene caricato solo durante l'esportazione, elaborato in uno spazio temporaneo e non conservato.",
+        },
+        {
+          q: "Perché Windows mostra «Windows ha protetto il PC»?",
+          a: "Windows avvisa per le app nuove che hanno ancora pochi download. Nel programma di installazione fai clic su «Ulteriori informazioni» e poi su «Esegui comunque». Una volta installata, l'app si aggiorna da sola.",
+        },
+        {
+          q: "In che lingua è l'app?",
+          a: "Per ora l'interfaccia dell'app è in inglese.",
+        },
+      ],
+    },
+    "rimuovere-sfondo": {
+      enPath: "/remove-background",
+      demo: "background",
+      title: "Rimuovere lo sfondo da un'immagine gratis – PNG trasparente",
+      description:
+        "Carica una foto e ottieni in pochi secondi un PNG con sfondo trasparente. Un risultato gratis al giorno, senza account.",
+      badge: "Strumento gratuito",
+      h1: ["Rimuovi lo ", "sfondo", " da qualsiasi foto"],
+      intro:
+        "Carica una foto e ricevi un PNG trasparente. Niente da selezionare e nessun account per l'anteprima. Poi posiziona il soggetto sullo sfondo che preferisci.",
+      guideTitle: "Come rimuovere lo sfondo da una foto",
+      steps: [
+        "Trascina una foto JPG, PNG o WebP (fino a 25 MB) nell'area di caricamento, oppure fai clic per scegliere un file.",
+        "WipeClip riconosce il soggetto automaticamente. Non devi tracciare né selezionare nulla.",
+        "Controlla l'anteprima scontornata sulla scacchiera trasparente.",
+        "Scarica il risultato come PNG con sfondo trasparente e posizionalo su un nuovo sfondo.",
+      ],
+      facts: [
+        { label: "Formato", value: "PNG con trasparenza" },
+        { label: "Caricamento max", value: "25 MB per immagine" },
+        { label: "Gratis", value: "1 scontorno al giorno, dimensione ridotta" },
+        { label: "Con accesso", value: "Piena risoluzione, 1 credito per immagine" },
+        { label: "Crediti gratuiti", value: "2 al giorno, per ogni account" },
+      ],
+      faqTitle: "Rimuovere lo sfondo: domande frequenti",
+      faqs: [
+        {
+          q: "È davvero gratis?",
+          a: "Sì. Tutti hanno uno scontorno gratuito al giorno a dimensione ridotta, senza account. Per la piena risoluzione accedi: costa 1 credito, e ogni account riceve 2 crediti gratuiti al giorno.",
+        },
+        {
+          q: "Che formato di file ottengo?",
+          a: "Un PNG con canale alfa trasparente, per mettere il soggetto direttamente su un nuovo sfondo, una scheda prodotto o una slide.",
+        },
+        {
+          q: "Va bene per le foto dei prodotti?",
+          a: "Sì. Il PNG scontornato si può mettere su uno sfondo bianco o colorato, come richiedono molti marketplace e negozi online per le foto dei prodotti.",
+        },
+        {
+          q: "I bordi di capelli e dettagli fini vengono puliti?",
+          a: "Dopo il primo ritaglio, WipeClip pulisce i bordi e ammorbidisce il canale alfa per eliminare aloni e contorni irregolari intorno ai dettagli fini.",
+        },
+        {
+          q: "Conservate la mia foto?",
+          a: "No. La foto viene elaborata per creare il tuo PNG e poi eliminata. Non viene mai usata per addestrare alcun modello.",
+        },
+      ],
+    },
+    "rendere-nitida-foto": {
+      enPath: "/sharpen-image",
+      demo: "sharpen",
+      title: "Rendere nitida una foto sfocata gratis",
+      description:
+        "Ridai dettaglio a una foto morbida o leggermente sfocata in pochi secondi. Un risultato gratis al giorno, senza account. Intensità leggera, standard o forte.",
+      badge: "Strumento gratuito",
+      h1: ["Rendi nitida una foto ", "morbida o sfocata", ""],
+      intro: "Carica una foto, scegli l'intensità e recupera dettagli più nitidi, senza account per l'anteprima.",
+      guideTitle: "Come rendere più nitida una foto",
+      steps: [
+        "Trascina una foto JPG, PNG o WebP (fino a 25 MB) nell'area di caricamento, oppure fai clic per scegliere un file.",
+        "Scegli un'intensità: Light per pelle e cielo, Standard per la maggior parte delle foto, Strong per le foto che restano morbide.",
+        "Confronta il risultato con l'originale fianco a fianco.",
+        "Scarica la foto migliorata. Mantiene le dimensioni in pixel del file caricato.",
+      ],
+      facts: [
+        { label: "Intensità", value: "Light, Standard, Strong" },
+        { label: "Caricamento max", value: "25 MB per immagine" },
+        { label: "Gratis", value: "1 foto al giorno, dimensione ridotta" },
+        { label: "Piena risoluzione", value: "1 credito per foto, 2 crediti gratuiti al giorno" },
+      ],
+      faqTitle: "Nitidezza delle foto: domande frequenti",
+      faqs: [
+        {
+          q: "Sistema una foto molto sfocata o mossa?",
+          a: "No. Lo strumento recupera il contrasto locale e i dettagli dei bordi in una foto già abbastanza nitida ma un po' morbida, per esempio dopo compressione o ridimensionamento. Non può inventare dettagli mai catturati.",
+        },
+        {
+          q: "Aumenta la risoluzione dell'immagine?",
+          a: "No. Il risultato ha le stesse dimensioni in pixel del file caricato. Lo strumento migliora la chiarezza alla stessa risoluzione.",
+        },
+        {
+          q: "Che differenza c'è tra Light, Standard e Strong?",
+          a: "Quanto viene aumentato il contrasto locale intorno ai bordi rilevati. Standard va bene per la maggior parte delle foto, Light evita l'eccesso su pelle o cielo, Strong è per le foto ancora morbide dopo Standard.",
+        },
+        {
+          q: "È gratis?",
+          a: "Sì. Tutti hanno una foto migliorata gratis al giorno a dimensione ridotta, senza account. Per la piena risoluzione accedi: costa 1 credito, e ogni account riceve 2 crediti gratuiti al giorno.",
+        },
+        {
+          q: "Conservate la mia foto?",
+          a: "No. La foto viene elaborata e poi eliminata. Non viene mai usata per addestrare alcun modello.",
+        },
+      ],
+    },
+    "estrarre-fotogramma-video": {
+      enPath: "/extract-video-frame",
+      demo: "frame",
+      title: "Estrarre un fotogramma da un video gratis, senza caricarlo",
+      description:
+        "Salva qualsiasi fotogramma di un video come screenshot o miniatura PNG. Funziona nel browser, senza caricare nulla. Un download gratis al giorno.",
+      badge: "Gratis • Senza caricamento",
+      h1: ["Estrai un ", "fotogramma", " da qualsiasi video"],
+      intro:
+        "Vai al momento che vuoi e salvalo come PNG, fino alla piena risoluzione. Tutto avviene nel tuo browser. Il tuo video non viene mai caricato.",
+      guideTitle: "Come salvare un fotogramma da un video",
+      steps: [
+        "Apri un video che il tuo browser può riprodurre (MP4 o WebM, fino a 500 MB). Resta sul tuo dispositivo.",
+        "Vai al momento che vuoi, oppure scegli una delle copertine che WipeClip suggerisce analizzando il video.",
+        "Cattura il fotogramma. Puoi catturarne quanti vuoi.",
+        "Scarica un fotogramma gratis a dimensione ridotta una volta al giorno, oppure a piena risoluzione per 1 credito.",
+      ],
+      facts: [
+        { label: "Formato", value: "PNG, fino alla risoluzione del video" },
+        { label: "Dimensione max", value: "500 MB" },
+        { label: "Caricamento", value: "Nessuno, funziona nel browser" },
+        { label: "Gratis", value: "1 download al giorno, bassa risoluzione" },
+        { label: "Piena risoluzione", value: "1 credito per fotogramma, accesso richiesto" },
+      ],
+      faqTitle: "Estrarre fotogrammi: domande frequenti",
+      faqs: [
+        {
+          q: "Il mio video viene caricato da qualche parte?",
+          a: "No. Il video viene decodificato e disegnato interamente nella scheda del tuo browser, e non viene mai inviato ai server di WipeClip.co. Funzionano video fino a 500 MB in un formato che il tuo browser può riprodurre (di solito MP4 o WebM).",
+        },
+        {
+          q: "Quanti fotogrammi posso catturare?",
+          a: "Quanti vuoi per catturare e vedere l'anteprima. Il limite riguarda il download: un fotogramma gratis al giorno in bassa risoluzione, e ogni fotogramma a piena risoluzione costa 1 credito. Ogni account riceve 2 crediti gratuiti al giorno.",
+        },
+        {
+          q: "Che risoluzione ha il fotogramma esportato?",
+          a: "Un download a piena risoluzione è un PNG alla risoluzione nativa del video. Il download gratuito giornaliero è ridotto a circa 0,25 megapixel.",
+        },
+        {
+          q: "E se voglio montare tutto il video?",
+          a: "Questo strumento salva un solo fotogramma. Per tagliare, sottotitolare o riordinare tutto il clip, usa l'editor video gratuito di WipeClip.co per Windows e Mac.",
         },
       ],
     },
