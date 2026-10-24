@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import Navbar from "@/components/Navbar";
-import Footer from "@/components/Footer";
 import Logo from "@/components/Logo";
 import { createClient } from "@/lib/supabase/client";
 
@@ -30,8 +28,7 @@ export default function ResetPasswordClient() {
   };
 
   return (
-    <div className="flex flex-1 flex-col min-h-screen">
-      <Navbar />
+    <>
       <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 pt-36 pb-28 relative overflow-hidden">
         <div
           aria-hidden
@@ -87,7 +84,6 @@ export default function ResetPasswordClient() {
           )}
         </div>
       </main>
-      <Footer />
-    </div>
+    </>
   );
 }

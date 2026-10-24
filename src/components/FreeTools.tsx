@@ -1,7 +1,9 @@
 import Link from "next/link";
 import Reveal from "./Reveal";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
-import { TOOLS, type ToolAvailability } from "@/lib/site-pages";
+import { TOOLS } from "@/lib/site-pages";
+import { localeHref, type Lang } from "@/lib/i18n";
+import { getDict, toolCopy } from "@/i18n";
 
 // Card icons, keyed by tool href; names and copy come from site-pages.
 const ICONS: Record<string, React.ReactNode> = {
@@ -39,10 +41,10 @@ const ICONS: Record<string, React.ReactNode> = {
   ),
 };
 
-const BADGE: Record<ToolAvailability, string> = { desktop: "New", free: "Free", pro: "Pro" };
-
-
-export default function FreeTools() {
+export default function FreeTools({ lang = "en" }: { lang?: Lang }) {
+  const d = getDict(lang);
+  const t = d.freeTools;
+  const catalog = d.toolCatalog;
   return (
     <section id="tools" className="scroll-mt-28 py-24 relative overflow-hidden">
       <div
@@ -53,25 +55,25 @@ export default function FreeTools() {
       <div className="mx-auto max-w-7xl px-6">
         <div className="mx-auto max-w-2xl text-center">
           <div className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-cyan-50 border border-cyan-500/30 px-3.5 py-1 text-xs font-semibold text-cyan-600">
-            The Full Toolkit
+            {t.badge}
           </div>
           <h2 className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-            More than <span className="text-gradient">{AI_CLEANUP_ENABLED ? "video cleanup" : "video editing"}</span>
+            {t.title}<span className="text-gradient">{AI_CLEANUP_ENABLED ? "video cleanup" : t.titleHighlight}</span>
           </h2>
           <p className="mt-4 text-muted text-base leading-relaxed">
-            Everything else you need for the same footage and photos: a full desktop video editor, plus
-            three free tools with no account required to try.
+            {t.intro}
           </p>
         </div>
 
         <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {TOOLS.map((t, i) => {
-            const badge = BADGE[t.availability];
+            const featured = t.availability === "desktop";
+            const copy = toolCopy(lang, t);
             return (
-            <Reveal key={t.href} delay={i * 80} className={badge === "New" ? "lg:col-span-2" : ""}>
+            <Reveal key={t.href} delay={i * 80} className={featured ? "lg:col-span-2" : ""}>
             <Link
-              href={t.href}
-              className={`glass-card-interactive group rounded-[1.75rem] p-7 flex h-full flex-col justify-between ${badge === "New" ? "border-glow" : ""}`}
+              href={localeHref(lang, t.href)}
+              className={`glass-card-interactive group rounded-[1.75rem] p-7 flex h-full flex-col justify-between ${featured ? "border-glow" : ""}`}
             >
               <div>
                 <div className="mb-5 flex items-center justify-between">
@@ -80,19 +82,19 @@ export default function FreeTools() {
                   </div>
                   <span
                     className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
-                      badge === "Free"
+                      t.availability === "free"
                         ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
                         : "border-accent/30 bg-accent/10 text-accent"
                     }`}
                   >
-                    {badge}
+                    {catalog.badges[t.availability]}
                   </span>
                 </div>
-                <h3 className="font-display text-lg font-bold text-foreground tracking-tight">{t.title}</h3>
-                <p className="mt-2.5 text-sm text-muted leading-relaxed">{t.desc}</p>
+                <h3 className="font-display text-lg font-bold text-foreground tracking-tight">{copy.title}</h3>
+                <p className="mt-2.5 text-sm text-muted leading-relaxed">{copy.desc}</p>
               </div>
               <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-cyan-600 transition-transform group-hover:translate-x-1">
-                Try it
+                {d.freeTools.tryIt}
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>
@@ -103,8 +105,8 @@ export default function FreeTools() {
           })}
         </div>
         <p className="mt-10 text-center text-sm">
-          <Link href="/tools" className="font-semibold text-cyan-600 underline hover:text-foreground">
-            See every tool and where it runs
+          <Link href={localeHref(lang, "/tools")} className="font-semibold text-cyan-600 underline hover:text-foreground">
+            {d.freeTools.seeAll}
           </Link>
         </p>
       </div>

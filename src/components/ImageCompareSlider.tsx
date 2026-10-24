@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { useI18n } from "@/i18n/client";
 
 // Plain solid background reads as a rendering bug behind a transparent
 // PNG (e.g. the background-remover's output) - a checkerboard is the
@@ -22,6 +23,7 @@ export default function ImageCompareSlider({
   transparentResult?: boolean;
 }) {
   const [percent, setPercent] = useState(50);
+  const t = useI18n().t.tool.compare;
   const containerRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
 
@@ -52,17 +54,17 @@ export default function ImageCompareSlider({
         }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={afterSrc} alt="Cleaned result" className="absolute inset-0 h-full w-full object-contain" draggable={false} />
+        <img src={afterSrc} alt={t.resultAlt} className="absolute inset-0 h-full w-full object-contain" draggable={false} />
         <span className="absolute bottom-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full bg-surface-2/80 backdrop-blur-md px-3.5 py-1 text-xs font-semibold text-emerald-600 border border-emerald-500/30 shadow-lg">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          Clean Result
+          {t.result}
         </span>
 
         <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - percent}% 0 0)` }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={beforeSrc} alt="Original" className="absolute inset-0 h-full w-full object-contain" draggable={false} />
+          <img src={beforeSrc} alt={t.original} className="absolute inset-0 h-full w-full object-contain" draggable={false} />
           <span className="absolute bottom-4 left-4 inline-flex items-center gap-1.5 rounded-full bg-surface-2/80 backdrop-blur-md px-3.5 py-1 text-xs font-medium text-muted border border-border shadow-lg">
-            Original
+            {t.original}
           </span>
         </div>
 

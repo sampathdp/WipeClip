@@ -1,9 +1,11 @@
 import Link from "next/link";
 import BeforeAfterDemo from "./BeforeAfterDemo";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
+import { localeHref, type Lang } from "@/lib/i18n";
+import { getDict } from "@/i18n";
 
-const MARQUEE_ITEMS = AI_CLEANUP_ENABLED
-  ? [
+// AI cleanup copy stays English while the feature is off (see src/i18n/locales/en.ts).
+const CLEANUP_MARQUEE = [
       "MP4",
       "MOV",
       "WEBM",
@@ -15,17 +17,6 @@ const MARQUEE_ITEMS = AI_CLEANUP_ENABLED
       "STICKERS",
       "YOUR OWN FOOTAGE",
       "~15s AVG RENDER",
-    ]
-  : [
-      "MP4",
-      "MOV",
-      "WEBM",
-      "TRIM · CUT · TRANSITIONS",
-      "AUTO CAPTIONS",
-      "PICTURE-IN-PICTURE",
-      "TEXT · STICKERS · MUSIC",
-      "FILTERS",
-      "LANDSCAPE · VERTICAL · SQUARE",
     ];
 
 // Illustrative timeline under the hero video when the before/after cleanup
@@ -36,7 +27,7 @@ const SHOWCASE_CLIPS = [
   { w: "28%", cls: "from-fuchsia-500/60 to-fuchsia-500/30" },
 ];
 
-function EditorShowcase() {
+function EditorShowcase({ label }: { label: string }) {
   return (
     <div className="glass-card overflow-hidden rounded-[2.5rem] border border-cyan-500/20 p-4 sm:p-5">
       <video
@@ -45,7 +36,7 @@ function EditorShowcase() {
         muted
         loop
         playsInline
-        aria-label="Video editor preview"
+        aria-label={label}
         className="aspect-video w-full rounded-[1.75rem] bg-black object-cover ring-1 ring-border"
       />
       <div aria-hidden className="mt-4 flex h-10 gap-1">
@@ -63,7 +54,9 @@ function EditorShowcase() {
   );
 }
 
-export default function Hero() {
+export default function Hero({ lang = "en" }: { lang?: Lang }) {
+  const t = getDict(lang).hero;
+  const marquee = AI_CLEANUP_ENABLED ? CLEANUP_MARQUEE : t.marquee;
   return (
     <section className="relative overflow-hidden pt-20 pb-16 md:pt-32">
       {/* Dynamic Ambient Glow Mesh */}
@@ -95,35 +88,32 @@ export default function Hero() {
                   fill="currentColor"
                 />
               </svg>
-              <span className="tracking-wide">{AI_CLEANUP_ENABLED ? "AI Motion-Aware Inpainting" : "AI Auto Captions"}</span>
+              <span className="tracking-wide">{AI_CLEANUP_ENABLED ? "AI Motion-Aware Inpainting" : t.badge}</span>
             </div>
 
             {/* Core Headline - stacked, oversized, mixed weight */}
             <h1 className="font-display text-6xl tracking-tighter leading-[0.92] text-foreground sm:text-7xl lg:text-6xl xl:text-7xl">
-              <span className="block font-semibold text-foreground/90">Desktop Video </span>
+              <span className="block font-semibold text-foreground/90">{t.h1[0]}</span>
               <span className="block italic font-extrabold text-gradient drop-shadow-[0_0_35px_rgba(124,92,255,0.35)]">
-                Editor{" "}
+                {t.h1[1]}
               </span>
-              <span className="block font-extrabold">for Creators</span>
+              <span className="block font-extrabold">{t.h1[2]}</span>
             </h1>
 
             {/* Subtitle */}
             <p className="mx-auto mt-7 max-w-md text-base leading-relaxed text-muted sm:text-lg lg:mx-0 lg:border-l-2 lg:border-accent/40 lg:pl-5">
-              Trim, cut and arrange clips, add transitions, text, stickers,
-              filters and music, then export in landscape, vertical or square. Free
-              for Windows and Mac, with a built-in screen recorder.
               {AI_CLEANUP_ENABLED
-                ? " Built-in AI object removal takes out passers-by, cables and other distractions from footage you shot."
-                : " Auto captions and picture-in-picture included."}
+                ? "Trim, cut and arrange clips, add transitions, text, stickers, filters and music, then export in landscape, vertical or square. Free for Windows and Mac, with a built-in screen recorder. Built-in AI object removal takes out passers-by, cables and other distractions from footage you shot."
+                : t.intro}
             </p>
 
             {/* Action CTAs */}
             <div className="mt-9 flex flex-wrap items-center justify-center gap-4 lg:justify-start">
               <Link
-                href="/download"
+                href={localeHref(lang, "/download")}
                 className="btn-primary rounded-full px-8 py-4 text-sm sm:text-base font-bold inline-flex items-center justify-center gap-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_0_35px_rgba(124,92,255,0.45)] transition-all hover:scale-[1.02]"
               >
-<span>Download free</span>
+<span>{t.download}</span>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>
@@ -140,14 +130,14 @@ export default function Hero() {
                   href="#tools"
                   className="btn-secondary rounded-full px-7 py-4 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2"
                 >
-                  Free photo tools
+                  {t.photoTools}
                 </a>
               )}
             </div>
 
             {/* Trust Highlights */}
             <div className="mt-8 flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-              {["Free forever plan", "No account to start", "Windows & Mac"].map((label) => (
+              {t.trust.map((label) => (
                 <span
                   key={label}
                   className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-surface-2/60 px-3 py-1 text-[11px] font-medium text-muted"
@@ -166,7 +156,7 @@ export default function Hero() {
             <div className="absolute inset-0 -z-10 translate-x-3 translate-y-3 rotate-[-2deg] rounded-[2.5rem] bg-gradient-to-br from-accent/10 to-cyan-400/8 blur-sm dark:from-accent/25 dark:to-cyan-400/20" />
             <div className="absolute inset-0 -z-10 -translate-x-2 translate-y-5 rotate-[2deg] rounded-[2.5rem] border border-cyan-500/10 bg-surface-2/40" />
 
-            {AI_CLEANUP_ENABLED ? <BeforeAfterDemo /> : <EditorShowcase />}
+            {AI_CLEANUP_ENABLED ? <BeforeAfterDemo /> : <EditorShowcase label={t.videoLabel} />}
 
             {/* Floating stat chips, overlapping the video edges */}
             {AI_CLEANUP_ENABLED && (
@@ -192,7 +182,7 @@ export default function Hero() {
       {/* Scrolling marquee strip - full bleed, edge to edge */}
       <div className="mt-20 overflow-hidden border-y border-border/60 bg-surface-2/40 py-3">
         <div className="animate-marquee flex w-max items-center gap-8 font-mono text-[11px] font-medium tracking-widest text-muted">
-          {[...MARQUEE_ITEMS, ...MARQUEE_ITEMS].map((item, i) => (
+          {[...marquee, ...marquee].map((item, i) => (
             <span key={i} className="flex items-center gap-8">
               {item}
               <span className="text-cyan-600">•</span>

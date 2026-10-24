@@ -1,12 +1,16 @@
-/** Translated landing pages for European visitors. English stays at the
- * root with no prefix; each other language lives under /<locale> with its
- * own slugs, since people search in their own words ("hintergrund
- * entfernen", not "remove background"). */
+/** Site languages. English stays at the root with no prefix; every other
+ * language mirrors the same pages under /<locale> with the same slugs
+ * (/fr/pricing, /de/remove-background). */
 
 export const LOCALES = ["de", "fr", "es", "it", "nl", "pl"] as const;
 export type Locale = (typeof LOCALES)[number];
 
-export const LOCALE_INFO: Record<Locale, { name: string; ogLocale: string }> = {
+/** English plus every translated language. */
+export const LANGS = ["en", ...LOCALES] as const;
+export type Lang = (typeof LANGS)[number];
+
+export const LANG_INFO: Record<Lang, { name: string; ogLocale: string }> = {
+  en: { name: "English", ogLocale: "en_US" },
   de: { name: "Deutsch", ogLocale: "de_DE" },
   fr: { name: "Français", ogLocale: "fr_FR" },
   es: { name: "Español", ogLocale: "es_ES" },
@@ -19,10 +23,68 @@ export function isLocale(value: string): value is Locale {
   return (LOCALES as readonly string[]).includes(value);
 }
 
-/** English path -> its slug in each language. An empty slug is the
- * language's index page (/de, /fr). */
-export const TRANSLATED_PATHS: Record<string, Record<Locale, string>> = {
-  "/download": { de: "", fr: "", es: "", it: "", nl: "", pl: "" },
+/** Pages that exist in every language. Anything else (admin, auth, API,
+ * the switched-off AI cleanup pages) stays English-only at its one path. */
+export const LOCALIZED_PATHS = [
+  "/",
+  "/download",
+  "/about",
+  "/pricing",
+  "/tools",
+  "/remove-background",
+  "/sharpen-image",
+  "/extract-video-frame",
+  "/feedback",
+  "/privacy",
+  "/terms",
+  "/refund-policy",
+  "/dmca",
+  "/sign-in",
+  "/profile",
+  "/history",
+  "/referrals",
+  "/welcome",
+] as const;
+
+function isLocalizedPath(path: string): boolean {
+  return (LOCALIZED_PATHS as readonly string[]).includes(path);
+}
+
+/** The language a pathname is in, from its first segment. */
+export function langOf(pathname: string): Lang {
+  const first = pathname.split("/")[1] ?? "";
+  return isLocale(first) ? first : "en";
+}
+
+/** A pathname without its language prefix: /fr/pricing -> /pricing. */
+export function stripLang(pathname: string): string {
+  const lang = langOf(pathname);
+  if (lang === "en") return pathname || "/";
+  return pathname.slice(lang.length + 1) || "/";
+}
+
+/** An internal link in the given language: /pricing -> /fr/pricing,
+ * /#faq -> /fr#faq. Untranslated pages and external URLs pass through. */
+export function localeHref(lang: Lang, href: string): string {
+  if (lang === "en" || !href.startsWith("/")) return href;
+  const cut = href.search(/[?#]/);
+  const path = cut === -1 ? href : href.slice(0, cut);
+  const rest = cut === -1 ? "" : href.slice(cut);
+  if (!isLocalizedPath(path)) return href;
+  return (path === "/" ? `/${lang}` : `/${lang}${path}`) + rest;
+}
+
+/** hreflang map for an English path that exists in every language. */
+export function languageAlternates(enPath: string): Record<string, string> | undefined {
+  if (!isLocalizedPath(enPath)) return undefined;
+  const languages: Record<string, string> = { "x-default": enPath };
+  for (const l of LANGS) languages[l] = localeHref(l, enPath);
+  return languages;
+}
+
+/** The first translated pages used their own slugs per language. They now
+ * live at the English slug; next.config redirects the old URLs. */
+export const LEGACY_SLUGS: Record<string, Record<Locale, string>> = {
   "/remove-background": {
     de: "hintergrund-entfernen",
     fr: "supprimer-arriere-plan",
@@ -48,20 +110,3 @@ export const TRANSLATED_PATHS: Record<string, Record<Locale, string>> = {
     pl: "wyodrebnij-klatke-z-wideo",
   },
 };
-
-export function localizedPath(locale: Locale, slug: string): string {
-  return slug ? `/${locale}/${slug}` : `/${locale}`;
-}
-
-/** hreflang map for a page that exists in several languages, keyed by any
- * of its versions' paths. Undefined for English-only pages. */
-export function languageAlternates(path: string): Record<string, string> | undefined {
-  for (const [enPath, slugs] of Object.entries(TRANSLATED_PATHS)) {
-    const versions = LOCALES.map((l) => localizedPath(l, slugs[l]));
-    if (enPath !== path && !versions.includes(path)) continue;
-    const languages: Record<string, string> = { en: enPath, "x-default": enPath };
-    LOCALES.forEach((l, i) => (languages[l] = versions[i]));
-    return languages;
-  }
-  return undefined;
-}

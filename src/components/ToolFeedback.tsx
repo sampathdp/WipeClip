@@ -3,12 +3,9 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import FeedbackForm, { type FeedbackKind } from "./FeedbackForm";
+import { useI18n } from "@/i18n/client";
 
-const QUICK_PICKS: { kind: FeedbackKind; label: string }[] = [
-  { kind: "feedback", label: "Share feedback" },
-  { kind: "bug", label: "Report a problem" },
-  { kind: "feature", label: "Suggest a feature" },
-];
+const QUICK_PICKS: FeedbackKind[] = ["feedback", "bug", "feature"];
 
 /** Shown under a tool's result: a one-line "how did it turn out?" prompt
  * that opens the same form as /feedback, tagged with the tool and page so
@@ -17,6 +14,7 @@ const QUICK_PICKS: { kind: FeedbackKind; label: string }[] = [
 export default function ToolFeedback({ tool, className = "mt-6" }: { tool: string; className?: string }) {
   const [openKind, setOpenKind] = useState<FeedbackKind | null>(null);
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
+  const t = useI18n().t.feedback;
 
   useEffect(() => {
     const supabase = createClient();
@@ -32,13 +30,13 @@ export default function ToolFeedback({ tool, className = "mt-6" }: { tool: strin
       {openKind ? (
         <>
           <div className="mb-4 flex items-center justify-between gap-3">
-            <p className="text-sm font-semibold text-foreground">Tell us about this result</p>
+            <p className="text-sm font-semibold text-foreground">{t.toolTitle}</p>
             <button
               type="button"
               onClick={() => setOpenKind(null)}
               className="text-xs font-semibold text-muted hover:text-foreground"
             >
-              Close
+              {t.close}
             </button>
           </div>
           <FeedbackForm
@@ -47,21 +45,21 @@ export default function ToolFeedback({ tool, className = "mt-6" }: { tool: strin
             defaultKind={openKind}
             tool={tool}
             pageUrl={() => window.location.href}
-            signedInSentHint="You can follow its status on the Feedback page."
+            signedInSentHint={t.sentHintTool}
           />
         </>
       ) : (
         <div className="flex flex-col items-center gap-3 text-center sm:flex-row sm:justify-between sm:text-left">
-          <p className="text-sm text-muted">How did this turn out? Your feedback helps us improve it.</p>
+          <p className="text-sm text-muted">{t.toolPrompt}</p>
           <div className="flex flex-wrap justify-center gap-2">
-            {QUICK_PICKS.map((p) => (
+            {QUICK_PICKS.map((kind) => (
               <button
-                key={p.kind}
+                key={kind}
                 type="button"
-                onClick={() => setOpenKind(p.kind)}
+                onClick={() => setOpenKind(kind)}
                 className="btn-secondary rounded-full px-4 py-2 text-xs font-semibold"
               >
-                {p.label}
+                {t.quick[kind]}
               </button>
             ))}
           </div>

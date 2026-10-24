@@ -4,44 +4,33 @@ import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import { PLANS } from "@/lib/credits";
 import { DESKTOP_DOWNLOADS } from "@/lib/download";
 import { faqJsonLd, softwareAppJsonLd } from "@/lib/seo";
+import { localeHref, type Lang } from "@/lib/i18n";
+import { fmt, getDict } from "@/i18n";
+import type { Dict } from "@/i18n/types";
+import { rich } from "@/i18n/rich";
 
-const lowestPass = Object.values(PLANS).reduce((a, b) => (b.usdCents < a.usdCents ? b : a));
+// Passes only: credit packs (and the retired one) have no plan or days.
+const lowestPass = Object.values(PLANS)
+  .filter((p) => p.tier)
+  .reduce((a, b) => (b.usdCents < a.usdCents ? b : a));
 
-const editorFaqs = [
-  {
-    q: "What is WipeClip?",
-    a: "WipeClip is a free screen recorder and video editor for Windows and Mac. It records your screen, system audio, microphone and webcam as separate tracks, zooms in on your clicks automatically, finds pauses to cut, writes captions on your own computer, and exports at your original quality.",
-  },
-  {
-    q: "Is WipeClip free?",
-    a: `Yes. Recording and editing are free, with free credits that renew every day. Optional one-time passes, from ${lowestPass.priceLabel} for ${lowestPass.days} days, add premium transitions, filters and effects, exports up to 4K and more credits. Passes don't renew automatically.`,
-  },
-  {
-    q: "Which computers does WipeClip run on?",
-    a: DESKTOP_DOWNLOADS.map((d) => `${d.label}: ${d.requirements}.`).join(" "),
-  },
-  {
-    q: "What can I do in the editor?",
-    a: "The WipeClip desktop app for Windows and Mac lets you record your screen, trim, split and remove sections, reorder clips, add transitions, text, stickers, music and auto captions, and layer clips picture-in-picture, then export at your original aspect ratio and frame rate.",
-  },
-  {
-    q: "Do I need to install anything?",
-    a: "Yes. The editor is a free desktop app for Windows and Mac. Download it from wipeclip.co/download. Your projects are saved on your own computer so you can pick up where you left off.",
-  },
-  {
-    q: "What is the maximum file size?",
-    a: "Clips up to 300MB are supported on the free plan.",
-  },
-  {
-    q: "Do you store or use my video files?",
-    a: "No. Editing happens on your computer. Files uploaded for export are processed in temporary storage and deleted once your result is ready.",
-  },
-  {
-    q: "Will you process explicit or adult content?",
-    a: "No. Every upload is automatically screened before processing, and clips flagged as explicit or abusive are immediately rejected.",
-  },
-];
+/** "Windows: Windows 10 (21H2 or later) or Windows 11. macOS: …" in the
+ * dictionary's language. */
+export function systemsAnswer(d: Dict): string {
+  return DESKTOP_DOWNLOADS.map((dl) => {
+    const os = d.client.downloads[dl.os];
+    return `${os.label}: ${os.requirements}.`;
+  }).join(" ");
+}
 
+function editorFaqs(d: Dict) {
+  return d.homeFaq.items.map((f) => ({
+    q: f.q,
+    a: fmt(f.a, { price: lowestPass.priceLabel, days: lowestPass.days ?? "", systems: systemsAnswer(d) }),
+  }));
+}
+
+// English only: shown while the AI cleanup feature is on.
 const cleanupFaqs = [
   {
     q: "Can I also trim, cut, or edit my video?",
@@ -77,15 +66,21 @@ const cleanupFaqs = [
   },
 ];
 
-const faqs = AI_CLEANUP_ENABLED ? cleanupFaqs : editorFaqs;
+export default function Faq({ lang = "en" }: { lang?: Lang }) {
+  const d = getDict(lang);
+  const t = d.homeFaq;
+  const faqs = AI_CLEANUP_ENABLED ? cleanupFaqs : editorFaqs(d);
+  // Shown only on the homepage, so it also carries the app's own node.
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [softwareAppJsonLd(lang === "en" ? {} : { inLanguage: lang }), { ...faqJsonLd(faqs), inLanguage: lang }],
+  };
+  const link = (path: string, label: string) => (
+    <Link href={localeHref(lang, path)} className="underline hover:text-cyan-600">
+      {label}
+    </Link>
+  );
 
-// Shown only on the homepage, so it also carries the app's own node.
-const jsonLd = {
-  "@context": "https://schema.org",
-  "@graph": [softwareAppJsonLd(), faqJsonLd(faqs)],
-};
-
-export default function Faq() {
   return (
     <section id="faq" className="scroll-mt-28 py-24 relative">
       <script
@@ -97,10 +92,10 @@ export default function Faq() {
       <div className="mx-auto max-w-3xl px-6">
         <div className="text-center">
           <div className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-surface-2/90 border border-border px-3.5 py-1 text-xs font-semibold text-muted">
-            Frequently Asked Questions
+            {t.badge}
           </div>
           <h2 className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-            Got questions? We&apos;ve got answers.
+            {t.title}
           </h2>
         </div>
 
@@ -124,19 +119,11 @@ export default function Faq() {
         </Reveal>
 
         <p className="mt-8 text-center text-xs text-muted">
-          Full details available in our{" "}
-          <Link href="/terms" className="underline hover:text-cyan-600">
-            Terms of Service
-          </Link>
-          ,{" "}
-          <Link href="/privacy" className="underline hover:text-cyan-600">
-            Privacy Policy
-          </Link>
-          , and{" "}
-          <Link href="/dmca" className="underline hover:text-cyan-600">
-            Copyright Policy
-          </Link>
-          .
+          {rich(t.more, {
+            terms: link("/terms", t.terms),
+            privacy: link("/privacy", t.privacy),
+            dmca: link("/dmca", t.dmca),
+          })}
         </p>
       </div>
     </section>

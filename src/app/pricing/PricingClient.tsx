@@ -3,13 +3,15 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { initializePaddle, type Paddle } from "@paddle/paddle-js";
-import Navbar from "@/components/Navbar";
-import Footer from "@/components/Footer";
 import { formatCleanupLimit, formatLkr, FREE_DAILY_CREDITS, MAX_CLEANUP_SECONDS, PLANS, type PlanKey } from "@/lib/credits";
 import { TIER_LIMITS, TIERS as TIER_ORDER, toTier, type Tier } from "@/lib/entitlements";
 import { createClient } from "@/lib/supabase/client";
 import { landingPagePath, trackEvent } from "@/lib/analytics";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
+import { useI18n, useLocaleHref } from "@/i18n/client";
+import { fmt } from "@/i18n/format";
+import { rich } from "@/i18n/rich";
+import type { ClientMessages } from "@/i18n/types";
 
 type Billing = "month" | "year";
 
@@ -55,6 +57,9 @@ function readPromoCode(): string | null {
 
 let paddleLoad: Promise<Paddle> | null = null;
 
+/** loadPaddle's error message, shown translated (see buy). */
+const CHECKOUT_LOAD_FAILED = "checkout_load_failed";
+
 /** Loads and initializes Paddle.js once per page, in the environment the
  * server names (never defaulted here). pwCustomer is the signed-in user's
  * Paddle customer ID (ctm_...), for Paddle Retain - never our own user id
@@ -70,7 +75,7 @@ function loadPaddle(config: NonNullable<CheckoutConfig["paddle"]>): Promise<Padd
       return paddle;
     },
     () => {
-      throw new Error("Could not load the checkout. Check your connection or ad blocker and try again.");
+      throw new Error(CHECKOUT_LOAD_FAILED);
     }
   );
   paddleLoad.catch(() => (paddleLoad = null));
@@ -118,58 +123,29 @@ const res = (r: string) => (r === "4k" ? "4K" : r);
 const cleanupLimit = (tier: Tier) =>
   AI_CLEANUP_ENABLED ? [`AI video cleanup up to ${formatCleanupLimit(MAX_CLEANUP_SECONDS[tier])} per clip`] : [];
 
+type PricingMessages = ClientMessages["pricing"];
+
 /** Card copy per tier. Limits come from TIER_LIMITS so the page can't
- * drift from what /api/export actually enforces. */
-const TIERS: { tier: Tier; tagline: string; popular?: boolean; features: string[] }[] = [
-  {
-    tier: "free",
-    tagline: "Everything you need to start editing.",
-    features: [
-      "Full video editor: trim, split, text, stickers, audio",
-      "Basic transitions, filters and effects",
-      `Exports up to ${res(TIER_LIMITS.free.maxResolution)}`,
-      `${FREE_DAILY_CREDITS} AI credits a day`,
-      ...cleanupLimit("free"),
-    ],
-  },
-  {
-    tier: "lite",
-    tagline: "Premium editing at a small price.",
-    features: [
-      "Everything in Free",
-      "All premium transitions, filters and effects",
-      "Green screen, blend modes, speed curves, LUTs and curves",
-      "Karaoke captions, auto-ducking, voice effects and stabilization",
-      "GIF, audio-only, high-quality and 60 fps exports",
-      `Exports up to ${res(TIER_LIMITS.lite.maxResolution)}`,
-      `${PLANS.lite.credits} bonus AI credits, plus ${FREE_DAILY_CREDITS} free every day`,
-      ...cleanupLimit("lite"),
-    ],
-  },
-  {
-    tier: "starter",
-    tagline: "For creators publishing every week.",
-    popular: true,
-    features: [
-      "Everything in Lite",
-      `Exports up to ${res(TIER_LIMITS.starter.maxResolution)} Full HD`,
-      `${PLANS.starter.credits} bonus AI credits, plus ${FREE_DAILY_CREDITS} free every day`,
-      ...cleanupLimit("starter"),
-    ],
-  },
-  {
-    tier: "pro",
-    tagline: "For professionals and agencies.",
-    features: [
-      "Everything in Starter",
-      `Exports up to ${res(TIER_LIMITS.pro.maxResolution)} Ultra HD`,
-      `${PLANS.pro.credits} bonus AI credits, plus ${FREE_DAILY_CREDITS} free every day`,
-      ...cleanupLimit("pro"),
-      ...(AI_CLEANUP_ENABLED ? ["Image cleanup tool", "Highest-quality AI cleanup (motion-tracked)"] : []),
-      "Usage and billing history",
-    ],
-  },
-];
+ * drift from what /api/export actually enforces. The AI cleanup lines stay
+ * English while that feature is off. */
+function tierCards(t: PricingMessages): { tier: Tier; tagline: string; popular?: boolean; features: string[] }[] {
+  return TIER_ORDER.map((tier) => {
+    const copy = t.tiers[tier];
+    const features = copy.features.map((f) =>
+      fmt(f, {
+        res: res(TIER_LIMITS[tier].maxResolution),
+        daily: FREE_DAILY_CREDITS,
+        credits: tier === "free" ? 0 : PLANS[tier].credits,
+      }),
+    );
+    // The cleanup lines follow the credits line, which is last except on
+    // Pro, where "Usage and billing history" comes after it.
+    const at = tier === "pro" ? features.length - 1 : features.length;
+    const cleanupPro = tier === "pro" && AI_CLEANUP_ENABLED ? ["Image cleanup tool", "Highest-quality AI cleanup (motion-tracked)"] : [];
+    features.splice(at, 0, ...cleanupLimit(tier), ...cleanupPro);
+    return { tier, tagline: copy.tagline, popular: tier === "starter", features };
+  });
+}
 
 const SUBSCRIPTION_KEYS: Record<Exclude<Tier, "free">, Record<Billing, PlanKey>> = {
   lite: { month: "lite", year: "lite_yearly" },
@@ -177,16 +153,19 @@ const SUBSCRIPTION_KEYS: Record<Exclude<Tier, "free">, Record<Billing, PlanKey>>
   pro: { month: "pro", year: "pro_yearly" },
 };
 
-const COMPARISON: { label: string; values: Record<Tier, string | boolean> }[] = [
-  { label: "Trim, split, reorder, speed", values: { free: true, lite: true, starter: true, pro: true } },
-  { label: "Text, stickers, images, audio tracks", values: { free: true, lite: true, starter: true, pro: true } },
-  { label: "Landscape, vertical and square canvas sizes", values: { free: true, lite: true, starter: true, pro: true } },
-  { label: "Fade, Crossfade, Dip to Black transitions", values: { free: true, lite: true, starter: true, pro: true } },
-  { label: "Slide, Zoom, Blur, Dip to White transitions", values: { free: false, lite: true, starter: true, pro: true } },
-  { label: "Filters", values: { free: "4 basic", lite: "All 10", starter: "All 10", pro: "All 10" } },
-  { label: "Effects", values: { free: "3 basic", lite: "All 11", starter: "All 11", pro: "All 11" } },
+function comparison(t: PricingMessages): { label: string; values: Record<Tier, string | boolean> }[] {
+  const r = t.rows;
+  const all = (n: number) => fmt(r.all, { n });
+  return [
+  { label: r.trim, values: { free: true, lite: true, starter: true, pro: true } },
+  { label: r.text, values: { free: true, lite: true, starter: true, pro: true } },
+  { label: r.canvas, values: { free: true, lite: true, starter: true, pro: true } },
+  { label: r.basicTransitions, values: { free: true, lite: true, starter: true, pro: true } },
+  { label: r.premiumTransitions, values: { free: false, lite: true, starter: true, pro: true } },
+  { label: r.filters, values: { free: fmt(r.basic, { n: 4 }), lite: all(10), starter: all(10), pro: all(10) } },
+  { label: r.effects, values: { free: fmt(r.basic, { n: 3 }), lite: all(11), starter: all(11), pro: all(11) } },
   {
-    label: "Max export resolution",
+    label: r.resolution,
     values: {
       free: res(TIER_LIMITS.free.maxResolution),
       lite: res(TIER_LIMITS.lite.maxResolution),
@@ -195,7 +174,7 @@ const COMPARISON: { label: string; values: Record<Tier, string | boolean> }[] = 
     },
   },
   {
-    label: "Exports per day",
+    label: r.exports,
     values: {
       free: String(TIER_LIMITS.free.dailyExports),
       lite: String(TIER_LIMITS.lite.dailyExports),
@@ -204,12 +183,12 @@ const COMPARISON: { label: string; values: Record<Tier, string | boolean> }[] = 
     },
   },
   {
-    label: "AI credits",
+    label: r.credits,
     values: {
-      free: `${FREE_DAILY_CREDITS} / day`,
-      lite: `${FREE_DAILY_CREDITS} / day + ${PLANS.lite.credits} / 30 days`,
-      starter: `${FREE_DAILY_CREDITS} / day + ${PLANS.starter.credits} / 30 days`,
-      pro: `${FREE_DAILY_CREDITS} / day + ${PLANS.pro.credits} / 30 days`,
+      free: fmt(r.perDay, { n: FREE_DAILY_CREDITS }),
+      lite: fmt(r.perDayPlus, { daily: FREE_DAILY_CREDITS, n: PLANS.lite.credits }),
+      starter: fmt(r.perDayPlus, { daily: FREE_DAILY_CREDITS, n: PLANS.starter.credits }),
+      pro: fmt(r.perDayPlus, { daily: FREE_DAILY_CREDITS, n: PLANS.pro.credits }),
     },
   },
   ...(AI_CLEANUP_ENABLED
@@ -225,11 +204,15 @@ const COMPARISON: { label: string; values: Record<Tier, string | boolean> }[] = 
         },
       ]
     : []),
-];
+  ];
+}
 
 /** `children`: server-rendered content after the plans (the pricing FAQ),
  * kept out of this client bundle and in the page's HTML for crawlers. */
 export default function PricingClient({ children }: { children?: React.ReactNode }) {
+  const { lang, t: messages } = useI18n();
+  const t = messages.pricing;
+  const href = useLocaleHref();
   const [billing, setBilling] = useState<Billing>("month");
   const [loading, setLoading] = useState<PlanKey | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -316,7 +299,7 @@ export default function PricingClient({ children }: { children?: React.ReactNode
       rememberPromoCode(c.promo ? trimmed : null);
       if (c.promo) setPromoInput("");
     } catch {
-      setPromoError("Couldn't check the code. Try again.");
+      setPromoError(t.promoCheckFailed);
     } finally {
       setPromoChecking(false);
     }
@@ -363,7 +346,7 @@ export default function PricingClient({ children }: { children?: React.ReactNode
       if (data?.promoBlocked) {
         // Already used on this account: drop the code and say why; buying again charges the list price.
         removePromo();
-        setPromoError(data.error ?? "This code can't be used.");
+        setPromoError(data.error ?? t.promoBlocked);
         setLoading(null);
         return;
       }
@@ -387,14 +370,16 @@ export default function PricingClient({ children }: { children?: React.ReactNode
       if (!res.ok || !data?.url) throw new Error(data?.error ?? `Could not start checkout (HTTP ${res.status}).`);
       setCheckoutUrl(data.url);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not start checkout.");
+      setError(e instanceof Error ? (e.message === CHECKOUT_LOAD_FAILED ? t.checkoutLoadFailed : e.message) : t.checkoutFailed);
       setLoading(null);
     }
   };
 
+  const tiers = tierCards(t);
+  const rows = comparison(t);
+  const planLabel = (key: PlanKey) => (key === "payg" ? t.paygLabel : PLANS[key].label);
+
   return (
-    <div className="flex flex-1 flex-col min-h-screen">
-      <Navbar />
       <main className="flex-1 px-6 pt-36 pb-28 relative overflow-hidden">
         {/* Background glow meshes */}
         <div
@@ -408,17 +393,16 @@ export default function PricingClient({ children }: { children?: React.ReactNode
 
         <div className="mx-auto max-w-3xl text-center">
           <div className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-surface-2/90 border border-border px-3.5 py-1 text-xs font-semibold text-muted">
-            Simple plans for the video editor
+            {t.badge}
           </div>
           <h1 className="font-display text-4xl font-extrabold tracking-tight sm:text-5xl text-foreground">
-            Edit free. <span className="text-gradient">Upgrade when you grow.</span>
+            {t.title}<span className="text-gradient">{t.titleHighlight}</span>
           </h1>
           <p className="mt-4 text-base sm:text-lg text-muted max-w-xl mx-auto">
-            The editor is free forever. Paid passes start at {PLANS.lite.priceLabel} for 30 days, with no subscription, and unlock premium transitions,
-            filters and effects, higher resolutions and more AI credits.
+            {fmt(t.intro, { price: PLANS.lite.priceLabel })}
           </p>
 
-          <div className="mt-8 inline-flex rounded-full border border-border bg-surface-2/80 p-1 text-sm font-semibold" role="radiogroup" aria-label="Billing period">
+          <div className="mt-8 inline-flex rounded-full border border-border bg-surface-2/80 p-1 text-sm font-semibold" role="radiogroup" aria-label={t.billingPeriod}>
             {(["month", "year"] as const).map((b) => (
               <button
                 key={b}
@@ -428,8 +412,8 @@ export default function PricingClient({ children }: { children?: React.ReactNode
                 onClick={() => setBilling(b)}
                 className={`rounded-full px-5 py-2 transition ${billing === b ? "bg-foreground text-background" : "text-muted hover:text-foreground"}`}
               >
-                {b === "month" ? "30 days" : "1 year"}
-                {b === "year" && <span className="ml-1.5 text-[11px] font-bold text-emerald-500">Save 25%+</span>}
+                {b === "month" ? t.days30 : t.year1}
+                {b === "year" && <span className="ml-1.5 text-[11px] font-bold text-emerald-500">{t.save}</span>}
               </button>
             ))}
           </div>
@@ -442,14 +426,18 @@ export default function PricingClient({ children }: { children?: React.ReactNode
               className="mx-auto mt-10 max-w-2xl rounded-2xl border border-emerald-500/50 bg-emerald-500/10 px-5 py-4 text-center text-sm text-foreground"
             >
               <p className="font-semibold">
-                Code {promoCode} applied: {promo.percent}% off{" "}
-                {promo.plans.map((p) => PLANS[p].label).filter((l, i, a) => a.indexOf(l) === i).join(" and ")}
+                {fmt(t.promoApplied, {
+                  code: promoCode ?? "",
+                  percent: promo.percent,
+                  plans: promo.plans.map(planLabel).filter((l, i, a) => a.indexOf(l) === i).join(t.and),
+                })}
               </p>
               <p className="mt-1 text-muted">
-                Applied at checkout, once per account, until{" "}
-                {new Date(promo.endsAt).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}.{" "}
+                {fmt(t.promoUntil, {
+                  date: new Date(promo.endsAt).toLocaleDateString(lang, { month: "long", day: "numeric", year: "numeric" }),
+                })}{" "}
                 <button type="button" onClick={removePromo} className="underline hover:text-foreground">
-                  Remove code
+                  {t.removeCode}
                 </button>
               </p>
             </div>
@@ -465,8 +453,8 @@ export default function PricingClient({ children }: { children?: React.ReactNode
                 <input
                   value={promoInput}
                   onChange={(e) => setPromoInput(e.target.value)}
-                  placeholder="Have a code?"
-                  aria-label="Discount code"
+                  placeholder={t.haveCode}
+                  aria-label={t.discountCode}
                   autoComplete="off"
                   className="flex-1 rounded-full border border-border bg-surface-2/80 px-4 py-2 text-sm uppercase text-foreground placeholder:normal-case"
                 />
@@ -475,7 +463,7 @@ export default function PricingClient({ children }: { children?: React.ReactNode
                   disabled={promoChecking || !promoInput.trim()}
                   className="btn-secondary rounded-full px-5 py-2 text-xs font-bold disabled:opacity-50"
                 >
-                  {promoChecking ? "Checking…" : "Apply"}
+                  {promoChecking ? t.checking : t.apply}
                 </button>
               </div>
               {promoError && <p role="alert" className="text-xs text-red-500">{promoError}</p>}
@@ -488,25 +476,26 @@ export default function PricingClient({ children }: { children?: React.ReactNode
             role="status"
             className="mx-auto mt-10 max-w-2xl rounded-2xl border border-amber-400/60 bg-amber-400/10 px-5 py-4 text-center text-sm text-foreground"
           >
-            <p className="font-semibold">Online payments are under construction 🚧</p>
+            <p className="font-semibold">{t.manualTitle}</p>
             <p className="mt-1 text-muted">
-              You can still upgrade. Message us on WhatsApp at{" "}
-              <a
-                href={whatsappLink("Hi WipeClip, I'd like a payment link for a plan.")}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-semibold text-foreground underline"
-              >
-                {SUPPORT_PHONE_DISPLAY}
-              </a>{" "}
-              and we&apos;ll send you a secure payment link. Include the email you signed up with so we can
-              activate your plan.
+              {rich(t.manualBody, {
+                phone: (
+                  <a
+                    href={whatsappLink("Hi WipeClip, I'd like a payment link for a plan.")}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-foreground underline"
+                  >
+                    {SUPPORT_PHONE_DISPLAY}
+                  </a>
+                ),
+              })}
             </p>
           </div>
         )}
 
         <div className="mx-auto mt-14 grid max-w-7xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {TIERS.map((card) => {
+          {tiers.map((card) => {
             const key = card.tier === "free" ? null : SUBSCRIPTION_KEYS[card.tier][billing];
             const plan = key ? PLANS[key] : null;
             const isCurrent = currentTier === card.tier;
@@ -521,31 +510,31 @@ export default function PricingClient({ children }: { children?: React.ReactNode
               >
                 {card.popular && (
                   <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-accent to-accent-2 px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg">
-                    Most Popular
+                    {t.mostPopular}
                   </div>
                 )}
 
                 <div>
                   <div className="flex items-center justify-between">
                     <h2 className="inline-block rounded-full bg-surface-3 border border-border px-3 py-1 text-xs font-semibold text-foreground">
-                      {plan ? plan.label : "Free"}
+                      {plan ? plan.label : t.free}
                     </h2>
-                    {isCurrent && <span className="text-[11px] font-bold text-emerald-500">Current plan</span>}
+                    {isCurrent && <span className="text-[11px] font-bold text-emerald-500">{t.currentPlan}</span>}
                   </div>
 
                   <div className="mt-4">
                     <span className="font-mono text-3xl font-extrabold text-foreground">
                       {key && plan ? (localPrices[key] ?? plan.priceLabel) : "$0"}
                     </span>
-                    <span className="text-xs text-muted"> {plan ? (plan.period === "year" ? "for 1 year" : "for 30 days") : "/ forever"}</span>
+                    <span className="text-xs text-muted"> {plan ? (plan.period === "year" ? t.forYear : t.for30) : t.forever}</span>
                     {key && promo?.plans.includes(key) && (
-                      <p className="mt-1 text-[11px] font-bold text-emerald-500">{promo.percent}% off at checkout</p>
+                      <p className="mt-1 text-[11px] font-bold text-emerald-500">{fmt(t.offAtCheckout, { percent: promo.percent })}</p>
                     )}
                     {plan && (
                       <p className="mt-1 text-[11px] text-muted">
-                        {showLkr ? `Charged as ${formatLkr(plan.amountCents)} · ` : ""}
-                        {pricesTaxed ? "Incl. VAT / tax · " : ""}
-                        One-time payment, no auto-renewal · {plan.credits} AI credits included
+                        {showLkr ? fmt(t.chargedAs, { amount: formatLkr(plan.amountCents) }) : ""}
+                        {pricesTaxed ? t.inclTax : ""}
+                        {fmt(t.oneTime, { n: plan.credits })}
                       </p>
                     )}
                   </div>
@@ -572,16 +561,16 @@ export default function PricingClient({ children }: { children?: React.ReactNode
                       className={`w-full rounded-full py-3 text-xs font-bold transition-all ${card.popular ? "btn-primary" : "btn-secondary"} disabled:opacity-50`}
                     >
                       {loading === key
-                        ? "Opening checkout…"
+                        ? t.openingCheckout
                         : manualPayments
-                          ? `Get ${plan.label} via WhatsApp`
+                          ? fmt(t.getViaWhatsapp, { plan: plan.label })
                           : isCurrent
-                            ? `Renew ${plan.label}`
-                            : `Get ${plan.label}`}
+                            ? fmt(t.renew, { plan: plan.label })
+                            : fmt(t.get, { plan: plan.label })}
                     </button>
                   ) : (
-                    <Link href="/download" className="btn-secondary block w-full rounded-full py-3 text-center text-xs font-semibold">
-                      Download free
+                    <Link href={href("/download")} className="btn-secondary block w-full rounded-full py-3 text-center text-xs font-semibold">
+                      {t.downloadFree}
                     </Link>
                   )}
                 </div>
@@ -592,12 +581,15 @@ export default function PricingClient({ children }: { children?: React.ReactNode
 
         <div className="glass-card mx-auto mt-6 flex max-w-7xl flex-col items-center justify-between gap-4 rounded-[2rem] border border-border/80 p-6 sm:flex-row">
           <div className="text-center sm:text-left">
-            <h2 className="text-sm font-bold text-foreground">Only need the AI tools?</h2>
+            <h2 className="text-sm font-bold text-foreground">{t.onlyAi}</h2>
             <p className="mt-1 text-xs text-muted">
-              {PLANS.payg.label}: {PLANS.payg.credits} AI credits for{" "}
-              <span className="font-mono font-bold text-foreground">{localPrices.payg ?? PLANS.payg.priceLabel}</span>, one-time.
-              {showLkr ? ` Charged as ${formatLkr(PLANS.payg.amountCents)}.` : ""} Works on any plan, including Free, and
-              doesn&apos;t change your plan.
+              {rich(t.paygLine, {
+                label: t.paygLabel,
+                n: PLANS.payg.credits,
+                price: <span className="font-mono font-bold text-foreground">{localPrices.payg ?? PLANS.payg.priceLabel}</span>,
+              })}
+              {showLkr ? fmt(t.paygCharged, { amount: formatLkr(PLANS.payg.amountCents) }) : ""}
+              {t.paygNote}
             </p>
           </div>
           <button
@@ -605,53 +597,62 @@ export default function PricingClient({ children }: { children?: React.ReactNode
             disabled={loading !== null}
             className="btn-secondary shrink-0 rounded-full px-6 py-3 text-xs font-bold disabled:opacity-50"
           >
-            {loading === "payg" ? "Opening checkout…" : manualPayments ? "Get credits via WhatsApp" : "Buy credits"}
+            {loading === "payg" ? t.openingCheckout : manualPayments ? t.creditsViaWhatsapp : t.buyCredits}
           </button>
         </div>
 
         <p className="mx-auto mt-6 max-w-2xl text-center text-xs text-muted">
-          Plans are prepaid for the period shown and don&apos;t renew automatically. Renewing early adds the time to
-          your current plan. AI credits are used by the AI tools ({AI_CLEANUP_ENABLED ? "object cleanup, " : ""}background removal, sharpening);
-          editing and exporting never use credits.
-          {AI_CLEANUP_ENABLED
-            ? " Video cleanup costs 1 credit per started minute at 720p, 2 at 1080p and 4 at 4K; images cost 1 credit each."
-            : ""}{" "}
-          Full refund within 14 days, see our{" "}
-          <Link href="/refund-policy" className="underline hover:text-foreground">
-            refund policy
-          </Link>
-          .
+          {AI_CLEANUP_ENABLED ? (
+            <>
+              Plans are prepaid for the period shown and don&apos;t renew automatically. Renewing early adds the time to
+              your current plan. AI credits are used by the AI tools (object cleanup, background removal, sharpening);
+              editing and exporting never use credits. Video cleanup costs 1 credit per started minute at 720p, 2 at
+              1080p and 4 at 4K; images cost 1 credit each. Full refund within 14 days, see our{" "}
+              <Link href="/refund-policy" className="underline hover:text-foreground">
+                refund policy
+              </Link>
+              .
+            </>
+          ) : (
+            rich(t.footnote, {
+              link: (
+                <Link href={href("/refund-policy")} className="underline hover:text-foreground">
+                  {t.refundPolicy}
+                </Link>
+              ),
+            })
+          )}
         </p>
 
         {error && <p className="mt-6 text-center text-sm font-medium text-rose-600">{error}</p>}
 
         <section className="mx-auto mt-20 max-w-4xl" aria-labelledby="compare-heading">
           <h2 id="compare-heading" className="text-center font-display text-2xl font-extrabold tracking-tight text-foreground">
-            Compare plans
+            {t.compare}
           </h2>
           <div className="mt-8 overflow-x-auto rounded-2xl border border-border">
             <table className="w-full min-w-[620px] text-left text-sm">
               <thead className="bg-surface-2/60 text-xs uppercase tracking-wider text-muted">
                 <tr>
-                  <th className="px-4 py-3 font-semibold">Feature</th>
-                  <th className="px-4 py-3 font-semibold">Free</th>
+                  <th className="px-4 py-3 font-semibold">{t.feature}</th>
+                  <th className="px-4 py-3 font-semibold">{t.free}</th>
                   <th className="px-4 py-3 font-semibold">Lite</th>
                   <th className="px-4 py-3 font-semibold">Starter</th>
                   <th className="px-4 py-3 font-semibold">Pro</th>
                 </tr>
               </thead>
               <tbody>
-                {COMPARISON.map((row, i) => (
+                {rows.map((row, i) => (
                   <tr key={row.label} className={i % 2 ? "bg-surface-2/30" : ""}>
                     <td className="px-4 py-2.5 text-foreground/90">{row.label}</td>
-                    {TIER_ORDER.map((t) => {
-                      const v = row.values[t];
+                    {TIER_ORDER.map((tier) => {
+                      const v = row.values[tier];
                       return (
-                        <td key={t} className="px-4 py-2.5 text-muted">
+                        <td key={tier} className="px-4 py-2.5 text-muted">
                           {v === true ? (
-                            <span className="font-bold text-cyan-600" aria-label="Included">✓</span>
+                            <span className="font-bold text-cyan-600" aria-label={t.included}>✓</span>
                           ) : v === false ? (
-                            <span aria-label="Not included">-</span>
+                            <span aria-label={t.notIncluded}>-</span>
                           ) : (
                             v
                           )}
@@ -666,7 +667,5 @@ export default function PricingClient({ children }: { children?: React.ReactNode
         </section>
         {children}
       </main>
-      <Footer />
-    </div>
   );
 }

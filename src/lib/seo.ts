@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { PLANS } from "./credits";
-import { languageAlternates, LOCALE_INFO, type Locale } from "./i18n";
+import { LANG_INFO, languageAlternates, localeHref, type Lang } from "./i18n";
 
 export const SITE_URL = "https://www.wipeclip.co";
 export const SITE_NAME = "WipeClip.co";
@@ -82,9 +82,10 @@ const OG_IMAGE = "/opengraph-image";
 
 /**
  * Builds a consistent title/description/canonical/OpenGraph/Twitter metadata
- * object for a public page. `path` must be root-relative (e.g. "/pricing")
- * and is resolved against the root layout's `metadataBase` (SITE_URL). It
- * must never be a vercel.app, preview, or localhost URL.
+ * object for a public page. `path` is the English path, root-relative (e.g.
+ * "/pricing"); `lang` picks which language version this is for. It is
+ * resolved against the root layout's `metadataBase` (SITE_URL) and must
+ * never be a vercel.app, preview, or localhost URL.
  */
 export function buildPageMetadata({
   title,
@@ -92,7 +93,7 @@ export function buildPageMetadata({
   path,
   ogTitle,
   ogDescription,
-  locale,
+  lang = "en",
 }: {
   title: string;
   description: string;
@@ -100,22 +101,23 @@ export function buildPageMetadata({
   ogTitle?: string;
   ogDescription?: string;
   /** Set on translated pages; English when omitted. */
-  locale?: Locale;
+  lang?: Lang;
 }): Metadata {
   const socialTitle = ogTitle ?? title;
   const socialDescription = ogDescription ?? description;
+  const url = localeHref(lang, path);
 
   return {
     title,
     description,
-    alternates: { canonical: path, languages: languageAlternates(path) },
+    alternates: { canonical: url, languages: languageAlternates(path) },
     openGraph: {
       type: "website",
-      url: path,
+      url,
       siteName: SITE_NAME,
       title: socialTitle,
       description: socialDescription,
-      locale: locale ? LOCALE_INFO[locale].ogLocale : "en_US",
+      locale: LANG_INFO[lang].ogLocale,
       images: [{ url: OG_IMAGE, width: 1200, height: 630, alt: socialTitle }],
     },
     twitter: {

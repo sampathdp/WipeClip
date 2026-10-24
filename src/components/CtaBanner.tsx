@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
+import { localeHref, type Lang } from "@/lib/i18n";
+import { getDict } from "@/i18n";
 
-export default function CtaBanner() {
+export default function CtaBanner({ lang = "en" }: { lang?: Lang }) {
+  const t = getDict(lang).cta;
   return (
     <section className="py-20 relative">
       <div className="relative mx-auto max-w-5xl px-6">
@@ -24,30 +27,30 @@ export default function CtaBanner() {
                 </>
               ) : (
                 <>
-                  Your next video, <span className="text-gradient">edited in minutes</span>
+                  {t.title}<span className="text-gradient">{t.titleHighlight}</span>
                 </>
               )}
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-base sm:text-lg text-muted">
               {AI_CLEANUP_ENABLED
                 ? "No registration needed to preview. Upload a clip you shot and see the crystal-clear result in under 15 seconds."
-                : "Free for Windows and Mac. Record your screen or drop in a clip, trim, add captions and export in any format."}
+                : t.intro}
             </p>
             <div className="mt-8">
               <Link
-                href={AI_CLEANUP_ENABLED ? "/#upload" : "/download"}
+                href={AI_CLEANUP_ENABLED ? "/#upload" : localeHref(lang, "/download")}
                 className="btn-primary inline-flex items-center gap-2 rounded-full px-8 py-4 text-base font-bold shadow-[0_0_30px_rgba(124,92,255,0.5)]"
               >
-                <span>{AI_CLEANUP_ENABLED ? "Remove an Object Free" : "Download Free"}</span>
+                <span>{AI_CLEANUP_ENABLED ? "Remove an Object Free" : t.button}</span>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>
               </Link>
             </div>
             <p className="mt-5 text-xs text-muted">
-              Just need a clean cutout instead?{" "}
-              <Link href="/remove-background" className="font-semibold text-cyan-600 underline hover:text-cyan-700">
-                Try the free background remover
+              {t.cutout}
+              <Link href={localeHref(lang, "/remove-background")} className="font-semibold text-cyan-600 underline hover:text-cyan-700">
+                {t.cutoutLink}
               </Link>
             </p>
           </div>

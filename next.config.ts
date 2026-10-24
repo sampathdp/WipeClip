@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { LEGACY_SLUGS } from "./src/lib/i18n";
 
 const securityHeaders = [
   // Blocks this site from being embedded in an <iframe> elsewhere -
@@ -48,7 +49,17 @@ const nextConfig: NextConfig = {
   // The online editor was retired: the editor ships only as the Windows and
   // macOS app, so old links and search results land on its download page.
   async redirects() {
-    return [{ source: "/editor", destination: "/download", permanent: true }];
+    return [
+      { source: "/editor", destination: "/download", permanent: true },
+      // The first translated pages had their own slugs per language.
+      ...Object.entries(LEGACY_SLUGS).flatMap(([enPath, slugs]) =>
+        Object.entries(slugs).map(([locale, slug]) => ({
+          source: `/${locale}/${slug}`,
+          destination: `/${locale}${enPath}`,
+          permanent: true,
+        })),
+      ),
+    ];
   },
   async headers() {
     return [

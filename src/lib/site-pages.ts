@@ -26,7 +26,9 @@ export type GuideEntry = {
 };
 
 /** Every public tool page. The /tools directory, homepage cards and
- * related-tool links all read from here, so a tool only exists once. */
+ * related-tool links all read from here, so a tool only exists once. The
+ * translated titles and descriptions are each dictionary's toolCatalog
+ * (src/i18n/locales). */
 const ALL_TOOLS: ToolEntry[] = [
   {
     href: "/download",
@@ -103,9 +105,3 @@ export function getGuide(href: string): GuideEntry {
   if (!guide) throw new Error(`Unknown guide ${href}`);
   return guide;
 }
-
-export const AVAILABILITY_LABEL: Record<ToolAvailability, string> = {
-  free: "Free in browser",
-  pro: "Pro, in browser",
-  desktop: "Windows & Mac app",
-};

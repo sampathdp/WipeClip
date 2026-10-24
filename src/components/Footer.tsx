@@ -1,10 +1,16 @@
 import Link from "next/link";
 import Logo from "./Logo";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
-import { LOCALE_INFO, LOCALES } from "@/lib/i18n";
+import { LANG_INFO, LANGS, localeHref, type Lang } from "@/lib/i18n";
 import { GUIDES } from "@/lib/site-pages";
+import { getDict } from "@/i18n";
+import { rich } from "@/i18n/rich";
 
-export default function Footer() {
+export default function Footer({ lang = "en" }: { lang?: Lang }) {
+  const d = getDict(lang);
+  const t = d.footer;
+  const tools = d.client.toolNames;
+  const href = (path: string) => localeHref(lang, path);
   return (
     <footer className="py-10">
       <div className="mx-auto max-w-7xl px-6">
@@ -14,41 +20,41 @@ export default function Footer() {
             <span className="text-xs text-muted">&copy; {new Date().getFullYear()}</span>
           </div>
           <nav className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted">
-            <Link href="/download" className="transition-colors hover:text-foreground">
-              Download
+            <Link href={href("/download")} className="transition-colors hover:text-foreground">
+              {t.download}
             </Link>
-            <Link href="/about" className="transition-colors hover:text-foreground">
-              About
+            <Link href={href("/about")} className="transition-colors hover:text-foreground">
+              {t.about}
             </Link>
-            <Link href="/feedback" className="transition-colors hover:text-foreground">
-              Feedback &amp; Bugs
+            <Link href={href("/feedback")} className="transition-colors hover:text-foreground">
+              {t.feedback}
             </Link>
-            <Link href="/privacy" className="transition-colors hover:text-foreground">
-              Privacy
+            <Link href={href("/privacy")} className="transition-colors hover:text-foreground">
+              {t.privacy}
             </Link>
-            <Link href="/terms" className="transition-colors hover:text-foreground">
-              Terms
+            <Link href={href("/terms")} className="transition-colors hover:text-foreground">
+              {t.terms}
             </Link>
-            <Link href="/refund-policy" className="transition-colors hover:text-foreground">
-              Refund Policy
+            <Link href={href("/refund-policy")} className="transition-colors hover:text-foreground">
+              {t.refund}
             </Link>
-            <Link href="/dmca" className="transition-colors hover:text-foreground">
-              Copyright / DMCA
+            <Link href={href("/dmca")} className="transition-colors hover:text-foreground">
+              {t.dmca}
             </Link>
           </nav>
         </div>
         <div className="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t border-border/60 pt-6 text-xs text-muted">
-          <span className="font-semibold text-foreground/80">Free tools:</span>
-          <Link href="/remove-background" className="transition-colors hover:text-foreground">
-            Background Remover
+          <span className="font-semibold text-foreground/80">{t.freeTools}</span>
+          <Link href={href("/remove-background")} className="transition-colors hover:text-foreground">
+            {tools.removeBackground}
           </Link>
           <span className="text-border">&middot;</span>
-          <Link href="/extract-video-frame" className="transition-colors hover:text-foreground">
-            Video Frame Grabber
+          <Link href={href("/extract-video-frame")} className="transition-colors hover:text-foreground">
+            {tools.frameGrabber}
           </Link>
           <span className="text-border">&middot;</span>
-          <Link href="/sharpen-image" className="transition-colors hover:text-foreground">
-            Photo Sharpener
+          <Link href={href("/sharpen-image")} className="transition-colors hover:text-foreground">
+            {tools.sharpen}
           </Link>
           {AI_CLEANUP_ENABLED && (
             <>
@@ -59,34 +65,33 @@ export default function Footer() {
             </>
           )}
           <span className="text-border">&middot;</span>
-          <Link href="/tools" className="font-semibold transition-colors hover:text-foreground">
-            All tools
+          <Link href={href("/tools")} className="font-semibold transition-colors hover:text-foreground">
+            {t.allTools}
           </Link>
           {GUIDES.length > 0 && (
             <>
               <span className="text-border">&middot;</span>
               <Link href="/guides" className="transition-colors hover:text-foreground">
-                Guides
+                {t.guides}
               </Link>
             </>
           )}
-          <span className="ml-auto flex gap-x-2">
-            {LOCALES.map((l) => (
-              <Link key={l} href={`/${l}`} hrefLang={l} className="transition-colors hover:text-foreground">
-                {LOCALE_INFO[l].name}
+          <span className="ml-auto flex flex-wrap gap-x-2">
+            {LANGS.filter((l) => l !== lang).map((l) => (
+              <Link key={l} href={localeHref(l, "/")} hrefLang={l} lang={l} className="transition-colors hover:text-foreground">
+                {LANG_INFO[l].name}
               </Link>
             ))}
           </span>
         </div>
         <p className="mt-4 text-xs text-muted">
-          For content you created or have the rights to edit only. Using
-          WipeClip.co to infringe anyone&apos;s copyright or other rights is
-          prohibited. Not affiliated with any third-party video platform or
-          AI model provider. Please review our{" "}
-          <Link href="/terms" className="underline hover:text-foreground">
-            Terms of Service
-          </Link>
-          .
+          {rich(t.disclaimer, {
+            terms: (
+              <Link href={href("/terms")} className="underline hover:text-foreground">
+                {t.termsLink}
+              </Link>
+            ),
+          })}
         </p>
       </div>
     </footer>

@@ -6,6 +6,8 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { trackEvent } from "@/lib/analytics";
 import { authRedirectUrl, IS_DESKTOP, openExternal } from "@/lib/platform";
+import { useI18n, useLocaleHref } from "@/i18n/client";
+import { rich } from "@/i18n/rich";
 
 type View = "password" | "magic";
 type PasswordAction = "signin" | "signup";
@@ -57,6 +59,9 @@ export default function SignInModal({
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const { t: messages } = useI18n();
+  const t = messages.signIn;
+  const href = useLocaleHref();
 
   useEffect(() => {
     if (!open) return;
@@ -189,7 +194,7 @@ export default function SignInModal({
       >
         <button
           onClick={onClose}
-          aria-label="Close"
+          aria-label={t.close}
           className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-muted hover:text-foreground hover:bg-surface-2/80"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -198,19 +203,16 @@ export default function SignInModal({
         </button>
 
         <h2 id="signin-modal-heading" className="font-display text-xl font-bold tracking-tight text-foreground pr-6">
-          Sign in to download
+          {t.modalTitle}
         </h2>
         <p className="mt-1.5 text-xs sm:text-sm text-muted">
-          Your clean video stays right here - sign in and it&apos;s ready to download immediately.
+          {t.modalIntro}
         </p>
 
         {status === "sent" ? (
           <div className="mt-6 rounded-2xl bg-cyan-50 border border-cyan-400/40 p-5 text-sm text-cyan-700">
-            <p className="font-medium">Check your email</p>
-            <p className="mt-1 text-xs text-muted">
-              We sent a link to <strong className="text-cyan-600">{email}</strong>. Opening it
-              signs you in here too.
-            </p>
+            <p className="font-medium">{t.checkEmail}</p>
+            <p className="mt-1 text-xs text-muted">{rich(t.modalSent, { email: <strong className="text-cyan-600">{email}</strong> })}</p>
           </div>
         ) : (
           <>
@@ -221,12 +223,12 @@ export default function SignInModal({
               className="mt-6 flex w-full items-center justify-center gap-3 rounded-full border border-border-light bg-white py-3 text-sm font-semibold text-slate-800 transition-all hover:shadow-[0_0_20px_rgba(15,23,42,0.12)] dark:hover:shadow-[0_0_20px_rgba(255,255,255,0.15)] disabled:opacity-50"
             >
               <GoogleIcon />
-              {googleLoading ? "Redirecting…" : "Continue with Google"}
+              {googleLoading ? t.redirecting : t.google}
             </button>
 
             <div className="my-4 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-wider text-muted">
               <span className="h-px flex-1 bg-border" />
-              or
+              {t.or}
               <span className="h-px flex-1 bg-border" />
             </div>
 
@@ -235,7 +237,7 @@ export default function SignInModal({
               className="flex flex-col gap-3 text-left"
             >
               <label htmlFor="signin-modal-email" className="sr-only">
-                Email address
+                {t.email}
               </label>
               <input
                 id="signin-modal-email"
@@ -250,7 +252,7 @@ export default function SignInModal({
               {view === "password" && (
                 <>
                   <label htmlFor="signin-modal-password" className="sr-only">
-                    Password
+                    {t.password}
                   </label>
                   <input
                     id="signin-modal-password"
@@ -272,12 +274,12 @@ export default function SignInModal({
                 className="btn-primary mt-1 w-full rounded-full py-3 text-sm font-bold disabled:opacity-50"
               >
                 {status === "sending"
-                  ? "Please wait…"
+                  ? t.wait
                   : view === "magic"
-                    ? "Send sign-in link"
+                    ? t.sendLink
                     : passwordAction === "signup"
-                      ? "Create account"
-                      : "Sign in"}
+                      ? t.createAccount
+                      : t.signIn}
               </button>
 
               {error && <p className="text-center text-xs font-medium text-rose-600">{error}</p>}
@@ -290,20 +292,20 @@ export default function SignInModal({
                       onClick={() => setPasswordAction((a) => (a === "signin" ? "signup" : "signin"))}
                       className="hover:text-foreground"
                     >
-                      {passwordAction === "signin" ? "New here? Create an account" : "Already have an account? Sign in"}
+                      {passwordAction === "signin" ? t.toSignUp : t.toSignIn}
                     </button>
                     <button type="button" onClick={() => setView("magic")} className="hover:text-foreground">
-                      Prefer a magic link instead?
+                      {t.toMagic}
                     </button>
                   </>
                 ) : (
                   <button type="button" onClick={() => setView("password")} className="hover:text-foreground">
-                    Use email and password instead
+                    {t.toPassword}
                   </button>
                 )}
                 {!IS_DESKTOP && (
-                  <Link href="/sign-in" className="hover:text-foreground">
-                    Or open the full sign-in page
+                  <Link href={href("/sign-in")} className="hover:text-foreground">
+                    {t.fullPage}
                   </Link>
                 )}
               </div>

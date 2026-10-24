@@ -20,6 +20,9 @@ import {
   InsufficientCreditsError,
   removeBackground,
 } from "@/lib/toolsApi";
+import { useErrorText, useI18n, useLocaleHref } from "@/i18n/client";
+import { fmt } from "@/i18n/format";
+import { rich } from "@/i18n/rich";
 
 type Step = "idle" | "select" | "processing" | "done" | "error" | "blocked";
 type BlockReason = "content" | "credits";
@@ -44,6 +47,10 @@ export default function BackgroundRemoverDemo() {
   const [resultQuality, setResultQuality] = useState<ToolQuality>("preview");
   const [lastQuality, setLastQuality] = useState<ToolQuality>("preview");
   const inputRef = useRef<HTMLInputElement>(null);
+  const { t: messages } = useI18n();
+  const t = messages.tool;
+  const href = useLocaleHref();
+  const errorText = useErrorText();
 
   // Same "process now, gate the download on sign-in" split as UploadDemo -
   // see /api/remove-background's anonymous branch for why processing
@@ -94,18 +101,18 @@ export default function BackgroundRemoverDemo() {
     if (!picked) return;
     trackEvent("file_selected", { tool: TOOL });
     if (!picked.type.startsWith("image/")) {
-      setError("Please choose an image file.");
+      setError(t.chooseImage);
       return;
     }
     if (picked.size > MAX_BYTES) {
-      setError("File exceeds the 25MB limit.");
+      setError(t.tooBig25);
       return;
     }
     setError(null);
     setFile(picked);
     setPreviewUrl(URL.createObjectURL(picked));
     setStep("select");
-  }, []);
+  }, [t]);
 
   const process = useCallback(async (quality: ToolQuality) => {
     if (!file) return;
@@ -135,30 +142,30 @@ export default function BackgroundRemoverDemo() {
       }
     } catch (e) {
       if (e instanceof PreviewLimitError || e instanceof AuthRequiredError) {
-        setError(e.message);
+        setError(errorText(e));
         setStep(backTo);
         if (e instanceof AuthRequiredError) setShowSignInModal(true);
         return;
       }
       if (e instanceof ContentBlockedError) {
-        setError(e.message);
+        setError(errorText(e));
         setBlockReason("content");
         setStep("blocked");
         trackEvent("processing_failed", { tool: TOOL, error_category: "content_policy" });
         return;
       }
       if (e instanceof InsufficientCreditsError) {
-        setError(e.message);
+        setError(errorText(e));
         setBlockReason("credits");
         setStep("blocked");
         trackEvent("processing_failed", { tool: TOOL, error_category: "insufficient_credits" });
         return;
       }
-      setError(e instanceof ApiError ? e.message : "Processing failed. Try again.");
+      setError(e instanceof ApiError ? errorText(e) : t.failed);
       setStep("error");
       trackEvent("processing_failed", { tool: TOOL, error_category: "processing_error" });
     }
-  }, [file, isSignedIn, step]);
+  }, [errorText, t, file, isSignedIn, step]);
 
   return (
     <div
@@ -168,10 +175,10 @@ export default function BackgroundRemoverDemo() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl text-foreground">
-            Try it now: <span className="text-gradient">Remove Background</span>
+            {t.tryItNow}<span className="text-gradient">{t.background.name}</span>
           </h2>
           <p className="mt-1.5 text-sm sm:text-base text-muted">
-            Upload a photo, get a transparent PNG back. No marking, no account needed to preview.
+            {t.background.intro}
           </p>
         </div>
       </div>
@@ -218,8 +225,8 @@ export default function BackgroundRemoverDemo() {
               />
             </svg>
           </div>
-          <p className="text-base font-semibold text-foreground">Drop your photo here, or click to browse</p>
-          <p className="mt-1 text-xs sm:text-sm text-muted">PNG, JPG, WebP &bull; Up to 25MB</p>
+          <p className="text-base font-semibold text-foreground">{t.dropPhoto}</p>
+          <p className="mt-1 text-xs sm:text-sm text-muted">{t.photoTypes}</p>
           </button>
         </>
       )}
@@ -242,27 +249,29 @@ export default function BackgroundRemoverDemo() {
             </svg>
           </div>
           <p className={`font-semibold text-base ${blockReason === "content" ? "text-rose-600" : "text-foreground"}`}>
-            {error ?? "This image can't be processed here."}
+            {error ?? t.cantProcess}
           </p>
 
           {blockReason === "content" && (
             <p className="max-w-md text-xs sm:text-sm text-muted">
-              WipeClip.co doesn&apos;t process explicit or adult content. See our{" "}
-              <Link href="/terms" className="underline hover:text-foreground">
-                Terms of Service
-              </Link>
-              .
+              {rich(t.explicitNote, {
+                terms: (
+                  <Link href={href("/terms")} className="underline hover:text-foreground">
+                    {t.terms}
+                  </Link>
+                ),
+              })}
             </p>
           )}
 
           <div className="mt-4 flex flex-wrap justify-center gap-3">
             {blockReason === "credits" && (
-              <Link href="/pricing" className="btn-primary rounded-full px-5 py-2.5 text-sm font-semibold">
-                Buy more credits
+              <Link href={href("/pricing")} className="btn-primary rounded-full px-5 py-2.5 text-sm font-semibold">
+                {t.buyCredits}
               </Link>
             )}
             <button onClick={reset} className="btn-secondary rounded-full px-5 py-2.5 text-sm font-semibold">
-              Choose a different file
+              {t.chooseDifferent}
             </button>
           </div>
         </div>
@@ -276,7 +285,7 @@ export default function BackgroundRemoverDemo() {
             </div>
             {step !== "processing" && (
               <button onClick={reset} className="shrink-0 text-xs font-semibold text-muted transition-colors hover:text-cyan-600">
-                Start over
+                {t.startOver}
               </button>
             )}
           </div>
@@ -287,7 +296,7 @@ export default function BackgroundRemoverDemo() {
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={previewUrl}
-                  alt="Selected photo"
+                  alt={t.selectedPhoto}
                   className="max-h-full max-w-full rounded-2xl border border-border object-contain"
                 />
               </div>
@@ -300,9 +309,9 @@ export default function BackgroundRemoverDemo() {
                   className="mt-0.5 h-4 w-4 shrink-0 rounded border-border bg-surface-3 accent-cyan-400 cursor-pointer"
                 />
                 <span>
-                  I own this image, or have permission to edit it.{" "}
-                  <Link href="/terms" className="underline hover:text-foreground text-cyan-600">
-                    Terms of Service
+                  {t.consent}{" "}
+                  <Link href={href("/terms")} className="underline hover:text-foreground text-cyan-600">
+                    {t.terms}
                   </Link>
                 </span>
               </label>
@@ -313,19 +322,18 @@ export default function BackgroundRemoverDemo() {
                   disabled={!consent}
                   className="btn-secondary flex-1 rounded-full py-3.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  Free preview (reduced size)
+                  {t.freePreview}
                 </button>
                 <button
                   onClick={() => process("full")}
                   disabled={!consent}
                   className="btn-primary flex-1 rounded-full py-3.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  Full resolution · {IMAGE_CREDIT_COST} credit
+                  {fmt(t.fullRes, { n: IMAGE_CREDIT_COST })}
                 </button>
               </div>
               <p className="mt-2 text-center text-xs text-muted">
-                One free preview a day. Full resolution needs an account, and every account gets {FREE_DAILY_CREDITS} free
-                credits a day.
+                {fmt(t.previewNote, { n: FREE_DAILY_CREDITS })}
               </p>
             </div>
           )}
@@ -333,7 +341,7 @@ export default function BackgroundRemoverDemo() {
           {step === "processing" && (
             <div className="mt-6 flex flex-col items-center gap-4 py-8 text-center">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-500/20 border-t-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.4)]" />
-              <p className="text-sm font-medium text-foreground">Removing background…</p>
+              <p className="text-sm font-medium text-foreground">{t.background.working}</p>
             </div>
           )}
 
@@ -347,10 +355,10 @@ export default function BackgroundRemoverDemo() {
               {resultQuality === "preview" && (
                 <div className="mb-4 flex flex-col items-center justify-between gap-3 rounded-2xl border border-cyan-500/20 bg-cyan-50/70 p-4 sm:flex-row">
                   <p className="text-xs sm:text-sm text-muted">
-                    This free preview is reduced in size. Get the full-resolution PNG for {IMAGE_CREDIT_COST} credit.
+                    {fmt(t.previewReduced, { n: IMAGE_CREDIT_COST })}
                   </p>
                   <button onClick={() => process("full")} className="btn-primary shrink-0 rounded-full px-5 py-2.5 text-xs font-bold">
-                    Get full resolution
+                    {t.getFullRes}
                   </button>
                 </div>
               )}
@@ -368,7 +376,7 @@ export default function BackgroundRemoverDemo() {
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
                     </svg>
-                    <span>Download Transparent PNG</span>
+                    <span>{t.background.download}</span>
                   </a>
                 ) : (
                   <button
@@ -379,11 +387,11 @@ export default function BackgroundRemoverDemo() {
                       <rect x="4" y="10" width="16" height="10" rx="2" />
                       <path d="M8 10V7a4 4 0 0 1 8 0v3" />
                     </svg>
-                    <span>Sign In to Download</span>
+                    <span>{t.signInToDownload}</span>
                   </button>
                 )}
                 <button onClick={reset} className="btn-secondary rounded-full px-6 py-3.5 text-sm font-semibold">
-                  Process Another
+                  {t.processAnother}
                 </button>
               </div>
 
@@ -393,9 +401,9 @@ export default function BackgroundRemoverDemo() {
                 <p className="text-xs sm:text-sm text-muted">
                   {AI_CLEANUP_ENABLED
                     ? "Also need to remove an unwanted object from your own photo or video? "
-                    : "Making a video with this image? "}
-                  <Link href={AI_CLEANUP_ENABLED ? "/" : "/download"} className="font-semibold text-cyan-600 underline hover:text-cyan-700">
-                    {AI_CLEANUP_ENABLED ? "Try WipeClip.co's AI object removal free" : "Get WipeClip.co's free video editor for Windows and Mac"}
+                    : t.makingVideo}
+                  <Link href={AI_CLEANUP_ENABLED ? "/" : href("/download")} className="font-semibold text-cyan-600 underline hover:text-cyan-700">
+                    {AI_CLEANUP_ENABLED ? "Try WipeClip.co's AI object removal free" : t.getEditor}
                   </Link>
                 </p>
               </div>
@@ -407,7 +415,7 @@ export default function BackgroundRemoverDemo() {
               onClick={() => process(lastQuality)}
               className="mt-6 w-full rounded-full bg-rose-500/20 border border-rose-500/40 px-5 py-3 text-sm font-semibold text-rose-600 hover:bg-rose-500/30 transition-all"
             >
-              Retry
+              {t.retry}
             </button>
           )}
         </div>

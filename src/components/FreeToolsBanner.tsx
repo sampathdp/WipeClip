@@ -2,11 +2,12 @@
 
 import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import { useI18n, useLocaleHref } from "@/i18n/client";
 
 const FREE_TOOLS = [
   {
     href: "/remove-background",
-    label: "Background Remover",
+    label: "removeBackground",
     icon: (
       <>
         <path d="M12 2a5 5 0 0 1 5 5c0 2-1 3.5-2.5 5L12 15l-2.5-3C8 10.5 7 9 7 7a5 5 0 0 1 5-5Z" />
@@ -16,7 +17,7 @@ const FREE_TOOLS = [
   },
   {
     href: "/extract-video-frame",
-    label: "Video Frame Grabber",
+    label: "frameGrabber",
     icon: (
       <>
         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
@@ -26,7 +27,7 @@ const FREE_TOOLS = [
   },
   {
     href: "/sharpen-image",
-    label: "Photo Sharpener",
+    label: "sharpen",
     icon: (
       <>
         <path d="M12 2 2 7l10 5 10-5-10-5Z" />
@@ -34,7 +35,7 @@ const FREE_TOOLS = [
       </>
     ),
   },
-];
+] as const;
 
 const DISMISS_KEY = "wipeclip_free_tools_banner_dismissed";
 
@@ -61,6 +62,8 @@ export default function FreeToolsBanner() {
   // dismissed before.
   const dismissedBefore = useSyncExternalStore(noSubscribe, wasDismissed, () => false);
   const [dismissed, setDismissed] = useState(false);
+  const { t } = useI18n();
+  const href = useLocaleHref();
 
   if (dismissed || dismissedBefore) return null;
 
@@ -77,20 +80,20 @@ export default function FreeToolsBanner() {
             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-tr from-accent to-accent-2 text-white shadow-[0_0_10px_rgba(34,211,238,0.4)]">
               <GiftIcon />
             </span>
-            <span className="hidden sm:inline">3 free tools, no sign-up:</span>
-            <span className="sm:hidden">Free tools:</span>
+            <span className="hidden sm:inline">{t.freeToolsBanner.lead}</span>
+            <span className="sm:hidden">{t.freeToolsBanner.leadShort}</span>
           </span>
 
-          {FREE_TOOLS.map((t) => (
+          {FREE_TOOLS.map((tool) => (
             <Link
-              key={t.href}
-              href={t.href}
+              key={tool.href}
+              href={href(tool.href)}
               className="group inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-3/70 px-3 py-1 text-[11px] font-semibold text-muted transition-all hover:-translate-y-px hover:border-cyan-400/50 hover:text-cyan-700 hover:shadow-[0_0_12px_rgba(34,211,238,0.25)] dark:hover:text-cyan-300 sm:text-xs"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-cyan-600 dark:text-cyan-400">
-                {t.icon}
+                {tool.icon}
               </svg>
-              {t.label}
+              {t.toolNames[tool.label]}
             </Link>
           ))}
         </div>
@@ -98,7 +101,7 @@ export default function FreeToolsBanner() {
         <button
           type="button"
           onClick={dismiss}
-          aria-label="Dismiss banner"
+          aria-label={t.freeToolsBanner.dismiss}
           className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-muted transition-colors hover:bg-surface-3 hover:text-foreground"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

@@ -3,6 +3,8 @@
 import { useSyncExternalStore } from "react";
 import { DESKTOP_DOWNLOADS } from "@/lib/download";
 import { currentPath, trackEvent } from "@/lib/analytics";
+import { useI18n } from "@/i18n/client";
+import { fmt } from "@/i18n/format";
 
 type Os = (typeof DESKTOP_DOWNLOADS)[number]["os"];
 
@@ -39,6 +41,7 @@ export default function DownloadButtons({ compact = false }: { compact?: boolean
   // The server render (and first client render) knows no OS; the client
   // then reads it from the user agent, which never changes.
   const os = useSyncExternalStore(noSubscribe, detectOs, () => null);
+  const { t } = useI18n();
 
   const items = [...DESKTOP_DOWNLOADS].sort((a, b) => Number(b.os === os) - Number(a.os === os));
 
@@ -46,6 +49,7 @@ export default function DownloadButtons({ compact = false }: { compact?: boolean
     <div className={compact ? "flex flex-wrap gap-3" : "grid gap-4 sm:grid-cols-2"}>
       {items.map((d) => {
         const primary = os ? d.os === os : d.os === "windows";
+        const copy = t.downloads[d.os];
         const icon = (
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             {ICONS[d.os]}
@@ -58,7 +62,7 @@ export default function DownloadButtons({ compact = false }: { compact?: boolean
             className={`${primary ? "btn-primary" : "btn-secondary"} inline-flex items-center justify-center gap-2.5 rounded-full px-6 py-3 text-sm font-bold`}
           >
             {icon}
-            Download for {d.label}
+            {fmt(t.downloads.downloadFor, { os: copy.label })}
           </a>
         ) : (
           <span
@@ -66,18 +70,18 @@ export default function DownloadButtons({ compact = false }: { compact?: boolean
             className="btn-secondary inline-flex cursor-not-allowed items-center justify-center gap-2.5 rounded-full px-6 py-3 text-sm font-semibold opacity-60"
           >
             {icon}
-            {d.label}: coming soon
+            {fmt(t.downloads.comingSoon, { os: copy.label })}
           </span>
         );
 
         if (compact) return <div key={d.os}>{button}</div>;
         return (
           <div key={d.os} className={`glass-card flex flex-col rounded-[1.5rem] p-6 ${primary ? "ring-1 ring-cyan-500/40" : ""}`}>
-            <h3 className="font-display text-lg font-bold text-foreground">WipeClip for {d.label}</h3>
-            <p className="mt-1 text-sm text-muted">{d.file}</p>
-            <p className="mt-1 text-xs text-muted">{d.requirements}</p>
+            <h3 className="font-display text-lg font-bold text-foreground">{fmt(t.downloads.appFor, { os: copy.label })}</h3>
+            <p className="mt-1 text-sm text-muted">{copy.file}</p>
+            <p className="mt-1 text-xs text-muted">{copy.requirements}</p>
             <div className="mt-5 flex">{button}</div>
-            {d.url && d.note && <p className="mt-3 text-xs text-muted">{d.note}</p>}
+            {d.url && copy.note && <p className="mt-3 text-xs text-muted">{copy.note}</p>}
           </div>
         );
       })}

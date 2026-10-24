@@ -1,13 +1,7 @@
-import type { Metadata } from "next";
-import SignInClient from "./SignInClient";
+import { accountMetadata, SignInView } from "@/views/account";
 
-export const metadata: Metadata = {
-  title: "Sign In",
-  description: "Sign in to your WipeClip.co account.",
-  alternates: { canonical: "/sign-in" },
-  robots: { index: false, follow: true },
-};
+export const metadata = accountMetadata("signIn", "en");
 
-export default function SignInPage() {
-  return <SignInClient />;
+export default function Page() {
+  return <SignInView lang="en" />;
 }

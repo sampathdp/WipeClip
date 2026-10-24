@@ -9,6 +9,8 @@ import { IMAGE_CREDIT_COST } from "@/lib/credits";
 import { allowFrameGrab, ApiError, AuthRequiredError, type ToolQuality } from "@/lib/toolsApi";
 import SignInModal from "./SignInModal";
 import { saveExportFile } from "@/lib/platform";
+import { useErrorText, useI18n, useLocaleHref } from "@/i18n/client";
+import { fmt } from "@/i18n/format";
 
 interface Capture {
   id: string;
@@ -194,16 +196,20 @@ export default function VideoFrameGrabberDemo() {
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { t: messages } = useI18n();
+  const t = messages.tool.frame;
+  const href = useLocaleHref();
+  const errorText = useErrorText();
 
   const pickFile = useCallback((picked: File | undefined) => {
     if (!picked) return;
     trackEvent("file_selected", { tool: TOOL });
     if (!picked.type.startsWith("video/")) {
-      setError("Please choose a video file.");
+      setError(t.chooseVideo);
       return;
     }
     if (picked.size > MAX_BYTES) {
-      setError("File exceeds the 500MB limit.");
+      setError(t.tooBig500);
       return;
     }
     setError(null);
@@ -212,7 +218,7 @@ export default function VideoFrameGrabberDemo() {
     setCaptures([]);
     setSuggestions([]);
     setBestSuggestionId(null);
-  }, []);
+  }, [t]);
 
   const reset = useCallback(() => {
     if (videoUrl) URL.revokeObjectURL(videoUrl);
@@ -269,7 +275,7 @@ export default function VideoFrameGrabberDemo() {
     try {
       const frames = await suggestCoverFrames(video, (done, total) => setSuggestProgress({ done, total }));
       if (frames.length === 0) {
-        setError("Couldn't find good cover frames in this video. Try grabbing one manually instead.");
+        setError(t.noCovers);
         return;
       }
       const withIds = frames.map((f) => ({
@@ -284,7 +290,7 @@ export default function VideoFrameGrabberDemo() {
     } finally {
       setIsSuggesting(false);
     }
-  }, [isSuggesting, suggestions]);
+  }, [isSuggesting, suggestions, t]);
 
   const download = useCallback(
     async (c: Capture, quality: ToolQuality, filename: string, source: "capture" | "suggestion") => {
@@ -297,12 +303,12 @@ export default function VideoFrameGrabberDemo() {
         if (!preview) window.dispatchEvent(new Event("credits:refresh"));
       } catch (e) {
         if (e instanceof AuthRequiredError) setShowSignInModal(true);
-        else setError(e instanceof ApiError || e instanceof Error ? e.message : "Couldn't download the frame. Try again.");
+        else setError(e instanceof ApiError ? errorText(e) : e instanceof Error ? e.message : t.downloadFailed);
       } finally {
         setDownloading(null);
       }
     },
-    []
+    [errorText, t]
   );
 
   const downloadButtons = (c: Capture, filename: string, source: "capture" | "suggestion") => (
@@ -310,18 +316,18 @@ export default function VideoFrameGrabberDemo() {
       <button
         onClick={() => download(c, "preview", filename, source)}
         disabled={downloading !== null}
-        title="Free low-resolution download, once a day"
+        title={t.freeTitle}
         className="text-[10px] font-semibold text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
       >
-        {downloading === `${c.id}:preview` ? "…" : "Free"}
+        {downloading === `${c.id}:preview` ? "…" : t.free}
       </button>
       <button
         onClick={() => download(c, "full", filename, source)}
         disabled={downloading !== null}
-        title={`Full-resolution download for ${IMAGE_CREDIT_COST} credit`}
+        title={fmt(t.hdTitle, { n: IMAGE_CREDIT_COST })}
         className="text-[10px] font-semibold text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
       >
-        {downloading === `${c.id}:full` ? "…" : `HD · ${IMAGE_CREDIT_COST} cr`}
+        {downloading === `${c.id}:full` ? "…" : fmt(t.hd, { n: IMAGE_CREDIT_COST })}
       </button>
     </>
   );
@@ -339,10 +345,10 @@ export default function VideoFrameGrabberDemo() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="font-display text-2xl font-bold tracking-tight sm:text-3xl text-foreground">
-            Try it now: <span className="text-gradient">Grab Video Frames</span>
+            {messages.tool.tryItNow}<span className="text-gradient">{t.name}</span>
           </h2>
           <p className="mt-1.5 text-sm sm:text-base text-muted">
-            Scrub to any moment, capture it as a PNG. 100% in your browser. Nothing is uploaded.
+            {t.intro}
           </p>
         </div>
       </div>
@@ -389,8 +395,8 @@ export default function VideoFrameGrabberDemo() {
               />
             </svg>
           </div>
-          <p className="text-base font-semibold text-foreground">Drop your video here, or click to browse</p>
-          <p className="mt-1 text-xs sm:text-sm text-muted">MP4, MOV, WebM &bull; Up to 500MB &bull; Never leaves your device</p>
+          <p className="text-base font-semibold text-foreground">{t.dropVideo}</p>
+          <p className="mt-1 text-xs sm:text-sm text-muted">{t.videoTypes}</p>
           </button>
         </>
       )}
@@ -405,7 +411,7 @@ export default function VideoFrameGrabberDemo() {
               </p>
             </div>
             <button onClick={reset} className="shrink-0 text-xs font-semibold text-muted transition-colors hover:text-cyan-600">
-              Start over
+              {messages.tool.startOver}
             </button>
           </div>
 
@@ -431,7 +437,7 @@ export default function VideoFrameGrabberDemo() {
                   <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                   <circle cx="12" cy="13" r="4" />
                 </svg>
-                <span>Capture This Frame</span>
+                <span>{t.capture}</span>
               </button>
               <button
                 onClick={runSuggest}
@@ -448,13 +454,11 @@ export default function VideoFrameGrabberDemo() {
                     <path d="M12 3v3M12 18v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M3 12h3M18 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
                   </svg>
                 )}
-                <span>{isSuggesting ? `Scanning… ${suggestProgress.done}/${suggestProgress.total || SUGGEST_SAMPLE_COUNT}` : "Suggest Cover Frames"}</span>
+                <span>{isSuggesting ? fmt(t.scanning, { done: suggestProgress.done, total: suggestProgress.total || SUGGEST_SAMPLE_COUNT }) : t.suggest}</span>
               </button>
             </div>
             <p className="mt-2 text-center text-xs text-muted">
-              Play, pause, or scrub the video above to the moment you want, then capture, or let us scan the clip
-              for a few sharp, well-lit frames that work well as a cover image. One free low-resolution download a
-              day; full resolution costs {IMAGE_CREDIT_COST} credit.
+              {fmt(t.help, { n: IMAGE_CREDIT_COST })}
             </p>
           </div>
 
@@ -462,7 +466,7 @@ export default function VideoFrameGrabberDemo() {
             <div className="mt-8 border-t border-border/60 pt-6">
               <div className="mb-4 flex items-center justify-between gap-4">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-                  Suggested cover frames{suggestions.length > 0 ? ` (${suggestions.length})` : ""}
+                  {t.suggested}{suggestions.length > 0 ? ` (${suggestions.length})` : ""}
                 </p>
                 {isSuggesting && (
                   <span className="text-[11px] font-mono text-muted">
@@ -477,17 +481,17 @@ export default function VideoFrameGrabberDemo() {
                     <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
                     <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                   </svg>
-                  <p className="text-xs text-muted">Scanning the video for sharp, well-lit frames…</p>
+                  <p className="text-xs text-muted">{t.scanningLong}</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   {suggestions.map((s) => (
                     <div key={s.id} className="group relative overflow-hidden rounded-xl border border-border bg-black">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={s.url} alt={`Suggested cover frame at ${formatTime(s.time)}`} className="aspect-video w-full object-cover" />
+                      <img src={s.url} alt={fmt(t.suggestedAlt, { time: formatTime(s.time) })} className="aspect-video w-full object-cover" />
                       {s.id === bestSuggestionId && (
                         <span className="absolute left-2 top-2 rounded-full bg-accent px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white shadow">
-                          Best pick
+                          {t.bestPick}
                         </span>
                       )}
                       <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-black/70 px-2 py-1.5 backdrop-blur-sm">
@@ -498,7 +502,7 @@ export default function VideoFrameGrabberDemo() {
                             onClick={() => applySuggestion(s)}
                             className="text-[10px] font-semibold text-cyan-600 hover:text-cyan-700"
                           >
-                            Use this
+                            {t.useThis}
                           </button>
                         </div>
                       </div>
@@ -512,13 +516,13 @@ export default function VideoFrameGrabberDemo() {
           {captures.length > 0 && (
             <div className="mt-8 border-t border-border/60 pt-6">
               <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-muted">
-                Captured frames ({captures.length})
+                {fmt(t.captured, { n: captures.length })}
               </p>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {captures.map((c) => (
                   <div key={c.id} className="group relative overflow-hidden rounded-xl border border-border bg-black">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={c.url} alt={`Frame at ${formatTime(c.time)}`} className="aspect-video w-full object-cover" />
+                    <img src={c.url} alt={fmt(t.frameAlt, { time: formatTime(c.time) })} className="aspect-video w-full object-cover" />
                     <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-black/70 px-2 py-1.5 backdrop-blur-sm">
                       <span className="font-mono text-[10px] text-white">{formatTime(c.time)}</span>
                       <div className="flex items-center gap-2">
@@ -527,7 +531,7 @@ export default function VideoFrameGrabberDemo() {
                           onClick={() => removeCapture(c.id)}
                           className="text-[10px] font-semibold text-rose-600 hover:text-rose-700"
                         >
-                          Remove
+                          {t.remove}
                         </button>
                       </div>
                     </div>
@@ -543,9 +547,9 @@ export default function VideoFrameGrabberDemo() {
             <p className="text-xs sm:text-sm text-muted">
               {AI_CLEANUP_ENABLED
                 ? "Need to remove an unwanted object instead of just grabbing a frame? "
-                : "Need to trim or edit the whole clip? "}
-              <Link href={AI_CLEANUP_ENABLED ? "/" : "/download"} className="font-semibold text-cyan-600 underline hover:text-cyan-700">
-                {AI_CLEANUP_ENABLED ? "Try WipeClip.co's AI object removal free" : "Get WipeClip.co's free video editor for Windows and Mac"}
+                : t.editClip}
+              <Link href={AI_CLEANUP_ENABLED ? "/" : href("/download")} className="font-semibold text-cyan-600 underline hover:text-cyan-700">
+                {AI_CLEANUP_ENABLED ? "Try WipeClip.co's AI object removal free" : messages.tool.getEditor}
               </Link>
             </p>
           </div>

@@ -1,24 +1,27 @@
 import Link from "next/link";
+import { localeHref, type Lang } from "@/lib/i18n";
+import { getDict } from "@/i18n";
+import { rich } from "@/i18n/rich";
 
-const points = [
-  "Your video is sent to our processing backend only for the duration of your request.",
-  "It's held in a temporary location and deleted immediately once your result is returned. We don't keep a copy afterward.",
-  "We don't use uploaded media to train any model.",
-];
-
-export default function PrivacyProcessing() {
+export default function PrivacyProcessing({ lang = "en" }: { lang?: Lang }) {
+  const t = getDict(lang).privacyProcessing;
+  const link = (path: string, label: string) => (
+    <Link href={localeHref(lang, path)} className="underline hover:text-foreground">
+      {label}
+    </Link>
+  );
   return (
     <section id="privacy" className="scroll-mt-28 py-24 relative">
       <div className="mx-auto max-w-3xl px-6 text-center">
         <div className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-surface-2/90 border border-border px-3.5 py-1 text-xs font-semibold text-muted">
-          Privacy &amp; Processing
+          {t.badge}
         </div>
         <h2 className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-          What happens to your file
+          {t.title}
         </h2>
 
         <ul className="mt-10 space-y-4 text-left">
-          {points.map((p) => (
+          {t.points.map((p) => (
             <li key={p} className="glass-card flex items-start gap-3 rounded-2xl p-5">
               <span className="mt-0.5 text-cyan-600 font-bold">✓</span>
               <span className="text-sm sm:text-base text-muted leading-relaxed">{p}</span>
@@ -27,15 +30,7 @@ export default function PrivacyProcessing() {
         </ul>
 
         <p className="mt-6 text-xs text-muted">
-          Full details in our{" "}
-          <Link href="/privacy" className="underline hover:text-foreground">
-            Privacy Policy
-          </Link>{" "}
-          and{" "}
-          <Link href="/terms" className="underline hover:text-foreground">
-            Terms of Service
-          </Link>
-          .
+          {rich(t.more, { privacy: link("/privacy", t.privacy), terms: link("/terms", t.terms) })}
         </p>
       </div>
     </section>

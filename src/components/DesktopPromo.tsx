@@ -1,15 +1,8 @@
 import Reveal from "./Reveal";
 import DownloadButtons from "./DownloadButtons";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
-
-const highlights = [
-  "Record screen, audio and webcam",
-  "Automatic zooms on clicks",
-  "Trim, split and reorder clips",
-  "Transitions, text and stickers",
-  "Auto captions from speech",
-  AI_CLEANUP_ENABLED ? "AI Cleanup on just one clip" : "Export at original quality",
-];
+import type { Lang } from "@/lib/i18n";
+import { getDict } from "@/i18n";
 
 // Illustrative timeline: three clips, two transitions, one sticker bar.
 const CLIPS = [
@@ -19,22 +12,23 @@ const CLIPS = [
 ];
 
 /** Homepage section promoting the Windows and macOS app (/download). */
-export default function DesktopPromo() {
+export default function DesktopPromo({ lang = "en" }: { lang?: Lang }) {
+  const t = getDict(lang).desktopPromo;
+  // The last highlight names AI Cleanup while that feature is on (English only).
+  const highlights = AI_CLEANUP_ENABLED ? [...t.highlights.slice(0, -1), "AI Cleanup on just one clip"] : t.highlights;
   return (
     <section id="download" className="scroll-mt-28 py-24 relative">
       <div className="mx-auto max-w-6xl px-6">
         <Reveal className="glass-card grid gap-10 rounded-[2rem] p-8 sm:p-12 lg:grid-cols-2 lg:items-center">
           <div>
             <div className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-50 px-3.5 py-1 text-xs font-semibold text-cyan-600 dark:bg-cyan-500/10">
-              Free for Windows &amp; Mac
+              {t.badge}
             </div>
             <h2 className="font-display text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl">
-              Record it, then <span className="text-gradient">finish the edit</span>
+              {t.title}<span className="text-gradient">{t.titleHighlight}</span>
             </h2>
             <p className="mt-4 text-base leading-relaxed text-muted">
-              The WipeClip desktop app puts a screen recorder and a lightweight video editor in one place. Capture your
-              screen, cut it down, add zooms, captions, transitions and stickers, and export at your original aspect
-              ratio and frame rate.
+              {t.intro}
             </p>
             <ul className="mt-6 grid gap-2.5 sm:grid-cols-2">
               {highlights.map((h) => (
@@ -53,7 +47,7 @@ export default function DesktopPromo() {
             <div className="aspect-video rounded-xl bg-gradient-to-br from-slate-800 via-slate-900 to-black ring-1 ring-border">
               <div className="flex h-full items-start justify-end p-4">
                 <span className="rotate-6 rounded-lg border-2 border-white bg-rose-500 px-3 py-1 font-display text-sm font-black text-white shadow-lg">
-                  SUBSCRIBE
+                  {t.sticker}
                 </span>
               </div>
             </div>

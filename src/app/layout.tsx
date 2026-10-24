@@ -5,6 +5,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import ReferralCapture from "@/components/ReferralCapture";
 import ServiceBanner from "@/components/ServiceBanner";
 import InlineScript from "@/components/InlineScript";
+import HtmlLang from "@/components/HtmlLang";
 import { SITE_URL, SUPPORT_EMAIL } from "@/lib/seo";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import "./globals.css";
@@ -160,6 +161,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         />
       </head>
       <body className="min-h-full flex flex-col bg-background text-foreground font-sans">
+        <HtmlLang />
         <ServiceBanner />
         <ReferralCapture />
         {children}

@@ -5,8 +5,12 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch, IS_DESKTOP } from "@/lib/platform";
 import SignInModal from "@/components/SignInModal";
+import { useI18n, useLocaleHref } from "@/i18n/client";
+import { fmt } from "@/i18n/format";
 
 export default function AuthStatus() {
+  const { t } = useI18n();
+  const href = useLocaleHref();
   const [email, setEmail] = useState<string | null | undefined>(undefined);
   const [credits, setCredits] = useState<number | null>(null);
   const [plan, setPlan] = useState<string | null>(null);
@@ -72,10 +76,10 @@ export default function AuthStatus() {
     if (IS_DESKTOP) return <DesktopSignIn />;
     return (
       <Link
-        href="/sign-in"
+        href={href("/sign-in")}
         className="btn-primary rounded-full px-4 py-2 text-sm font-semibold inline-flex items-center gap-1.5"
       >
-        Sign in
+        {t.auth.signIn}
       </Link>
     );
   }
@@ -84,6 +88,7 @@ export default function AuthStatus() {
 }
 
 function DesktopSignIn() {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -92,19 +97,19 @@ function DesktopSignIn() {
         onClick={() => setOpen(true)}
         className="btn-primary rounded-full px-4 py-2 text-sm font-semibold inline-flex items-center gap-1.5"
       >
-        Sign in
+        {t.auth.signIn}
       </button>
       <SignInModal open={open} onClose={() => setOpen(false)} />
     </>
   );
 }
 
-const PLAN_LABEL: Record<string, string> = { free: "Free plan", starter: "Starter", pro: "Pro" };
-
 /** Signed-in navbar: a credits pill plus an avatar that opens the account
  * menu - everything that used to sit inline in the bar lives in here now.
  */
 function AccountMenu({ email, credits, plan }: { email: string; credits: number | null; plan: string | null }) {
+  const { t } = useI18n();
+  const href = useLocaleHref();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -131,20 +136,20 @@ function AccountMenu({ email, credits, plan }: { email: string; credits: number 
   return (
     <div ref={rootRef} className="relative flex items-center gap-2">
       <Link
-        href="/pricing"
-        title="Your credits - click to buy more"
+        href={href("/pricing")}
+        title={t.auth.creditsTitle}
         className="hidden items-center gap-1.5 rounded-full bg-surface-2/90 border border-cyan-500/30 px-3 py-1.5 font-mono text-xs text-cyan-600 transition-all hover:border-cyan-400 hover:shadow-[0_0_12px_rgba(34,211,238,0.3)] sm:inline-flex"
       >
         <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
         {credits ?? "…"}
-        <span className="sr-only"> credits</span>
+        <span className="sr-only"> {t.auth.creditsSr}</span>
       </Link>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Account menu"
+        aria-label={t.auth.accountMenu}
         className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 font-display text-sm font-bold text-white shadow-[0_0_15px_rgba(124,92,255,0.35)] ring-2 ring-transparent transition hover:ring-cyan-400/50 focus-visible:outline-none focus-visible:ring-cyan-400"
       >
         {initial}
@@ -158,24 +163,24 @@ function AccountMenu({ email, credits, plan }: { email: string; credits: number 
           <div className="border-b border-border px-3 pb-3 pt-2">
             <p className="truncate text-sm font-semibold text-foreground">{email}</p>
             <p className="mt-0.5 text-xs text-muted">
-              {plan ? (PLAN_LABEL[plan] ?? plan) : "…"} · {credits ?? "…"} credits
+              {fmt(t.auth.creditsLine, { plan: plan ? (t.auth.plans[plan] ?? plan) : "…", n: credits ?? "…" })}
             </p>
           </div>
           <div className="py-1" onClick={() => setOpen(false)}>
-            <Link role="menuitem" href="/profile" className={item}>
-              Profile
+            <Link role="menuitem" href={href("/profile")} className={item}>
+              {t.auth.profile}
             </Link>
-            <Link role="menuitem" href="/history" className={item}>
-              Job History
+            <Link role="menuitem" href={href("/history")} className={item}>
+              {t.auth.jobHistory}
               {plan !== "pro" && (
                 <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-bold text-accent">PRO</span>
               )}
             </Link>
-            <Link role="menuitem" href="/referrals" className={item}>
-              Refer a Friend
+            <Link role="menuitem" href={href("/referrals")} className={item}>
+              {t.auth.referFriend}
             </Link>
-            <Link role="menuitem" href="/pricing" className={item}>
-              Buy credits
+            <Link role="menuitem" href={href("/pricing")} className={item}>
+              {t.auth.buyCredits}
             </Link>
           </div>
           {IS_DESKTOP ? (
@@ -188,13 +193,13 @@ function AccountMenu({ email, credits, plan }: { email: string; credits: number 
                 onClick={() => void createClient().auth.signOut()}
                 className={item + " text-rose-600 dark:text-rose-400"}
               >
-                Sign out
+                {t.auth.signOut}
               </button>
             </div>
           ) : (
             <form action="/auth/sign-out" method="post" className="border-t border-border pt-1">
               <button role="menuitem" type="submit" className={item + " text-rose-600 dark:text-rose-400"}>
-                Sign out
+                {t.auth.signOut}
               </button>
             </form>
           )}

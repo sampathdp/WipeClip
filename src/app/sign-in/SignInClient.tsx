@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Navbar from "@/components/Navbar";
-import Footer from "@/components/Footer";
 import Logo from "@/components/Logo";
 import { createClient } from "@/lib/supabase/client";
 import { trackEvent } from "@/lib/analytics";
+import { useI18n, useLocaleHref } from "@/i18n/client";
+import { rich } from "@/i18n/rich";
 
 type View = "password" | "magic" | "forgot";
 type PasswordAction = "signin" | "signup";
@@ -34,8 +34,18 @@ function GoogleIcon() {
   );
 }
 
+/** The sign-in card; the page around it renders the navbar and footer. */
 export default function SignInClient() {
   const router = useRouter();
+  const { lang, t: messages } = useI18n();
+  const t = messages.signIn;
+  const href = useLocaleHref();
+  // Translated pages come back to their own home page after the email or
+  // Google round trip.
+  const callbackUrl = (next?: string) => {
+    const target = next ?? (lang === "en" ? null : href("/"));
+    return `${window.location.origin}/auth/callback${target ? `?next=${target}` : ""}`;
+  };
   const [view, setView] = useState<View>("password");
   const [passwordAction, setPasswordAction] = useState<PasswordAction>("signin");
   const [email, setEmail] = useState("");
@@ -50,7 +60,7 @@ export default function SignInClient() {
     const supabase = createClient();
     const { error: err } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: { redirectTo: callbackUrl() },
     });
     if (err) {
       setError(err.message);
@@ -71,7 +81,7 @@ export default function SignInClient() {
       const { data, error: err } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+        options: { emailRedirectTo: callbackUrl() },
       });
       if (err) {
         setError(err.message);
@@ -80,7 +90,7 @@ export default function SignInClient() {
       }
       if (data.session) {
         trackEvent("signup_completed", { method: "password" });
-        router.push("/");
+        router.push(href("/"));
         return;
       }
       // Email confirmation is required before a session exists.
@@ -94,7 +104,7 @@ export default function SignInClient() {
       setStatus("error");
       return;
     }
-    router.push("/");
+    router.push(href("/"));
   };
 
   const sendMagicLink = async (e: React.FormEvent) => {
@@ -104,7 +114,7 @@ export default function SignInClient() {
     const supabase = createClient();
     const { error: err } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      options: { emailRedirectTo: callbackUrl() },
     });
     if (err) {
       setError(err.message);
@@ -120,7 +130,7 @@ export default function SignInClient() {
     setError(null);
     const supabase = createClient();
     const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/callback?next=/auth/reset-password`,
+      redirectTo: callbackUrl("/auth/reset-password"),
     });
     if (err) {
       setError(err.message);
@@ -137,16 +147,10 @@ export default function SignInClient() {
     setPassword("");
   };
 
-  const sentCopy =
-    view === "forgot"
-      ? "We sent a password reset link to"
-      : view === "magic"
-        ? "We sent a sign-in link to"
-        : "Confirm your account via the link we sent to";
+  const sentCopy = view === "forgot" ? t.sentReset : view === "magic" ? t.sentMagic : t.sentConfirm;
+  const brand = <span className="text-gradient">WipeClip.co</span>;
 
   return (
-    <div className="flex flex-1 flex-col min-h-screen">
-      <Navbar />
       <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 pt-36 pb-28 relative overflow-hidden">
         {/* Background glow mesh */}
         <div
@@ -160,33 +164,21 @@ export default function SignInClient() {
           </div>
 
           <h1 className="font-display text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground">
-            {view === "password" && passwordAction === "signup" ? (
-              <>
-                Create your <span className="text-gradient">WipeClip.co</span> account
-              </>
-            ) : (
-              <>
-                Sign in to <span className="text-gradient">WipeClip.co</span>
-              </>
-            )}
+            {rich(view === "password" && passwordAction === "signup" ? t.pageTitleSignUp : t.pageTitleSignIn, { brand })}
           </h1>
 
           {status === "sent" ? (
             <div className="mt-8 rounded-2xl bg-cyan-50 border border-cyan-400/40 p-6 text-sm text-cyan-700 shadow-[0_0_25px_rgba(34,211,238,0.2)]">
               <div className="mb-2 text-2xl">✓</div>
-              <p className="font-medium">Check your email</p>
+              <p className="font-medium">{t.checkEmail}</p>
               <p className="mt-1 text-xs text-muted">
-                {sentCopy} <strong className="text-cyan-600">{email}</strong>.
+                {rich(sentCopy, { email: <strong className="text-cyan-600">{email}</strong> })}
               </p>
             </div>
           ) : (
             <>
               <p className="mt-2.5 text-xs sm:text-sm text-muted">
-                {view === "magic"
-                  ? "Passwordless magic link. We will send an instant login link to your inbox."
-                  : view === "forgot"
-                    ? "Enter your email and we'll send you a link to reset your password."
-                    : "Use your email and password, or continue with Google."}
+                {view === "magic" ? t.introMagic : view === "forgot" ? t.introForgot : t.introPassword}
               </p>
 
               {view !== "forgot" && (
@@ -198,12 +190,12 @@ export default function SignInClient() {
                     className="mt-7 flex w-full items-center justify-center gap-3 rounded-full border border-border-light bg-white py-3.5 text-sm font-semibold text-slate-800 transition-all hover:shadow-[0_0_20px_rgba(15,23,42,0.12)] dark:hover:shadow-[0_0_20px_rgba(255,255,255,0.15)] disabled:opacity-50"
                   >
                     <GoogleIcon />
-                    {googleLoading ? "Redirecting…" : "Continue with Google"}
+                    {googleLoading ? t.redirecting : t.google}
                   </button>
 
                   <div className="my-6 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-wider text-muted">
                     <span className="h-px flex-1 bg-border" />
-                    or
+                    {t.or}
                     <span className="h-px flex-1 bg-border" />
                   </div>
                 </>
@@ -215,7 +207,7 @@ export default function SignInClient() {
               >
                 <div>
                   <label htmlFor="email" className="block text-xs font-semibold text-muted uppercase tracking-wider mb-2">
-                    Email Address
+                    {t.emailLabel}
                   </label>
                   <input
                     id="email"
@@ -232,7 +224,7 @@ export default function SignInClient() {
                   <div>
                     <div className="mb-2 flex items-center justify-between">
                       <label htmlFor="password" className="block text-xs font-semibold text-muted uppercase tracking-wider">
-                        Password
+                        {t.password}
                       </label>
                       {passwordAction === "signin" && (
                         <button
@@ -240,7 +232,7 @@ export default function SignInClient() {
                           onClick={() => switchView("forgot")}
                           className="text-xs font-medium text-cyan-600 hover:text-cyan-700"
                         >
-                          Forgot password?
+                          {t.forgot}
                         </button>
                       )}
                     </div>
@@ -264,14 +256,14 @@ export default function SignInClient() {
                   className="btn-primary mt-2 w-full rounded-full py-3.5 text-sm font-bold disabled:opacity-50"
                 >
                   {status === "sending"
-                    ? "Please wait…"
+                    ? t.wait
                     : view === "magic"
-                      ? "Send Sign-in Link"
+                      ? t.sendLink
                       : view === "forgot"
-                        ? "Send Reset Link"
+                        ? t.sendReset
                         : passwordAction === "signup"
-                          ? "Create Account"
-                          : "Sign In"}
+                          ? t.createAccount
+                          : t.signIn}
                 </button>
 
                 {error && <p className="text-center text-xs font-medium text-rose-600 mt-1">{error}</p>}
@@ -280,7 +272,7 @@ export default function SignInClient() {
               <div className="mt-6 flex flex-col gap-2 text-xs text-muted">
                 {view === "forgot" ? (
                   <button onClick={() => switchView("password")} className="hover:text-foreground">
-                    Back to sign in
+                    {t.backToSignIn}
                   </button>
                 ) : view === "password" ? (
                   <>
@@ -291,15 +283,15 @@ export default function SignInClient() {
                       }}
                       className="hover:text-foreground"
                     >
-                      {passwordAction === "signin" ? "New here? Create an account" : "Already have an account? Sign in"}
+                      {passwordAction === "signin" ? t.toSignUp : t.toSignIn}
                     </button>
                     <button onClick={() => switchView("magic")} className="hover:text-foreground">
-                      Prefer a magic link instead?
+                      {t.toMagic}
                     </button>
                   </>
                 ) : (
                   <button onClick={() => switchView("password")} className="hover:text-foreground">
-                    Use email and password instead
+                    {t.toPassword}
                   </button>
                 )}
               </div>
@@ -307,7 +299,5 @@ export default function SignInClient() {
           )}
         </div>
       </main>
-      <Footer />
-    </div>
   );
 }

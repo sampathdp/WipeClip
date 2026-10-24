@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useI18n } from "@/i18n/client";
 
 export default function CopyReferralLink({ link }: { link: string }) {
   const [copied, setCopied] = useState(false);
+  const t = useI18n().t.referral;
 
   return (
     <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -21,7 +23,7 @@ export default function CopyReferralLink({ link }: { link: string }) {
         }}
         className="btn-primary shrink-0 rounded-xl px-6 py-3.5 text-sm font-semibold"
       >
-        {copied ? "Copied!" : "Copy link"}
+        {copied ? t.copied : t.copy}
       </button>
     </div>
   );
