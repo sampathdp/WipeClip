@@ -3,7 +3,8 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import PhotoSharpenerDemo from "@/components/PhotoSharpenerDemo";
 import ToolGuide from "@/components/ToolGuide";
-import { buildPageMetadata, faqJsonLd, jsonLdString } from "@/lib/seo";
+import { buildPageMetadata, faqJsonLd, jsonLdString, webApplicationJsonLd } from "@/lib/seo";
+import RelatedTools from "@/components/RelatedTools";
 
 const title = "Sharpen a Blurry Photo - Free";
 const description =
@@ -39,7 +40,10 @@ const faqs = [
 ];
 
 export default function Page() {
-  const jsonLd = { "@context": "https://schema.org", ...faqJsonLd(faqs) };
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [faqJsonLd(faqs), webApplicationJsonLd({ name: "Photo Sharpener", path: "/sharpen-image", description, free: true })],
+  };
 
   return (
     <div className="flex flex-1 flex-col">
@@ -115,6 +119,7 @@ export default function Page() {
             </div>
           </div>
         </section>
+        <RelatedTools current="/sharpen-image" />
       </main>
       <Footer />
     </div>

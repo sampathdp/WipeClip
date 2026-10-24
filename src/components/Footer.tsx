@@ -2,6 +2,7 @@ import Link from "next/link";
 import Logo from "./Logo";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import { LOCALE_INFO, LOCALES } from "@/lib/i18n";
+import { GUIDES } from "@/lib/site-pages";
 
 export default function Footer() {
   return (
@@ -54,6 +55,18 @@ export default function Footer() {
               <span className="text-border">&middot;</span>
               <Link href="/image-cleanup" className="transition-colors hover:text-foreground">
                 Image Cleanup
+              </Link>
+            </>
+          )}
+          <span className="text-border">&middot;</span>
+          <Link href="/tools" className="font-semibold transition-colors hover:text-foreground">
+            All tools
+          </Link>
+          {GUIDES.length > 0 && (
+            <>
+              <span className="text-border">&middot;</span>
+              <Link href="/guides" className="transition-colors hover:text-foreground">
+                Guides
               </Link>
             </>
           )}

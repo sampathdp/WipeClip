@@ -8,6 +8,7 @@ const siteUrl = SITE_URL;
 // Pages that 404 while the AI cleanup feature is switched off.
 const CLEANUP_PATHS = [
   "/image-cleanup",
+  "/guides",
   "/guides/does-ai-cleanup-reduce-video-quality",
   "/guides/how-ai-video-inpainting-works",
 ];
@@ -37,6 +38,18 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: "2026-10-21",
       changeFrequency: "weekly",
       priority: 0.9,
+    },
+    {
+      url: `${siteUrl}/tools`,
+      lastModified: "2026-10-24",
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
+    {
+      url: `${siteUrl}/guides`,
+      lastModified: "2026-10-24",
+      changeFrequency: "monthly",
+      priority: 0.6,
     },
     {
       url: `${siteUrl}/image-cleanup`,

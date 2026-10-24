@@ -11,13 +11,10 @@ import DirectAnswer from "@/components/guides/DirectAnswer";
 import ArticleByline from "@/components/guides/ArticleByline";
 import RelatedGuides from "@/components/guides/RelatedGuides";
 import { buildPageMetadata, SITE_URL } from "@/lib/seo";
+import { getGuide } from "@/lib/site-pages";
 
-const title = "How AI Video Inpainting Works";
-const description =
-  "A plain-language explanation of how video inpainting fills in a marked region using nearby pixels and nearby frames, and where the approach runs into trouble.";
 const path = "/guides/how-ai-video-inpainting-works";
-const publishedDate = "2026-08-25";
-const updatedDate = "2026-10-01";
+const { title, description, published: publishedDate, updated: updatedDate } = getGuide(path);
 
 export const metadata: Metadata = buildPageMetadata({ title, description, path });
 
@@ -74,6 +71,7 @@ export default function Page() {
       <Breadcrumbs
         items={[
           { label: "Home", href: "/" },
+          { label: "Guides", href: "/guides" },
           { label: "How AI Video Inpainting Works" },
         ]}
       />

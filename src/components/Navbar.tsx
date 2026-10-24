@@ -39,7 +39,7 @@ export default function Navbar() {
 
         <div className="flex items-center gap-2 sm:gap-3">
           <Link
-            href="/#tools"
+            href="/tools"
             aria-label="Free Tools"
             className="group inline-flex shrink-0 items-center gap-1.5 rounded-full border border-cyan-400/50 bg-gradient-to-r from-accent-2/20 to-accent/20 px-2.5 py-2 text-xs font-bold text-cyan-700 shadow-[0_0_15px_rgba(34,211,238,0.2)] transition-all hover:scale-[1.04] hover:border-cyan-400 hover:shadow-[0_0_22px_rgba(34,211,238,0.35)] dark:text-cyan-300 sm:px-3.5"
           >

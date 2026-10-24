@@ -4,7 +4,8 @@ import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import ImageEditorDemo from "@/components/ImageEditorDemo";
-import { buildPageMetadata } from "@/lib/seo";
+import RelatedTools from "@/components/RelatedTools";
+import { buildPageMetadata, faqJsonLd, webApplicationJsonLd } from "@/lib/seo";
 import { PLANS } from "@/lib/credits";
 
 const title = "AI Object Removal for Photos - Pro Tool";
@@ -41,12 +42,10 @@ export default function Page() {
 
   const jsonLd = {
     "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: faqs.map((f) => ({
-      "@type": "Question",
-      name: f.q,
-      acceptedAnswer: { "@type": "Answer", text: f.a },
-    })),
+    "@graph": [
+      faqJsonLd(faqs),
+      webApplicationJsonLd({ name: "AI Image Cleanup", path: "/image-cleanup", description, free: false }),
+    ],
   };
 
   return (
@@ -108,6 +107,7 @@ Image cleanup: FAQ
             </div>
           </div>
         </section>
+        <RelatedTools current="/image-cleanup" />
       </main>
       <Footer />
     </div>

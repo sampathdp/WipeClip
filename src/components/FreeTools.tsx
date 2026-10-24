@@ -1,75 +1,46 @@
 import Link from "next/link";
 import Reveal from "./Reveal";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
+import { TOOLS, type ToolAvailability } from "@/lib/site-pages";
 
-const allTools = [
-  {
-    href: "/download",
-    badge: "New",
-    title: "Desktop Video Editor",
-    desc: AI_CLEANUP_ENABLED
-      ? "Trim, split and cut out sections, reorder clips, add transitions and stickers, and AI-clean any clip. Free for Windows and Mac."
-      : "Trim, split and cut out sections, reorder clips, add transitions, stickers and auto captions. Free for Windows and Mac.",
-    icon: (
+// Card icons, keyed by tool href; names and copy come from site-pages.
+const ICONS: Record<string, React.ReactNode> = {
+  "/download": (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="6" cy="6" r="3" />
         <circle cx="6" cy="18" r="3" />
         <path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12" />
       </svg>
-    ),
-  },
-  {
-    href: "/remove-background",
-    badge: "Free",
-    title: "Background Remover",
-    desc: "Upload a photo, get a transparent PNG back. No region to mark, no account needed to preview.",
-    icon: (
+  ),
+  "/remove-background": (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 2a5 5 0 0 1 5 5c0 2-1 3.5-2.5 5L12 15l-2.5-3C8 10.5 7 9 7 7a5 5 0 0 1 5-5Z" />
         <path d="M5 21c0-3 3-5 7-5s7 2 7 5" />
       </svg>
-    ),
-  },
-  {
-    href: "/extract-video-frame",
-    badge: "Free",
-    title: "Video Frame Grabber",
-    desc: "Scrub to any moment, capture it as a full-resolution PNG. 100% in your browser. Nothing is uploaded.",
-    icon: (
+  ),
+  "/extract-video-frame": (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
         <circle cx="12" cy="13" r="4" />
       </svg>
-    ),
-  },
-  {
-    href: "/sharpen-image",
-    badge: "Free",
-    title: "Photo Sharpener",
-    desc: "Restore crisp detail to a soft or slightly blurry photo. Pick light, standard, or strong strength.",
-    icon: (
+  ),
+  "/sharpen-image": (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 2 2 7l10 5 10-5-10-5Z" />
         <path d="m2 17 10 5 10-5M2 12l10 5 10-5" />
       </svg>
-    ),
-  },
-  {
-    href: "/image-cleanup",
-    badge: "Pro",
-    title: "AI Image Cleanup",
-    desc: "Mark an unwanted object on a photo you took, once. Same reconstruction engine as the video tool.",
-    icon: (
+  ),
+  "/image-cleanup": (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="18" height="18" rx="2" />
         <circle cx="9" cy="9" r="2" />
         <path d="m21 15-5-5L5 21" />
       </svg>
-    ),
-  },
-];
+  ),
+};
 
-const tools = AI_CLEANUP_ENABLED ? allTools : allTools.filter((t) => t.href !== "/image-cleanup");
+const BADGE: Record<ToolAvailability, string> = { desktop: "New", free: "Free", pro: "Pro" };
+
 
 export default function FreeTools() {
   return (
@@ -94,25 +65,27 @@ export default function FreeTools() {
         </div>
 
         <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {tools.map((t, i) => (
-            <Reveal key={t.href} delay={i * 80} className={t.badge === "New" ? "lg:col-span-2" : ""}>
+          {TOOLS.map((t, i) => {
+            const badge = BADGE[t.availability];
+            return (
+            <Reveal key={t.href} delay={i * 80} className={badge === "New" ? "lg:col-span-2" : ""}>
             <Link
               href={t.href}
-              className={`glass-card-interactive group rounded-[1.75rem] p-7 flex h-full flex-col justify-between ${t.badge === "New" ? "border-glow" : ""}`}
+              className={`glass-card-interactive group rounded-[1.75rem] p-7 flex h-full flex-col justify-between ${badge === "New" ? "border-glow" : ""}`}
             >
               <div>
                 <div className="mb-5 flex items-center justify-between">
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-tr from-accent/30 to-accent-2/30 border border-cyan-400/30 text-cyan-600 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
-                    {t.icon}
+                    {ICONS[t.href]}
                   </div>
                   <span
                     className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
-                      t.badge === "Free"
+                      badge === "Free"
                         ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600"
                         : "border-accent/30 bg-accent/10 text-accent"
                     }`}
                   >
-                    {t.badge}
+                    {badge}
                   </span>
                 </div>
                 <h3 className="font-display text-lg font-bold text-foreground tracking-tight">{t.title}</h3>
@@ -126,8 +99,14 @@ export default function FreeTools() {
               </span>
             </Link>
             </Reveal>
-          ))}
+            );
+          })}
         </div>
+        <p className="mt-10 text-center text-sm">
+          <Link href="/tools" className="font-semibold text-cyan-600 underline hover:text-foreground">
+            See every tool and where it runs
+          </Link>
+        </p>
       </div>
     </section>
   );

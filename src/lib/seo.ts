@@ -33,6 +33,33 @@ export function softwareAppJsonLd(extra: Record<string, unknown> = {}) {
   };
 }
 
+/** A browser tool page's schema.org node. `free` adds a $0 offer, true of
+ * the free daily result on the photo and frame tools. */
+export function webApplicationJsonLd({
+  name,
+  path,
+  description,
+  free,
+}: {
+  name: string;
+  path: string;
+  description: string;
+  free: boolean;
+}) {
+  return {
+    "@type": "WebApplication",
+    "@id": `${SITE_URL}${path}#app`,
+    name,
+    url: `${SITE_URL}${path}`,
+    description,
+    applicationCategory: "MultimediaApplication",
+    operatingSystem: "Any (web browser)",
+    isAccessibleForFree: free,
+    ...(free ? { offers: { "@type": "Offer", price: "0", priceCurrency: "USD" } } : {}),
+    publisher: { "@id": `${SITE_URL}/#organization` },
+  };
+}
+
 /** FAQPage JSON-LD from the same question list the page shows. */
 export function faqJsonLd(faqs: { q: string; a: string }[]) {
   return {
