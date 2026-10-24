@@ -27,6 +27,8 @@ export const UI: Record<Locale, { factsTitle: string; otherLanguages: string; fr
   fr: { factsTitle: "En bref", otherLanguages: "Cette page en", freeTools: "Outils gratuits" },
   es: { factsTitle: "De un vistazo", otherLanguages: "Esta página en", freeTools: "Herramientas gratis" },
   it: { factsTitle: "In breve", otherLanguages: "Questa pagina in", freeTools: "Strumenti gratuiti" },
+  nl: { factsTitle: "In het kort", otherLanguages: "Deze pagina in", freeTools: "Gratis tools" },
+  pl: { factsTitle: "W skrócie", otherLanguages: "Ta strona w języku", freeTools: "Darmowe narzędzia" },
 };
 
 /** Translations of the English pages, keyed by the same slugs as
@@ -785,6 +787,384 @@ export const PAGES: Record<Locale, Record<string, LocalizedPage>> = {
         {
           q: "E se voglio montare tutto il video?",
           a: "Questo strumento salva un solo fotogramma. Per tagliare, sottotitolare o riordinare tutto il clip, usa l'editor video gratuito di WipeClip.co per Windows e Mac.",
+        },
+      ],
+    },
+  },
+  nl: {
+    "": {
+      enPath: "/download",
+      demo: "download",
+      title: "Gratis schermrecorder en video-editor voor Windows en Mac",
+      description:
+        "Neem je scherm op, knip pauzes weg met één klik en voeg automatische zooms en ondertitels toe. Gratis voor Windows en macOS.",
+      badge: "Gratis voor Windows en Mac",
+      h1: ["Neem je scherm op en ", "bewerk je video's", " gratis"],
+      intro:
+        "WipeClip is een gratis schermrecorder en video-editor voor Windows en Mac. Zooms volgen automatisch elke klik, pauzes knip je weg met één klik en ondertitels worden op je eigen computer gemaakt.",
+      guideTitle: "Zo maak je een video met WipeClip",
+      steps: [
+        "Download WipeClip voor Windows of macOS en installeer de app.",
+        "Neem je hele scherm, een venster of een gebied op. Systeemgeluid, microfoon en webcam worden als aparte sporen opgeslagen.",
+        "Neem de voorgestelde zooms op je klikken over of pas ze aan.",
+        "Knip lange pauzes en stilstand weg en maak ondertitels op je eigen computer.",
+        "Exporteer een MP4 en ondertitels (.srt of .vtt) direct naar je schijf.",
+      ],
+      facts: [
+        { label: "Systemen", value: "Windows 10 (21H2+), Windows 11, macOS 11+" },
+        { label: "Prijs", value: "Gratis, optionele passen zonder abonnement" },
+        { label: "Opnemen", value: "Scherm, venster of gebied" },
+        { label: "Ondertitels", value: "Op het apparaat gemaakt, .srt en .vtt" },
+        { label: "Formaten", value: "Liggend, staand, vierkant" },
+      ],
+      faqTitle: "Veelgestelde vragen over WipeClip",
+      faqs: [
+        {
+          q: "Is WipeClip gratis?",
+          a: "Ja. Downloaden, opnemen en bewerken is gratis. Als je inlogt, krijg je exports in volledige resolutie die credits gebruiken. Je krijgt elke dag gratis credits, en optionele passen zonder abonnement ontgrendelen premium effecten en 4K.",
+        },
+        {
+          q: "Welke systemen worden ondersteund?",
+          a: "Windows 10 (21H2 of nieuwer), Windows 11 en macOS 11 of nieuwer.",
+        },
+        {
+          q: "Worden mijn opnames geüpload?",
+          a: "Nee. Opnames worden opgeslagen in een map op je computer, en opnemen, bewerken, analyseren en ondertitelen gebeurt daar. Een video wordt alleen bij het exporteren geüpload, verwerkt in tijdelijke opslag en niet bewaard.",
+        },
+        {
+          q: "Waarom toont Windows „Windows heeft uw pc beschermd”?",
+          a: "Windows waarschuwt bij nieuwe apps die nog weinig zijn gedownload. Klik in het installatieprogramma op „Meer informatie” en daarna op „Toch uitvoeren”. Na de installatie werkt de app zichzelf bij.",
+        },
+        {
+          q: "In welke taal is de app?",
+          a: "De interface van de app is voorlopig in het Engels.",
+        },
+      ],
+    },
+    "achtergrond-verwijderen": {
+      enPath: "/remove-background",
+      demo: "background",
+      title: "Achtergrond verwijderen gratis – transparante PNG",
+      description:
+        "Upload een foto en krijg binnen enkele seconden een PNG met transparante achtergrond. Eén gratis resultaat per dag, zonder account.",
+      badge: "Gratis tool",
+      h1: ["Verwijder de ", "achtergrond", " van elke foto"],
+      intro:
+        "Upload een foto en krijg een transparante PNG terug. Niets te markeren en geen account nodig voor de preview. Zet het onderwerp daarna op elke achtergrond die je wilt.",
+      guideTitle: "Zo verwijder je de achtergrond van een foto",
+      steps: [
+        "Sleep een JPG-, PNG- of WebP-foto (tot 25 MB) naar het uploadvak, of klik erop om een bestand te kiezen.",
+        "WipeClip herkent het onderwerp automatisch. Je hoeft niets over te trekken of te markeren.",
+        "Bekijk de uitgeknipte preview op het transparante dambordpatroon.",
+        "Download het resultaat als PNG met transparante achtergrond en plaats het op een nieuwe achtergrond.",
+      ],
+      facts: [
+        { label: "Uitvoer", value: "PNG met transparantie" },
+        { label: "Max. upload", value: "25 MB per afbeelding" },
+        { label: "Gratis", value: "1 uitsnede per dag, verkleind" },
+        { label: "Ingelogd", value: "Volledige resolutie, 1 credit per afbeelding" },
+        { label: "Gratis credits", value: "2 per dag, voor elk account" },
+      ],
+      faqTitle: "Achtergrond verwijderen: veelgestelde vragen",
+      faqs: [
+        {
+          q: "Is dit echt gratis?",
+          a: "Ja. Iedereen krijgt één gratis uitsnede per dag in verkleind formaat, zonder account. Voor volledige resolutie log je in: dat kost 1 credit, en elk account krijgt 2 gratis credits per dag.",
+        },
+        {
+          q: "Welk bestandsformaat krijg ik?",
+          a: "Een PNG met transparant alfakanaal, zodat je het onderwerp direct op een nieuwe achtergrond, een productpagina of een dia kunt zetten.",
+        },
+        {
+          q: "Is dit geschikt voor productfoto's?",
+          a: "Ja. De uitgeknipte PNG kun je op een witte of gekleurde achtergrond zetten, zoals veel online marktplaatsen en webshops voor productfoto's vragen.",
+        },
+        {
+          q: "Worden randen bij haar of fijne details netjes?",
+          a: "Na de eerste uitsnede maakt WipeClip de randen schoon en egaliseert het alfakanaal, zodat halo's en ruwe randen rond fijne details verdwijnen.",
+        },
+        {
+          q: "Bewaren jullie mijn foto?",
+          a: "Nee. De foto wordt verwerkt om je PNG te maken en daarna verwijderd. Hij wordt nooit gebruikt om een model te trainen.",
+        },
+      ],
+    },
+    "foto-verscherpen": {
+      enPath: "/sharpen-image",
+      demo: "sharpen",
+      title: "Wazige foto verscherpen – gratis",
+      description:
+        "Breng detail terug in een zachte of licht wazige foto, binnen enkele seconden. Eén gratis resultaat per dag, zonder account. Sterkte: licht, standaard of sterk.",
+      badge: "Gratis tool",
+      h1: ["Verscherp een ", "zachte of wazige", " foto"],
+      intro: "Upload een foto, kies een sterkte en krijg scherpere details terug, zonder account voor de preview.",
+      guideTitle: "Zo verscherp je een zachte foto",
+      steps: [
+        "Sleep een JPG-, PNG- of WebP-foto (tot 25 MB) naar het uploadvak, of klik erop om een bestand te kiezen.",
+        "Kies een sterkte: Light voor huid en lucht, Standard voor de meeste foto's, Strong voor foto's die nog zacht ogen.",
+        "Vergelijk het resultaat naast het origineel.",
+        "Download de verscherpte foto. Hij behoudt de pixelafmetingen van je upload.",
+      ],
+      facts: [
+        { label: "Sterktes", value: "Light, Standard, Strong" },
+        { label: "Max. upload", value: "25 MB per afbeelding" },
+        { label: "Gratis", value: "1 foto per dag, verkleind" },
+        { label: "Volledige resolutie", value: "1 credit per foto, 2 gratis credits per dag" },
+      ],
+      faqTitle: "Foto verscherpen: veelgestelde vragen",
+      faqs: [
+        {
+          q: "Herstelt dit een erg wazige of bewogen foto?",
+          a: "Nee. De tool herstelt lokaal contrast en randdetail bij een foto die al redelijk scherp is maar wat zacht oogt, bijvoorbeeld na compressie of verkleinen. Detail dat nooit is vastgelegd, kan hij niet terugtoveren.",
+        },
+        {
+          q: "Wordt de resolutie hoger?",
+          a: "Nee. Het resultaat heeft dezelfde pixelafmetingen als je upload. De tool verbetert de helderheid bij dezelfde resolutie.",
+        },
+        {
+          q: "Wat is het verschil tussen Light, Standard en Strong?",
+          a: "Hoe sterk het lokale contrast rond gevonden randen wordt verhoogd. Standard past bij de meeste foto's, Light voorkomt overscherpte huid of lucht, Strong is voor foto's die na Standard nog zacht zijn.",
+        },
+        {
+          q: "Is het gratis?",
+          a: "Ja. Iedereen krijgt één gratis verscherpte foto per dag in verkleind formaat, zonder account. Voor volledige resolutie log je in: dat kost 1 credit, en elk account krijgt 2 gratis credits per dag.",
+        },
+        {
+          q: "Bewaren jullie mijn foto?",
+          a: "Nee. De foto wordt verwerkt en daarna verwijderd. Hij wordt nooit gebruikt om een model te trainen.",
+        },
+      ],
+    },
+    "frame-uit-video-halen": {
+      enPath: "/extract-video-frame",
+      demo: "frame",
+      title: "Frame uit video halen – gratis, zonder upload",
+      description:
+        "Sla elk frame van een video op als PNG-screenshot of thumbnail. Werkt helemaal in je browser, zonder upload. Eén gratis download per dag.",
+      badge: "Gratis • Zonder upload",
+      h1: ["Haal een ", "frame", " uit elke video"],
+      intro:
+        "Ga naar het moment dat je wilt en sla het op als PNG, tot volledige resolutie. Alles gebeurt in je browser. Je video wordt nooit geüpload.",
+      guideTitle: "Zo sla je een frame uit een video op",
+      steps: [
+        "Open een video die je browser kan afspelen (MP4 of WebM, tot 500 MB). Hij blijft op je apparaat.",
+        "Ga naar het gewenste moment, of kies een van de omslagframes die WipeClip voorstelt na het scannen van de video.",
+        "Leg het frame vast. Zoveel als je wilt.",
+        "Download eenmaal per dag gratis een frame in verkleind formaat, of in volledige resolutie voor 1 credit.",
+      ],
+      facts: [
+        { label: "Uitvoer", value: "PNG, tot de resolutie van de video" },
+        { label: "Max. videogrootte", value: "500 MB" },
+        { label: "Upload", value: "Geen, werkt in je browser" },
+        { label: "Gratis", value: "1 download per dag, lage resolutie" },
+        { label: "Volledige resolutie", value: "1 credit per frame, inloggen nodig" },
+      ],
+      faqTitle: "Frame uit video halen: veelgestelde vragen",
+      faqs: [
+        {
+          q: "Wordt mijn video ergens naartoe geüpload?",
+          a: "Nee. De video wordt volledig in je browsertabblad gedecodeerd en getekend, en nooit naar de servers van WipeClip.co gestuurd. Video's tot 500 MB in een formaat dat je browser kan afspelen (meestal MP4 of WebM) werken.",
+        },
+        {
+          q: "Hoeveel frames kan ik vastleggen?",
+          a: "Vastleggen en bekijken zoveel als je wilt. De limiet zit bij het downloaden: één gratis frame per dag in lage resolutie, en elk frame in volledige resolutie kost 1 credit. Elk account krijgt 2 gratis credits per dag.",
+        },
+        {
+          q: "Welke resolutie heeft het geëxporteerde frame?",
+          a: "Een download in volledige resolutie is een PNG op de oorspronkelijke resolutie van de video. De gratis dagelijkse download is verkleind tot ongeveer 0,25 megapixel.",
+        },
+        {
+          q: "En als ik de hele video wil bewerken?",
+          a: "Deze tool slaat één stilstaand frame op. Om de hele clip te knippen, te ondertitelen of te herschikken, gebruik je de gratis video-editor van WipeClip.co voor Windows en Mac.",
+        },
+      ],
+    },
+  },
+  pl: {
+    "": {
+      enPath: "/download",
+      demo: "download",
+      title: "Darmowy rejestrator ekranu i edytor wideo na Windows i Mac",
+      description:
+        "Nagrywaj ekran, wycinaj pauzy jednym kliknięciem, dodawaj automatyczne zbliżenia i napisy. Za darmo na Windows i macOS.",
+      badge: "Za darmo na Windows i Mac",
+      h1: ["Nagrywaj ekran i ", "montuj filmy", " za darmo"],
+      intro:
+        "WipeClip to darmowy rejestrator ekranu i edytor wideo na Windows i Mac. Zbliżenia automatycznie podążają za każdym kliknięciem, pauzy wycinasz jednym kliknięciem, a napisy powstają na twoim komputerze.",
+      guideTitle: "Jak zrobić film w WipeClip",
+      steps: [
+        "Pobierz WipeClip na Windows lub macOS i zainstaluj aplikację.",
+        "Nagraj cały ekran, jedno okno lub wybrany obszar. Dźwięk systemowy, mikrofon i kamera zapisują się na osobnych ścieżkach.",
+        "Zaakceptuj proponowane zbliżenia na twoje kliknięcia albo je dopasuj.",
+        "Wytnij długie pauzy i przestoje, a napisy wygeneruj na własnym komputerze.",
+        "Wyeksportuj plik MP4 i napisy (.srt lub .vtt) prosto na dysk.",
+      ],
+      facts: [
+        { label: "Systemy", value: "Windows 10 (21H2+), Windows 11, macOS 11+" },
+        { label: "Cena", value: "Za darmo, opcjonalne pakiety bez subskrypcji" },
+        { label: "Nagrywanie", value: "Ekran, okno lub obszar" },
+        { label: "Napisy", value: "Tworzone na urządzeniu, .srt i .vtt" },
+        { label: "Formaty", value: "Poziomy, pionowy, kwadratowy" },
+      ],
+      faqTitle: "Najczęstsze pytania o WipeClip",
+      faqs: [
+        {
+          q: "Czy WipeClip jest darmowy?",
+          a: "Tak. Pobieranie, nagrywanie i edycja są darmowe. Po zalogowaniu dostajesz eksport w pełnej rozdzielczości, który zużywa kredyty. Darmowe kredyty odnawiają się codziennie, a opcjonalne pakiety bez subskrypcji odblokowują efekty premium i 4K.",
+        },
+        {
+          q: "Jakie systemy są obsługiwane?",
+          a: "Windows 10 (21H2 lub nowszy), Windows 11 oraz macOS 11 lub nowszy.",
+        },
+        {
+          q: "Czy moje nagrania są wysyłane do sieci?",
+          a: "Nie. Nagrania zapisują się w folderze na twoim komputerze, a nagrywanie, edycja, analiza i napisy odbywają się właśnie tam. Film jest wysyłany tylko przy eksporcie, przetwarzany w pamięci tymczasowej i nie jest przechowywany.",
+        },
+        {
+          q: "Dlaczego Windows wyświetla „System Windows ochronił ten komputer”?",
+          a: "Windows ostrzega przed nowymi aplikacjami, które mają jeszcze mało pobrań. W instalatorze kliknij „Więcej informacji”, a potem „Uruchom mimo to”. Po instalacji aplikacja aktualizuje się sama.",
+        },
+        {
+          q: "W jakim języku jest aplikacja?",
+          a: "Na razie interfejs aplikacji jest po angielsku.",
+        },
+      ],
+    },
+    "usun-tlo": {
+      enPath: "/remove-background",
+      demo: "background",
+      title: "Usuń tło ze zdjęcia za darmo – przezroczysty PNG",
+      description:
+        "Wgraj zdjęcie i w kilka sekund otrzymaj PNG z przezroczystym tłem. Jeden darmowy wynik dziennie, bez konta.",
+      badge: "Darmowe narzędzie",
+      h1: ["Usuń ", "tło", " z dowolnego zdjęcia"],
+      intro:
+        "Wgraj zdjęcie i odbierz przezroczysty PNG. Nic nie trzeba zaznaczać, a podgląd działa bez konta. Potem umieść obiekt na dowolnym tle.",
+      guideTitle: "Jak usunąć tło ze zdjęcia",
+      steps: [
+        "Przeciągnij zdjęcie JPG, PNG lub WebP (do 25 MB) na pole przesyłania albo kliknij je, aby wybrać plik.",
+        "WipeClip automatycznie wykrywa obiekt. Nie trzeba niczego obrysowywać ani zaznaczać.",
+        "Sprawdź wycięty podgląd na przezroczystej szachownicy.",
+        "Pobierz wynik jako PNG z przezroczystym tłem i umieść go na nowym tle.",
+      ],
+      facts: [
+        { label: "Wynik", value: "PNG z przezroczystością" },
+        { label: "Maks. plik", value: "25 MB na obraz" },
+        { label: "Za darmo", value: "1 wycięcie dziennie, zmniejszone" },
+        { label: "Po zalogowaniu", value: "Pełna rozdzielczość, 1 kredyt za obraz" },
+        { label: "Darmowe kredyty", value: "2 dziennie dla każdego konta" },
+      ],
+      faqTitle: "Usuwanie tła: najczęstsze pytania",
+      faqs: [
+        {
+          q: "Czy to naprawdę jest darmowe?",
+          a: "Tak. Każdy dostaje jedno darmowe wycięcie dziennie w zmniejszonym rozmiarze, bez konta. Pełna rozdzielczość wymaga zalogowania: kosztuje 1 kredyt, a każde konto dostaje 2 darmowe kredyty dziennie.",
+        },
+        {
+          q: "W jakim formacie dostanę plik?",
+          a: "Jako PNG z przezroczystym kanałem alfa, więc obiekt od razu umieścisz na nowym tle, stronie produktu albo slajdzie.",
+        },
+        {
+          q: "Czy nadaje się to do zdjęć produktów?",
+          a: "Tak. Wycięty PNG umieścisz na białym lub kolorowym tle, którego wiele platform sprzedażowych i sklepów internetowych wymaga dla zdjęć produktów.",
+        },
+        {
+          q: "Czy krawędzie włosów i drobnych detali wyglądają czysto?",
+          a: "Po pierwszym wycięciu WipeClip czyści krawędzie i wygładza kanał alfa, aby usunąć poświaty i postrzępione brzegi wokół drobnych detali.",
+        },
+        {
+          q: "Czy przechowujecie moje zdjęcie?",
+          a: "Nie. Zdjęcie jest przetwarzane, aby utworzyć twój PNG, a potem usuwane. Nigdy nie służy do trenowania żadnego modelu.",
+        },
+      ],
+    },
+    "wyostrz-zdjecie": {
+      enPath: "/sharpen-image",
+      demo: "sharpen",
+      title: "Wyostrz rozmyte zdjęcie za darmo",
+      description:
+        "Przywróć szczegóły miękkiemu lub lekko rozmytemu zdjęciu w kilka sekund. Jeden darmowy wynik dziennie, bez konta. Siła: lekka, standardowa lub mocna.",
+      badge: "Darmowe narzędzie",
+      h1: ["Wyostrz ", "miękkie lub rozmyte", " zdjęcie"],
+      intro: "Wgraj zdjęcie, wybierz siłę i odzyskaj ostrzejsze szczegóły, bez konta do podglądu.",
+      guideTitle: "Jak wyostrzyć miękkie zdjęcie",
+      steps: [
+        "Przeciągnij zdjęcie JPG, PNG lub WebP (do 25 MB) na pole przesyłania albo kliknij je, aby wybrać plik.",
+        "Wybierz siłę: Light do skóry i nieba, Standard do większości zdjęć, Strong do zdjęć, które wciąż wyglądają miękko.",
+        "Porównaj wynik z oryginałem obok siebie.",
+        "Pobierz wyostrzone zdjęcie. Zachowuje wymiary w pikselach przesłanego pliku.",
+      ],
+      facts: [
+        { label: "Siła", value: "Light, Standard, Strong" },
+        { label: "Maks. plik", value: "25 MB na obraz" },
+        { label: "Za darmo", value: "1 zdjęcie dziennie, zmniejszone" },
+        { label: "Pełna rozdzielczość", value: "1 kredyt za zdjęcie, 2 darmowe kredyty dziennie" },
+      ],
+      faqTitle: "Wyostrzanie zdjęć: najczęstsze pytania",
+      faqs: [
+        {
+          q: "Czy to naprawi bardzo rozmyte lub poruszone zdjęcie?",
+          a: "Nie. Narzędzie przywraca lokalny kontrast i szczegóły krawędzi w zdjęciu, które jest w miarę ostre, ale wygląda nieco miękko, na przykład po kompresji lub zmniejszeniu. Nie odtworzy szczegółów, których aparat nigdy nie zarejestrował.",
+        },
+        {
+          q: "Czy zwiększa rozdzielczość obrazu?",
+          a: "Nie. Wynik ma te same wymiary w pikselach co przesłany plik. Narzędzie poprawia wyrazistość przy tej samej rozdzielczości.",
+        },
+        {
+          q: "Czym różnią się Light, Standard i Strong?",
+          a: "Tym, jak mocno wzmacniany jest lokalny kontrast wokół wykrytych krawędzi. Standard pasuje do większości zdjęć, Light unika przeostrzenia skóry i nieba, a Strong jest dla zdjęć, które po Standard wciąż są miękkie.",
+        },
+        {
+          q: "Czy to jest darmowe?",
+          a: "Tak. Każdy dostaje jedno darmowe wyostrzone zdjęcie dziennie w zmniejszonym rozmiarze, bez konta. Pełna rozdzielczość wymaga zalogowania: kosztuje 1 kredyt, a każde konto dostaje 2 darmowe kredyty dziennie.",
+        },
+        {
+          q: "Czy przechowujecie moje zdjęcie?",
+          a: "Nie. Zdjęcie jest przetwarzane, a potem usuwane. Nigdy nie służy do trenowania żadnego modelu.",
+        },
+      ],
+    },
+    "wyodrebnij-klatke-z-wideo": {
+      enPath: "/extract-video-frame",
+      demo: "frame",
+      title: "Wyodrębnij klatkę z wideo za darmo, bez wysyłania",
+      description:
+        "Zapisz dowolną klatkę filmu jako zrzut ekranu lub miniaturę PNG. Działa w przeglądarce, bez wysyłania pliku. Jedno darmowe pobranie dziennie.",
+      badge: "Za darmo • Bez wysyłania",
+      h1: ["Wyodrębnij ", "klatkę", " z dowolnego filmu"],
+      intro:
+        "Przejdź do wybranego momentu i zapisz go jako PNG, aż do pełnej rozdzielczości. Wszystko dzieje się w przeglądarce. Twój film nigdy nie jest wysyłany.",
+      guideTitle: "Jak zapisać klatkę z filmu",
+      steps: [
+        "Otwórz film, który twoja przeglądarka potrafi odtworzyć (MP4 lub WebM, do 500 MB). Zostaje na twoim urządzeniu.",
+        "Przejdź do wybranego momentu albo wybierz jedną z okładek, które WipeClip proponuje po przeskanowaniu filmu.",
+        "Przechwyć klatkę. Możesz przechwycić ich dowolnie dużo.",
+        "Raz dziennie pobierz klatkę za darmo w zmniejszonym rozmiarze albo w pełnej rozdzielczości za 1 kredyt.",
+      ],
+      facts: [
+        { label: "Wynik", value: "PNG, do rozdzielczości filmu" },
+        { label: "Maks. rozmiar filmu", value: "500 MB" },
+        { label: "Wysyłanie", value: "Brak, działa w przeglądarce" },
+        { label: "Za darmo", value: "1 pobranie dziennie, niska rozdzielczość" },
+        { label: "Pełna rozdzielczość", value: "1 kredyt za klatkę, wymaga logowania" },
+      ],
+      faqTitle: "Klatka z wideo: najczęstsze pytania",
+      faqs: [
+        {
+          q: "Czy mój film jest gdzieś wysyłany?",
+          a: "Nie. Film jest dekodowany i rysowany w całości w karcie przeglądarki i nigdy nie trafia na serwery WipeClip.co. Działają filmy do 500 MB w formacie, który przeglądarka potrafi odtworzyć (zwykle MP4 lub WebM).",
+        },
+        {
+          q: "Ile klatek mogę przechwycić?",
+          a: "Przechwytywać i oglądać możesz bez ograniczeń. Limit dotyczy pobierania: jedna darmowa klatka dziennie w niskiej rozdzielczości, a każda klatka w pełnej rozdzielczości kosztuje 1 kredyt. Każde konto dostaje 2 darmowe kredyty dziennie.",
+        },
+        {
+          q: "Jaką rozdzielczość ma wyeksportowana klatka?",
+          a: "Pobranie w pełnej rozdzielczości to PNG w natywnej rozdzielczości filmu. Darmowe dzienne pobranie jest zmniejszone do około 0,25 megapiksela.",
+        },
+        {
+          q: "A jeśli chcę zmontować cały film?",
+          a: "To narzędzie zapisuje pojedynczą klatkę. Aby przyciąć, dodać napisy lub zmienić kolejność całego klipu, użyj darmowego edytora wideo WipeClip.co na Windows i Mac.",
         },
       ],
     },
