@@ -420,6 +420,42 @@ export async function cleanAudio(
   return res.blob();
 }
 
+/** How much the picture changes in each source range of a video on this
+ * machine (backend/app/pipeline/activity.py), 0..1 per range. Local engine
+ * only; null without it. At most 50 ranges per call. */
+export async function videoActivity(path: string, ranges: [number, number][], signal?: AbortSignal): Promise<number[] | null> {
+  const engine = await localEngine();
+  if (!engine) return null;
+  const body = new FormData();
+  body.append("path", path);
+  body.append("ranges", JSON.stringify(ranges.map(([a, b]) => [Math.round(a * 1000) / 1000, Math.round(b * 1000) / 1000])));
+  const res = await fetch(`${engine.url}/api/video/activity`, { method: "POST", body, headers: engineHeaders(engine), signal });
+  if (!res.ok) await throwApiError(res, "The video couldn't be checked for on-screen activity.");
+  const data = (await res.json()) as { ranges: { changing: number }[] };
+  return data.ranges.map((r) => r.changing);
+}
+
+/** Picture change and scene-change scores (0..100) of sampled frames in
+ * source seconds start..end of a video on this machine
+ * (backend/app/pipeline/activity.py motion_profile). Local engine only;
+ * null without it. At most 600 s per call. */
+export async function videoMotion(
+  path: string,
+  start: number,
+  end: number,
+  signal?: AbortSignal
+): Promise<{ times: number[]; motion: number[]; scene: number[] } | null> {
+  const engine = await localEngine();
+  if (!engine) return null;
+  const body = new FormData();
+  body.append("path", path);
+  body.append("start", start.toFixed(3));
+  body.append("end", end.toFixed(3));
+  const res = await fetch(`${engine.url}/api/video/motion`, { method: "POST", body, headers: engineHeaders(engine), signal });
+  if (!res.ok) await throwApiError(res, "The video couldn't be measured for movement.");
+  return (await res.json()) as { times: number[]; motion: number[]; scene: number[] };
+}
+
 /** Goes through our own /api/process-image route (Pro-plan + credit
  * gated), not the FastAPI backend directly - same non-bypassable pattern
  * as processVideo/src/app/api/process/route.ts.

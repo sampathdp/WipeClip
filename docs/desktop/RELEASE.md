@@ -152,6 +152,33 @@ Canvas panel > **Frame**: None, Subtle, Card, Floating, or custom padding (0-20%
 
 With the local engine, an export shows real progress: "Checking your videos…" while sources are read and screened, then a bar with the percentage rendered and an estimate of the time left. The client sends a random `job_id` with the export and polls `GET /api/jobs/{id}` on the engine (`backend/app/progress.py`); ffmpeg runs with `-progress`, so the figure is seconds of output written out of the timeline's length. **Cancel export** posts `/api/jobs/{id}/cancel`, which kills ffmpeg at once (the export request then answers 409 "cancelled") and returns the dialog to its settings. When an export finishes or fails while WipeClip's window isn't focused, the OS shows a notification (`notify_if_away`, `src-tauri/src/notify.rs`; Rust-only use of the notification plugin, no page permissions). The saved file's "Show in folder" button is unchanged. Without the local engine (cloud backend, website) the bar stays indeterminate: progress is in-process only, and the cloud may run jobs on RQ workers or another instance. Tests: `backend/tests/test_export_progress.py` (real render: progress only rises and ends cleared, cancel stops ffmpeg within seconds and answers 409, ids validated). Not yet clicked through in the installed app (needs a signed-in export against a site that issues local tickets).
 
+## Export: encoders, output checks, disk space, benchmark
+
+`backend/app/pipeline/encoders.py`, used by `editor.render_export`.
+
+- **Encoder**: the desktop engine uses NVIDIA NVENC (`h264_nvenc`, preset p5, VBR constant quality) when a 1 s test encode works on first use, otherwise libx264. If an export fails with NVENC or its file doesn't check out, it's rendered again with libx264, and NVENC isn't tried again that session. The log line says only the error's kind, never ffmpeg's text (it can contain paths). The cloud backend always uses libx264. Intel Quick Sync (`h264_qsv`) works but isn't picked automatically (see the table). `WIPECLIP_ENCODER=libx264|h264_nvenc|h264_qsv` forces one. AMD AMF and Media Foundation weren't tested (no AMD GPU; Media Foundation's H.264 refused the frames) and aren't used. All of these are in the bundled ffmpeg build already, so licensing is unchanged.
+- **Quality calibration**: NVENC `-cq` = CRF + 6 and Quick Sync `-global_quality` = CRF − 4 give at least libx264 CRF 20's SSIM, scored against a CRF 8 render of the same graph, on both a real screen recording and high-motion 1440p60 footage (`.bench/calibration.jsonl`). At that quality hardware files are larger: NVENC 1.3–1.5×, Quick Sync 1.2–2.1×.
+- **Every output is checked** before it's returned: it exists, has the expected streams (video and/or audio), the planned size (MP4), length within max(0.3 s, 3 frames), and its last 1.5 s decodes without errors. A cut-off file fails the last check.
+- **Disk space**: before rendering, free space at the output folder must cover a generous estimate (0.15 bits per pixel per frame + 200 MB). Otherwise, or when ffmpeg reports a full disk mid-render, the export answers 507 `disk_full` with the space needed and free, and the project is unchanged. The temporary folder is removed on success, failure and cancel (tested).
+- **One log line per export**: format, size, fps, length, clip count, encoder, render time, file size.
+
+**Benchmark** (`backend/bench/export_bench.py`, real export graph, ffmpeg process measured with Windows APIs). Machine: i7-9750H (6 cores / 12 threads), 15.9 GB RAM, GeForce GTX 1650 (driver 32.0.15.7602) + UHD 630, Windows 11. Media: a real 300 s 1080p30 desktop capture from the native recorder (9,001 frames, 0 dropped, A/V within 22 ms of the clock) plus synthetic 1440p60 high-motion and A/V-sync clips. All 18 outputs passed the output check.
+
+| Project | libx264 | NVENC | Quick Sync | Notes |
+|---|---|---|---|---|
+| Short: 60 s 1080p30 + system audio | 22.6 s, 745 MB, 2.2 MB | **15.9 s**, 536 MB, 2.9 MB | 24.7 s, 361 MB, 2.6 MB | SSIM 0.9982 / 0.9983 / 0.9982 |
+| Long: 300 s 1080p30 + audio | 99.0 s, 757 MB | **76.0 s**, 540 MB | 99.0 s, 372 MB | 3.0× / 3.9× / 3.0× real time |
+| Gameplay: 60 s 2560×1440 60 fps | 74.9 s, 1.2 GB, 124 MB | **51.4 s**, 708 MB, 186 MB | 66.6 s, 458 MB, 259 MB | Slower than real time on CPU |
+| Clip sound + mic + system audio | 20.3 s | **15.0 s** | 20.2 s | Max A/V and mic offset 0 ms (10 ms measurement step), 11/11 flashes matched |
+| 40 cuts, each with a zoom (200 s) | 234 s, **9.5 GB** | 237 s, 10.0 GB | 219 s, 10.5 GB | After the memory fix below: 215 s, **8.3 GB** (libx264) |
+| 6 crossfades + 12 text layers (117 s) | 80 s, **11.7 GB** | 71 s, 11.6 GB | 88 s, 11.7 GB | After the fix: **57 s, 2.2 GB** (libx264), 49 s, 2.0 GB (NVENC) |
+
+NVENC is 1.3–1.5× faster when the graph isn't the bottleneck. With 40 clips the filter graph is (all encoders ~0.9× real time). Quick Sync ranged from 9% slower to 11% faster than libx264, for larger files, so it isn't automatic.
+
+**Memory found and fixed**: still layers (text, stickers, images, shapes) were looped from t = 0 at the output frame rate, so ffmpeg decoded and queued every frame before each layer appeared: about 470 MB per layer on a 1080p timeline. They're now looped for their own length and shifted into place, like video layers (`test_late_layers_show_only_in_their_time`). Clip decoders are capped at 2 threads once there are more than 2 clips (24 clips: 5.6 → 3.5 GB, same speed).
+
+**Still open**: every clip keeps its own decoder open for the whole render, about 200 MB per 1080p clip. A 10-minute recording with 40 accepted pause cuts needs ~8 GB, which would page heavily on an 8 GB machine. The fix is rendering in segments (see the beta report).
+
 ## Updates
 
 The app checks `https://github.com/sampathdp/wipeclip-releases/releases/latest/download/latest.json` 10 s after launch and every 6 hours (`src-tauri/src/updater.rs`, `UpdateBanner` in `desktop/app/DesktopShell.tsx`). A newer version shows a banner. **Update now** downloads it, verifies its signature, installs it (Windows: the NSIS installer in passive mode) and restarts; **Later** hides that version until a newer one appears. Nothing installs without the click, and installing is refused while a recording is being written. Debug builds never check.

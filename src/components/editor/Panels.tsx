@@ -1,6 +1,8 @@
 "use client";
 
+import { useShortcutKeys } from "@/lib/platform/keys";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { CREATOR_PRESETS, type CreatorPresetId } from "@/lib/editor/creatorPresets";
 import { useClockTime, type Clock } from "@/lib/editor/clock";
 import { voiceoverSupported } from "@/lib/editor/voiceover";
 import { DEFAULT_KEY } from "@/lib/editor/chromaKey";
@@ -1206,6 +1208,7 @@ export function OverlayPanel({
 }) {
   const o = overlay;
   const proLabel = useProLabel();
+  const shortcutKeys = useShortcutKeys();
   const title =
     o.kind === "text"
       ? o.keystroke
@@ -1443,7 +1446,7 @@ export function OverlayPanel({
           </ActionButton>
           <ActionButton onClick={() => onChange({ hidden: !o.hidden })}>{o.hidden ? "Show" : "Hide"}</ActionButton>
           <ActionButton onClick={() => onChange({ locked: !o.locked })}>{o.locked ? "Unlock" : "Lock"}</ActionButton>
-          <ActionButton onClick={onDuplicate} title="Duplicate (Ctrl+D)">
+          <ActionButton onClick={onDuplicate} title={`Duplicate (${shortcutKeys.mod}+D)`}>
             Duplicate
           </ActionButton>
           <ActionButton onClick={style.onCopy} title="Copy the look, animation, mask and blend of this layer">
@@ -2016,17 +2019,39 @@ export function CanvasPanel({
   onUploadBackground,
   onClose,
   gesture,
+  onPreset,
 }: {
   canvas: Canvas;
   onChange: (c: Canvas) => void;
   onUploadBackground: (file: File) => void;
   onClose: () => void;
   gesture: Gesture;
+  /** Creator presets (creatorPresets.ts); absent = not offered. */
+  onPreset?: (id: CreatorPresetId) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const bg = canvas.background;
   return (
     <PanelShell title="Canvas" onClose={onClose}>
+      {onPreset && (
+        <>
+          <SectionTitle>Made for</SectionTitle>
+          <div className="mb-1 grid grid-cols-2 gap-2">
+            {CREATOR_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onPreset(p.id)}
+                className="rounded-xl border border-border bg-surface px-3 py-2 text-left transition hover:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+              >
+                <span className="block text-sm font-semibold text-foreground">{p.label}</span>
+                <span className="block text-[11px] text-muted">{p.hint}</span>
+              </button>
+            ))}
+          </div>
+          <p className="mb-4 text-[11px] text-muted">Sets the options below (one undo step); change any of them afterwards.</p>
+        </>
+      )}
       <SectionTitle>Size</SectionTitle>
       <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Canvas size">
         {CANVAS_PRESETS.map((p) => (

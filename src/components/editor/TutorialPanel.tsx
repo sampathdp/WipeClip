@@ -1,19 +1,33 @@
 "use client";
 
+import { useShortcutKeys } from "@/lib/platform/keys";
 import { useState, type ReactNode } from "react";
 import { DEFAULT_SILENCE, type SilenceSettings } from "@/lib/editor/audioAnalysis";
 import type { KeystrokeSettings } from "@/lib/editor/keystrokes";
 import { displayCombo } from "@/lib/editor/keystrokes";
 import { SHAPE_LABELS } from "@/lib/editor/shapes";
 import { formatTime } from "@/lib/editor/timeline";
-import type { Chapter, EditSuggestion, MaskMode, PrivacyMask, ShapeType } from "@/lib/editor/types";
+import type { FocusPreset } from "@/lib/editor/focus";
+import type { Chapter, Draft, DraftItem, EditSuggestion, MaskMode, PrivacyMask, ShapeType } from "@/lib/editor/types";
+import { willApply } from "@/lib/editor/draft";
 import { ActionButton, PanelShell, SecondsInput } from "./Inspector";
 import { SliderField, type Gesture } from "./Panels";
 import { TrashIcon } from "./icons";
 
-export type TutorialTab = "review" | "chapters" | "shortcuts" | "privacy" | "annotate" | "retake";
+export type TutorialTab = "draft" | "review" | "chapters" | "shortcuts" | "privacy" | "annotate" | "retake";
+
+/** What "Generate draft" proposes (src/lib/editor/draft.ts). */
+export interface DraftSettings {
+  zooms: boolean;
+  preset: FocusPreset;
+  highlights: boolean;
+  cuts: boolean;
+  review: ReviewSettings;
+  chapters: boolean;
+}
 
 const TABS: { id: TutorialTab; label: string }[] = [
+  { id: "draft", label: "Draft" },
   { id: "review", label: "Review" },
   { id: "chapters", label: "Chapters" },
   { id: "shortcuts", label: "Shortcuts" },
@@ -32,11 +46,18 @@ function Hint({ children }: { children: ReactNode }) {
   return <p className="mb-3 text-xs text-muted">{children}</p>;
 }
 
-function Check({ label, checked, onChange, disabled }: { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+function Check({ label, checked, onChange, disabled, hint }: { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; hint?: string }) {
   return (
-    <label className={`flex items-center gap-2 text-xs font-medium text-foreground ${disabled ? "opacity-50" : ""}`}>
-      <input type="checkbox" className="accent-[var(--accent)]" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
-      {label}
+    <label className={`flex ${hint ? "items-start" : "items-center"} gap-2 text-xs font-medium text-foreground ${disabled ? "opacity-50" : ""}`}>
+      <input type="checkbox" className={`accent-[var(--accent)] ${hint ? "mt-0.5" : ""}`} checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+      {hint ? (
+        <span>
+          {label}
+          <span className="block text-[11px] font-normal text-muted">{hint}</span>
+        </span>
+      ) : (
+        label
+      )}
     </label>
   );
 }
@@ -69,6 +90,18 @@ export interface TutorialPanelProps {
   onEditSuggestion: (id: string, patch: Partial<EditSuggestion>) => void;
   onAcceptAllHigh: () => void;
   onClearSuggestions: () => void;
+  /** Playback skips the pending cuts (nothing removed). */
+  previewingCuts: boolean;
+  onPreviewCuts: (on: boolean) => void;
+  // draft
+  draft: Draft | null;
+  /** The timeline changed since the draft was made. */
+  draftStale: boolean;
+  onGenerateDraft: (s: DraftSettings) => void;
+  onDraftStatus: (status: DraftItem["status"], which: "all" | DraftItem["kind"] | string[]) => void;
+  onApplyDraft: () => void;
+  onDiscardDraft: () => void;
+  onSeek: (t: number) => void;
   // chapters
   chapters: Chapter[];
   onSuggestChapters: () => void;
@@ -119,6 +152,7 @@ export function TutorialPanel(p: TutorialPanelProps) {
           </button>
         ))}
       </div>
+      {p.tab === "draft" && <DraftTab {...p} />}
       {p.tab === "review" && <ReviewTab {...p} />}
       {p.tab === "chapters" && <ChaptersTab {...p} />}
       {p.tab === "shortcuts" && <ShortcutsTab {...p} />}
@@ -126,6 +160,185 @@ export function TutorialPanel(p: TutorialPanelProps) {
       {p.tab === "annotate" && <AnnotateTab {...p} />}
       {p.tab === "retake" && <RetakeTab {...p} />}
     </PanelShell>
+  );
+}
+
+const KIND_LABEL: Record<DraftItem["kind"], string> = { cut: "Cuts", zoom: "Zooms", highlights: "Click highlights", chapter: "Chapters", review: "Worth a look" };
+const KIND_ORDER: DraftItem["kind"][] = ["cut", "zoom", "highlights", "chapter", "review"];
+
+function DraftTab(p: TutorialPanelProps) {
+  const keys = useShortcutKeys();
+  const [ds, setDs] = useState<DraftSettings>({ zooms: true, preset: "balanced", highlights: true, cuts: true, review: { silence: DEFAULT_SILENCE, idle: 10 }, chapters: true });
+  const d = p.draft;
+  const set = (patch: Partial<DraftSettings>) => setDs((s) => ({ ...s, ...patch }));
+  const accepted = d ? d.items.filter((i) => willApply(d, i)).length : 0;
+  const counts = (k: DraftItem["kind"]) => (d ? d.items.filter((i) => i.kind === k) : []);
+  const cutTitle = (id?: string) => {
+    const c = id ? d?.items.find((i) => i.id === id) : undefined;
+    return c ? formatTime(c.start) : "";
+  };
+  return (
+    <>
+      <Hint>
+        Builds a first edit from the recording: zooms and click highlights from your mouse and keyboard activity, cuts for long pauses and dead time,
+        chapters where something changed. It uses timing, sound levels and the recorded events only - it doesn&apos;t understand what is on screen or
+        what is said. Nothing changes until you apply what you accept.
+      </Hint>
+      <div className="space-y-2 rounded-xl border border-border p-3">
+        <Check label="Zooms" checked={ds.zooms} onChange={(zooms) => set({ zooms })} />
+        {ds.zooms && (
+          <div className="ml-6 grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Zoom style">
+            {(["subtle", "balanced", "dynamic"] as FocusPreset[]).map((pr) => (
+              <button
+                key={pr}
+                type="button"
+                role="radio"
+                aria-checked={ds.preset === pr}
+                onClick={() => set({ preset: pr })}
+                className={`rounded-lg border px-2 py-1 text-[11px] font-semibold capitalize ${ds.preset === pr ? "border-accent-2 bg-accent-2/10 text-foreground" : "border-border text-muted hover:text-foreground"}`}
+              >
+                {pr}
+              </button>
+            ))}
+          </div>
+        )}
+        <Check label="Click highlights" checked={ds.highlights} onChange={(highlights) => set({ highlights })} />
+        <Check label="Cuts for pauses and dead time" checked={ds.cuts} onChange={(cuts) => set({ cuts })} />
+        {ds.cuts && (
+          <div className="ml-6 space-y-2">
+            <SliderField
+              label="Sensitivity"
+              value={ds.review.silence.sensitivity}
+              min={0}
+              max={1}
+              step={0.05}
+              format={(v) => (v < 0.35 ? "Only clear silence" : v < 0.7 ? "Normal" : "Also quiet parts")}
+              onChange={(sensitivity) => set({ review: { ...ds.review, silence: { ...ds.review.silence, sensitivity } } })}
+              gesture={noGesture}
+            />
+            <SliderField label="Minimum pause" value={ds.review.silence.minPause} min={0.5} max={6} step={0.1} format={(v) => `${v.toFixed(1)} s`} onChange={(minPause) => set({ review: { ...ds.review, silence: { ...ds.review.silence, minPause } } })} gesture={noGesture} />
+            <SliderField label="Pause to keep" value={ds.review.silence.keep} min={0} max={1.5} step={0.05} format={(v) => `${v.toFixed(2)} s each side`} onChange={(keep) => set({ review: { ...ds.review, silence: { ...ds.review.silence, keep } } })} gesture={noGesture} />
+          </div>
+        )}
+        <Check label="Chapters" checked={ds.chapters} onChange={(chapters) => set({ chapters })} />
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {p.analysis ? (
+          <>
+            <span className="text-xs text-muted" role="status">
+              {p.analysis}
+            </span>
+            <button type="button" className="text-xs font-semibold underline" onClick={p.onCancelAnalysis}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <ActionButton tone="accent" onClick={() => p.onGenerateDraft(ds)} disabled={!ds.zooms && !ds.highlights && !ds.cuts && !ds.chapters}>
+            {d && !d.appliedAt ? "Generate draft again" : "Generate draft"}
+          </ActionButton>
+        )}
+      </div>
+
+      {d && (
+        <>
+          {d.appliedAt ? (
+            <p className="mt-3 rounded-xl border border-border bg-surface-2/60 p-2.5 text-xs text-muted" role="status">
+              Applied. Everything is now ordinary timeline content you can edit; undo with {keys.mod}+Z.
+            </p>
+          ) : p.draftStale ? (
+            <p className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-foreground" role="alert">
+              The timeline changed since this draft was made, so its cuts and chapters no longer line up. Zooms and click highlights can still be applied;
+              generate the draft again for the rest.
+            </p>
+          ) : null}
+          {d.notes.map((n) => (
+            <p key={n} className="mt-2 text-[11px] text-muted">
+              {n}
+            </p>
+          ))}
+          {!d.appliedAt && d.items.length > 0 && (
+            <>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <ActionButton onClick={() => p.onDraftStatus("accepted", "all")}>Accept all</ActionButton>
+                <ActionButton onClick={() => p.onDraftStatus("rejected", "all")}>Reject all</ActionButton>
+                <ActionButton tone="accent" onClick={p.onApplyDraft} disabled={accepted === 0}>
+                  Apply {accepted} accepted
+                </ActionButton>
+                <ActionButton onClick={p.onDiscardDraft}>Discard draft</ActionButton>
+              </div>
+              {counts("cut").length > 0 && !p.draftStale && (
+                <div className="mt-3">
+                  <Check
+                    label="Preview the result"
+                    checked={p.previewingCuts}
+                    onChange={p.onPreviewCuts}
+                    hint="Playback skips the draft's cuts that you haven't rejected. Nothing is removed until you apply."
+                  />
+                </div>
+              )}
+            </>
+          )}
+          {d.items.length === 0 && <p className="mt-3 text-xs text-muted">Nothing to suggest for this recording.</p>}
+          {KIND_ORDER.filter((k) => counts(k).length).map((k) => (
+            <div key={k}>
+              <Title>
+                {KIND_LABEL[k]} ({counts(k).length})
+              </Title>
+              {!d.appliedAt && counts(k).length > 1 && (
+                <div className="mb-2 flex gap-3 text-[11px]">
+                  <button type="button" className="font-semibold text-accent-2 underline" onClick={() => p.onDraftStatus("accepted", k)}>
+                    Accept all {KIND_LABEL[k].toLowerCase()}
+                  </button>
+                  <button type="button" className="font-semibold text-muted underline" onClick={() => p.onDraftStatus("rejected", k)}>
+                    Reject all
+                  </button>
+                </div>
+              )}
+              <ul className="space-y-1.5">
+                {counts(k).map((i) => (
+                  <li key={i.id} className={`rounded-xl border border-border p-2 text-xs ${i.status === "rejected" ? "opacity-50" : ""}`}>
+                    <div className="flex items-start gap-2">
+                      <button type="button" className="font-mono text-muted hover:text-foreground" onClick={() => p.onSeek(Math.max(0, i.start - 1))} title="Go to">
+                        {formatTime(i.start)}
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-foreground">{i.title}</p>
+                        <p className="text-[11px] text-muted">{i.detail}</p>
+                        {i.insideCut && (
+                          <p className="text-[11px] text-amber-600 dark:text-amber-400">Mostly inside the cut at {cutTitle(i.insideCut)}: left out if that cut is applied.</p>
+                        )}
+                        {i.status === "accepted" && !willApply(d, i) && <p className="text-[11px] text-muted">Won&apos;t be applied: its cut is accepted.</p>}
+                      </div>
+                      <span className={`rounded px-1 text-[10px] font-semibold ${CONFIDENCE[i.confidence]}`}>{i.confidence}</span>
+                    </div>
+                    {!d.appliedAt && (
+                      <div className="mt-1.5 flex gap-2">
+                        <button
+                          type="button"
+                          aria-pressed={i.status === "accepted"}
+                          className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${i.status === "accepted" ? "border-accent-2 bg-accent-2/15 text-foreground" : "border-border text-muted"}`}
+                          onClick={() => p.onDraftStatus(i.status === "accepted" ? "pending" : "accepted", [i.id])}
+                        >
+                          {i.status === "accepted" ? "Accepted" : "Accept"}
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={i.status === "rejected"}
+                          className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${i.status === "rejected" ? "border-border bg-surface-3 text-foreground" : "border-border text-muted"}`}
+                          onClick={() => p.onDraftStatus(i.status === "rejected" ? "pending" : "rejected", [i.id])}
+                        >
+                          {i.status === "rejected" ? "Rejected" : "Reject"}
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </>
+      )}
+    </>
   );
 }
 
@@ -137,6 +350,7 @@ function ReviewTab(p: TutorialPanelProps) {
   const rejected = p.suggestions.filter((s) => s.status === "rejected").length;
   const list = showAll ? p.suggestions.filter((s) => s.kind !== "retake") : pending;
   const high = pending.filter((s) => s.action === "cut" && s.confidence === "high").length;
+  const pendingCuts = pending.filter((s) => s.action === "cut").length;
   return (
     <>
       <Hint>
@@ -176,6 +390,16 @@ function ReviewTab(p: TutorialPanelProps) {
         {high > 0 && <ActionButton onClick={p.onAcceptAllHigh}>Accept {high} high-confidence cut{high === 1 ? "" : "s"}</ActionButton>}
         {p.suggestions.length > 0 && <ActionButton onClick={p.onClearSuggestions}>Clear</ActionButton>}
       </div>
+      {pendingCuts > 0 && (
+        <div className="mt-3">
+          <Check
+            label="Preview the result"
+            checked={p.previewingCuts}
+            onChange={p.onPreviewCuts}
+            hint={`Playback skips the ${pendingCuts} suggested cut${pendingCuts === 1 ? "" : "s"} still to review, so you can hear how it would flow. Nothing is removed until you accept.`}
+          />
+        </div>
+      )}
       {p.suggestions.length > 0 && (
         <>
           <Title>

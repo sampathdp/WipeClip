@@ -6,6 +6,7 @@ import { gradeOf, isNeutralColor } from "@/lib/editor/look";
 import { DIP_AUDIO, frameShadow, locate, sourceTimeAt, videoBox, type Layout } from "@/lib/editor/timeline";
 import type { AudioClip, Canvas, Clip, Crop, EffectClip, MediaSource, Project } from "@/lib/editor/types";
 import { CameraCache, cameraCrop, clipView, evalCamera } from "@/lib/editor/camera";
+import { appliedZooms } from "@/lib/editor/focusPrefs";
 import { PointerCache, pointerScene } from "@/lib/editor/pointer";
 import { drawScene } from "@/lib/editor/pointerDraw";
 import { drawMasks } from "@/lib/editor/maskDraw";
@@ -247,7 +248,7 @@ export default function PreviewPlayer({
         if (!need) return null;
         const clip = lay.clips[need.index].clip;
         const view = clipView(clip, sources[clip.sourceId], canvasSize, canvas);
-        const cam = caches.current.camera.track(project?.zooms, clip, view);
+        const cam = caches.current.camera.track(project ? appliedZooms(project) : undefined, clip, view);
         return cam ? cameraCrop(clip.crop, evalCamera(cam, need.time)) : clip.crop;
       });
       applyComposite(els as HTMLVideoElement[], [shadowA.current, shadowB.current], needs, crops, loc, lay, sources, canvas, canvasSize, stageW, stageH, dipRef.current, volume, muted, t);

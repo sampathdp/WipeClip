@@ -13,6 +13,8 @@
 
 export const ANALYSIS_RATE = 16000;
 const FRAME = 320; // 20 ms
+/** Silence is at least this far below typical speech (90th percentile). */
+const SPEECH_GAP_DB = 12;
 
 export interface SilenceSettings {
   /** 0..1: higher treats more of the quiet as silence. */
@@ -102,14 +104,19 @@ export function clippedSpans(channels: Float32Array[], rate: number, from = 0, t
   return runs(mask, 1, Math.round(0.2 / sec)).map(([a, b]) => ({ start: (a + f0) * sec, end: (b + f0) * sec }));
 }
 
-/** `clipping`: per-source clipping already mapped to timeline time (see
- * clippedSpans). Without it, clipping is estimated from the mix itself. */
-export function analyzeAudio(
-  samples: Float32Array,
-  s: SilenceSettings = DEFAULT_SILENCE,
-  rate = ANALYSIS_RATE,
-  sourceClipping?: AudioSpan[]
-): AudioReport {
+/** Per-frame measurements of a mix: everything the detection needs, a few
+ * hundred KB for an hour where the samples are hundreds of MB. Kept by the
+ * editor so changing the settings doesn't decode and mix again. */
+export interface AudioLevels {
+  frameDb: Float32Array;
+  peaks: Float32Array;
+  clipMask: Uint8Array;
+  /** Frame length, seconds. */
+  sec: number;
+  duration: number;
+}
+
+export function measureLevels(samples: Float32Array, rate = ANALYSIS_RATE): AudioLevels {
   const frame = Math.round((FRAME * rate) / ANALYSIS_RATE);
   const n = Math.floor(samples.length / frame);
   const frameDb = new Float32Array(n);
@@ -131,17 +138,39 @@ export function analyzeAudio(
     // A few clipped samples in a row is clipping, not one stray peak.
     clipMask[f] = clipped >= 3 ? 1 : 0;
   }
-  const sec = frame / rate;
+  return { frameDb, peaks, clipMask, sec: frame / rate, duration: samples.length / rate };
+}
+
+/** `clipping`: per-source clipping already mapped to timeline time (see
+ * clippedSpans). Without it, clipping is estimated from the mix itself. */
+export function analyzeAudio(
+  samples: Float32Array,
+  s: SilenceSettings = DEFAULT_SILENCE,
+  rate = ANALYSIS_RATE,
+  sourceClipping?: AudioSpan[]
+): AudioReport {
+  return detectAudio(measureLevels(samples, rate), s, sourceClipping);
+}
+
+/** The analysis of already measured levels (see measureLevels). */
+export function detectAudio(levels: AudioLevels, s: SilenceSettings = DEFAULT_SILENCE, sourceClipping?: AudioSpan[]): AudioReport {
+  const { frameDb, peaks, clipMask, sec, duration } = levels;
+  const n = frameDb.length;
   const toSpan = ([a, b]: [number, number]): AudioSpan => ({ start: a * sec, end: b * sec });
   if (n === 0) {
-    return { frameDb, noiseFloorDb: -90, speechThresholdDb: -60, silences: [], clipping: [], loud: [], quiet: [], duration: samples.length / rate };
+    return { frameDb, noiseFloorDb: -90, speechThresholdDb: -60, silences: [], clipping: [], loud: [], quiet: [], duration };
   }
 
-  const floor = Math.max(-90, percentile(frameDb, 0.1));
+  // The floor is what the quietest 5% of frames sound like. With fewer
+  // pauses than that (someone talking almost non-stop) it lands on the
+  // quiet parts of speech instead; the 12 dB rule below keeps the threshold
+  // out of the speech then, where it used to turn a whole talk into one
+  // "silence".
+  const floor = Math.max(-90, percentile(frameDb, 0.05));
   const speechLevel = percentile(frameDb, 0.9);
   // Threshold between the floor and typical speech; sensitivity moves it.
   const margin = 4 + 14 * Math.min(1, Math.max(0, s.sensitivity));
-  const threshold = Math.min(Math.max(floor + margin, -60), speechLevel - 3);
+  const threshold = Math.min(Math.max(floor + margin, -60), speechLevel - SPEECH_GAP_DB);
 
   // Silence mask, then ignore speech blips under 120 ms (clicks, breaths).
   const silent = new Uint8Array(n);
@@ -170,7 +199,7 @@ export function analyzeAudio(
   }
   const quiet = runs(quietMask, Math.round(4 / sec), Math.round(0.4 / sec)).map(toSpan);
 
-  return { frameDb, noiseFloorDb: floor, speechThresholdDb: threshold, silences, clipping, loud, quiet, duration: samples.length / rate };
+  return { frameDb, noiseFloorDb: floor, speechThresholdDb: threshold, silences, clipping, loud, quiet, duration };
 }
 
 /** Sorted, with overlapping or touching spans (within 0.2 s) joined. */

@@ -54,8 +54,24 @@ function overlaps(acts: Act[], start: number, end: number, kinds: Act["kind"][])
   return acts.some((a) => a.t >= start && a.t <= end && kinds.includes(a.kind));
 }
 
-export function suggestEdits(input: { lay: Layout; acts: Act[] | null; audio: AudioReport | null }, s: InsightSettings, ids: () => string): EditSuggestion[] {
-  const { lay, acts, audio } = input;
+/** A silence where the picture changes at least this share of the time is
+ * footage (a video playing, a build, a game), not dead time. */
+export const MOVING_SHARE = 0.25;
+
+/** Silences that could become cuts (not at times of on-screen work): the
+ * ranges whose picture is worth checking (see `motion` in suggestEdits). */
+export function cutCandidates(audio: AudioReport, acts: Act[] | null): { start: number; end: number }[] {
+  return audio.silences.filter((sil) => !(acts && overlaps(acts, sil.start, sil.end, ["click", "key", "scroll"])));
+}
+
+/** `motion(start, end)`: share of that timeline range in which the picture
+ * changes, null when unknown (no local engine, no file on disk). */
+export function suggestEdits(
+  input: { lay: Layout; acts: Act[] | null; audio: AudioReport | null; motion?: (start: number, end: number) => number | null },
+  s: InsightSettings,
+  ids: () => string
+): EditSuggestion[] {
+  const { lay, acts, audio, motion } = input;
   const total = lay.total;
   const out: EditSuggestion[] = [];
   const add = (x: Omit<EditSuggestion, "id" | "status">) => out.push({ ...x, id: ids(), status: "pending" });
@@ -72,6 +88,19 @@ export function suggestEdits(input: { lay: Layout; acts: Act[] | null; audio: Au
           end: sil.end,
           title: `${len.toFixed(1)} s without speech while you work on screen`,
           detail: "Probably part of the demonstration, so it isn't suggested as a cut. Speed it up or add a caption if it feels slow.",
+          action: "review",
+          confidence: "low",
+        });
+        continue;
+      }
+      const moving = motion?.(sil.start, sil.end) ?? null;
+      if (moving !== null && moving >= MOVING_SHARE) {
+        add({
+          kind: "silence",
+          start: sil.start,
+          end: sil.end,
+          title: `${len.toFixed(1)} s without speech, but the picture keeps changing`,
+          detail: `The picture changes for about ${Math.round(moving * 100)}% of it (a video, an animation, a game?), so it isn't suggested as a cut. Watch it before deciding.`,
           action: "review",
           confidence: "low",
         });
@@ -280,4 +309,28 @@ export function acceptedCuts(list: EditSuggestion[]): { start: number; end: numb
     } else merged.push({ start: c.start, end: c.end, ids: [c.id] });
   }
   return merged.reverse();
+}
+
+/** What "Preview the result" skips: the pending cut suggestions as sorted,
+ * merged timeline ranges. Playback jumps over them; nothing is removed. */
+export function previewSkips(list: EditSuggestion[]): { start: number; end: number }[] {
+  const cuts = list.filter((s) => s.status === "pending" && s.action === "cut" && s.end > s.start).sort((a, b) => a.start - b.start);
+  const out: { start: number; end: number }[] = [];
+  for (const c of cuts) {
+    const last = out[out.length - 1];
+    if (last && c.start <= last.end) last.end = Math.max(last.end, c.end);
+    else out.push({ start: c.start, end: c.end });
+  }
+  return out;
+}
+
+/** Where playback at `t` continues when skipping `ranges`: the end of the
+ * range `t` is in, else `t`. A range's last 10 ms doesn't count, so
+ * landing on its end never jumps again. */
+export function skipTarget(ranges: { start: number; end: number }[], t: number): number {
+  for (const r of ranges) {
+    if (t < r.start) break;
+    if (t < r.end - 0.01) return r.end;
+  }
+  return t;
 }

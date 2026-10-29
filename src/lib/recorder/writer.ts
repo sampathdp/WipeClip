@@ -8,6 +8,22 @@
 
 export type WriteFn = (bytes: Uint8Array) => Promise<void>;
 
+/** Queued-but-unwritten bytes, all files together, at which the session
+ * warns and at which it stops. A disk that stalls (unplugged USB drive,
+ * network share, a scanner holding the file) makes chunks pile up in
+ * memory; without a limit a long recording would grow until the WebView
+ * runs out of memory and loses everything not yet on disk. */
+export const BACKLOG_WARN_BYTES = 64 * 1024 * 1024;
+export const BACKLOG_STOP_BYTES = 256 * 1024 * 1024;
+
+export type BacklogState = "ok" | "slow" | "stalled";
+
+export function backlogState(bytes: number): BacklogState {
+  if (bytes >= BACKLOG_STOP_BYTES) return "stalled";
+  if (bytes >= BACKLOG_WARN_BYTES) return "slow";
+  return "ok";
+}
+
 export class ChunkWriter {
   private tail: Promise<void> = Promise.resolve();
   private failed: Error | null = null;

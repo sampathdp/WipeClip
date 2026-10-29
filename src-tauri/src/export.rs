@@ -71,6 +71,8 @@ fn clean_file_name(suggested: &str, kind: &SaveKind) -> String {
 pub async fn choose_export_path(
     app: tauri::AppHandle,
     state: State<'_, ExportState>,
+    media: State<'_, crate::media::MediaState>,
+    recordings: State<'_, crate::recording::RecordingState>,
     suggested_name: String,
     kind: Option<String>,
 ) -> Result<Option<String>, String> {
@@ -88,6 +90,10 @@ pub async fn choose_export_path(
         let mut name = path.file_name().unwrap_or_default().to_os_string();
         name.push(format!(".{}", kind.ext));
         path.set_file_name(name);
+    }
+    // The dialog's "replace?" is no reason to destroy an original recording.
+    if crate::media::is_source(&app, &media, &recordings, &path) {
+        return Err("That file is one of your source videos or recordings. Choose another name so the original stays as it is.".into());
     }
     let token = uuid::Uuid::new_v4().to_string();
     state.pending.lock().unwrap().insert(token.clone(), path);
@@ -111,10 +117,10 @@ pub async fn write_export(request: Request<'_>, state: State<'_, ExportState>) -
         return Err("Export data was not sent as raw bytes.".into());
     };
     write_atomically(&path, bytes).map_err(|e| {
-        log::error!("export save to {} failed: {e}", path.display());
+        log::error!("export save to {} failed: {e}", crate::media::log_name(&path));
         friendly_io_error(&e)
     })?;
-    log::info!("export saved: {} ({} bytes)", path.display(), bytes.len());
+    log::info!("export saved: {} ({} bytes)", crate::media::log_name(&path), bytes.len());
     state.saved.lock().unwrap().insert(path.clone());
     Ok(path.to_string_lossy().into_owned())
 }

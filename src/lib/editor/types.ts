@@ -411,6 +411,26 @@ export interface PointerStyle {
 
 // --- Tutorial tools (Phase 3) -------------------------------------------------
 
+/** A source-time range where no zooms are suggested. */
+export interface FocusExclusion {
+  id: string;
+  sourceId: string;
+  start: number;
+  end: number;
+}
+
+/** Project-wide focus controls (src/lib/editor/focusPrefs.ts). */
+export interface FocusPrefs {
+  /** Scales every zoom's strength above 1x (1 = as set, 0.25..1.5). */
+  intensity: number;
+  /** Original view: zooms are kept but not applied. */
+  bypass: boolean;
+  excluded: FocusExclusion[];
+  /** Recorded clicks left out (no ring, no suggestion), by press time in
+   * source seconds. */
+  ignoredClicks: { sourceId: string; t: number }[];
+}
+
 export type MaskMode = "blur" | "pixelate" | "solid";
 
 /** A privacy mask over part of the picture for a time range (timeline
@@ -475,6 +495,90 @@ export interface Chapter {
   auto: boolean;
 }
 
+/** Version of `Draft`; a draft with another version is dropped on load
+ * (it's only suggestions - generating again recreates it). */
+export const DRAFT_VERSION = 1;
+
+export type DraftItemKind = "zoom" | "highlights" | "cut" | "chapter" | "review";
+
+/** One proposal of a draft (src/lib/editor/draft.ts). Nothing in it is
+ * applied until the user applies the draft. */
+export interface DraftItem {
+  id: string;
+  kind: DraftItemKind;
+  status: "pending" | "accepted" | "rejected";
+  title: string;
+  /** What it's based on, in plain words. */
+  detail: string;
+  confidence: "low" | "medium" | "high";
+  /** Timeline seconds where it shows (a zoom: its first visible span). */
+  start: number;
+  end: number;
+  /** kind "zoom": the zoom, in source time like every zoom. */
+  zoom?: CameraZoom;
+  /** kind "cut" / "review": the suggestion, in timeline time. */
+  suggestion?: EditSuggestion;
+  /** kind "chapter". */
+  chapter?: Chapter;
+  /** kind "zoom"/"chapter": the cut that would remove it (mostly inside). */
+  insideCut?: string;
+}
+
+/** Highlight suggestions (highlights.ts): candidate moments worth a clip,
+ * from explainable signals. Suggestions only: nothing in the timeline
+ * changes, and a highlight is exported as its own file from a copy of the
+ * project. Times are timeline seconds. */
+export const HIGHLIGHTS_VERSION = 1;
+
+export type HighlightSignal = "sound" | "picture" | "scene" | "input" | "marker";
+
+export interface Highlight {
+  id: string;
+  start: number;
+  end: number;
+  /** The strongest moment inside the range. */
+  peak: number;
+  /** 0..1, for ranking. */
+  score: number;
+  confidence: "high" | "medium" | "low";
+  /** What the suggestion is based on, in plain words. */
+  reasons: { signal: HighlightSignal; text: string }[];
+  status: "pending" | "kept" | "rejected";
+  /** Its range was changed by hand. */
+  edited?: boolean;
+  title?: string;
+}
+
+export interface HighlightSet {
+  version: typeof HIGHLIGHTS_VERSION;
+  createdAt: string;
+  /** The timeline the times refer to (draft.ts timelineKey). */
+  timelineKey: string;
+  /** What the suggestions were made from, to skip unchanged work. */
+  inputsKey: string;
+  items: Highlight[];
+  notes: string[];
+  /** Local counts for the user's own review (never sent anywhere): how many
+   * suggestions were made, kept, rejected and edited. */
+  stats: { suggested: number; kept: number; rejected: number; edited: number; exported: number };
+}
+
+/** A generated draft: proposals from the recording's events and the
+ * analysis results, reviewed before anything changes. */
+export interface Draft {
+  version: typeof DRAFT_VERSION;
+  createdAt: string;
+  /** The timeline the times refer to (draft.ts timelineKey). Cuts and
+   * chapters can't be applied once it has changed. */
+  timelineKey: string;
+  /** What the analysis was made from, to skip unchanged work. */
+  inputsKey: string;
+  items: DraftItem[];
+  /** Short notes on what couldn't be analyzed. */
+  notes: string[];
+  appliedAt?: string;
+}
+
 /** The undoable part of the editor state. */
 export interface Project {
   clips: Clip[];
@@ -487,6 +591,11 @@ export interface Project {
   zooms?: CameraZoom[];
   /** Click/cursor drawing for recorded sources; null/absent = off. */
   pointer?: PointerStyle | null;
+  /** Intensity, original view, excluded ranges, ignored clicks; absent =
+   * defaults. */
+  focus?: FocusPrefs;
+  /** The last generated draft (suggestions only until applied). */
+  draft?: Draft;
   /** Privacy masks (blur / pixelate / solid), drawn above the video. */
   masks?: PrivacyMask[];
   /** Review items from silence and interaction analysis, or user marks. */
@@ -496,6 +605,8 @@ export interface Project {
    * (wordEdit.ts). Kept in sync by ripple cuts and inserts; `total` is the
    * timeline length it matches, so other edits show it's out of date. */
   transcript?: Transcript;
+  /** The last highlight suggestions (highlights.ts). */
+  highlights?: HighlightSet;
 }
 
 export interface TranscriptWord {
@@ -651,7 +762,59 @@ export function migrateProject(raw: unknown): Project {
     suggestions: (p.suggestions as EditSuggestion[] | undefined) ?? [],
     chapters: (p.chapters as Chapter[] | undefined) ?? [],
     ...(p.transcript ? { transcript: p.transcript as Transcript } : {}),
+    ...(validDraft(p.draft) ? { draft: p.draft } : {}),
+    ...(validHighlights(p.highlights) ? { highlights: p.highlights } : {}),
+    ...(p.focus
+      ? {
+          focus: {
+            intensity: 1,
+            bypass: false,
+            ...(p.focus as Partial<FocusPrefs>),
+            excluded: (p.focus as Partial<FocusPrefs>).excluded ?? [],
+            ignoredClicks: (p.focus as Partial<FocusPrefs>).ignoredClicks ?? [],
+          },
+        }
+      : {}),
   };
+}
+
+const DRAFT_KINDS = new Set<DraftItemKind>(["zoom", "highlights", "cut", "chapter", "review"]);
+
+/** A saved draft is kept only if it's this version and every item is
+ * well-formed; anything else is dropped (it can be generated again). */
+export function validDraft(raw: unknown): raw is Draft {
+  const d = raw as Partial<Draft> | null | undefined;
+  if (!d || d.version !== DRAFT_VERSION || !Array.isArray(d.items) || typeof d.timelineKey !== "string") return false;
+  return d.items.every(
+    (i) =>
+      i &&
+      typeof i.id === "string" &&
+      DRAFT_KINDS.has(i.kind) &&
+      ["pending", "accepted", "rejected"].includes(i.status) &&
+      Number.isFinite(i.start) &&
+      Number.isFinite(i.end) &&
+      (i.kind !== "zoom" || (!!i.zoom && Number.isFinite(i.zoom.start) && Number.isFinite(i.zoom.end))) &&
+      ((i.kind !== "cut" && i.kind !== "review") || !!i.suggestion) &&
+      (i.kind !== "chapter" || !!i.chapter)
+  );
+}
+
+/** Saved highlights are kept only if they're this version and well-formed;
+ * anything else is dropped (they can be found again). */
+export function validHighlights(raw: unknown): raw is HighlightSet {
+  const h = raw as Partial<HighlightSet> | null | undefined;
+  if (!h || h.version !== HIGHLIGHTS_VERSION || !Array.isArray(h.items) || typeof h.timelineKey !== "string" || !h.stats) return false;
+  return h.items.every(
+    (i) =>
+      i &&
+      typeof i.id === "string" &&
+      Number.isFinite(i.start) &&
+      Number.isFinite(i.end) &&
+      i.end > i.start &&
+      Number.isFinite(i.peak) &&
+      ["pending", "kept", "rejected"].includes(i.status) &&
+      Array.isArray(i.reasons)
+  );
 }
 
 export const DEFAULT_POINTER: PointerStyle = {

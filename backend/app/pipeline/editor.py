@@ -55,13 +55,16 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from app.config import VIDEO_ENCODE_CRF, VIDEO_ENCODE_PRESET
+from app.pipeline import encoders
 from app.pipeline import look as look_pipeline
 from app.pipeline.video import _run_ffmpeg, get_ffmpeg_path
 
@@ -1285,11 +1288,10 @@ def _overlay_filters(
             f"{_num(max(0.0, min(1.0, o.key_smoothness / 100)))}"
         )
     parts.append(f"scale={target_w}:{target_h}:flags=lanczos")
-    if o.video:
-        # Shift the trimmed input to start at the layer's timeline position,
-        # at the output frame rate, so the time-based fades/animations and
-        # `enable` below see timeline time.
-        parts.insert(0, f"setpts=PTS-STARTPTS+{s}/TB,fps={_num(plan.fps)}")
+    # Shift the input (a video layer's trimmed range, or a still looped for
+    # the layer's length) to start at the layer's timeline position, so the
+    # time-based fades/animations and `enable` below see timeline time.
+    parts.insert(0, f"setpts=PTS-STARTPTS+{s}/TB,fps={_num(plan.fps)}" if o.video else f"setpts=PTS-STARTPTS+{s}/TB")
     sized = len(parts)  # filters up to here run before the shape mask
     opacities = keyframe_values(kfs, "opacity") if kfs else [o.opacity]
     if len(set(opacities)) > 1:
@@ -1350,7 +1352,7 @@ def _overlay_filters(
         # Shape mask, in the layer's own frame: its alpha times the mask.
         head = (
             f"[{input_idx}:v:0]{','.join(parts[:sized])}[olp{n}];"
-            f"[{mask_idx}:v]scale={target_w}:{target_h}:flags=bicubic,format=gray[olm{n}];"
+            f"[{mask_idx}:v]setpts=PTS-STARTPTS+{s}/TB,scale={target_w}:{target_h}:flags=bicubic,format=gray[olm{n}];"
             f"[olp{n}]split[olq{n}][olr{n}];[olq{n}]alphaextract[ola{n}];"
             f"[ola{n}][olm{n}]blend=all_mode=multiply[olb{n}];[olr{n}][olb{n}]alphamerge"
         )
@@ -1376,10 +1378,133 @@ def _overlay_filters(
     return chain, out_label
 
 
-def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]:
+# Long timelines are rendered in two steps (see render_export): every
+# clip input's decoder stays open for the whole render, about 80 MB each
+# before its filters and 150 MB with them at 1080p (measured: 40 clips
+# peaked at 5.6 GB), so from SEGMENT_MIN_CLIPS clips on, groups of about
+# SEGMENT_CLIPS clips are first rendered to near-lossless pieces, which
+# the final render joins and puts the timeline's layers on.
+SEGMENT_MIN_CLIPS = 13
+SEGMENT_CLIPS = 8
+SEGMENT_CRF = 8
+
+
+def segment_groups(plan: ExportPlan) -> list[list[int]]:
+    """The clip indexes of each piece, or [] when the timeline is rendered
+    in one go. A piece only ends at a plain cut: a transition needs both
+    of its clips in the same render."""
+    quantize_plan(plan)
+    if len(plan.clips) < SEGMENT_MIN_CLIPS:
+        return []
+    groups: list[list[int]] = [[]]
+    for i in range(len(plan.clips)):
+        if len(groups[-1]) >= SEGMENT_CLIPS and plan.clips[i - 1].transition is None:
+            groups.append([])
+        groups[-1].append(i)
+    return groups
+
+
+def _clip_track(plan: ExportPlan, indexes: "range | list[int]", inputs: _Inputs, tmp: str, graph: list[str]) -> tuple[str, str, float]:
+    """The clips at `indexes` (consecutive), each fitted to the canvas and
+    joined with their transitions, added to `graph`. Returns the video and
+    audio labels and the track's length."""
+    fps = plan.fps
+    indexes = list(indexes)
+    # A freeze only needs a moment of its source around the held frame.
+    # Every input's decoder is open for the whole render; with its default
+    # thread count (one per core) each 1080p decoder holds ~230 MB, so with
+    # many clips they're limited to 2 threads each (24 clips: 5.6 -> 3.5 GB
+    # peak, same render time, measured).
+    dec_threads = ["-threads", "2"] if len(indexes) > 2 else []
+    clip_idx = {
+        i: inputs.add(*dec_threads, "-ss", _num(c.start), "-t", _num(0.5 if c.freeze else (c.source_length or c.duration * c.speed)), "-i", c.source_path)
+        for i, c in ((i, plan.clips[i]) for i in indexes)
+    }
+    for i in indexes:
+        graph += _clip_video_chain(plan, plan.clips[i], i, clip_idx[i], inputs, tmp)
+        if plan.with_audio:
+            graph.append(_clip_audio_chain(plan, plan.clips[i], i, clip_idx[i]))
+
+    # Video: each run of plain cuts joined by one concat, and the runs
+    # crossfaded into each other. Never a concat after an xfade: xfade ends
+    # its stream at its last frame's start, so the fps after such a concat
+    # dropped a frame at every later cut (18 clips with 2 crossfades lost
+    # 1.2 s, measured).
+    runs: list[list[int]] = [[]]
+    for i in indexes:
+        if runs[-1] and plan.clips[i - 1].transition:
+            runs.append([])
+        runs[-1].append(i)
+
+    def run_label(run: list[int]) -> str:
+        if len(run) == 1:
+            return f"v{run[0]}"
+        graph.append("".join(f"[v{i}]" for i in run) + f"concat=n={len(run)}:v=1:a=0,fps={_num(fps)}[vr{run[0]}]")
+        return f"vr{run[0]}"
+
+    v_acc = run_label(runs[0])
+    length = sum(plan.clips[i].duration for i in runs[0])
+    for run in runs[1:]:
+        td = plan.clips[run[0] - 1].transition_duration
+        xfade, _ = TRANSITIONS[plan.clips[run[0] - 1].transition]
+        graph.append(f"[{v_acc}][{run_label(run)}]xfade=transition={xfade}:duration={_num(td)}:offset={_num(length - td)}[vx{run[0]}]")
+        v_acc = f"vx{run[0]}"
+        length += sum(plan.clips[i].duration for i in run) - td
+
+    first = indexes[0]
+    a_acc = f"a{first}"
+    if plan.with_audio:
+        for i in indexes[1:]:
+            prev = plan.clips[i - 1]
+            a_out = f"aj{i}"
+            if prev.transition:
+                _, audio_style = TRANSITIONS[prev.transition]
+                td = prev.transition_duration
+                # Where the clips overlap: the audio track's length so far.
+                at = sum(plan.clips[k].duration - plan.clips[k].transition_duration for k in indexes if k < i - 1) + prev.duration
+                if audio_style == "dip":
+                    half = _num(td / 2)
+                    graph.append(f"[{a_acc}]afade=t=out:st={_num(at - td)}:d={half}[ao{i}]")
+                    graph.append(f"[a{i}]afade=t=in:st={half}:d={half}[ai{i}]")
+                    graph.append(f"[ao{i}][ai{i}]acrossfade=d={_num(td)}:c1=nofade:c2=nofade[{a_out}]")
+                else:
+                    graph.append(f"[{a_acc}][a{i}]acrossfade=d={_num(td)}:c1=tri:c2=tri[{a_out}]")
+            else:
+                graph.append(f"[{a_acc}][a{i}]concat=n=2:v=0:a=1[{a_out}]")
+            a_acc = a_out
+    return v_acc, a_acc, length
+
+
+def build_segment_args(plan: ExportPlan, indexes: list[int], output_path: str, tmp: str, n: int) -> list[str]:
+    """First step of a long timeline's render: the clips at `indexes` as one
+    near-lossless piece (H.264 at SEGMENT_CRF, PCM audio) of exactly their
+    timeline length. `n` names the piece's graph script."""
+    quantize_plan(plan)
+    inputs = _Inputs()
+    graph: list[str] = []
+    v_acc, a_acc, length = _clip_track(plan, indexes, inputs, tmp, graph)
+    graph.append(f"[{v_acc}]format=yuv420p[sv]")
+    script = os.path.join(tmp, f"segment{n}.txt")
+    with open(script, "w", encoding="utf-8") as f:
+        f.write(";\n".join(graph))
+    args = ["-y", "-hide_banner", *inputs.args, "-filter_complex_script", script, "-map", "[sv]"]
+    if plan.with_audio:
+        args += ["-map", f"[{a_acc}]", "-c:a", "pcm_s16le"]
+    return args + [
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", str(SEGMENT_CRF), "-pix_fmt", "yuv420p",
+        "-r", _num(plan.fps), "-t", _num(length), output_path,
+    ]  # fmt: skip
+
+
+def build_export_args(
+    plan: ExportPlan, output_path: str, tmp: str, encoder: str = encoders.SOFTWARE, segments: list[str] | None = None
+) -> list[str]:
     """Builds the ffmpeg argument list and writes the filter graph (plus
     any LUT files) into `tmp` - the graph goes in a script file because a
     long timeline's graph can exceed Windows' command-line length limit.
+    `encoder`: the MP4 video encoder (app/pipeline/encoders.py).
+    `segments`: the clips' pre-rendered pieces (build_segment_args), in
+    order, used instead of the clips themselves.
     """
     quantize_plan(plan)
     fps = plan.fps
@@ -1387,42 +1512,15 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
     inputs = _Inputs()
     graph: list[str] = []
 
-    # A freeze only needs a moment of its source around the held frame.
-    clip_idx = [
-        inputs.add("-ss", _num(c.start), "-t", _num(0.5 if c.freeze else (c.source_length or c.duration * c.speed)), "-i", c.source_path)
-        for c in plan.clips
-    ]
-    for i, clip in enumerate(plan.clips):
-        graph += _clip_video_chain(plan, clip, i, clip_idx[i], inputs, tmp)
-        if plan.with_audio:
-            graph.append(_clip_audio_chain(plan, clip, i, clip_idx[i]))
-
-    v_acc, a_acc = "v0", "a0"
-    length = plan.clips[0].duration
-    for i in range(1, len(plan.clips)):
-        prev, cur = plan.clips[i - 1], plan.clips[i]
-        v_out, a_out = f"vj{i}", f"aj{i}"
-        if prev.transition:
-            xfade, audio_style = TRANSITIONS[prev.transition]
-            td = prev.transition_duration
-            graph.append(
-                f"[{v_acc}][v{i}]xfade=transition={xfade}:duration={_num(td)}:offset={_num(length - td)}[{v_out}]"
-            )
-            if plan.with_audio:
-                if audio_style == "dip":
-                    half = _num(td / 2)
-                    graph.append(f"[{a_acc}]afade=t=out:st={_num(length - td)}:d={half}[ao{i}]")
-                    graph.append(f"[a{i}]afade=t=in:st={half}:d={half}[ai{i}]")
-                    graph.append(f"[ao{i}][ai{i}]acrossfade=d={_num(td)}:c1=nofade:c2=nofade[{a_out}]")
-                else:
-                    graph.append(f"[{a_acc}][a{i}]acrossfade=d={_num(td)}:c1=tri:c2=tri[{a_out}]")
-            length += cur.duration - td
-        else:
-            graph.append(f"[{v_acc}][v{i}]concat=n=2:v=1:a=0,fps={_num(fps)}[{v_out}]")
-            if plan.with_audio:
-                graph.append(f"[{a_acc}][a{i}]concat=n=2:v=0:a=1[{a_out}]")
-            length += cur.duration
-        v_acc, a_acc = v_out, a_out
+    if segments is None:
+        v_acc, a_acc, _ = _clip_track(plan, range(len(plan.clips)), inputs, tmp, graph)
+    else:
+        # The clips were pre-rendered in groups (build_segment_args): joined
+        # here, so only one decoder per group is open for this render.
+        idx = [inputs.add("-i", s) for s in segments]
+        pads = "".join(f"[{n}:v:0]" + (f"[{n}:a:0]" if plan.with_audio else "") for n in idx)
+        graph.append(f"{pads}concat=n={len(idx)}:v=1:a={1 if plan.with_audio else 0}[vseg]" + ("[aseg]" if plan.with_audio else ""))
+        v_acc, a_acc = "vseg", "aseg"
 
     if plan.effects:
         fx = ",".join(_effect_filters(e, plan.width, plan.height) for e in plan.effects)
@@ -1447,10 +1545,12 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
             # _overlay_filters, and gone after its end (eof_action=pass).
             idx = inputs.add("-ss", _num(o.offset), "-t", _num(o.end - o.start), "-i", o.image_path)
         else:
-            # Looped still from t=0 so its timestamps line up with the output
-            # timeline; eof_action=pass leaves the video untouched afterwards.
-            idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end + 0.1), "-i", o.image_path)
-        mask_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end + 0.1), "-i", o.mask_path) if o.mask_path else None
+            # Looped still for the layer's own length, shifted into place in
+            # _overlay_filters. Looping it from t=0 instead made ffmpeg decode
+            # and queue every frame before the layer appears: about 470 MB
+            # per text layer on a 1080p timeline (measured).
+            idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end - o.start + 0.1), "-i", o.image_path)
+        mask_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end - o.start + 0.1), "-i", o.mask_path) if o.mask_path else None
         chain, v_acc = _overlay_filters(o, idx, n, plan, v_acc, mask_idx)
         graph.append(chain)
     if plan.output_format == "gif":
@@ -1510,14 +1610,7 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
     if plan.with_audio:
         args += ["-map", f"[{a_acc}]", "-c:a", "aac", "-b:a", plan.audio_bitrate]
     args += [
-        "-c:v",
-        "libx264",
-        "-preset",
-        VIDEO_ENCODE_PRESET,
-        "-crf",
-        str(plan.crf),
-        "-pix_fmt",
-        "yuv420p",
+        *encoders.encoder_args(encoder, plan.crf),
         "-r",
         _num(fps),
         "-t",
@@ -1531,22 +1624,94 @@ def build_export_args(plan: ExportPlan, output_path: str, tmp: str) -> list[str]
 
 async def render_export(plan: ExportPlan, output_path: str, job: "JobProgress | None" = None) -> None:
     """Renders the plan. With a `job` (app/progress.py) it reports seconds
-    rendered out of the timeline's length and stops on cancel."""
+    rendered out of the timeline's length and stops on cancel.
+
+    MP4s use the encoder app/pipeline/encoders.py picks (hardware when it
+    works); if that fails or its file doesn't check out, the export is
+    rendered again with libx264. Every output is checked (streams, size,
+    length, a decodable end) before it's returned. Raises encoders.DiskFull
+    when there isn't room, before rendering or when a write fails."""
     tmp = tempfile.mkdtemp(prefix="wipeclip-export-")
     try:
-        if job is None:
+        quantize_plan(plan)
+        total = timeline_duration(plan)
+        encoders.check_space(os.path.dirname(os.path.abspath(output_path)), encoders.estimate_bytes(plan.width, plan.height, plan.fps, total))
+        encoder = encoders.pick_encoder() if plan.output_format == "mp4" else encoders.SOFTWARE
+        if job is not None:
+            job.check()
+            # Stabilization analysis runs while the phase still reads "checking".
+            await prepare_stabilization(plan, tmp, cancel=job.cancel)
+            job.total = total
+            job.phase = "rendering"
+        else:
             await prepare_stabilization(plan, tmp)
-            await _run_ffmpeg(build_export_args(plan, output_path, tmp))
-            return
-        job.check()
-        # Stabilization analysis runs while the phase still reads "checking".
-        await prepare_stabilization(plan, tmp, cancel=job.cancel)
-        job.total = timeline_duration(plan)
-        job.phase = "rendering"
+
+        # Long timelines: the clips' pieces first (segment_groups), each on
+        # the temp drive, counted as the first half of the progress bar.
+        groups = segment_groups(plan)
+        segments: list[str] | None = None
+        share = 0.5 if groups else 0.0
+        if groups:
+            encoders.check_space(tmp, 4 * encoders.estimate_bytes(plan.width, plan.height, plan.fps, total))
+            segments, rendered = [], 0.0
+            for n, group in enumerate(groups):
+                path = os.path.join(tmp, f"segment{n}.mkv")
+                start = rendered
+
+                def report_piece(seconds: float, start: float = start) -> None:
+                    if job is not None:
+                        job.done = (start + seconds) * share
+
+                await _run_ffmpeg(
+                    build_segment_args(plan, group, path, tmp, n),
+                    progress=report_piece if job is not None else None,
+                    cancel=job.cancel if job is not None else None,
+                )
+                segments.append(path)
+                rendered += sum(plan.clips[i].duration - (plan.clips[i].transition_duration if i != group[-1] else 0.0) for i in group)
 
         def report(seconds: float) -> None:
-            job.done = seconds
+            if job is not None:
+                job.done = total * share + seconds * (1 - share)
 
-        await _run_ffmpeg(build_export_args(plan, output_path, tmp), progress=report, cancel=job.cancel)
+        async def attempt(enc: str) -> dict:
+            started = time.monotonic()
+            if job is None:
+                await _run_ffmpeg(build_export_args(plan, output_path, tmp, enc, segments))
+            else:
+                job.done = total * share
+                await _run_ffmpeg(build_export_args(plan, output_path, tmp, enc, segments), progress=report, cancel=job.cancel)
+            info = encoders.validate_output(
+                output_path,
+                duration=total,
+                width=plan.width if plan.output_format == "mp4" else None,
+                height=plan.height if plan.output_format == "mp4" else None,
+                video=plan.output_format != "audio",
+                audio=plan.with_audio and plan.output_format != "gif",
+                fps=plan.fps,
+            )
+            print(
+                f"export: {plan.output_format} {plan.width}x{plan.height} {_num(plan.fps)} fps, {total:.1f} s, "
+                f"{len(plan.clips)} clips, encoder {enc}, {time.monotonic() - started:.1f} s, {os.path.getsize(output_path) / 1e6:.1f} MB",
+                file=sys.stderr,
+            )
+            return info
+
+        try:
+            await attempt(encoder)
+        except (RuntimeError, encoders.OutputInvalid) as exc:
+            if encoders.is_disk_full(str(exc)):
+                raise encoders.DiskFull(None, shutil.disk_usage(os.path.dirname(os.path.abspath(output_path))).free) from exc
+            if encoder == encoders.SOFTWARE:
+                raise
+            # Only the error's kind: ffmpeg's text can contain file paths.
+            print(f"export: {encoder} failed ({type(exc).__name__}); rendering again with {encoders.SOFTWARE}", file=sys.stderr)
+            encoders.give_up_hardware()
+            try:
+                await attempt(encoders.SOFTWARE)
+            except RuntimeError as exc2:
+                if encoders.is_disk_full(str(exc2)):
+                    raise encoders.DiskFull(None, None) from exc2
+                raise
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

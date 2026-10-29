@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import tempfile
+import traceback
 import unittest
 from unittest import mock
 
@@ -17,6 +18,7 @@ import numpy as np
 from fastapi.testclient import TestClient
 
 from app import main
+from app.pipeline import audio_clean
 from app.pipeline.video import get_ffmpeg_path
 
 FF = get_ffmpeg_path()
@@ -102,6 +104,20 @@ class AudioCleanTest(unittest.TestCase):
         with mock.patch.object(main, "LOCAL_MODE", True):
             res = TestClient(main.app).post("/api/audio/clean", data={"path": self.src, "start": "3", "end": "2"})
         self.assertEqual(res.status_code, 400)
+
+    def test_unreadable_file_is_a_message_without_its_path(self) -> None:
+        broken = os.path.join(self.dir.name, "broken clip.mp4")
+        with open(broken, "wb") as f:
+            f.write(b"not a video")
+        with mock.patch.object(main, "LOCAL_MODE", True), mock.patch("traceback.print_exc") as printed:
+            res = TestClient(main.app).post("/api/audio/clean", data={"path": broken, "start": "0", "end": "1"})
+        self.assertEqual(res.status_code, 400, res.text[:300])
+        self.assertIn("couldn't be cleaned up", res.json()["detail"])
+        # What gets logged is the error kind, never the file's name.
+        self.assertTrue(printed.called)
+        with self.assertRaises(RuntimeError) as caught:
+            audio_clean._decode(broken, 0, 1)
+        self.assertNotIn("broken clip", "".join(traceback.format_exception(caught.exception)))
 
 
 if __name__ == "__main__":

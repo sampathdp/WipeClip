@@ -108,7 +108,7 @@ from app.config import (
     RESOLUTION_HEIGHTS,
     SHARPEN_AMOUNT_PRESETS,
 )
-from app.pipeline import audio_clean, io_utils, moderation
+from app.pipeline import activity, audio_clean, encoders, io_utils, moderation
 from app.pipeline import editor as editor_pipeline
 from app.pipeline import video as video_pipeline
 from app.queue import get_queue
@@ -407,6 +407,52 @@ async def api_audio_clean(
             traceback.print_exc()
             raise HTTPException(status_code=400, detail="This clip's audio couldn't be cleaned up.") from exc
         return _stream_result(out_path, "audio/mp4")
+
+
+MAX_ACTIVITY_RANGES = 50
+
+
+@app.post("/api/video/activity")
+async def api_video_activity(path: str = Form(...), ranges: str = Form(...)):
+    """Desktop engine only: how much the picture changes in each of up to
+    MAX_ACTIVITY_RANGES source-time ranges ([[start, end], ...] JSON) of a
+    video on this machine (app/pipeline/activity.py). Used by the editor's
+    silence review; only those ranges are decoded."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    try:
+        raw = json.loads(ranges)
+        parsed = [(float(a), float(b)) for a, b in raw]
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid ranges") from None
+    if not parsed or len(parsed) > MAX_ACTIVITY_RANGES:
+        raise HTTPException(status_code=400, detail="Invalid ranges")
+    for a, b in parsed:
+        if not (math.isfinite(a) and math.isfinite(b)) or a < 0 or b <= a or b - a > 3600:
+            raise HTTPException(status_code=400, detail="Invalid range")
+    in_path = _local_file(path, _VIDEO_SUFFIXES)
+    try:
+        result = await activity.measure_ranges(in_path, parsed)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail="This video couldn't be read.") from exc
+    return {"ranges": result}
+
+
+@app.post("/api/video/motion")
+async def api_video_motion(path: str = Form(...), start: float = Form(...), end: float = Form(...)):
+    """Desktop engine only: picture change and scene-change scores through
+    source seconds start..end (at most activity.MAX_PROFILE_SECONDS) of a
+    video on this machine (app/pipeline/activity.py motion_profile). Used by
+    the editor's highlight suggestions."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    if not (math.isfinite(start) and math.isfinite(end)) or start < 0 or end <= start or end - start > activity.MAX_PROFILE_SECONDS:
+        raise HTTPException(status_code=400, detail="Invalid range")
+    in_path = _local_file(path, _VIDEO_SUFFIXES)
+    try:
+        return await activity.motion_profile(in_path, start, end)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail="This video couldn't be read.") from exc
 
 
 @app.post("/api/video/probe")
@@ -1386,6 +1432,16 @@ async def api_video_export(
                 await _run_pipeline_job(jobs.editor_export_job, plan_json, out_path, job_id if job else None, timeout=job_timeout)
             except progress.Cancelled:
                 raise
+            except encoders.DiskFull as exc:
+                need = f" It needs about {exc.needed / 1e9:.1f} GB" if exc.needed else ""
+                free = f"; {exc.free / 1e9:.1f} GB is free" if exc.free is not None else ""
+                raise HTTPException(
+                    status_code=507,
+                    detail={
+                        "code": "disk_full",
+                        "message": f"Not enough free disk space to export.{need}{free}. Free some space (or empty the Recycle Bin / Trash) and export again. Your project is unchanged.",
+                    },
+                ) from exc
             except Exception as exc:  # noqa: BLE001
                 traceback.print_exc()
                 raise HTTPException(

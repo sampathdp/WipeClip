@@ -6,12 +6,14 @@
  * retake/replace workflow. Everything edits Project data through `apply`
  * (one undo step per action); nothing changes the source files.
  */
+import { modKey } from "@/lib/platform/keys";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { analyzeAudio, type AudioReport } from "@/lib/editor/audioAnalysis";
+import { detectAudio, measureLevels, type AudioLevels, type AudioReport, type AudioSpan } from "@/lib/editor/audioAnalysis";
+import { ActivityCache, screenPieces, type ScreenPiece } from "@/lib/editor/screenActivity";
 import { buildSpeechMix } from "@/lib/editor/captions";
 import { timelineTimeOf } from "@/lib/editor/camera";
 import { DEFAULT_CHAPTERS, suggestChapters } from "@/lib/editor/chapters";
-import { acceptedCuts, interactionTimeline, suggestEdits, type Act } from "@/lib/editor/insights";
+import { acceptedCuts, cutCandidates, interactionTimeline, previewSkips, suggestEdits, type Act } from "@/lib/editor/insights";
 import { DEFAULT_KEYSTROKES, comboCounts, keystrokeOverlays, type KeystrokeSettings } from "@/lib/editor/keystrokes";
 import { loadVideoMeta } from "@/lib/editor/media";
 import { recordingEvents } from "@/lib/editor/pointer";
@@ -19,17 +21,20 @@ import { rippleCut, rippleReplace } from "@/lib/editor/ripple";
 import { SHAPE_WIDTH, defaultShape } from "@/lib/editor/shapes";
 import { layout, locate, newId, formatTime, type Layout } from "@/lib/editor/timeline";
 import { captionCues, chapterList, chaptersVtt } from "@/lib/editor/transcript";
-import { newClip, type Chapter, type EditSuggestion, type MaskMode, type MediaSource, type Overlay, type PrivacyMask, type Project, type Selection, type ShapeType } from "@/lib/editor/types";
+import { newClip, type CameraZoom, type Chapter, type EditSuggestion, type MaskMode, type MediaSource, type Overlay, type PrivacyMask, type Project, type Selection, type ShapeType } from "@/lib/editor/types";
 import { IS_DESKTOP, saveTextFile } from "@/lib/platform";
 import { recordingOpen, recordingRead } from "@/lib/platform/recorder";
 import { loadRecordingBundle, recoverRecording } from "@/lib/recorder/bundle";
 import { recordingToSources } from "@/lib/recorder/editorImport";
 import { parseManifest } from "@/lib/recorder/format";
 import { planRecordingProject } from "@/lib/recorder/importPlan";
-import { ApiError, ContentBlockedError, probeVideo } from "@/lib/toolsApi";
+import { ApiError, ContentBlockedError, probeVideo, videoActivity } from "@/lib/toolsApi";
 import Dialog from "./Dialog";
 import { ActionButton } from "./Inspector";
-import type { ReviewSettings, TutorialPanelProps, TutorialTab } from "./TutorialPanel";
+import type { DraftSettings, ReviewSettings, TutorialPanelProps, TutorialTab } from "./TutorialPanel";
+import { applyDraft, buildDraft, draftSkips, isStale, setDraftStatus, timelineKey } from "@/lib/editor/draft";
+import { FOCUS_PRESETS, analyzeFocus } from "@/lib/editor/focus";
+import { eventsForSuggestions, focusPrefs } from "@/lib/editor/focusPrefs";
 
 interface Deps {
   project: Project;
@@ -59,6 +64,15 @@ interface PendingReplace {
   label: string;
 }
 
+/** What the speech mix (captions.ts buildSpeechMix) is made of: the clips
+ * and audio tracks with their timing and volume, and which files they play.
+ * Over-inclusive on purpose - a change that doesn't affect the sound only
+ * costs a new mix. */
+export function mixKey(lay: Layout, project: Project, sources: Record<string, MediaSource>): string {
+  const files = Object.values(sources).map((s) => [s.id, s.kind, s.duration, s.disk?.path ?? null, s.disk?.size ?? s.file?.size ?? null, s.hasAudio]);
+  return JSON.stringify([lay.fps, lay.total, project.clips, project.audio, files]);
+}
+
 export function useTutorialTools(d: Deps) {
   const { project, lay, sources, recSource, clock, apply, say } = d;
   const [tab, setTab] = useState<TutorialTab>("review");
@@ -67,6 +81,9 @@ export function useTutorialTools(d: Deps) {
   const analysisCtrl = useRef<AbortController | null>(null);
   useEffect(() => () => analysisCtrl.current?.abort(), []);
   const lastReport = useRef<AudioReport | null>(null);
+  const levelsCache = useRef<{ key: string; levels: AudioLevels | null; clipping: AudioSpan[]; skipped: string[] } | null>(null);
+  const activity = useRef(new ActivityCache());
+  const [previewingCuts, setPreviewingCuts] = useState(false);
   const [keySettings, setKeySettings] = useState<KeystrokeSettings>(DEFAULT_KEYSTROKES);
   const [replaceBusy, setReplaceBusy] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingReplace | null>(null);
@@ -75,37 +92,111 @@ export function useTutorialTools(d: Deps) {
   const acts: Act[] | null = useMemo(() => (recSource && events ? interactionTimeline(lay, recSource.id, events) : null), [lay, recSource, events]);
   const isMac = recSource?.recording?.manifest.app?.platform === "macos";
   const suggestions = useMemo(() => project.suggestions ?? [], [project.suggestions]);
+  const skipRanges = useMemo(() => {
+    if (!previewingCuts) return [];
+    const all = [...previewSkips(suggestions), ...draftSkips(project.draft, lay)].sort((a, b) => a.start - b.start);
+    const out: { start: number; end: number }[] = [];
+    for (const r of all) {
+      const last = out[out.length - 1];
+      if (last && r.start <= last.end) last.end = Math.max(last.end, r.end);
+      else out.push({ ...r });
+    }
+    return out;
+  }, [previewingCuts, suggestions, project.draft, lay]);
 
   // --- review -----------------------------------------------------------------
+  /** Cut and review suggestions for the current timeline (sound levels,
+   * picture check, interaction events). null when a newer run took over.
+   * Throws AbortError when cancelled. Shared by Review > Analyze and the
+   * draft. */
+  const reviewSuggestions = useCallback(
+    async (s: ReviewSettings, run: number, signal: AbortSignal): Promise<{ list: EditSuggestion[]; notes: string[]; nothing: boolean } | null> => {
+      const t0 = performance.now();
+      {
+        // The mix's levels are reused while the timeline's sound is the same
+        // (only the settings changed, or edits that don't touch the sound).
+        const key = mixKey(lay, project, sources);
+        let cached = levelsCache.current?.key === key ? levelsCache.current : null;
+        const reused = cached !== null;
+        if (!cached) {
+          setAnalysis("Mixing the timeline's audio…");
+          const mix = await buildSpeechMix(lay, project, sources, { withClipping: true, signal });
+          if (run !== analysisRun.current) return null;
+          cached = { key, levels: mix.samples ? measureLevels(mix.samples) : null, clipping: mix.clipping, skipped: mix.skipped };
+          levelsCache.current = cached;
+        }
+        setAnalysis("Analyzing…");
+        await new Promise((r) => setTimeout(r, 0));
+        if (run !== analysisRun.current) return null;
+        const report = cached.levels ? detectAudio(cached.levels, s.silence, cached.clipping) : null;
+        lastReport.current = report;
+        const notes: string[] = [];
+        if (cached.skipped.length) notes.push(`${cached.skipped.join(", ")} ${cached.skipped.length === 1 ? "is" : "are"} too large to analyze for sound.`);
+        if (!report && !acts) return { list: [], notes, nothing: true };
+        // Silences that could become cuts: check whether the picture moves
+        // (local engine; each file range measured once per session).
+        let checked = false;
+        const pieces = new Map<string, ScreenPiece[]>();
+        if (report) {
+          for (const c of cutCandidates(report, acts)) pieces.set(`${c.start}|${c.end}`, screenPieces(lay, sources, c.start, c.end));
+          const todo = activity.current.missing([...pieces.values()].flat());
+          const byPath = new Map<string, ScreenPiece[]>();
+          for (const p of todo) byPath.set(p.path, [...(byPath.get(p.path) ?? []), p]);
+          let done = 0;
+          try {
+            for (const [path, list] of byPath) {
+              for (let i = 0; i < list.length; i += 10) {
+                const batch = list.slice(i, i + 10);
+                setAnalysis(`Checking the picture in quiet parts… ${Math.round((done / todo.length) * 100)}%`);
+                const res = await videoActivity(path, batch.map((p) => [p.sourceStart, p.sourceEnd]), signal);
+                if (run !== analysisRun.current) return null;
+                if (!res) break; // no local engine
+                res.forEach((v, k) => activity.current.set(batch[k], v));
+                done += batch.length;
+              }
+            }
+          } catch (e) {
+            if ((e as Error)?.name === "AbortError") throw e;
+            console.warn("[review] picture check failed", e);
+          }
+          checked = [...pieces.values()].some((ps) => activity.current.share(ps) !== null);
+        }
+        const motion = (start: number, end: number) => {
+          const ps = pieces.get(`${start}|${end}`);
+          return ps ? activity.current.share(ps) : null;
+        };
+        const aspect = recSource ? recSource.width / Math.max(1, recSource.height) : 16 / 9;
+        const list = suggestEdits({ lay, acts, audio: report, motion }, { silence: s.silence, idle: s.idle, aspect }, () => newId("sg"));
+        if (run !== analysisRun.current) return null;
+        console.info(`[review] analysis took ${Math.round(performance.now() - t0)} ms (levels ${reused ? "reused" : "measured"}, picture ${checked ? "checked" : "not checked"})`);
+        if (pieces.size && !checked) notes.push("Quiet parts couldn't be checked for movement on screen here, so watch them before cutting.");
+        return { list, notes, nothing: false };
+      }
+    },
+    [lay, project, sources, acts, recSource]
+  );
+
   const analyze = useCallback(
     async (s: ReviewSettings) => {
       const run = ++analysisRun.current;
       analysisCtrl.current?.abort();
       const ctrl = new AbortController();
       analysisCtrl.current = ctrl;
-      setAnalysis("Mixing the timeline's audio…");
       try {
-        const mix = await buildSpeechMix(lay, project, sources, { withClipping: true, signal: ctrl.signal });
-        if (run !== analysisRun.current) return;
-        setAnalysis("Analyzing…");
-        await new Promise((r) => setTimeout(r, 0));
-        if (run !== analysisRun.current) return;
-        const report = mix.samples ? analyzeAudio(mix.samples, s.silence, undefined, mix.clipping) : null;
-        lastReport.current = report;
-        const tooLarge = mix.skipped.length ? ` ${mix.skipped.join(", ")} ${mix.skipped.length === 1 ? "is" : "are"} too large to analyze for sound.` : "";
-        if (!report && !acts) {
-          say(tooLarge ? `Nothing to analyze.${tooLarge}` : "There's no sound or recorded interaction to analyze.");
+        const r = await reviewSuggestions(s, run, ctrl.signal);
+        if (!r) return;
+        const tail = r.notes.length ? ` ${r.notes.join(" ")}` : "";
+        if (r.nothing) {
+          say(tail ? `Nothing to analyze.${tail}` : "There's no sound or recorded interaction to analyze.");
           return;
         }
-        const aspect = recSource ? recSource.width / Math.max(1, recSource.height) : 16 / 9;
-        const list = suggestEdits({ lay, acts, audio: report }, { silence: s.silence, idle: s.idle, aspect }, () => newId("sg"));
-        if (run !== analysisRun.current) return;
+        const list = r.list;
         apply((p) => ({ ...p, suggestions: [...(p.suggestions ?? []).filter((x) => x.kind === "retake"), ...list] }));
         const cuts = list.filter((x) => x.action === "cut").length;
         say(
           (list.length
             ? `${list.length} suggestion${list.length === 1 ? "" : "s"} (${cuts} possible cut${cuts === 1 ? "" : "s"}). Nothing changes until you accept.`
-            : "Nothing stood out. Your recording looks tight.") + tooLarge
+            : "Nothing stood out. Your recording looks tight.") + tail
         );
       } catch (e) {
         if ((e as Error)?.name === "AbortError") return;
@@ -116,8 +207,87 @@ export function useTutorialTools(d: Deps) {
         if (analysisCtrl.current === ctrl) analysisCtrl.current = null;
       }
     },
-    [lay, project, sources, acts, recSource, apply, say]
+    [reviewSuggestions, apply, say]
   );
+
+  // --- draft ----------------------------------------------------------------------
+  /** Record -> Analyze -> Review: zooms, click highlights, cuts, review
+   * items and chapters in one reviewable draft (draft.ts). Generating is
+   * one undo step; nothing else changes until the draft is applied. */
+  const generateDraft = useCallback(
+    async (ds: DraftSettings) => {
+      const inputsKey = JSON.stringify([mixKey(lay, project, sources), timelineKey(lay), recSource?.id ?? null, events?.length ?? 0, project.focus ?? null, ds]);
+      if (project.draft && !project.draft.appliedAt && project.draft.inputsKey === inputsKey) {
+        say("The draft is up to date: nothing it's based on has changed.");
+        return;
+      }
+      const run = ++analysisRun.current;
+      analysisCtrl.current?.abort();
+      const ctrl = new AbortController();
+      analysisCtrl.current = ctrl;
+      const notes: string[] = [];
+      try {
+        let zooms: CameraZoom[] = [];
+        let clicks = 0;
+        if ((ds.zooms || ds.highlights) && recSource && events) {
+          const prefs = focusPrefs(project);
+          const usable = eventsForSuggestions(events, recSource.id, prefs);
+          clicks = usable.filter((e) => e.type === "button" && e.down && e.x >= 0 && e.x <= 1 && e.y >= 0 && e.y <= 1).length;
+          if (ds.zooms) {
+            const res = await analyzeFocus(
+              { events: usable, duration: recSource.duration, aspect: recSource.width / Math.max(1, recSource.height), sourceId: recSource.id },
+              FOCUS_PRESETS[ds.preset],
+              () => newId("zm"),
+              { signal: ctrl.signal, onProgress: (pr) => pr.stage !== "done" && setAnalysis(pr.stage === "reading" ? "Reading the recorded interactions…" : "Finding focus points…") }
+            );
+            if (run !== analysisRun.current) return;
+            zooms = res.zooms;
+          }
+        } else if (ds.zooms || ds.highlights) {
+          notes.push("No recorded mouse activity that can be placed on the video, so no zooms or click highlights.");
+        }
+        let suggestions: EditSuggestion[] = [];
+        if (ds.cuts) {
+          const r = await reviewSuggestions(ds.review, run, ctrl.signal);
+          if (!r) return;
+          suggestions = r.list;
+          notes.push(...r.notes);
+        }
+        const chapters = ds.chapters ? suggestChapters({ acts, cues: captionCues(project.overlays), audio: lastReport.current, total: lay.total }, DEFAULT_CHAPTERS, () => newId("ch")) : [];
+        if (run !== analysisRun.current) return;
+        const draft = buildDraft({ lay, project, zooms, suggestions, chapters, clicks: ds.highlights ? clicks : 0, inputsKey, notes }, () => newId("di"));
+        apply((p) => ({ ...p, draft }));
+        setTab("draft");
+        say(draft.items.length ? `Draft ready: ${draft.items.length} suggestion${draft.items.length === 1 ? "" : "s"} to review. Nothing has changed yet.` : "The draft found nothing to suggest.");
+      } catch (e) {
+        if ((e as Error)?.name === "AbortError") return;
+        console.error("[draft] generation failed", e);
+        say("The draft couldn't be made. Your project hasn't changed.");
+      } finally {
+        if (run === analysisRun.current) setAnalysis(null);
+        if (analysisCtrl.current === ctrl) analysisCtrl.current = null;
+      }
+    },
+    [lay, project, sources, recSource, events, acts, reviewSuggestions, apply, say]
+  );
+
+  const applyDraftNow = useCallback(() => {
+    const res = applyDraft(project, lay.fps);
+    if ("error" in res) {
+      say(res.error);
+      return;
+    }
+    apply(() => res.project);
+    const a = res.applied;
+    const parts = [
+      a.cut && `${a.cut} cut${a.cut === 1 ? "" : "s"}`,
+      a.zoom && `${a.zoom} zoom${a.zoom === 1 ? "" : "s"}`,
+      a.highlights && "click highlights",
+      a.chapter && `${a.chapter} chapter${a.chapter === 1 ? "" : "s"}`,
+      a.review && `${a.review} item${a.review === 1 ? "" : "s"} to review`,
+    ].filter(Boolean);
+    say(`Applied ${parts.join(", ") || "nothing"}.${res.skipped.length ? ` ${res.skipped.join(" ")}` : ""} Undo with ${modKey()}+Z.`);
+  }, [project, lay.fps, apply, say]);
 
   const cut = useCallback(
     (ranges: { start: number; end: number }[]) => {
@@ -134,7 +304,7 @@ export function useTutorialTools(d: Deps) {
         removed += res.removed;
       }
       apply(() => next);
-      say(`Removed ${removed.toFixed(1)} s. Undo with Ctrl+Z if it doesn't feel right.`);
+      say(`Removed ${removed.toFixed(1)} s. Undo with ${modKey()}+Z if it doesn't feel right.`);
       return true;
     },
     [project, lay.fps, apply, say]
@@ -320,7 +490,7 @@ export function useTutorialTools(d: Deps) {
     made.forEach((s) => d.addSource(s));
     apply(() => res.project);
     setPending(null);
-    say(`Replaced ${formatTime(mark.start)}–${formatTime(mark.end)}. Undo with Ctrl+Z.`);
+    say(`Replaced ${formatTime(mark.start)}–${formatTime(mark.end)}. Undo with ${modKey()}+Z.`);
   }, [pending, project, lay, apply, say, d]);
 
   const cancelReplace = useCallback(() => {
@@ -360,6 +530,15 @@ export function useTutorialTools(d: Deps) {
       cut(acceptedCuts(high));
     },
     onClearSuggestions: () => apply((p) => ({ ...p, suggestions: (p.suggestions ?? []).filter((s) => s.kind === "retake") })),
+    previewingCuts,
+    onPreviewCuts: setPreviewingCuts,
+    draft: project.draft ?? null,
+    draftStale: project.draft ? isStale(project.draft, lay) : false,
+    onGenerateDraft: (s) => void generateDraft(s),
+    onDraftStatus: (status, which) => apply((p) => (p.draft ? { ...p, draft: setDraftStatus(p.draft, status, which) } : p)),
+    onApplyDraft: applyDraftNow,
+    onDiscardDraft: () => apply((p) => { const { draft: _drop, ...rest } = p; void _drop; return rest; }),
+    onSeek: (t) => clock.set(Math.max(0, Math.min(lay.total, t))),
     chapters,
     onSuggestChapters: suggestChaptersNow,
     onAddChapter: () => {
@@ -434,7 +613,7 @@ export function useTutorialTools(d: Deps) {
     );
   }
 
-  return { panelProps, dialog, acts, setTab };
+  return { panelProps, dialog, acts, setTab, skipRanges };
 }
 
 function pickVideoFile(): Promise<File | null> {

@@ -4,7 +4,8 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { CloseIcon } from "./icons";
 
 /** Minimal modal: Escape/backdrop close (unless `onClose` is omitted, e.g.
- * while a job is running), focus moved inside on open and restored after.
+ * while a job is running), focus moved inside on open, kept inside while
+ * open (Tab wraps) and restored after.
  */
 export default function Dialog({
   title,
@@ -23,6 +24,30 @@ export default function Dialog({
     const previous = document.activeElement as HTMLElement | null;
     panelRef.current?.focus();
     return () => previous?.focus?.();
+  }, []);
+
+  // Tab stays inside the dialog (aria-modal promises the rest is inert).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const panel = panelRef.current;
+      if (e.key !== "Tab" || !panel) return;
+      const items = [...panel.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter(
+        (el) => !el.hasAttribute("disabled") && el.offsetParent !== null
+      );
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const inside = panel.contains(document.activeElement);
+      if (e.shiftKey && (document.activeElement === first || !inside)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || !inside)) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
   useEffect(() => {

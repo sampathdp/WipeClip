@@ -56,7 +56,7 @@ import {
   type TrackKind,
 } from "./format";
 import { pickMimeType } from "./mime";
-import { ChunkWriter } from "./writer";
+import { backlogState, ChunkWriter, type BacklogState } from "./writer";
 
 /** Chunk length handed to disk; also the most a crash can lose. */
 const TIMESLICE_MS = 1000;
@@ -152,6 +152,7 @@ export class RecordingSession {
   private lastSurface: { width: number; height: number } | null = null;
   private recordingId = crypto.randomUUID();
   private draining = false;
+  private backlog: BacklogState = "ok";
   private startedAt: number | null = null;
   private nativeInfo: NativeCaptureStarted | null = null;
   private nativeStopped: NativeCaptureStopped | null = null;
@@ -284,6 +285,7 @@ export class RecordingSession {
       this.timers.push(setInterval(() => void this.drain(), DRAIN_MS));
       this.timers.push(setInterval(() => void this.saveManifest(), MANIFEST_EVERY_MS));
       this.timers.push(setInterval(() => void this.checkDisk(), DISK_CHECK_MS));
+      this.timers.push(setInterval(() => this.checkBacklog(), TIMESLICE_MS));
       this.watchTracks();
       this.setStatus("recording");
     } catch (e) {
@@ -443,6 +445,22 @@ export class RecordingSession {
     } finally {
       this.draining = false;
     }
+  }
+
+  /** Bytes handed to the writers that haven't reached disk yet. */
+  pendingBytes(): number {
+    return this.tracks.reduce((n, t) => n + t.writer.backlog, 0) + (this.eventsWriter?.backlog ?? 0);
+  }
+
+  /** Stops before a stalled disk turns into unbounded memory use (see
+   * BACKLOG_STOP_BYTES); warns once each time writes fall behind. */
+  private checkBacklog() {
+    const state = backlogState(this.pendingBytes());
+    if (state === this.backlog) return;
+    const was = this.backlog;
+    this.backlog = state;
+    if (state === "stalled") void this.autoStop("Recording stopped: the disk stopped keeping up, so nothing more could be saved safely.");
+    else if (state === "slow" && was === "ok") this.warn("The disk is falling behind; part of the recording is waiting in memory.");
   }
 
   private async checkDisk() {

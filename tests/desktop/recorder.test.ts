@@ -19,7 +19,7 @@ import {
   type RecordingManifest,
 } from "../../src/lib/recorder/format.ts";
 import { planRecordingProject, type ImportedTrack } from "../../src/lib/recorder/importPlan.ts";
-import { ChunkWriter } from "../../src/lib/recorder/writer.ts";
+import { BACKLOG_STOP_BYTES, BACKLOG_WARN_BYTES, ChunkWriter, backlogState } from "../../src/lib/recorder/writer.ts";
 
 // --- clock -------------------------------------------------------------------
 
@@ -346,6 +346,47 @@ test("chunk writer keeps order and stops at the first failure", async () => {
   w.push(new Uint8Array([5]));
   await w.flush();
   assert.equal(calls, 3);
+});
+
+test("stalled disk: backlog grows while a write hangs, and the limits classify it", async () => {
+  let release!: () => void;
+  const hung = new Promise<void>((r) => (release = r));
+  const w = new ChunkWriter(() => hung, () => {});
+  const chunk = new Uint8Array(1024 * 1024);
+  for (let i = 0; i < 70; i++) w.push(chunk); // 70 s of a 1 MB/s webcam
+  assert.equal(w.backlog, 70 * 1024 * 1024, "queued bytes are counted before they're written");
+  assert.equal(backlogState(w.backlog), "slow");
+  assert.equal(backlogState(0), "ok");
+  assert.equal(backlogState(BACKLOG_WARN_BYTES - 1), "ok");
+  assert.equal(backlogState(BACKLOG_WARN_BYTES), "slow");
+  assert.equal(backlogState(BACKLOG_STOP_BYTES), "stalled");
+  release();
+  await w.flush();
+  assert.equal(w.backlog, 0);
+  assert.equal(w.bytes, 70 * 1024 * 1024);
+});
+
+// --- media errors ----------------------------------------------------------------
+
+test("permission denied and missing devices get clear messages and the right settings page", async () => {
+  const { mediaError } = await import("../../src/lib/recorder/mediaErrors.ts");
+  const err = (name: string) => Object.assign(new Error("x"), { name });
+  const macMic = mediaError(err("NotAllowedError"), "microphone", "macos");
+  assert.match(macMic.message, /System Settings > Privacy & Security/);
+  assert.equal(macMic.settings, "microphone");
+  assert.match(mediaError(err("NotAllowedError"), "screen", "macos").message, /quit and reopen/);
+  assert.equal(mediaError(err("NotAllowedError"), "screen", "macos").settings, "screen");
+  const winCam = mediaError(err("NotAllowedError"), "camera", "windows");
+  assert.match(winCam.message, /Windows Settings > Privacy & security/);
+  assert.equal(winCam.settings, "camera");
+  // The in-app picker on Windows: NotAllowed means the user backed out.
+  assert.deepEqual(mediaError(err("NotAllowedError"), "screen", "windows"), { message: "Screen selection was cancelled." });
+  assert.equal(mediaError(err("NotFoundError"), "microphone", "windows").message, "No microphone was found.");
+  assert.equal(mediaError(err("OverconstrainedError"), "camera", "macos").message, "No camera was found.");
+  assert.match(mediaError(err("NotReadableError"), "camera", "windows").message, /in use by another app/);
+  assert.match(mediaError(err("NotSupportedError"), "screen", "macos").message, /^Screen capture isn't supported/);
+  assert.equal(mediaError(new Error("boom"), "microphone", "windows").message, "boom");
+  assert.equal(mediaError(null, "microphone", "windows").message, "Couldn't start the microphone.");
 });
 
 // --- mime ------------------------------------------------------------------------

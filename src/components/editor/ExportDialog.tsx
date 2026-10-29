@@ -90,7 +90,13 @@ export default function ExportDialog({
   initialResult,
   onClose,
   onSignIn,
+  title = "Export video",
+  nameSuffix = "edit",
 }: {
+  /** "Export highlight" etc. */
+  title?: string;
+  /** End of the suggested file name ("edit", "highlight-1"). */
+  nameSuffix?: string;
   project: Project;
   sources: Record<string, MediaSource>;
   originalId: string;
@@ -200,10 +206,10 @@ export default function ExportDialog({
     }
   };
 
-  const filename = `wipeclip-${sourceName(original).replace(/\.[^.]+$/, "")}-edit.${OUTPUT_EXT[output.format]}`;
+  const filename = `wipeclip-${sourceName(original).replace(/\.[^.]+$/, "")}-${nameSuffix}.${OUTPUT_EXT[output.format]}`;
 
   return (
-    <Dialog title="Export video" onClose={state === "rendering" ? undefined : onClose}>
+    <Dialog title={title} onClose={state === "rendering" ? undefined : onClose}>
       {state === "setup" && (
         <div className="space-y-5">
           <div className="grid grid-cols-3 gap-2 rounded-xl border border-border bg-surface-2/60 p-3 text-center text-xs">

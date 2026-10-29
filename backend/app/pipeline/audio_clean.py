@@ -37,7 +37,13 @@ def _decode(in_path: str, start: float, dur: float, filters: str | None = None) 
     if filters:
         args += ["-af", filters]
     args += ["-ac", "1", "-ar", str(_RATE), "-f", "f32le", "-"]
-    return np.frombuffer(subprocess.run(args, capture_output=True, check=True).stdout, np.float32)
+    res = subprocess.run(args, capture_output=True)
+    if res.returncode != 0:
+        # A RuntimeError like _run_ffmpeg's, which the route turns into a
+        # message; without the command (or the chained error), which names
+        # the user's file.
+        raise RuntimeError(f"ffmpeg couldn't decode the audio (exit {res.returncode})")
+    return np.frombuffer(res.stdout, np.float32)
 
 
 def noise_floor_db(samples: np.ndarray) -> float:

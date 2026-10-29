@@ -23,8 +23,13 @@ use tauri::async_runtime::Mutex;
 use tauri::{AppHandle, Manager, State};
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(90);
-/// Origins the page calls the engine from (see links::is_app_url).
-const ALLOWED_ORIGINS: &str = "tauri://localhost,http://tauri.localhost,https://tauri.localhost,http://localhost:3100";
+/// Origins the page calls the engine from (see links::is_app_url). The dev
+/// server's origin only in debug builds, which load the page from it.
+const ALLOWED_ORIGINS: &str = if cfg!(debug_assertions) {
+    "tauri://localhost,http://tauri.localhost,https://tauri.localhost,http://localhost:3100"
+} else {
+    "tauri://localhost,http://tauri.localhost,https://tauri.localhost"
+};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -119,11 +124,26 @@ fn engine_command(app: &AppHandle) -> Option<Command> {
     None
 }
 
+/// The port is free when picked but released before the engine binds it,
+/// so another program can take it in between; the engine then exits at
+/// once, and one more try on a new port gets past that.
 fn start(command: &mut Command) -> Result<Running, String> {
+    match try_start(command) {
+        Err((true, e)) => {
+            log::warn!("{e} Trying again on another port.");
+            try_start(command).map_err(|(_, e)| e)
+        }
+        other => other.map_err(|(_, e)| e),
+    }
+}
+
+/// Err((exited_early, message)).
+fn try_start(command: &mut Command) -> Result<Running, (bool, String)> {
+    let fail = |e: String| (false, e);
     // Free port: bind to 0, read it back, release it for the engine.
     let port = TcpListener::bind("127.0.0.1:0")
         .and_then(|l| l.local_addr())
-        .map_err(|e| format!("No free port for the engine: {e}"))?
+        .map_err(|e| fail(format!("No free port for the engine: {e}")))?
         .port();
     let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
 
@@ -148,7 +168,7 @@ fn start(command: &mut Command) -> Result<Running, String> {
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = command.spawn().map_err(|e| format!("Couldn't start the engine: {e}"))?;
+    let mut child = command.spawn().map_err(|e| fail(format!("Couldn't start the engine: {e}")))?;
     forward_logs(child.stdout.take());
     forward_logs(child.stderr.take());
 
@@ -160,11 +180,11 @@ fn start(command: &mut Command) -> Result<Running, String> {
             return Ok(Running { child, port, info });
         }
         if let Ok(Some(status)) = child.try_wait() {
-            return Err(format!("The engine stopped while starting ({status})."));
+            return Err((true, format!("The engine stopped while starting ({status}).")));
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
-            return Err("The engine took too long to start.".into());
+            return Err(fail("The engine took too long to start.".into()));
         }
         std::thread::sleep(Duration::from_millis(250));
     }

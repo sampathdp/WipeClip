@@ -17,6 +17,7 @@ mod media;
 mod notify;
 mod opened;
 mod recording;
+mod redact;
 mod secure_storage;
 mod shortcuts;
 mod system;
@@ -258,7 +259,7 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
                 return true;
             }
             if let Err(err) = links::open_external_url(&handle, url.as_str()) {
-                log::warn!("blocked navigation to {url}: {err}");
+                log::warn!("blocked navigation to {}: {err}", url.origin().ascii_serialization());
             }
             false
         })
@@ -290,6 +291,23 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
+                // The plugin's own layout, with every message passed through
+                // redact (no file paths, so no user names, in a log users send us).
+                .format(|out, message, record| {
+                    let now = tauri_plugin_log::TimezoneStrategy::UseUtc.get_now();
+                    out.finish(format_args!(
+                        "[{}-{:02}-{:02}][{:02}:{:02}:{:02}][{}][{}] {}",
+                        now.year(),
+                        u8::from(now.month()),
+                        now.day(),
+                        now.hour(),
+                        now.minute(),
+                        now.second(),
+                        record.target(),
+                        record.level(),
+                        redact::redact(&message.to_string())
+                    ))
+                })
                 .targets([Target::new(TargetKind::Stdout), Target::new(TargetKind::LogDir { file_name: None })])
                 .max_file_size(5_000_000)
                 .build(),
