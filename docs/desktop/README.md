@@ -10,6 +10,7 @@ The desktop app is the website's real video editor (`src/components/editor`), bu
 - automatic focus zooms, click highlights and a drawn cursor for those recordings - see [FOCUS.md](FOCUS.md),
 - tutorial tools: pause and dead-time review, captions with subtitle export, shortcut indicators, chapters, privacy masks, annotations and retakes - see [TUTORIAL.md](TUTORIAL.md).
 - highlight suggestions and creator presets (landscape, vertical, square, software tutorial) - see [CREATOR.md](CREATOR.md).
+- audio and camera: noise reduction for tracks (on this computer), loudness normalization with a limiter, a mixer with meters, mute and solo, and webcam layouts - see [AUDIO.md](AUDIO.md).
 
 See [ARCHITECTURE-AUDIT.md](ARCHITECTURE-AUDIT.md) for why it's built this way, [RELEASE.md](RELEASE.md) for release readiness, test results, packaging and the manual checklist, [BETA-READINESS.md](BETA-READINESS.md) for the beta audit, test matrix and roadmap, and [RELEASE-VALIDATION.md](RELEASE-VALIDATION.md) for the latest verified status, bug list and release checklist.
 
@@ -27,6 +28,7 @@ See [ARCHITECTURE-AUDIT.md](ARCHITECTURE-AUDIT.md) for why it's built this way, 
 | `src/lib/recorder/`, `src/components/recorder/` | Screen recorder: recording format, timing, event mapping, session, UI ([RECORDER.md](RECORDER.md)) |
 | `src-tauri/src/recording/`, `src-tauri/src/input/`, `src-tauri/src/shortcuts.rs` | Recorder native side: recording files, input monitor, hotkeys |
 | `src/lib/editor/camera.ts`, `pointer.ts`, `focus.ts`, `focusExport.ts` | Focus zooms, pointer reconstruction, suggestions, export rows ([FOCUS.md](FOCUS.md)) |
+| `src/lib/editor/mix.ts`, `loudness.ts`, `programMix.ts`, `audioMixer.ts`, `webcamLayout.ts` | Mix model, loudness, preview mixer, webcam layouts ([AUDIO.md](AUDIO.md)) |
 | `tests/desktop/` | Node tests for CORS, the secret scan, the recorder and focus effects; `manual/` holds the headless-Chrome preview check |
 | `.github/workflows/desktop.yml` | Windows and macOS builds on GitHub runners |
 

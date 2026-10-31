@@ -13,6 +13,7 @@ import type { Clip, MediaSource, Overlay, Project } from "./types";
 import { sourceInput } from "./sourceFile";
 import { clipKeyTimeToLocal } from "./keyframes";
 import { activeRamp, rampSegments } from "./speed";
+import { clipMixVolume, masterGainDb, playedSourceId } from "./mix";
 
 /** What file the export makes: an MP4 (at a quality and, optionally, a
  * frame rate), an animated GIF, or the sound alone (M4A). */
@@ -121,7 +122,8 @@ export async function exportProject(
   const audioPayload = [];
   for (const a of project.audio) {
     if (a.muted || a.volume === 0) continue;
-    const src = sources[a.sourceId];
+    // The cleaned copy unless bypassed (mix.ts), like the preview plays.
+    const src = sources[playedSourceId(a, sources)];
     if (!src) continue;
     const ref =
       src.kind === "audio"
@@ -215,7 +217,7 @@ export async function exportProject(
       crop: c.crop,
       transition: c.transition ? { type: c.transition.type, duration: c.transition.duration } : null,
       speed: c.speed,
-      volume: c.volume,
+      volume: clipMixVolume(project, c),
       transform: c.transform,
       look: {
         filter: c.look.filter,
@@ -246,6 +248,8 @@ export async function exportProject(
     format: output.format,
     quality: output.quality,
     fpsChosen: output.fps !== null,
+    // Loudness normalization (loudness.ts), the same gain the preview plays.
+    ...(masterGainDb(project) ? { masterGain: masterGainDb(project) } : {}),
   };
 
   return exportEditorProject(

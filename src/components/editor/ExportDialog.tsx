@@ -10,7 +10,7 @@ import { saveLastExport } from "@/lib/editor/projectStore";
 import { canvasSize, formatTime } from "@/lib/editor/timeline";
 import type { MediaSource, Project } from "@/lib/editor/types";
 import { ContentBlockedError, PlanRequiredError, type RenderProgress, type Resolution } from "@/lib/toolsApi";
-import { IS_DESKTOP, notifyIfAway, revealExport, saveExportFile } from "@/lib/platform";
+import { EngineUnavailableError, IS_DESKTOP, notifyIfAway, revealExport, saveExportFile } from "@/lib/platform";
 import Dialog from "./Dialog";
 import { ExportIcon } from "./icons";
 import PremiumBadge from "./PremiumBadge";
@@ -185,7 +185,7 @@ export default function ExportDialog({
         setError({ message: "Export took too long. Try a shorter video or a lower resolution. Your project is safe." });
       } else if (e instanceof PlanRequiredError) {
         setError({ message: e.message, upgrade: true });
-      } else if (e instanceof ContentBlockedError) {
+      } else if (e instanceof ContentBlockedError || e instanceof EngineUnavailableError) {
         setError({ message: e.message });
       } else if (e instanceof TypeError) {
         setError({ message: "Network problem during export. Check your connection and try again. Your project is safe." });

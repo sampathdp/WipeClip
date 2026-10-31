@@ -11,10 +11,11 @@ export function ffmpegPath() {
   return execFileSync("backend/.venv/Scripts/python.exe", ["-c", "import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())"]).toString().trim();
 }
 
-export async function launch({ port = 9333, chrome = process.env.CHROME ?? "C:/Program Files/Google/Chrome/Application/chrome.exe" } = {}) {
+/** `args`: extra Chrome flags, e.g. --host-resolver-rules to take hosts offline. */
+export async function launch({ port = 9333, chrome = process.env.CHROME ?? "C:/Program Files/Google/Chrome/Application/chrome.exe", args = [] } = {}) {
   const proc = spawn(chrome, [
     "--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${mkdtempSync(join(tmpdir(), "cdp-"))}`,
-    "--window-size=1600,1000", "--autoplay-policy=no-user-gesture-required", "--no-first-run", "about:blank",
+    "--window-size=1600,1000", "--autoplay-policy=no-user-gesture-required", "--no-first-run", ...args, "about:blank",
   ]);
   return connect({ port, proc });
 }
@@ -75,6 +76,13 @@ export async function connect({ port, proc = null }) {
     await send("Page.navigate", { url: u });
     await loaded;
     await sleep(1500);
+    // Seeding needs the editor's database at its current version; a
+    // production build can create it a little later than the load event.
+    for (let i = 0; i < 100; i++) {
+      const ready = await evaluate(`indexedDB.databases().then((ds) => ds.some((d) => d.name === "wipeclip-editor" && d.version >= 2))`);
+      if (ready) break;
+      await sleep(150);
+    }
   };
   const key = async (k, code, vk, modifiers = 0) => {
     for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: k, code, windowsVirtualKeyCode: vk, modifiers });
@@ -89,7 +97,8 @@ export async function connect({ port, proc = null }) {
   const seedProject = (videoB64, project, sourceMeta, recording) =>
     evaluate(`(async () => {
       const bytes = Uint8Array.from(atob(${JSON.stringify(videoB64)}), c => c.charCodeAt(0));
-      const db = await new Promise((res, rej) => { const r = indexedDB.open("wipeclip-editor"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+      // Opened at the editor's schema version (projectStore.ts), stores created if the page hasn't yet.
+      const db = await new Promise((res, rej) => { const r = indexedDB.open("wipeclip-editor", 2); r.onupgradeneeded = () => { for (const n of ["project", "sources", "projects"]) if (!r.result.objectStoreNames.contains(n)) r.result.createObjectStore(n); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
       const put = (store, value, key) => new Promise((res, rej) => { const tx = db.transaction(store, "readwrite"); tx.objectStore(store).put(value, key); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
       await put("sources", new Blob([bytes], { type: "video/mp4" }), ${JSON.stringify(sourceMeta.id)});
       ${recording ? `await put("sources", ${JSON.stringify(recording)}, ${JSON.stringify(sourceMeta.id + "#recording")});` : ""}

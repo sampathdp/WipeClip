@@ -110,3 +110,19 @@ export function setClickIgnored(p: Project, sourceId: string, t: number, ignore:
 export function patchFocusPrefs(p: Project, patch: Partial<Pick<FocusPrefs, "intensity" | "bypass">>): Project {
   return { ...p, focus: { ...focusPrefs(p), ...patch } };
 }
+
+const compared = new WeakMap<Project, Project>();
+
+/** The project as the preview shows it while comparing with the original:
+ * no zooms, everything else the same. Never saved, never exported, not an
+ * undo step - only the preview gets it. The same object for the same
+ * project, so the preview's caches keep hitting. */
+export function previewWithoutZooms(p: Project): Project {
+  if (focusPrefs(p).bypass) return p;
+  let out = compared.get(p);
+  if (!out) {
+    out = patchFocusPrefs(p, { bypass: true });
+    compared.set(p, out);
+  }
+  return out;
+}

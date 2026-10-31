@@ -1,4 +1,4 @@
-import { apiFetch, localEngine, type LocalEngine } from "@/lib/platform";
+import { apiFetch, EngineUnavailableError, localEngine, type LocalEngine } from "@/lib/platform";
 import type { DiskMedia } from "@/lib/editor/types";
 import { readDiskFile } from "@/lib/platform/media";
 
@@ -416,15 +416,26 @@ export async function cleanAudio(
   body.append("denoise", String(opts.denoise));
   body.append("level", opts.level ? "true" : "false");
   const res = await fetch(`${engine.url}/api/audio/clean`, { method: "POST", body, headers: engineHeaders(engine), signal });
-  if (!res.ok) await throwApiError(res, "This clip's audio couldn't be cleaned up.");
+  if (!res.ok) await throwApiError(res, "This audio couldn't be cleaned up.");
   return res.blob();
+}
+
+/** The engine for optional measurements: null when there's none or it
+ * couldn't start (the analysis then goes without the picture). */
+async function optionalEngine(): Promise<LocalEngine | null> {
+  try {
+    return await localEngine();
+  } catch (e) {
+    if (e instanceof EngineUnavailableError) return null;
+    throw e;
+  }
 }
 
 /** How much the picture changes in each source range of a video on this
  * machine (backend/app/pipeline/activity.py), 0..1 per range. Local engine
  * only; null without it. At most 50 ranges per call. */
 export async function videoActivity(path: string, ranges: [number, number][], signal?: AbortSignal): Promise<number[] | null> {
-  const engine = await localEngine();
+  const engine = await optionalEngine();
   if (!engine) return null;
   const body = new FormData();
   body.append("path", path);
@@ -445,7 +456,7 @@ export async function videoMotion(
   end: number,
   signal?: AbortSignal
 ): Promise<{ times: number[]; motion: number[]; scene: number[] } | null> {
-  const engine = await localEngine();
+  const engine = await optionalEngine();
   if (!engine) return null;
   const body = new FormData();
   body.append("path", path);

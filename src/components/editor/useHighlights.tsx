@@ -16,13 +16,21 @@ import {
   DEFAULT_HIGHLIGHTS,
   buildHighlightSet,
   editHighlight,
+  anchorFor,
   findHighlights,
   highlightProject,
   pictureOnTimeline,
+  placeHighlights,
   profileChunks,
+  renameHighlight,
   setHighlightStatus,
+  speechFromWords,
+  workflowSettings,
+  WORKFLOWS,
   type HighlightSettings,
+  type HighlightWorkflow,
 } from "@/lib/editor/highlights";
+import { transcriptCurrent } from "@/lib/editor/wordEdit";
 import { interactionTimeline } from "@/lib/editor/insights";
 import { recordingEvents } from "@/lib/editor/pointer";
 import { newId, type Layout } from "@/lib/editor/timeline";
@@ -46,6 +54,8 @@ interface Deps {
   say: (m: string) => void;
   setPlaying: (v: boolean) => void;
   openExport: (clip: { project: Project; total: number; title: string; nameSuffix: string }) => void;
+  /** Several highlights as separate files (BatchExportDialog). */
+  openBatchExport: (items: { id: string; title: string; project: Project; fileName: string }[], vertical: boolean) => void;
 }
 
 export interface HighlightsPanelProps {
@@ -60,6 +70,12 @@ export interface HighlightsPanelProps {
   onStatus: (h: Highlight, status: Highlight["status"]) => void;
   onRange: (h: Highlight, start: number, end: number) => void;
   onExport: (h: Highlight) => void;
+  /** Exports these highlights (kept, not out of date) as separate files. */
+  onExportBatch: (ids: string[]) => void;
+  onRename: (h: Highlight, title: string) => void;
+  onWorkflow: (w: HighlightWorkflow) => void;
+  /** Highlights whose footage changed since (preview and export are off). */
+  outdated: number;
   onMark: () => void;
   onClear: () => void;
   playhead: () => number;
@@ -68,7 +84,7 @@ export interface HighlightsPanelProps {
 }
 
 export function useHighlights(d: Deps): HighlightsPanelProps {
-  const { project, lay, sources, recSource, clock, apply, say, setPlaying, openExport } = d;
+  const { project, lay, sources, recSource, clock, apply, say, setPlaying, openExport, openBatchExport } = d;
   const [settings, setSettings] = useState<HighlightSettings>(DEFAULT_HIGHLIGHTS);
   const [busy, setBusy] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
@@ -83,9 +99,12 @@ export function useHighlights(d: Deps): HighlightsPanelProps {
     []
   );
 
-  const set = project.highlights ?? null;
   const tlKey = useMemo(() => timelineKey(lay), [lay]);
-  const stale = !!set && set.timelineKey !== tlKey;
+  // The saved set placed on the current timeline: after trims, splits and
+  // moves each highlight follows its footage or is marked out of date.
+  const set = useMemo(() => (project.highlights ? placeHighlights(project.highlights, lay, tlKey) : null), [project.highlights, lay, tlKey]);
+  const stale = !!project.highlights && project.highlights.timelineKey !== tlKey;
+  const outdated = set?.items.filter((h) => h.outdated && h.status !== "rejected").length ?? 0;
   const events = recordingEvents(recSource);
 
   const find = useCallback(async () => {
@@ -145,17 +164,20 @@ export function useHighlights(d: Deps): HighlightsPanelProps {
           )
         : null;
       const acts = recSource && events ? interactionTimeline(lay, recSource.id, events) : null;
+      // Spoken stretches from the transcript while it matches the edit;
+      // otherwise findHighlights estimates them from the sound.
+      const speech = project.transcript && transcriptCurrent(project.transcript, lay) ? speechFromWords(project.transcript.words) : null;
       setBusy("Finding highlights…");
       await new Promise((r) => setTimeout(r, 0));
       if (signal.aborted) return;
-      const inputsKey = JSON.stringify([key, settings, !!picture, acts?.length ?? 0, tlKey]);
+      const inputsKey = JSON.stringify([key, settings, !!picture, acts?.length ?? 0, speech?.length ?? null, tlKey]);
       if (set && set.inputsKey === inputsKey) {
         say("Highlights are up to date: nothing changed since they were found.");
         return;
       }
-      const result = findHighlights({ total: lay.total, levels, picture, acts }, settings);
+      const result = findHighlights({ total: lay.total, levels, picture, acts, speech }, settings);
       console.info(`[highlights] ${result.items.length} found in ${Math.round(performance.now() - t0)} ms (picture ${picture ? "measured" : "not measured"})`);
-      apply((p) => ({ ...p, highlights: buildHighlightSet(p.highlights, result, { timelineKey: tlKey, inputsKey }, () => newId("hl")) }));
+      apply((p) => ({ ...p, highlights: buildHighlightSet(p.highlights, result, { timelineKey: tlKey, inputsKey, lay }, () => newId("hl")) }));
       say(result.items.length ? `${result.items.length} possible highlight${result.items.length === 1 ? "" : "s"}. Nothing in your timeline changes.` : "Nothing stood out.");
     } catch (e) {
       if ((e as Error)?.name === "AbortError") {
@@ -172,10 +194,24 @@ export function useHighlights(d: Deps): HighlightsPanelProps {
     }
   }, [lay, project, sources, recSource, events, settings, tlKey, set, apply, say]);
 
+  // Edits apply to the set as placed on the current timeline.
   const updateSet = (fn: (s: HighlightSet) => HighlightSet, record = true) =>
-    apply((p) => (p.highlights ? { ...p, highlights: fn(p.highlights) } : p), record);
+    apply((p) => (p.highlights ? { ...p, highlights: fn(placeHighlights(p.highlights, lay, tlKey)) } : p), record);
+
+  const OUTDATED = "This highlight's footage was cut or changed since it was found. Set its start and end again, or find highlights again.";
+
+  const exportItem = (h: Highlight, index: number) => {
+    const r = highlightProject(project, lay.fps, h.start, h.end);
+    if (!r.ok) return r;
+    const name = (h.title ?? "").replace(/[^p{L}p{N} _-]+/gu, "").trim().slice(0, 40);
+    return { ok: true as const, item: { id: h.id, title: h.title ?? `Highlight ${index}`, project: r.project, fileName: `${name || `highlight-${index}`}.mp4` } };
+  };
 
   const preview = (h: Highlight) => {
+    if (h.outdated) {
+      say(OUTDATED);
+      return;
+    }
     stopPreview.current?.();
     setPlaying(false);
     clock.set(h.start);
@@ -206,8 +242,34 @@ export function useHighlights(d: Deps): HighlightsPanelProps {
     onCancel: () => ctrl.current?.abort(),
     onPreview: preview,
     onStatus: (h, status) => updateSet((s) => setHighlightStatus(s, h.id, status)),
-    onRange: (h, start, end) => updateSet((s) => editHighlight(s, h.id, start, end, lay.total)),
+    onRange: (h, start, end) => updateSet((s) => editHighlight(s, h.id, start, end, lay.total, lay)),
+    onRename: (h, title) => updateSet((s) => renameHighlight(s, h.id, title)),
+    onWorkflow: (w) => setSettings(workflowSettings(w, settings.sensitivity)),
+    outdated,
+    onExportBatch: (ids) => {
+      const visible = (set?.items ?? []).filter((x) => x.status !== "rejected");
+      const chosen = visible.filter((h) => ids.includes(h.id) && !h.outdated);
+      const items = [];
+      for (const h of chosen) {
+        const r = exportItem(h, visible.indexOf(h) + 1);
+        if (!r.ok) {
+          say(`${h.title ?? "A highlight"}: ${r.error}`);
+          return;
+        }
+        items.push(r.item);
+      }
+      if (!items.length) {
+        say("Keep some highlights first (out-of-date ones can't be exported).");
+        return;
+      }
+      setPlaying(false);
+      openBatchExport(items, !!WORKFLOWS[settings.workflow ?? "gameplay"].vertical);
+    },
     onExport: (h) => {
+      if (h.outdated) {
+        say(OUTDATED);
+        return;
+      }
       const r = highlightProject(project, lay.fps, h.start, h.end);
       if (!r.ok) {
         say(r.error);
@@ -232,9 +294,12 @@ export function useHighlights(d: Deps): HighlightsPanelProps {
         title: "Your highlight",
       };
       if (h.end - h.start < 0.5) return;
+      const anchor = anchorFor(lay, h.start, h.end);
+      if (anchor) h.anchor = anchor;
       apply((p) => {
-        const base: HighlightSet = p.highlights && p.highlights.timelineKey === tlKey
-          ? p.highlights
+        // Earlier highlights are kept, placed on the current timeline.
+        const base: HighlightSet = p.highlights
+          ? placeHighlights(p.highlights, lay, tlKey)
           : { version: 1, createdAt: new Date().toISOString(), timelineKey: tlKey, inputsKey: "", items: [], notes: [], stats: { suggested: 0, kept: 0, rejected: 0, edited: 0, exported: 0 } };
         return { ...p, highlights: { ...base, items: [...base.items, h].sort((a, b) => a.start - b.start) } };
       });

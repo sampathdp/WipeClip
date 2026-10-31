@@ -35,7 +35,8 @@ is an actual operation in the exported file:
      sound joins the audio mix like an audio clip.
   5. Audio. The clips' own audio (after joins) is mixed with every added /
      extracted audio clip (trimmed, delayed to its timeline position, with
-     volume and fades), then limited to avoid clipping.
+     volume and fades), then the master bus: the editor's loudness gain and
+     a peak limiter, so the mix can't clip (master_chain).
 
 Clip and transition durations are quantized to whole frames before
 building the graph so video and audio lengths agree exactly per clip -
@@ -138,6 +139,22 @@ def duck_gain_expr(au: "PlanAudio", var: str) -> str:
         return "1"
     return f"(1-{_num(au.duck_amount)}*({keyframe_expr(points, 'v', var)}))"
 
+
+# Master bus: the loudness gain (src/lib/editor/loudness.ts, measured and
+# stored by the editor, so the preview plays the same level), then a peak
+# limiter at about -1 dBFS (LIMIT_CEILING there). latency=1 compensates the
+# limiter's 5 ms look-ahead: without it every export's sound came out 5 ms
+# late and lost its last 5 ms (measured).
+LIMIT_CEILING = 0.89
+MAX_MASTER_GAIN_DB = 24.0
+
+
+def master_chain(gain_db: float) -> str:
+    gain = max(-MAX_MASTER_GAIN_DB, min(MAX_MASTER_GAIN_DB, gain_db))
+    pre = f"volume={gain:.2f}dB," if abs(gain) >= 0.05 else ""
+    return f"{pre}alimiter=limit={LIMIT_CEILING}:level=disabled:latency=1"
+
+
 ANIMS_IN = ("none", "fade", "pop", "bounce", "spin", "zoomin", "slideup", "slidedown", "slideleft", "slideright")
 ANIMS_OUT = ("none", "fade", "pop", "spin", "zoomout", "slideup", "slidedown", "slideleft", "slideright")
 EFFECTS = (
@@ -190,6 +207,7 @@ class MediaInfo:
     fps: float
     duration: float
     has_audio: bool
+    audio_mono: bool = False  # its (first) audio stream is mono
 
 
 _DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
@@ -238,7 +256,29 @@ def probe_media(path: str) -> MediaInfo:
             width, height = height, width
 
     has_audio = re.search(r"Stream #\d+:\d+[^:]*: Audio:", text) is not None
-    return MediaInfo(width=width, height=height, fps=fps, duration=_duration_of(text), has_audio=has_audio)
+    return MediaInfo(width=width, height=height, fps=fps, duration=_duration_of(text), has_audio=has_audio, audio_mono=audio_is_mono(text))
+
+
+_AUDIO_LINE_RE = re.compile(r"Stream #\d+:\d+[^:]*: Audio: .*")
+
+
+def audio_is_mono(text: str) -> bool:
+    """Whether the first audio stream in `ffmpeg -i` output is mono."""
+    line = _AUDIO_LINE_RE.search(text)
+    return bool(line and re.search(r",\s*mono\b", line.group(0)))
+
+
+def probe_audio_mono(path: str) -> bool:
+    return audio_is_mono(_ffmpeg_info(path))
+
+
+def _stereo(mono: bool) -> str:
+    """Filters that make a source stereo: a mono one on both channels at
+    full level, the way players and the editor's preview play it. ffmpeg's
+    own upmix (aformat to stereo) puts mono 3 dB lower on each side, so a
+    microphone track exported 3 dB quieter than it was heard (measured)."""
+    to_stereo = "aformat=sample_fmts=fltp:channel_layouts=stereo"
+    return f"pan=stereo|c0=c0|c1=c0,{to_stereo}" if mono else to_stereo
 
 
 def probe_audio(path: str) -> float:
@@ -301,6 +341,7 @@ class PlanClip:
     source_height: int
     start: float  # source seconds; for a freeze, the held frame's time
     duration: float  # source seconds; becomes timeline seconds in quantize_plan
+    source_mono: bool = False  # its audio is mono (see _stereo)
     transition: str | None = None  # key of TRANSITIONS, into the next clip
     freeze: bool = False
     reverse: bool = False
@@ -401,6 +442,7 @@ class PlanAudio:
     fade_in: float = 0.0
     fade_out: float = 0.0
     voice: str = "none"  # key of VOICE_FX
+    mono: bool = False  # the file's audio is mono (see _stereo)
     # Auto-ducking: lowered by duck_amount (0..1) during these timeline
     # ranges, ramping over DUCK_ATTACK before and DUCK_RELEASE after.
     duck_amount: float = 0.0
@@ -473,6 +515,8 @@ class ExportPlan:
     output_format: str = "mp4"  # key of OUTPUT_FORMATS
     pointer: PlanPointer | None = None
     masks: list[PlanMask] = field(default_factory=list)
+    # Loudness normalization gain on the whole mix, dB (master_chain).
+    master_gain_db: float = 0.0
 
 
 def plan_to_json(plan: ExportPlan) -> str:
@@ -987,8 +1031,11 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
     box_scale = 1.0 if scale_anim else scale
     box_w, box_h = _even(box_w * box_scale * inset), _even(box_h * box_scale * inset)
     pre.append(f"scale={box_w}:{box_h}:flags=lanczos,setsar=1")
-    if clip.adjust["blur"] > 0:
-        pre.append(f"gblur=sigma={_num(clip.adjust['blur'] / 100 * 0.02 * H)}")
+    blur = f"gblur=sigma={_num(clip.adjust['blur'] / 100 * 0.02 * H)}" if clip.adjust["blur"] > 0 else None
+    # With a zoom the blur comes after it, as in the preview (which blurs
+    # the zoomed picture); before it, the zoom magnified the blur.
+    if blur and not clip.camera:
+        pre.append(blur)
     pre.append(f"fps={_num(fps)}")
     if clip.reverse:
         # After scaling, so the buffered frames are at most canvas-sized.
@@ -1020,7 +1067,7 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
         # the blurred background (split below) follows it, like the preview.
         graph.append(f"[{idx}:v:0]{chain}[cp{i}]")
         graph += _camera_chain(clip, i, f"cp{i}", box_w, box_h, fps)
-        head = f"[zc{i}]null"
+        head = f"[zc{i}]{blur or 'null'}"
     if needs_blur_bg:
         graph.append(f"{head},split[c{i}][cb{i}]")
         graph.append(
@@ -1148,7 +1195,7 @@ def _clip_audio_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int) -> str
         piece = clip.source_length / k
         heads = "".join(f"[ra{i}_{n}]" for n in range(k))
         parts = [
-            f"[{idx}:a:0]aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,asplit={k}{heads}"
+            f"[{idx}:a:0]aresample={AUDIO_RATE},{_stereo(clip.source_mono)},asplit={k}{heads}"
         ]
         for n, s in enumerate(clip.ramp):
             parts.append(
@@ -1161,7 +1208,7 @@ def _clip_audio_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int) -> str
     tempo = _atempo(clip.speed) if clip.source_has_audio else "anull"
     rev = "areverse," if clip.reverse and clip.source_has_audio else ""
     return (
-        f"{src}aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,{rev}{tempo},"
+        f"{src}aresample={AUDIO_RATE},{_stereo(clip.source_mono and clip.source_has_audio)},{rev}{tempo},"
         f"volume={_num(clip.volume)},apad,atrim=duration={d},asetpts=PTS-STARTPTS[a{i}]"
     )
 
@@ -1570,7 +1617,7 @@ def build_export_args(
             idx = inputs.add("-ss", _num(au.offset), "-t", _num(au.duration), "-i", au.path)
             delay = int(round(au.start * 1000))
             chain = (
-                f"[{idx}:a:0]aresample={AUDIO_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                f"[{idx}:a:0]aresample={AUDIO_RATE},{_stereo(au.mono)},"
                 f"atrim=duration={_num(au.duration)},asetpts=PTS-STARTPTS,volume={_num(au.volume)}"
             )
             if VOICE_FX.get(au.voice):
@@ -1586,12 +1633,11 @@ def build_export_args(
             graph.append(chain)
             mix_inputs.append(f"[ax{n}]")
         # duration=first: the clips' own (always full-length) track sets the
-        # length; normalize=0 keeps every track at its chosen volume and the
-        # limiter catches the peaks that summing can create.
-        graph.append(
-            f"{''.join(mix_inputs)}amix=inputs={len(mix_inputs)}:duration=first:normalize=0,"
-            f"alimiter=limit=0.89:level=disabled[amix]"
-        )
+        # length; normalize=0 keeps every track at its chosen volume.
+        graph.append(f"{''.join(mix_inputs)}amix=inputs={len(mix_inputs)}:duration=first:normalize=0[amixed]")
+        a_acc = "amixed"
+    if plan.with_audio:
+        graph.append(f"[{a_acc}]{master_chain(plan.master_gain_db)}[amix]")
         a_acc = "amix"
 
     script = os.path.join(tmp, "graph.txt")

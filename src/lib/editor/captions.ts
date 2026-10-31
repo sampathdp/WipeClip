@@ -304,6 +304,10 @@ async function cpuWorkerCount(): Promise<number> {
   return Math.max(1, Math.min(MAX_CPU_WORKERS, cores - 1, Math.floor(budgetGb / 1.5)));
 }
 
+/** Every worker not yet terminated, including ones still loading the
+ * model (not yet in the pool), so cancelSpeech can stop them all. */
+const live = new Set<ModelWorker>();
+
 /** A captions.worker.ts instance with promise-based requests on top of
  * postMessage; one request in flight at a time. */
 class ModelWorker {
@@ -313,6 +317,7 @@ class ModelWorker {
   dead = false;
 
   constructor() {
+    live.add(this);
     this.w.onmessage = (e) => {
       const m = e.data;
       if (m.type === "progress") {
@@ -326,9 +331,7 @@ class ModelWorker {
     };
     this.w.onerror = (e) => {
       // A crashed worker (e.g. out of memory) can't be reused.
-      this.terminate();
-      this.pending?.reject(new Error(e.message || "Captioning failed"));
-      this.pending = null;
+      this.terminate(new Error(e.message || "Captioning failed"));
     };
   }
 
@@ -339,9 +342,14 @@ class ModelWorker {
     });
   }
 
-  terminate() {
+  /** Stops the worker; a request in flight fails with `reason` (an
+   * AbortError by default) instead of never settling. */
+  terminate(reason: Error = new DOMException("Speech recognition cancelled", "AbortError")) {
     this.dead = true;
+    live.delete(this);
     this.w.terminate();
+    this.pending?.reject(reason);
+    this.pending = null;
   }
 }
 
@@ -364,6 +372,7 @@ async function getPool(onProgress: (p: CaptionsProgress) => void, forceCpu: bool
     try {
       ({ device } = await first.request<{ device: Device }>({ type: "init", device: "webgpu", model: GPU_MODEL.id }));
     } catch (err) {
+      if (isAbort(err)) throw err;
       // A browser can list a GPU and still fail to use it (drivers,
       // blocklists); the CPU path then starts in a fresh worker.
       console.warn("[captions] WebGPU unavailable, using the CPU", err);
@@ -395,6 +404,17 @@ async function getPool(onProgress: (p: CaptionsProgress) => void, forceCpu: bool
   }
   pool = { device, workers };
   return pool;
+}
+
+const isAbort = (e: unknown) => (e as Error | null)?.name === "AbortError";
+
+/** Stops a model download or transcription in progress: every speech
+ * worker is ended and the running transcribe() rejects with an AbortError.
+ * Model files already downloaded stay cached; a partly downloaded file is
+ * fetched again next time. The next run starts fresh workers. */
+export function cancelSpeech(): void {
+  pool = null;
+  for (const w of [...live]) w.terminate();
 }
 
 /** A SpeechProbe on the captions model (loading it if needed, with
@@ -484,7 +504,7 @@ export async function transcribe(
   try {
     return await runOnPool(samples, language, onProgress, false);
   } catch (err) {
-    if (pool?.device !== "webgpu") throw err;
+    if (isAbort(err) || pool?.device !== "webgpu") throw err;
     console.warn("[captions] WebGPU run failed, retrying on the CPU", err);
     return runOnPool(samples, language, onProgress, true);
   }

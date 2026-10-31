@@ -98,6 +98,25 @@ class FocusExportTest(unittest.TestCase):
         self.assertEqual(color(after[170, 300]), "white")
         self.assertEqual(color(after[10, 300]), "green")
 
+    def test_blur_is_applied_after_the_zoom_like_the_preview(self) -> None:
+        # The preview blurs the zoomed picture; the export used to blur
+        # first, so the 2x zoom doubled the blur. Reference: the same zoom
+        # rendered sharp, then blurred with the clip's sigma.
+        rows = [(0.0, 0.25, 0.25, 0.5)]
+        adjust = dict(editor._NEUTRAL_ADJUST, blur=50.0)
+        blurred, sharp, reference = (os.path.join(self.tmp, n) for n in ("zb.mp4", "zs.mp4", "zr.mp4"))
+        render(base_plan(self.src, camera=rows, adjust=adjust), blurred)
+        render(base_plan(self.src, camera=rows), sharp)
+        sigma = 50 / 100 * 0.02 * H
+        subprocess.run(
+            [get_ffmpeg_path(), "-y", "-loglevel", "error", "-i", sharp, "-vf", f"gblur=sigma={sigma}", "-c:v", "libx264", "-crf", "10", reference],
+            check=True,
+        )
+        a, b = frame_at(blurred, 1.0).astype(float), frame_at(reference, 1.0).astype(float)
+        # Mean absolute difference: about 1 level with the right order,
+        # several times that with the blur magnified by the zoom.
+        self.assertLess(float(np.abs(a - b).mean()), 2.0)
+
     def test_zoom_near_edge_with_crop(self) -> None:
         # Clip cropped to the right half (green over white); window at the
         # bottom edge of that crop: shows white only.

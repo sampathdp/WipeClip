@@ -10,6 +10,7 @@ import {
   eventsForSuggestions,
   excludeRange,
   patchFocusPrefs,
+  previewWithoutZooms,
   removeExclusion,
   scaledZoom,
   setClickIgnored,
@@ -203,4 +204,20 @@ test("focus settings are undoable steps and survive saving and reopening", () =>
   // Older projects have no focus settings: defaults, nothing added.
   assert.equal(migrateProject(JSON.parse(JSON.stringify(project))).focus, undefined);
   assert.deepEqual(migrateProject({ ...saved, focus: { intensity: 0.5 } }).focus, { intensity: 0.5, bypass: false, excluded: [], ignoredClicks: [] });
+});
+
+test("compare with original: the preview loses its zooms, the project and export keep them", () => {
+  const { project, sources, canvas } = recording();
+  const preview = previewWithoutZooms(project);
+  assert.deepEqual(appliedZooms(preview), []);
+  assert.equal(previewWithoutZooms(project), preview, "same object while the project is unchanged (preview caches hit)");
+  // The project itself, which saving and export use, is untouched.
+  assert.equal(appliedZooms(project)?.length, 1);
+  assert.equal(project.focus, undefined);
+  const lay = layout(project, 30);
+  assert.ok((cameraPayload(project, lay, sources, canvas)[0]?.length ?? 0) > 1, "export still zooms");
+  assert.deepEqual(cameraPayload(preview, lay, sources, canvas), [null], "the preview's project has no camera");
+  // Already in original view: nothing to change.
+  const bypassed = patchFocusPrefs(project, { bypass: true });
+  assert.equal(previewWithoutZooms(bypassed), bypassed);
 });

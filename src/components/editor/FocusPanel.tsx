@@ -77,6 +77,8 @@ export function FocusPanel({
   onPointerChange,
   focus,
   onFocusChange,
+  comparing,
+  onCompare,
   onExcludeAtPlayhead,
   onRemoveExclusion,
   onIgnoreClickAtPlayhead,
@@ -100,6 +102,9 @@ export function FocusPanel({
   onPointerChange: (p: PointerStyle | null) => void;
   focus: FocusPrefs;
   onFocusChange: (patch: Partial<Pick<FocusPrefs, "intensity" | "bypass">>) => void;
+  /** Preview-only comparison with the unzoomed recording. */
+  comparing: boolean;
+  onCompare: (on: boolean) => void;
   onExcludeAtPlayhead: () => void;
   onRemoveExclusion: (id: string) => void;
   onIgnoreClickAtPlayhead: () => void;
@@ -207,6 +212,16 @@ export function FocusPanel({
         <>
           <Title>View</Title>
           <div className="space-y-3">
+            <button
+              type="button"
+              aria-pressed={comparing}
+              disabled={focus.bypass}
+              onClick={() => onCompare(!comparing)}
+              className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50 ${comparing ? "border-accent bg-accent/15 text-accent" : "border-border bg-surface text-foreground hover:border-accent/50"}`}
+            >
+              {comparing ? "Showing original - click to show zooms" : "Compare with original"}
+            </button>
+            <p className="-mt-2 text-[11px] text-muted">Preview only: the recording without zooms, to check what they add. Not saved; the export is unchanged.</p>
             <Check
               label="Original view"
               checked={focus.bypass}

@@ -20,11 +20,11 @@ export const DEFAULT_MASK: ShapeMask = { shape: "circle", x: 0.5, y: 0.5, w: 0.6
 const MASK_PX = 512;
 
 export function maskKey(m: ShapeMask | null | undefined): string {
-  return m ? `${m.shape}:${m.x}:${m.y}:${m.w}:${m.h}:${m.rotation}:${m.feather}:${m.invert}` : "";
+  return m ? `${m.shape}:${m.x}:${m.y}:${m.w}:${m.h}:${m.rotation}:${m.feather}:${m.invert}:${m.radius ?? 0}` : "";
 }
 
 /** Coverage 0..1 of a pixel at (px, py) in a w x h mask. */
-function coverage(m: ShapeMask, px: number, py: number, w: number, h: number): number {
+export function coverage(m: ShapeMask, px: number, py: number, w: number, h: number): number {
   const a = (-m.rotation * Math.PI) / 180;
   const dx = px - m.x * w;
   const dy = py - m.y * h;
@@ -38,9 +38,11 @@ function coverage(m: ShapeMask, px: number, py: number, w: number, h: number): n
     const r = Math.hypot(u / Math.max(1, hw), v / Math.max(1, hh));
     d = (r - 1) * Math.min(hw, hh);
   } else if (m.shape === "rect") {
-    const qx = Math.abs(u) - hw;
-    const qy = Math.abs(v) - hh;
-    d = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0);
+    // Rounded box: the distance to a box shrunk by the radius, minus it.
+    const r = Math.max(0, Math.min(1, m.radius ?? 0)) * Math.min(hw, hh);
+    const qx = Math.abs(u) - hw + r;
+    const qy = Math.abs(v) - hh + r;
+    d = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
   } else if (m.shape === "linear") {
     d = v; // above the line shows
   } else {

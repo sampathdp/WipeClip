@@ -79,6 +79,26 @@ function cutMedia<T extends Timed & { offset: number; id: string }>(item: T, t0:
   return out;
 }
 
+/** A ducked track's speech regions (timeline seconds) after removing
+ * [t0, t1): they follow the speech they were found from. */
+function cutDuck(a: AudioClip, t0: number, t1: number): AudioClip {
+  if (!a.duck) return a;
+  const regions = a.duck.regions
+    .map(([start, end]) => cutPlain({ start, end }, t0, t1))
+    .filter((r): r is Timed => !!r)
+    .map((r): [number, number] => [r.start, r.end]);
+  return { ...a, duck: { ...a.duck, regions } };
+}
+
+/** Same for inserting `duration` seconds at `at` (a region across it is split). */
+function insertDuck(a: AudioClip, at: number, duration: number): AudioClip {
+  if (!a.duck) return a;
+  const regions = a.duck.regions.flatMap(([s, e]): [number, number][] =>
+    e <= at ? [[s, e]] : s >= at ? [[s + duration, e + duration]] : [[s, at], [at + duration, e + duration]]
+  );
+  return { ...a, duck: { ...a.duck, regions } };
+}
+
 const audioAsTimed = (a: AudioClip) => ({ ...a, end: a.start + a.duration });
 const timedAsAudio = (a: AudioClip & { end: number }): AudioClip => {
   const { end, ...rest } = a;
@@ -119,7 +139,7 @@ export function rippleCut(project: Project, lay: Layout, from: number, to: numbe
       if (r) overlays.push(r);
     }
   }
-  const audio: AudioClip[] = project.audio.flatMap((a) => cutMedia(audioAsTimed(a), t0, t1, () => newId("aud")).map(timedAsAudio));
+  const audio: AudioClip[] = project.audio.flatMap((a) => cutMedia(audioAsTimed(cutDuck(a, t0, t1)), t0, t1, () => newId("aud")).map(timedAsAudio));
   const effects = project.effects.map((e) => cutPlain(e, t0, t1)).filter((e): e is EffectClip => !!e);
   const masks = (project.masks ?? []).map((m) => cutPlain(m, t0, t1)).filter((m): m is PrivacyMask => !!m);
   const suggestions = (project.suggestions ?? [])
@@ -194,7 +214,7 @@ export function rippleInsert(
     ];
   };
   const overlays: Overlay[] = project.overlays.flatMap((o): Overlay[] => (o.kind === "video" ? splitMedia(o, () => newId("ovl")) : [shift(o)]));
-  const audio = project.audio.flatMap((a) => splitMedia(audioAsTimed(a), () => newId("aud")).map(timedAsAudio));
+  const audio = project.audio.flatMap((a) => splitMedia(audioAsTimed(insertDuck(a, at, duration)), () => newId("aud")).map(timedAsAudio));
   return {
     ok: true,
     removed: 0,

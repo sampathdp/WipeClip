@@ -10,6 +10,7 @@ import { overlayValues } from "@/lib/editor/keyframes";
 import { spriteIndex } from "@/lib/editor/textAnim";
 import { shapeMaskUrl } from "@/lib/editor/shapeMask";
 import { drawKeyedFrame } from "@/lib/editor/chromaKey";
+import { previewMixer } from "@/lib/editor/audioMixer";
 import type { ChromaKey, Overlay } from "@/lib/editor/types";
 
 type Drag =
@@ -172,6 +173,7 @@ export default function OverlayLayer({
             >
               {o.kind === "video" ? (
                 <OverlayVideo
+                  layerId={o.id}
                   url={img.url}
                   sourceTime={o.offset + (time - o.start)}
                   gain={o.volume}
@@ -292,6 +294,7 @@ function SpriteCell({
  * detached media element keeps playing its sound.
  */
 function OverlayVideo({
+  layerId,
   url,
   sourceTime,
   gain,
@@ -303,6 +306,7 @@ function OverlayVideo({
 }: {
   /** Shape mask image (data URL) over the layer. */
   mask: string | null;
+  layerId: string;
   url: string;
   sourceTime: number;
   gain: number;
@@ -332,14 +336,25 @@ function OverlayVideo({
     const el = ref.current;
     if (!el) return;
     el.playbackRate = rate;
-    el.muted = muted;
-    // HTML media volume can't exceed 1, so >100% previews at 100%.
-    el.volume = Math.min(1, Math.max(0, volume * gain));
+    // Through the preview's mixer once it's engaged (PreviewPlayer), so
+    // the layer is metered and follows the master gain like the export.
+    // A silent layer (a webcam) isn't routed; one routed before stays routed.
+    const mixer = previewMixer();
+    const routed = mixer.engaged && gain > 0 ? mixer.route(el, `layer:${layerId}`) : mixer.existing(el);
+    if (routed) {
+      el.muted = false;
+      el.volume = 1;
+      routed.gain.value = muted ? 0 : Math.max(0, volume * gain);
+    } else {
+      el.muted = muted;
+      // HTML media volume can't exceed 1, so >100% previews at 100%.
+      el.volume = Math.min(1, Math.max(0, volume * gain));
+    }
     const drift = Math.abs(el.currentTime - sourceTime);
     if (el.readyState >= 1 && !el.seeking && drift > (playing ? 0.3 : 0.04)) el.currentTime = sourceTime;
     if (playing && el.paused && !el.ended) el.play().catch(() => {});
     if (!playing && !el.paused) el.pause();
-  }, [sourceTime, gain, playing, rate, volume, muted]);
+  }, [sourceTime, gain, playing, rate, volume, muted, layerId]);
 
   useEffect(() => {
     const el = ref.current;

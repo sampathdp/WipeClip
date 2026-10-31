@@ -27,6 +27,8 @@ pub struct ExportState {
     pending: Mutex<HashMap<String, PathBuf>>,
     /// Files this session wrote; the only ones reveal_export will show.
     saved: Mutex<HashSet<PathBuf>>,
+    /// token -> folder chosen for a batch export (choose_export_folder).
+    folders: Mutex<HashMap<String, PathBuf>>,
 }
 
 /// What is being saved: an exported video, a project file
@@ -98,6 +100,44 @@ pub async fn choose_export_path(
     let token = uuid::Uuid::new_v4().to_string();
     state.pending.lock().unwrap().insert(token.clone(), path);
     Ok(Some(token))
+}
+
+/// Batch exports (several highlights): the OS folder dialog once, then
+/// `export_path_in` names each file in that folder. Returns an opaque token
+/// for the folder; the page never names a folder itself.
+#[tauri::command]
+pub async fn choose_export_folder(app: tauri::AppHandle, state: State<'_, ExportState>) -> Result<Option<String>, String> {
+    let picked = app.dialog().file().set_title("Choose a folder for the exported videos").blocking_pick_folder();
+    let Some(picked) = picked else { return Ok(None) };
+    let dir = picked.into_path().map_err(|e| e.to_string())?;
+    if !dir.is_dir() {
+        return Err("That folder no longer exists.".into());
+    }
+    let token = uuid::Uuid::new_v4().to_string();
+    state.folders.lock().unwrap().insert(token.clone(), dir);
+    Ok(Some(token))
+}
+
+/// A one-time `write_export` token for a new video file in a folder chosen
+/// with `choose_export_folder`. Never replaces anything: an existing name
+/// gets " (2)", " (3)"... appended.
+#[tauri::command]
+pub fn export_path_in(state: State<'_, ExportState>, folder: String, suggested_name: String) -> Result<String, String> {
+    let dir = state.folders.lock().unwrap().get(&folder).cloned().ok_or("Choose the folder again.")?;
+    let path = free_name(&dir, &clean_file_name(&suggested_name, &VIDEO), |p| p.exists()).ok_or("Too many files with that name in the folder.")?;
+    let token = uuid::Uuid::new_v4().to_string();
+    state.pending.lock().unwrap().insert(token.clone(), path);
+    Ok(token)
+}
+
+/// `name` in `dir`, or "stem (n).ext" for the first n that doesn't exist.
+fn free_name(dir: &Path, name: &str, exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    let first = dir.join(name);
+    if !exists(&first) {
+        return Some(first);
+    }
+    let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
+    (2..1000).map(|n| dir.join(if ext.is_empty() { format!("{stem} ({n})") } else { format!("{stem} ({n}).{ext}") })).find(|p| !exists(p))
 }
 
 #[tauri::command]
@@ -240,6 +280,16 @@ mod tests {
         assert_eq!(clean_text_name("a/b.vtt").map(|n| n.0), Some("a_b.vtt".to_string()));
         assert!(clean_text_name("evil.exe").is_none());
         assert!(clean_text_name("noext").is_none());
+    }
+
+    #[test]
+    fn batch_names_never_replace_a_file() {
+        let dir = Path::new("out");
+        let taken = [dir.join("clip.mp4"), dir.join("clip (2).mp4")];
+        let exists = |p: &Path| taken.iter().any(|t| t == p);
+        assert_eq!(free_name(dir, "new.mp4", exists), Some(dir.join("new.mp4")));
+        assert_eq!(free_name(dir, "clip.mp4", exists), Some(dir.join("clip (3).mp4")));
+        assert_eq!(free_name(dir, &clean_file_name("../../evil", &VIDEO), |_| false), Some(dir.join("_.._evil.mp4")));
     }
 
     #[test]

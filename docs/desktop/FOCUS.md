@@ -38,6 +38,9 @@ Deterministic and based only on recorded data: click positions/times, whether th
 2. Clusters: consecutive interactions within the preset's time gap and radius; broken at pauses and when too long for one zoom.
 3. Candidates: clusters above the preset's threshold (markers always qualify; a marker with no nearby click focuses where the pointer was). Zoom = the preset's zoom, lowered so all the cluster's points plus padding fit, skipped below 1.15× (activity spread over the screen). **Follow** (on by default): when the points don't fit at the preset's zoom - a drag, the text cursor moving along a line, clicks across a form - the zoom keeps the preset's zoom (lowered only so points less than 0.6 s apart are in view together) and gets a `path`: the camera starts on the first point and pans (0.5 s, arriving on time) whenever a later point leaves the middle 64% of the view; pans less than 0.5 s apart collapse into one. Small moves never move the camera.
 4. Pacing: neighbours closer than the preset's minimum gap merge (same area) or chain (different area); then the busiest minutes are thinned to the preset's zooms-per-minute, keeping the most significant.
+   - **Back and forth** (Phase 3): when a zoom chains to another area and the next one returns near the first soon after, the three become one still zoom wide enough for both areas (no follow path inside it; reason "…, back and forth"). If no useful zoom (1.15× or more) fits both, the return trip gets no zoom of its own. When such a zoom reaches its maximum length, the next one keeps its framing if the action still fits, so the camera doesn't start panning at the seam.
+   - **Chaining never starts a zoom late**: when two zooms overlap, the earlier one ends once its own last action is done (plus its zoom-out time, which is when a chained pan leaves), instead of the later one starting after its own click. Before, the camera could still be on the previous spot when the click happened.
+   - Events outside the recording or with non-numeric positions are dropped before analysis (they used to produce a zoom with no end).
 
 | Preset | Zoom (max) | Duration | Transition | Threshold | Zooms/min |
 |---|---|---|---|---|---|
@@ -52,7 +55,7 @@ All values can be customized in the panel. Suggestions are ordinary zooms marked
 - **Zoom track** (shown for recordings or when zooms exist): drag to move (the length is kept and the zoom stays inside the recording), drag edges to change start/end (0.6 s minimum), click to select. Recorded clicks appear as ticks (cyan left, amber right).
 - **Zoom inspector**: enable/disable, strength, duration, zoom-in and zoom-out time, easing, focus position (setting it by hand ends following; moving or resizing the zoom keeps its path in step, a split divides it), "Focus on pointer" (pointer position at the playhead), Split at playhead, Delete (also the Delete key).
 - **Focus panel**: presets and settings, Analyze/Cancel, Remove suggestions, Add zoom at playhead (at the pointer if known), zoom list, pointer style (click highlights on/off, colors, ring size, duration, intensity; drawn cursor size, color, smoothing).
-- **View** (Focus panel, once there are zooms): **Original view** shows and exports the recording without any zoom, keeping every zoom for later; **Zoom intensity** (25–150%) scales the strength of all zooms at once (`1 + (zoom − 1) × intensity`, capped at 4×) without changing them.
+- **View** (Focus panel, once there are zooms): **Compare with original** (Phase 3) shows the preview without zooms while it's pressed in. It's preview only: not saved, not an undo step, and the export is unchanged (`previewWithoutZooms` in focusPrefs.ts). **Original view** shows and exports the recording without any zoom, keeping every zoom for later; **Zoom intensity** (25–150%) scales the strength of all zooms at once (`1 + (zoom − 1) × intensity`, capped at 4×) without changing them.
 - **Leave out**: **No zooms for 10 s from playhead** and the zoom inspector's **No zooms here** (deletes that zoom) add a source-time range where analysis suggests nothing, and remove the unedited suggestions it overlaps; **Ignore click at playhead** (nearest click within 0.5 s) removes that click's ring from preview and export and leaves it out of the next analysis. Its tick on the Zoom track turns grey. Both are listed with **Allow**/**Restore**. The user's own zooms are never removed by either.
 - These live in `Project.focus` (`src/lib/editor/focusPrefs.ts`), optional, defaults when absent, so older projects open unchanged. They apply where zooms and rings are evaluated: `appliedZooms(project)` feeds the camera tracks of the preview, masks, pointer and export rows, and `pointerScene` skips ignored clicks for both preview and export. The backend receives ordinary camera and ring rows.
 - All edits are one undo step each (sliders as one step per drag); everything is saved with the project.
@@ -81,6 +84,23 @@ Limits (`backend/app/config.py`): 100,000 camera rows per clip, 200,000 pointer 
 
 Fixtures: `backend/tests/fixtures/focus_payload.json` is written by the frontend test (`UPDATE_FIXTURES=1 npm run desktop:test:js` after an intended change to the camera or pointer math; commit it). `camera_vectors.json` is a hand-kept list of window → pixel cases that both `windowPixels` (camera.ts) and `camera_geometry` (editor.py) must reproduce; add cases when changing either.
 
+## Phase 3 before/after (alternating clicks)
+
+Eight deliberate clicks alternating between x = 0.2 and x = 0.8, measured on the camera track at 30 Hz (`reversals` in focus.test.ts):
+
+| Click spacing, preset | Before: zooms / camera reversals / clicks outside the view | After |
+|---|---|---|
+| 1.2 s, balanced | 8 / 8 / 7 of 8 | 4 / 2 / 0 |
+| 1.2 s, dynamic | 8 / 8 / 7 of 8 | 4 / 2 / 0 |
+| 2 s, balanced | 8 / 8 / 7 of 8 | 4 / 2 / 0 |
+| 2 s, dynamic | 8 / 8 / 0 | 4 / 2 / 0 |
+| 3 s, balanced | 8 / 8 / 0 | 7 / 8 / 0 |
+| 4 s, balanced or dynamic | 8 / 8 / 0 | 8 / 8 / 0 |
+
+At 3–4 s spacing each click keeps its own zoom and the camera eases out between them (slow, readable moves), so it was left as is.
+
+Blur with a zoom, export vs the preview's order (zoom, then blur): mean pixel difference 3.29 before, 0.35 after (`test_blur_is_applied_after_the_zoom_like_the_preview`).
+
 ## Limitations
 
 - No visual target detection (see above). Zoom size comes from interaction spread plus padding, not from element bounds.
@@ -89,5 +109,6 @@ Fixtures: `backend/tests/fixtures/focus_payload.json` is written by the frontend
 - The drawn cursor has a fixed arrow shape; it doesn't follow the system cursor's shape (text beam, hand) - that isn't recorded.
 - With canvas fill the sides of the frame are cut by the canvas. The camera compensates (see Camera), but the window must stay inside the recording, so the outermost strip can't always be brought into view: for a 16:9 recording at 2× in a 9:16 project, clicks within about 11% of the left/right frame edge stay off-canvas (about 8% in a 1:1 project). Use fit, or a stronger zoom, for those. Letting the window leave the frame on the hidden side would fix it but needs a backend geometry change.
 - Freeze-frame clips show no rings; reversed clips show the camera but no rings.
-- A clip's blur adjustment is applied before the export's zoom (the preview blurs after), so a blurred, zoomed clip looks slightly blurrier in the export.
+- The drawn cursor and click rings keep their canvas size when the camera zooms in. Scaling them with the zoom would mean resizing their sprites per frame in the export, which was measured about 6x slower for rings.
+- Clicks alternating between two areas 3–4 s apart still get one zoom each, with the camera easing out and back in between.
 - Export needs the updated backend (see Deployment).

@@ -14,6 +14,8 @@ import { buildSpeechMix } from "@/lib/editor/captions";
 import { timelineTimeOf } from "@/lib/editor/camera";
 import { DEFAULT_CHAPTERS, suggestChapters } from "@/lib/editor/chapters";
 import { acceptedCuts, cutCandidates, interactionTimeline, previewSkips, suggestEdits, type Act } from "@/lib/editor/insights";
+import { fillersSupported, speechAwarePauses, transcriptSuggestions } from "@/lib/editor/speechEdits";
+import { transcriptCurrent } from "@/lib/editor/wordEdit";
 import { DEFAULT_KEYSTROKES, comboCounts, keystrokeOverlays, type KeystrokeSettings } from "@/lib/editor/keystrokes";
 import { loadVideoMeta } from "@/lib/editor/media";
 import { recordingEvents } from "@/lib/editor/pointer";
@@ -166,7 +168,21 @@ export function useTutorialTools(d: Deps) {
           return ps ? activity.current.share(ps) : null;
         };
         const aspect = recSource ? recSource.width / Math.max(1, recSource.height) : 16 / 9;
-        const list = suggestEdits({ lay, acts, audio: report, motion }, { silence: s.silence, idle: s.idle, aspect }, () => newId("sg"));
+        let list = suggestEdits({ lay, acts, audio: report, motion }, { silence: s.silence, idle: s.idle, aspect }, () => newId("sg"));
+        // With a transcript that still matches the edit: filler words,
+        // repeats, and pauses checked against what was actually said.
+        const transcript = project.transcript;
+        if (transcript && transcriptCurrent(transcript, lay)) {
+          const sg = () => newId("sg");
+          list = [...speechAwarePauses(list, transcript, report?.silences ?? null, sg), ...transcriptSuggestions(transcript, sg)].sort((a, b) => a.start - b.start);
+          if (!fillersSupported(transcript.language)) notes.push("Filler words are only recognized in English; repeated words are checked in any language.");
+        } else {
+          notes.push(
+            transcript
+              ? "The transcript no longer matches the edit, so filler words and repeats weren't checked. Transcribe again in the Transcript panel."
+              : "Transcribe the speech (Transcript panel) to also find filler words, repeated words and quiet speech."
+          );
+        }
         if (run !== analysisRun.current) return null;
         console.info(`[review] analysis took ${Math.round(performance.now() - t0)} ms (levels ${reused ? "reused" : "measured"}, picture ${checked ? "checked" : "not checked"})`);
         if (pieces.size && !checked) notes.push("Quiet parts couldn't be checked for movement on screen here, so watch them before cutting.");

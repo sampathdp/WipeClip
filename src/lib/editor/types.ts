@@ -105,6 +105,9 @@ export interface ShapeMask {
   feather: number;
   /** Shows the outside instead. */
   invert: boolean;
+  /** Rectangles: corner radius as a share of half the short side (0..1);
+   * absent = square corners. */
+  radius?: number;
 }
 
 /** One keyframe of a clip's or layer's animation (see keyframes.ts). */
@@ -257,7 +260,7 @@ export type Overlay =
   | (OverlayBase & { kind: "text"; text: TextStyle })
   /** Picture-in-picture: a video playing from `offset` (source seconds)
    * for the layer's time range, with its own sound at `volume` (0..2). */
-  | (OverlayBase & { kind: "video"; sourceId: string; offset: number; volume: number })
+  | (OverlayBase & { kind: "video"; sourceId: string; offset: number; volume: number; camLayout?: CamLayout })
   /** Arrow, highlight circle, rectangle, numbered step, callout, focus outline. */
   | (OverlayBase & { kind: "shape"; shape: ShapeStyle });
 
@@ -285,6 +288,49 @@ export interface AudioClip {
   /** Detected beats (beats.ts), in seconds of the audio file, so trims
    * keep them on the music. */
   beats?: { bpm: number; times: number[] };
+  /** Noise reduction (mix.ts): a cleaned copy of the whole source file,
+   * made on this device and time-aligned with it, played instead of the
+   * original unless bypassed. The original is never changed. Absent = off. */
+  clean?: AudioCleanup;
+}
+
+export interface AudioCleanup {
+  sourceId: string;
+  /** 0..1, what the copy was made with (audio_clean.py: 6..40 dB). */
+  strength: number;
+  /** Plays (and exports) the original instead. */
+  bypass: boolean;
+}
+
+/** Loudness targets for the whole mix (loudness.ts LOUDNESS_TARGETS). */
+export type LoudnessTarget = "off" | "online" | "voice" | "broadcast";
+
+/** The mix bus (mix.ts): the clips' own sound as one track, and loudness
+ * normalization. Absent = defaults (video sound at 100%, no
+ * normalization). A peak limiter always protects the export. */
+export interface MasterAudio {
+  /** The clips' own sound, multiplying every clip's volume (0..2). */
+  videoVolume: number;
+  videoMuted: boolean;
+  loudness: LoudnessTarget;
+  /** Gain bringing the measured mix to the target, dB. Applied by the
+   * preview and the export alike; 0 when off. */
+  gainDb: number;
+  /** What it was measured from: integrated loudness (LUFS), sample peak
+   * (dBFS) and the mix's key (mix.ts mixKey), to tell when it's out of
+   * date. Absent = not measured. */
+  measured?: { lufs: number; peakDb: number; key: string };
+}
+
+/** A webcam layer's layout preset (webcamLayout.ts), kept so it can be
+ * placed again when the canvas size changes. Absent = placed by hand. */
+export interface CamLayout {
+  shape: "circle" | "rounded" | "rect";
+  size: "small" | "medium" | "large";
+  corner: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  /** Next to the screen (landscape canvas) or under it (portrait), instead
+   * of a corner bubble. */
+  split?: boolean;
 }
 
 export type VoiceFx = "none" | "chipmunk" | "deep" | "robot" | "echo" | "telephone" | "radio";
@@ -468,7 +514,11 @@ export type SuggestionKind =
   | "possible-retake"
   | "navigation"
   | "milestone"
-  | "retake";
+  | "retake"
+  // From the transcript (speechEdits.ts).
+  | "filler"
+  | "repeat"
+  | "no-speech";
 
 /** Something worth a look, in timeline seconds. Suggestions never change
  * the edit by themselves: "cut" ones remove their range only when the
@@ -530,7 +580,7 @@ export interface DraftItem {
  * project. Times are timeline seconds. */
 export const HIGHLIGHTS_VERSION = 1;
 
-export type HighlightSignal = "sound" | "picture" | "scene" | "input" | "marker";
+export type HighlightSignal = "sound" | "picture" | "scene" | "input" | "marker" | "speech" | "app" | "click";
 
 export interface Highlight {
   id: string;
@@ -547,6 +597,13 @@ export interface Highlight {
   /** Its range was changed by hand. */
   edited?: boolean;
   title?: string;
+  /** The same range in the recording's own time (one clip, played forward),
+   * so it can be found again after trims, splits and moves (highlights.ts
+   * placeHighlights). Missing when it spans clips. */
+  anchor?: { sourceId: string; start: number; end: number };
+  /** Its footage was cut, split or changed since: preview and export are
+   * off until it's found again or its range is set again. */
+  outdated?: boolean;
 }
 
 export interface HighlightSet {
@@ -607,6 +664,8 @@ export interface Project {
   transcript?: Transcript;
   /** The last highlight suggestions (highlights.ts). */
   highlights?: HighlightSet;
+  /** Mix bus and loudness (mix.ts); absent = defaults. */
+  master?: MasterAudio;
 }
 
 export interface TranscriptWord {
@@ -699,6 +758,7 @@ export const NEUTRAL_ADJUST: Adjustments = {
 export const DEFAULT_LOOK: Look = { filter: "original", intensity: 100, adjust: NEUTRAL_ADJUST };
 export const DEFAULT_TRANSFORM: VideoTransform = { x: 0.5, y: 0.5, scale: 1, rotation: 0 };
 export const FULL_CROP: Crop = { x: 0, y: 0, w: 1, h: 1 };
+export const DEFAULT_MASTER: MasterAudio = { videoVolume: 1, videoMuted: false, loudness: "off", gainDb: 0 };
 export const DEFAULT_CANVAS: Canvas = { aspect: "original", fit: "fit", background: { type: "color", color: "#000000" } };
 
 export function newClip(id: string, sourceId: string, start: number, end: number): Clip {
@@ -764,6 +824,7 @@ export function migrateProject(raw: unknown): Project {
     ...(p.transcript ? { transcript: p.transcript as Transcript } : {}),
     ...(validDraft(p.draft) ? { draft: p.draft } : {}),
     ...(validHighlights(p.highlights) ? { highlights: p.highlights } : {}),
+    ...(p.master ? { master: { ...DEFAULT_MASTER, ...(p.master as Partial<MasterAudio>) } } : {}),
     ...(p.focus
       ? {
           focus: {
@@ -813,7 +874,9 @@ export function validHighlights(raw: unknown): raw is HighlightSet {
       i.end > i.start &&
       Number.isFinite(i.peak) &&
       ["pending", "kept", "rejected"].includes(i.status) &&
-      Array.isArray(i.reasons)
+      Array.isArray(i.reasons) &&
+      (i.anchor === undefined ||
+        (typeof i.anchor?.sourceId === "string" && Number.isFinite(i.anchor.start) && Number.isFinite(i.anchor.end) && i.anchor.end > i.anchor.start))
   );
 }
 

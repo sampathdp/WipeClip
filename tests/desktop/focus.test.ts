@@ -732,3 +732,87 @@ test("zoom edits keep the follow path consistent", async () => {
   const reopened = migrateProject(JSON.parse(JSON.stringify({ clips: [], zooms: [z] })));
   assert.deepEqual(reopened.zooms?.[0].path, z.path);
 });
+
+// --- back and forth, invalid events (Phase 3) --------------------------------------
+
+/** Times the camera's center changes horizontal direction (moves under 0.5%
+ * of the frame per sample ignored), sampled at 30 Hz. */
+function reversals(zooms: CameraZoom[], duration: number): number {
+  const track = buildCameraTrack(zooms, "s", FULL_CROP);
+  let flips = 0;
+  let dir = 0;
+  let last = 0.5;
+  for (let t = 0; t <= duration; t += 1 / 30) {
+    const w = evalCamera(track, t);
+    const cx = w.x + w.s / 2;
+    const d = cx - last;
+    if (Math.abs(d) > 0.005) {
+      const sign = Math.sign(d);
+      if (dir !== 0 && sign !== dir) flips++;
+      dir = sign;
+      last = cx;
+    }
+  }
+  return flips;
+}
+
+test("clicks going back and forth get one steady zoom, not a whip pan each time", () => {
+  // Before Phase 3: 8 chained zooms, 6 direction reversals in 10 s.
+  const targets = Array.from({ length: 8 }, (_, i) => ({ t: 2 + i * 1.2, x: i % 2 ? 0.8 : 0.2, y: 0.5 }));
+  const duration = 16;
+  for (const preset of ["balanced", "dynamic"] as const) {
+    const { zooms } = suggestZooms({ events: session(targets), duration, aspect: 16 / 9, sourceId: "s" }, FOCUS_PRESETS[preset], ids);
+    assert.ok(zooms.length <= 4, `${preset}: ${zooms.length} zooms`);
+    assert.ok(reversals(zooms, duration) <= 2, `${preset}: ${reversals(zooms, duration)} reversals`);
+    assert.ok(zooms.some((z) => z.reason?.includes("back and forth")), `${preset}: reason explains the wide zoom`);
+    // Every click is still inside the camera window when it happens.
+    const track = buildCameraTrack(zooms, "s", FULL_CROP);
+    for (const g of targets) {
+      const w = evalCamera(track, g.t);
+      assert.ok(g.x >= w.x && g.x <= w.x + w.s && g.y >= w.y && g.y <= w.y + w.s, `${preset}: click at ${g.t} s outside the view`);
+    }
+  }
+});
+
+test("a single trip to another area and back after a while is still two zooms", () => {
+  // Far apart in time: no back-and-forth merge.
+  const events = session([
+    { t: 2, x: 0.2, y: 0.5 },
+    { t: 2.6, x: 0.2, y: 0.52 },
+    { t: 12, x: 0.8, y: 0.5 },
+    { t: 12.6, x: 0.8, y: 0.52 },
+    { t: 24, x: 0.2, y: 0.5 },
+    { t: 24.6, x: 0.2, y: 0.52 },
+  ]);
+  const { zooms } = suggestZooms({ events, duration: 30, aspect: 16 / 9, sourceId: "s" }, FOCUS_PRESETS.balanced, ids);
+  assert.equal(zooms.length, 3);
+  assert.ok(zooms.every((z) => !z.reason?.includes("back and forth")));
+});
+
+test("invalid, out-of-range and unsorted events never produce a broken zoom", () => {
+  const good = session([
+    { t: 2, x: 0.3, y: 0.3 },
+    { t: 5, x: 0.7, y: 0.6 },
+  ]);
+  const junk: InteractionEvent[] = [
+    { type: "button", t: Number.NaN, button: "left", down: true, x: 0.5, y: 0.5 },
+    { type: "button", t: 3000, button: "left", down: true, x: Number.NaN, y: 0.5 },
+    { type: "button", t: 3100, button: "left", down: true, x: 1.7, y: -0.4 },
+    { type: "button", t: -500, button: "left", down: true, x: 0.5, y: 0.5 },
+    { type: "button", t: 7000, button: "left", down: false, x: 0.4, y: 0.4 }, // release without a press
+    { type: "move", t: Number.POSITIVE_INFINITY, x: 0.5, y: 0.5 },
+    { type: "button", t: 99_000, button: "left", down: true, x: 0.5, y: 0.5 }, // after the end
+  ];
+  const events = [...junk, ...good].reverse(); // unsorted on purpose
+  const duration = 10;
+  let zooms: CameraZoom[] = [];
+  assert.doesNotThrow(() => {
+    zooms = suggestZooms({ events, duration, aspect: 16 / 9, sourceId: "s" }, FOCUS_PRESETS.dynamic, ids).zooms;
+  });
+  for (const z of zooms) {
+    for (const v of [z.start, z.end, z.x, z.y, z.zoom]) assert.ok(Number.isFinite(v), JSON.stringify(z));
+    assert.ok(z.start >= 0 && z.end <= duration && z.start < z.end, JSON.stringify(z));
+    assert.ok(z.x >= 0 && z.x <= 1 && z.y >= 0 && z.y <= 1, JSON.stringify(z));
+    assert.ok(z.zoom >= 1 && z.zoom <= 4, JSON.stringify(z));
+  }
+});

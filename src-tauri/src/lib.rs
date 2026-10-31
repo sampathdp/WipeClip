@@ -334,6 +334,8 @@ pub fn run() {
             frontend_log,
             links::open_external,
             export::choose_export_path,
+            export::choose_export_folder,
+            export::export_path_in,
             export::write_export,
             export::reveal_export,
             export::save_text_file,

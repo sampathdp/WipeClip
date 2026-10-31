@@ -90,6 +90,13 @@ async function goto(u) {
   await send("Page.navigate", { url: u });
   await loaded;
   await sleep(1500);
+  // Seeding needs the editor's database at its current version; a
+  // production build can create it a little later than the load event.
+  for (let i = 0; i < 100; i++) {
+    const ready = await evaluate(`indexedDB.databases().then((ds) => ds.some((d) => d.name === "wipeclip-editor" && d.version >= 2))`);
+    if (ready) break;
+    await sleep(150);
+  }
 }
 
 // --- the saved project ---------------------------------------------------------------
@@ -127,7 +134,8 @@ await goto(url);
 // A Recent projects entry (the page opened the database at its current version above).
 await evaluate(`(async () => {
   const bytes = Uint8Array.from(atob(${JSON.stringify(readFileSync(video).toString("base64"))}), c => c.charCodeAt(0));
-  const db = await new Promise((res, rej) => { const r = indexedDB.open("wipeclip-editor"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  // Opened at the editor's schema version (projectStore.ts), stores created if the page hasn't yet.
+  const db = await new Promise((res, rej) => { const r = indexedDB.open("wipeclip-editor", 2); r.onupgradeneeded = () => { for (const n of ["project", "sources", "projects"]) if (!r.result.objectStoreNames.contains(n)) r.result.createObjectStore(n); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
   const put = (store, value, key) => new Promise((res, rej) => { const tx = db.transaction(store, "readwrite"); tx.objectStore(store).put(value, key); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
   await put("sources", new Blob([bytes], { type: "video/mp4" }), "src_1");
   await put("sources", ${JSON.stringify(recording)}, "src_1#recording");

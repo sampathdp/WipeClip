@@ -48,7 +48,7 @@ const b = await launch();
 const r = {};
 const total = () => b.evaluate(`[...document.querySelectorAll("span")].map(s => s.textContent.trim()).find(t => /^\\/ \\d+:\\d\\d\\.\\d$/.test(t)) ?? null`);
 const items = () =>
-  b.evaluate(`[...document.querySelectorAll('ul[aria-label="Highlight suggestions"] > li')].map(li => ({ title: li.querySelector("p.font-semibold")?.textContent, reasons: [...li.querySelectorAll("ul li")].map(x => x.textContent), conf: li.querySelector("span.rounded")?.textContent }))`);
+  b.evaluate(`[...document.querySelectorAll('ul[aria-label="Highlight suggestions"] > li')].map(li => ({ title: li.querySelector("input")?.value ?? li.querySelector("p.font-semibold")?.textContent, reasons: [...li.querySelectorAll("ul li")].map(x => x.textContent), conf: li.querySelector("span.rounded")?.textContent }))`);
 const clickIn = (n, label) => b.evaluate(`(() => { const li = document.querySelectorAll('ul[aria-label="Highlight suggestions"] > li')[${n}]; const btn = li && [...li.querySelectorAll("button")].find(x => x.textContent.trim().startsWith(${JSON.stringify(label)})); btn?.click(); return !!btn; })()`);
 const find = async () => {
   await b.click("Find");

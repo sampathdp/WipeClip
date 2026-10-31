@@ -100,3 +100,32 @@ test("tutorial: framed canvas, click highlights, cursor only when the recording 
   assert.equal(p.project.pointer, undefined);
   assert.match(p.notes[0], /need a WipeClip screen recording/);
 });
+
+test("a highlight exported vertical: reframed on the activity inside the highlight only", async () => {
+  // The batch export path (VideoEditor reframeCopy): highlightProject cuts a
+  // copy, its activity is placed on the copy's own timeline, then the
+  // vertical preset. Activity outside the highlight must not pull the frame.
+  const { highlightProject } = await import("../../src/lib/editor/highlights.ts");
+  const { interactionTimeline } = await import("../../src/lib/editor/insights.ts");
+  const events = [
+    // Inside the highlight (source 10-16): work on the right.
+    ...[10.5, 12, 14].map((t) => ({ type: "button" as const, t: t * 1000, button: "left" as const, down: true, x: 0.85, y: 0.5 })),
+    // Elsewhere: lots of work on the left.
+    ...[1, 2, 3, 4, 5, 6, 35, 36, 37].map((t) => ({ type: "button" as const, t: t * 1000, button: "left" as const, down: true, x: 0.1, y: 0.5 })),
+  ];
+  const { project } = setup(null);
+  const copy = highlightProject(project, 30, 10, 16);
+  assert.ok(copy.ok);
+  if (!copy.ok) return;
+  const lay = layout(copy.project, 30);
+  const acts = interactionTimeline(lay, "rec", events);
+  assert.deepEqual(acts.map((a) => Math.round(a.x * 100)), [85, 85, 85], "only the highlight's own clicks");
+  const r = applyCreatorPreset(copy.project, "vertical", { lay, sources: { rec: src("rec") }, originalId: "rec", acts, recSourceId: "rec", cursorCaptured: true, keystrokes: [] });
+  const clip = r.project.clips[0];
+  const box = videoBox(clip, { width: 1920, height: 1080 }, { width: 1080, height: 1920 }, { fit: "fill" });
+  const xOnCanvas = clip.transform.x - box.w / 2 + 0.85 * box.w;
+  assert.ok(xOnCanvas > 0.05 && xOnCanvas < 0.95, `click at ${xOnCanvas} of the vertical frame`);
+  // The project the highlight came from is unchanged.
+  assert.equal(project.canvas.aspect, "original");
+  assert.deepEqual(project.clips.map((c) => [c.start, c.end]), [[0, 20], [30, 50]]);
+});

@@ -2,6 +2,196 @@
 
 Newest phase first.
 
+## Phase 6: audio quality and camera presentation (31 October 2026)
+
+Details: [AUDIO.md](AUDIO.md).
+
+**Files changed.**
+
+- New:
+  - `src/lib/editor/loudness.ts`, `mix.ts`, `programMix.ts`, `audioMixer.ts`, `webcamLayout.ts`
+  - `src/components/editor/MixerPanel.tsx`
+  - `tests/desktop/audio.test.ts`, `backend/tests/test_audio_mix.py`, `tests/desktop/manual/preview-audio.mjs`
+  - `docs/desktop/AUDIO.md`
+- Changed (editor):
+  - `types.ts`: `AudioClip.clean`, `Project.master`, `camLayout`, `ShapeMask.radius`
+  - `shapeMask.ts` (rounded rectangles), `ripple.ts` (ducking regions), `exportProject.ts`
+  - `voiceFx.ts` (router moved to `audioMixer.ts`)
+  - `PreviewPlayer.tsx`, `OverlayLayer.tsx`, `Panels.tsx`, `VideoEditor.tsx`, `toolsApi.ts` (message)
+- Changed (backend):
+  - `editor.py`: `master_chain`, mono upmix, `master_gain_db`
+  - `audio_clean.py`: delay compensation
+  - `main.py`: `masterGain`, clip volume up to 4, audio files for cleanup, mono flags
+- Test harness: `preview-highlights.mjs` reads highlight titles from their rename input (the Phase 5 rename made the old selector stale).
+
+**Functionality implemented.**
+
+- **Noise reduction for audio tracks:**
+  - Light, Medium or Strong;
+  - a cleaned, time-aligned copy made on this computer;
+  - Cleaned/Original compare;
+  - remove or undo.
+- **Loudness normalization:** -14, -16 or -23 LUFS presets. The gain is measured in the editor and applied by the preview and the export, with peak protection and an always-on limiter.
+- **Mixer:** video sound plus each track, with meters, volume, mute and solo (solo for listening only). Master meter.
+- **Webcam layouts:**
+  - circle, rounded or rectangle, in three sizes and four corners;
+  - side by side (landscape) or stacked (portrait);
+  - placed again when the canvas changes.
+- **Sync and level fixes:**
+  - The limiter's 5 ms delay.
+  - The denoiser's 25 ms delay.
+  - Mono sources were 3 dB quiet in the export.
+  - No limiter on clip-only mixes.
+  - Ducking after ripple edits.
+  - Voice effects silent on disk sources.
+
+**Tests executed.**
+
+| Suite | Result |
+|---|---|
+| `npm run desktop:test:js` | 214/214 (19 new) |
+| Backend `pytest tests` | 93/93 (12 new) |
+| `preview-audio.mjs` against a production build | 9/9 (meters, measurement within 0.1 LU of ffmpeg, undo) |
+| `preview-focus`, `preview-tutorial`, `preview-draft`, `preview-highlights` | pass |
+| `tsc` root and desktop, ESLint on changed files | pass |
+
+**Not implemented.** Webcam background removal. The reasons and options are in AUDIO.md; chroma key still works.
+
+**Known limitations.**
+
+- Noise reduction: steady noise only, desktop only, can't be cancelled while running.
+- Loudness reads up to about 1.5 LU low on broadband or wide-stereo content (voice within 0.1 LU).
+- The preview limiter has no look-ahead.
+- Webcam layouts clear the layer's keyframes.
+
+**Manual tests still required.** The routed preview with disk sources in the desktop app (CORS on the asset protocol), real noisy microphone recordings, loudness of a real export with a meter, webcam layouts exported on 16:9, 9:16 and 1:1, and preview mixer CPU on a low-end laptop. Details in AUDIO.md.
+
+**Compatibility.**
+
+- New fields are optional; older projects open unchanged.
+- **Export level change:** mono sources now export 3 dB louder, matching what the preview and players play.
+- The website's export needs this backend deployed for `masterGain` and video sound above 100 %.
+
+**Recommended next phase.** Run the manual desktop checks above (CORS first), then commit Phases 4–6 in reviewed commits.
+
+## Phase 4: speech-aware editing (29 October 2026)
+
+Details: [SPEECH.md](SPEECH.md).
+
+**Files changed.**
+
+- New: `src/lib/editor/speechEdits.ts`, `tests/desktop/speechEdits.test.ts`, `tests/desktop/manual/preview-transcript.mjs`, `docs/desktop/SPEECH.md`.
+- Changed: `src/lib/editor/types.ts` (kinds `filler`, `repeat`, `no-speech`), `src/lib/editor/captions.ts` (`cancelSpeech`, clean worker shutdown), `src/components/editor/useTutorialTools.tsx`, `TranscriptPanel.tsx`, `Panels.tsx` (`SpeechModelNotice`), `VideoEditor.tsx`.
+- Test harness: `tests/desktop/manual/cdp.mjs` (`launch({ args })`).
+
+**Functionality implemented.**
+
+- **Review suggestions from the transcript:** filler words (English), immediate repeats and restarted sentences. Each has its timestamp, reason, confidence and an uncertain-timing note, and goes through the existing per-item keep/cut, preview and one-step apply.
+- **Pauses checked against the words:** quiet speech becomes review instead of cut, and sound without words is flagged for review.
+- **Model consent in the Transcript panel:** it used to download without asking.
+- **Cancel** for model download and transcription.
+
+**Tests executed.**
+
+| Suite | Result |
+|---|---|
+| `npm run desktop:test:js` | 181/181 (7 new) |
+| `tsc` root and desktop | Pass |
+| ESLint on changed files | Pass |
+| `preview-transcript.mjs` against a production build | 10/10 (consent, cancel, offline) |
+| `preview-focus` (4 variants), `preview-draft`, `preview-highlights`, `preview-tutorial` | 7/7 pass |
+
+The headless scripts ran against a production build served by a small Node static server. The Phase 3 flakiness was caused by Python's `http.server` dropping chunk requests.
+
+**Known limitations.**
+
+- Fillers are English only.
+- Repeats must be exact and immediate.
+- Overlapping speakers are merged into one word stream.
+- Transcription speed was not re-measured (needs the model download).
+- The licence of the downloaded ONNX conversions isn't stated on their model cards. To review.
+
+**Manual tests still required.**
+
+On a real narrated recording:
+
+- transcribe, review the suggestions, preview, accept some, apply, undo;
+- check captions and audio sync after the cuts;
+- measure transcription time and memory.
+
+**Compatibility.**
+
+- New suggestion kinds are plain strings; older app versions show them like any other suggestion.
+- No new stored project fields.
+
+**Recommended next phase.** B3 (diagnostics zip) or P1-1 (signed export tickets) before the Windows beta.
+
+## Phase 3: smart zoom and cursor quality (29 October 2026)
+
+Details: [FOCUS.md](FOCUS.md) ("Suggestion engine" step 4, "Phase 3 before/after", Limitations).
+
+**What already existed (audited, kept).**
+
+- Suggestions from clicks, typing, drags, scrolls, shortcuts and markers, with pacing and follow paths.
+- Three easings.
+- Edge and canvas-fill handling.
+- Manual and edited zooms win over suggestions (`mergeSuggestions`).
+- Per-zoom reason.
+- Original view and intensity.
+- Leave-out ranges and ignored clicks.
+- One shared camera and pointer math for preview, masks and export, with tests.
+
+**Files changed.**
+
+- `src/lib/editor/focus.ts`
+- `src/lib/editor/focusPrefs.ts`
+- `src/components/editor/FocusPanel.tsx`
+- `src/components/editor/VideoEditor.tsx`
+- `backend/app/pipeline/editor.py`
+- Tests: `tests/desktop/focus.test.ts`, `tests/desktop/focusPrefs.test.ts`, `backend/tests/test_focus_export.py`
+- Harness: `tests/desktop/manual/cdp.mjs`, `tests/desktop/manual/preview-focus.mjs` (race-free seeding)
+- Docs: `docs/desktop/FOCUS.md`, this file
+
+**Functionality implemented.**
+
+- **Back-and-forth pacing.** Alternating clicks get one steady wide zoom instead of whip pans. At 1.2–2 s spacing: camera reversals 8 → 2.
+- **Chaining fix.** Before, with 1.2–2 s spacing, the camera was still on the previous spot for 7 of 8 alternating clicks when they happened; now it's on every click.
+- **Invalid events.** Events that are NaN, negative, past the end or out of order no longer produce a zoom with no end. They're dropped before analysis.
+- **Export blur order** now matches the preview (blur after zoom). Mean pixel difference: 3.29 → 0.35.
+- **"Compare with original"** in the Focus panel: preview only, never saved or exported, not an undo step.
+
+**Tests executed.**
+
+| Suite | Result |
+|---|---|
+| `npm run desktop:test:js` | 174/174 (4 new: back-and-forth, a single trip stays separate, invalid events, compare) |
+| Backend pytest | 81 passed (1 new: blur order, discriminates 0.35 vs 3.29) |
+| `tsc` root and desktop | Pass |
+| ESLint on changed files | Pass |
+
+Headless editor scripts were run against a static production build, since the dev server on port 3100 is stuck. Each of preview-focus `default` and `original`, preview-draft and preview-highlights passed at least once. They are flaky against that build: sleep-based steps sometimes don't find a button or capture empty screenshot samples.
+
+**Known limitations.**
+
+- Drawn cursor and rings don't scale with the zoom (export cost).
+- Alternating clicks 3–4 s apart still zoom out and back in between.
+- No visual target detection.
+- Canvas fill can't bring the outermost edge strip into view.
+
+**Manual tests still required.**
+
+- On a real recording in the desktop app: Analyze, then review a back-and-forth zoom (reason text).
+- Compare with original on and off during playback.
+- Export a blurred, zoomed clip and compare it with the preview.
+
+**Compatibility.**
+
+- Projects unchanged: no new stored fields.
+- Re-analysis of existing recordings gives different suggestions where clicks alternate. Existing zooms stay until re-analyzed; manual and edited zooms are never replaced.
+- Exports of zoomed clips with blur now look like the preview, so slightly less blurry than before.
+
+**Recommended next phase.** Make the headless scripts wait on conditions instead of sleeps, so they're reliable against a production build. Then B3 (diagnostics zip) or P1-1 (ticket signing).
+
 ## Phase 2: macOS port and native capture (29 October 2026). Stopped at a blocker: no Mac
 
 Full report: [MACOS.md](MACOS.md).
