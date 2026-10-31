@@ -13,6 +13,8 @@ type Stats = {
   revenue: { day: string; currency: string; cents: number }[];
   countries: { country: string; currency: string; started: number; paid: number; cents: number }[];
   statuses: { status: string; count: number }[];
+  /** Missing until schema.sql is run again after daily_active_users was added. */
+  active_users?: { day: string; count: number }[];
   users_by_country: { country: string; count: number }[];
 };
 
@@ -43,6 +45,9 @@ export default async function AdminAnalytics({ searchParams }: { searchParams: S
   const signups = stats.signups.reduce((n, d) => n + d.count, 0);
   const started = stats.checkouts.reduce((n, d) => n + d.started, 0);
   const paid = stats.checkouts.reduce((n, d) => n + d.paid, 0);
+  const active = stats.active_users ?? [];
+  const activeAvg = active.length ? Math.round(active.reduce((n, d) => n + d.count, 0) / active.length) : 0;
+  const activePeak = Math.max(0, ...active.map((d) => d.count));
 
   // Revenue per currency: one chart each, since LKR and USD don't share a scale.
   const currencies = [...new Set(stats.revenue.map((r) => r.currency))].sort();
@@ -94,6 +99,16 @@ export default async function AdminAnalytics({ searchParams }: { searchParams: S
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
+        <Card
+          title="Active accounts per day"
+          description={
+            active.length
+              ? `Signed-in accounts that used the site or app. ${activeAvg.toLocaleString()} a day on average, peak ${activePeak.toLocaleString()}.`
+              : "Run supabase/schema.sql again to start counting active accounts."
+          }
+        >
+          <ColumnChart data={active.map((d) => ({ label: dayLabel(d.day), value: d.count }))} />
+        </Card>
         <Card title="New accounts per day">
           <ColumnChart data={stats.signups.map((d) => ({ label: dayLabel(d.day), value: d.count }))} />
         </Card>

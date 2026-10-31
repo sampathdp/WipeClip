@@ -8,7 +8,10 @@
  */
 export const DOWNLOAD_PATH = "/download";
 
-const LATEST_RELEASE = "https://github.com/sampathdp/wipeclip-releases/releases/latest/download";
+/** The public repo the installers are published to (owner/name). */
+export const RELEASES_REPO = "sampathdp/wipeclip-releases";
+
+const LATEST_RELEASE = `https://github.com/${RELEASES_REPO}/releases/latest/download`;
 
 export const DESKTOP_DOWNLOADS = [
   {

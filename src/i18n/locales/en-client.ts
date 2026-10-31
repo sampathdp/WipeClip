@@ -87,6 +87,7 @@ const enClient = {
   downloads: {
     downloadFor: "Download for {os}",
     comingSoon: "{os}: coming soon",
+    downloadCount: "{count} downloads",
     appFor: "WipeClip for {os}",
     windows: {
       label: "Windows",

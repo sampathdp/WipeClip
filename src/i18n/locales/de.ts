@@ -87,6 +87,7 @@ const de: Dict = {
     downloads: {
       downloadFor: "Für {os} herunterladen",
       comingSoon: "{os}: bald verfügbar",
+      downloadCount: "{count} Downloads",
       appFor: "WipeClip für {os}",
       windows: {
         label: "Windows",

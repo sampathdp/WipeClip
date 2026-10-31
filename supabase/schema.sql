@@ -176,6 +176,17 @@ create table if not exists feedback (
 create index if not exists feedback_user_id_idx on feedback (user_id);
 create index if not exists feedback_status_idx on feedback (status, created_at desc);
 
+-- One row per account per UTC day it was active (signed in and asked for its
+-- balance, which every signed-in page load and the desktop app do), for the
+-- daily active accounts count in the admin panel. Written by /api/credits
+-- with the service-role key; nothing else reads or writes it.
+create table if not exists daily_active_users (
+  day date not null default current_date,
+  user_id uuid not null references profiles (id) on delete cascade,
+  primary key (day, user_id)
+);
+alter table daily_active_users enable row level security;
+
 -- New auth user -> profile row, so every signed-up account has a balance
 -- from the start without a separate onboarding step.
 create or replace function handle_new_user()
@@ -519,6 +530,13 @@ as $$
     'statuses', (
       select coalesce(jsonb_agg(jsonb_build_object('status', s.status, 'count', s.n) order by s.n desc), '[]')
       from (select status, count(*) as n from win group by 1) s
+    ),
+    'active_users', (
+      select coalesce(jsonb_agg(jsonb_build_object('day', days.day, 'count', coalesce(a.n, 0)) order by days.day), '[]')
+      from days
+      left join (
+        select day, count(*) as n from daily_active_users, bounds where day >= bounds.since group by 1
+      ) a on a.day = days.day
     ),
     'users_by_country', (
       select coalesce(jsonb_agg(jsonb_build_object('country', u.country, 'count', u.n) order by u.n desc), '[]')
