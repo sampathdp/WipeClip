@@ -276,33 +276,17 @@ const de: Dict = {
       feature: "Funktion",
       included: "Enthalten",
       notIncluded: "Nicht enthalten",
-      launch: {
-        badge: "Startangebot",
-        title: "Alle Werkzeuge kostenlos ",
-        titleHighlight: "für 30 Tage.",
-        intro: "Jedes neue Konto erhält {days} Tage Pro: alle Werkzeuge und Exporte bis 4K, ohne Karte. Danach bleibt der kostenlose Plan kostenlos.",
-        trialActive: "Deine Pro-Testphase läuft bis {date}.",
-        paymentsLater: "Bezahlpläne starten später. Heute gibt es nichts zu kaufen.",
-        comingSoon: "Bald verfügbar",
-        freeTagline: "Für immer kostenlos, nach {days} Tagen Pro-Testphase.",
-        freeFeatures: [
-          "{days} Tage Pro-Testphase für jedes neue Konto",
-          "Bildschirmrekorder, Fokus-Zooms und Untertitel",
-          "Kompletter Videoeditor mit allen Übergängen, Filtern und Effekten",
-          "Mischmodi, Geschwindigkeitskurven, Karaoke-Text, Masken und eigene Schriften",
-          "GIF-, Nur-Audio-, Hochqualitäts- und 60-fps-Exporte",
-          "Exporte bis {res}",
-          "{daily} kostenlose Credits pro Tag für die KI- und Credit-Werkzeuge",
-        ],
+      trial: {
+        banner: "Jedes neue Konto erhält {days} Tage Pro: alle Werkzeuge und Exporte bis 4K, ohne Karte.",
+        active: "Deine Pro-Testphase läuft bis {date}.",
+        feature: "{days} Tage Pro-Testphase für jedes neue Konto",
         rows: {
           trial: "{days} Tage Pro-Testphase für neue Konten",
           recorder: "Bildschirmrekorder, Fokus-Zooms, Untertitel",
+          powerTools: "Greenscreen, Stabilisierung, Stimmeffekte, LUTs, Kurven",
           proTools: "Mischmodi, Geschwindigkeitskurven, Karaoke-Text, Masken, eigene Schriften, Auto-Ducking",
           outputs: "GIF-, Nur-Audio-, Hochqualitäts- und 60-fps-Export",
-          creditTools: "Credit-Werkzeuge: Greenscreen, Stabilisierung, Stimmeffekte, LUTs, Kurven",
-          perExport: "{n} Credit pro Export",
         },
-        footnote: "Credits werden von den KI-Werkzeugen (Hintergrund entfernen, Schärfen) und von Exporten mit einem Credit-Werkzeug verwendet: Greenscreen, Stabilisierung, Stimmeffekte, LUTs oder Kurven ({n} Credit pro Export). Jedes Konto erhält {daily} kostenlose Credits pro Tag.",
       },
       tiers: {
         free: {

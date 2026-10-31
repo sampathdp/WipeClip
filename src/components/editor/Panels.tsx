@@ -76,17 +76,9 @@ const inputCls =
  * around its panel, read by the premium markers below. */
 export const PremiumLocked = createContext(false);
 
-/** The free plan while payments are off (src/lib/launch.ts): only the
- * credit tools are marked, since exporting them costs credits. */
-export const CreditLocked = createContext(false);
-
-/** Crown after a premium tool's title, for plans that don't include it.
- * `credit`: one of CREDIT_TOOLS (src/lib/entitlements.ts). */
-function ProTag({ credit = false }: { credit?: boolean }) {
-  const locked = useContext(PremiumLocked);
-  const creditLocked = useContext(CreditLocked);
-  if (!locked && !(credit && creditLocked)) return null;
-  return <PremiumBadge className="ml-1.5 inline-flex align-middle" credit={!locked} />;
+/** Crown after a premium tool's title, for plans that don't include it. */
+function ProTag() {
+  return useContext(PremiumLocked) ? <PremiumBadge className="ml-1.5 inline-flex align-middle" /> : null;
 }
 
 /** A label marked premium (for <option>s and plain-text labels). */
@@ -360,7 +352,7 @@ export function ClipExtras({
         <div className="space-y-2">
           <SectionTitle>
             Stabilize
-            <ProTag credit />
+            <ProTag />
           </SectionTitle>
           <label className="flex items-center justify-between text-xs font-medium text-foreground">
             Smooth out camera shake
@@ -693,7 +685,7 @@ function LutSection({ look, onChange, onImport, gesture }: { look: Look; onChang
     <div className="mt-5 space-y-3 border-t border-border pt-4">
       <SectionTitle>
         LUT
-        <ProTag credit />
+        <ProTag />
       </SectionTitle>
       <input
         ref={input}
@@ -759,7 +751,7 @@ function CurvesEditor({ curves, onChange, gesture }: { curves: Curves; onChange:
       <div className="flex items-center justify-between">
         <SectionTitle>
           Curves
-          <ProTag credit />
+          <ProTag />
         </SectionTitle>
         <div className="flex gap-1" role="tablist" aria-label="Curve channel">
           {CURVE_CHANNELS.map((c) => (
@@ -1610,7 +1602,7 @@ function ChromaKeySection({ overlay: o, onChange, gesture }: { overlay: Overlay;
       <label className="flex items-center justify-between text-xs font-semibold text-foreground">
         <span>
           Remove a color (green screen)
-          <ProTag credit />
+          <ProTag />
         </span>
         <input type="checkbox" checked={!!key} onChange={(e) => onChange({ key: e.target.checked ? DEFAULT_KEY : null })} />
       </label>
@@ -2011,7 +2003,7 @@ export function AudioPanel({
         <div>
           <SectionTitle>
             Voice effect
-            <ProTag credit />
+            <ProTag />
           </SectionTitle>
           <select className={inputCls} value={a.voice ?? "none"} onChange={(e) => onChange({ voice: e.target.value as VoiceFx })} aria-label="Voice effect">
             {(Object.keys(VOICE_FX_LABELS) as VoiceFx[]).map((k) => (

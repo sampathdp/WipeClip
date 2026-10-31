@@ -276,33 +276,17 @@ const nl: Dict = {
       feature: "Functie",
       included: "Inbegrepen",
       notIncluded: "Niet inbegrepen",
-      launch: {
-        badge: "Lanceringsaanbod",
-        title: "Alle tools gratis ",
-        titleHighlight: "voor 30 dagen.",
-        intro: "Elk nieuw account krijgt {days} dagen Pro: alle tools en exports tot 4K, zonder creditcard. Daarna blijft het gratis abonnement gratis.",
-        trialActive: "Je Pro-proefperiode loopt tot {date}.",
-        paymentsLater: "Betaalde abonnementen komen later. Vandaag valt er niets te kopen.",
-        comingSoon: "Binnenkort",
-        freeTagline: "Voor altijd gratis, na {days} dagen Pro-proefperiode.",
-        freeFeatures: [
-          "{days} dagen Pro-proefperiode voor elk nieuw account",
-          "Schermrecorder, focuszooms en ondertitels",
-          "Volledige video-editor met alle overgangen, filters en effecten",
-          "Overvloeimodi, snelheidscurves, karaoketekst, maskers en eigen lettertypen",
-          "GIF-, alleen-audio-, hoge-kwaliteits- en 60 fps-exports",
-          "Exports tot {res}",
-          "{daily} gratis credits per dag voor de AI-tools en credittools",
-        ],
+      trial: {
+        banner: "Elk nieuw account krijgt {days} dagen Pro: alle tools en exports tot 4K, zonder creditcard.",
+        active: "Je Pro-proefperiode loopt tot {date}.",
+        feature: "{days} dagen Pro-proefperiode voor elk nieuw account",
         rows: {
           trial: "{days} dagen Pro-proefperiode voor nieuwe accounts",
           recorder: "Schermrecorder, focuszooms, ondertitels",
+          powerTools: "Green screen, stabilisatie, stemeffecten, LUT's, curves",
           proTools: "Overvloeimodi, snelheidscurves, karaoketekst, maskers, eigen lettertypen, auto-ducking",
           outputs: "GIF-, alleen-audio-, hoge-kwaliteits- en 60 fps-export",
-          creditTools: "Credittools: green screen, stabilisatie, stemeffecten, LUT's, curves",
-          perExport: "{n} credit per export",
         },
-        footnote: "Credits worden gebruikt door de AI-tools (achtergrond verwijderen, verscherpen) en door exports met een credittool: green screen, stabilisatie, stemeffecten, LUT's of curves ({n} credit per export). Elk account krijgt {daily} gratis credits per dag.",
       },
       tiers: {
         free: {

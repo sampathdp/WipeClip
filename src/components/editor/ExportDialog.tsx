@@ -2,10 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { canExportAt, lockedFeaturesUsed, TIER_LABELS, TIER_LIMITS, tierForResolution, type Tier } from "@/lib/entitlements";
+import { canExportAt, premiumFeaturesUsed, TIER_LABELS, TIER_LIMITS, tierForResolution, type Tier } from "@/lib/entitlements";
 import { trackEvent } from "@/lib/analytics";
 import { PLANS } from "@/lib/credits";
-import { EXPORT_CREDIT_COST, PAYMENTS_ENABLED } from "@/lib/launch";
 import { DEFAULT_OUTPUT, exportProject, OUTPUT_EXT, type ExportOutput } from "@/lib/editor/exportProject";
 import { saveLastExport } from "@/lib/editor/projectStore";
 import { canvasSize, formatTime } from "@/lib/editor/timeline";
@@ -122,9 +121,7 @@ export default function ExportDialog({
   const limits = TIER_LIMITS[tier];
   const premium = limits.premiumEffects
     ? []
-    : lockedFeaturesUsed({ ...project, format: output.format, quality: output.quality, fps: output.fps ?? undefined, fpsChosen: output.fps !== null });
-  // While payments are off these cost a credit instead of a paid plan.
-  const usesCredits = premium.length > 0 && !PAYMENTS_ENABLED;
+    : premiumFeaturesUsed({ ...project, format: output.format, quality: output.quality, fps: output.fps ?? undefined, fpsChosen: output.fps !== null });
   const [state, setState] = useState<"setup" | "rendering" | "done" | "error">(initialResult ? "done" : "setup");
   const [error, setError] = useState<{ message: string; upgrade?: boolean } | null>(null);
   const [result, setResult] = useState<{ blob: Blob; url: string } | null>(() =>
@@ -172,8 +169,6 @@ export default function ExportDialog({
       );
       setResult({ blob, url: URL.createObjectURL(blob) });
       setState("done");
-      // A credit-tool export spent a credit: let the balance shown update.
-      if (usesCredits) window.dispatchEvent(new Event("credits:refresh"));
       void notifyIfAway("Export finished", `"${filename}" is ready to save in WipeClip.`);
       trackEvent("processing_completed", { tool: TOOL, resolution });
       // Survives a sign-in redirect, so an anonymous export isn't lost
@@ -198,7 +193,7 @@ export default function ExportDialog({
         const msg = e instanceof Error ? e.message : "";
         setError({
           message:
-            /limit|sign in|too long|too large|upgrade|credit/i.test(msg) && msg.length < 160
+            /limit|sign in|too long|too large|upgrade/i.test(msg) && msg.length < 160
               ? msg
               : "Export failed. Your original video is safe. Please try exporting again.",
         });
@@ -266,12 +261,7 @@ export default function ExportDialog({
             <p className="mt-2 text-xs text-muted">
               Frame rate matches your original; the aspect ratio follows your canvas. Videos are never upscaled.
             </p>
-            {isSignedIn && limits.maxResolution !== "4k" && !PAYMENTS_ENABLED && (
-              <p className="mt-2 text-xs text-muted">
-                Your {TIER_LABELS[tier]} plan exports up to {limits.maxResolution}. Plans with {tier === "free" ? "1080p and 4K" : "4K"} are coming soon.
-              </p>
-            )}
-            {isSignedIn && limits.maxResolution !== "4k" && PAYMENTS_ENABLED && (
+            {isSignedIn && limits.maxResolution !== "4k" && (
               <p className="mt-2 text-xs text-muted">
                 Your {TIER_LABELS[tier]} plan exports up to {limits.maxResolution}.{" "}
                 <Link href="/pricing" className="font-semibold text-accent underline">
@@ -290,7 +280,7 @@ export default function ExportDialog({
               </p>
             )}
           </div>
-          <OutputOptions output={output} onChange={setOutput} total={total} locked={!limits.premiumEffects && PAYMENTS_ENABLED} />
+          <OutputOptions output={output} onChange={setOutput} total={total} locked={!limits.premiumEffects} />
           {limits.exportBranding && premium.length === 0 && (
             <p className="text-xs text-muted">
               Free exports include a small &quot;Made with WipeClip&quot; mark in the corner.{" "}
@@ -300,24 +290,7 @@ export default function ExportDialog({
               to remove it.
             </p>
           )}
-          {usesCredits && (
-            <div className="rounded-xl border border-amber-400/50 bg-amber-400/10 p-3 text-xs">
-              <p className="flex items-center gap-1.5 font-semibold text-foreground">
-                <PremiumBadge className="shrink-0" credit /> This export uses {EXPORT_CREDIT_COST} credit
-              </p>
-              <ul className="mt-2 list-disc space-y-0.5 pl-5 text-muted">
-                {premium.map((f) => (
-                  <li key={f}>{f}</li>
-                ))}
-              </ul>
-              <p className="mt-2 text-muted">
-                {isSignedIn
-                  ? "Every account gets free credits each day. Remove these tools to export without using one."
-                  : "Sign in to use your free daily credits, or remove these tools to export without one."}
-              </p>
-            </div>
-          )}
-          {premium.length > 0 && !usesCredits && (
+          {premium.length > 0 && (
             <div className="rounded-xl border border-amber-400/50 bg-amber-400/10 p-3 text-xs">
               <p className="flex items-center gap-1.5 font-semibold text-foreground">
                 <PremiumBadge className="shrink-0" /> This project uses premium features
@@ -330,17 +303,13 @@ export default function ExportDialog({
               <p className="mt-2 text-muted">Any paid plan (from Lite, {PLANS.lite.priceLabel} for 30 days) exports them. Or swap them for free ones.</p>
             </div>
           )}
-          {usesCredits && !isSignedIn ? (
-            <button type="button" onClick={onSignIn} className="btn-primary flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold">
-              Sign in to export
-            </button>
-          ) : premium.length > 0 && !usesCredits ? (
+          {premium.length > 0 ? (
             <Link href="/pricing" className="btn-primary flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold">
               See plans
             </Link>
           ) : (
             <button type="button" onClick={start} className="btn-primary flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold">
-              <ExportIcon width={16} height={16} /> Export{usesCredits ? ` · ${EXPORT_CREDIT_COST} credit` : ""}
+              <ExportIcon width={16} height={16} /> Export
             </button>
           )}
         </div>

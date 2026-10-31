@@ -276,33 +276,17 @@ const pl: Dict = {
       feature: "Funkcja",
       included: "W zestawie",
       notIncluded: "Brak",
-      launch: {
-        badge: "Oferta na start",
-        title: "Wszystkie narzędzia za darmo ",
-        titleHighlight: "przez 30 dni.",
-        intro: "Każde nowe konto dostaje {days} dni Pro: wszystkie narzędzia i eksport do 4K, bez karty. Potem darmowy plan pozostaje darmowy.",
-        trialActive: "Twój okres próbny Pro trwa do {date}.",
-        paymentsLater: "Płatne plany pojawią się później. Dziś nie ma nic do kupienia.",
-        comingSoon: "Wkrótce",
-        freeTagline: "Za darmo na zawsze, po {days} dniach próbnych Pro.",
-        freeFeatures: [
-          "{days} dni próbnych Pro dla każdego nowego konta",
-          "Nagrywanie ekranu, zbliżenia fokusu i napisy",
-          "Pełny edytor wideo ze wszystkimi przejściami, filtrami i efektami",
-          "Tryby mieszania, krzywe prędkości, tekst karaoke, maski i własne czcionki",
-          "Eksport GIF, samego dźwięku, wysokiej jakości i 60 kl./s",
-          "Eksport do {res}",
-          "Darmowe kredyty każdego dnia ({daily}) na narzędzia AI i narzędzia za kredyty",
-        ],
+      trial: {
+        banner: "Każde nowe konto dostaje {days} dni Pro: wszystkie narzędzia i eksport do 4K, bez karty.",
+        active: "Twój okres próbny Pro trwa do {date}.",
+        feature: "{days} dni próbnych Pro dla każdego nowego konta",
         rows: {
           trial: "Okres próbny Pro dla nowych kont (dni: {days})",
           recorder: "Nagrywanie ekranu, zbliżenia fokusu, napisy",
+          powerTools: "Green screen, stabilizacja, efekty głosu, LUT, krzywe",
           proTools: "Tryby mieszania, krzywe prędkości, tekst karaoke, maski, własne czcionki, automatyczne wyciszanie",
           outputs: "Eksport GIF, samego dźwięku, wysokiej jakości i 60 kl./s",
-          creditTools: "Narzędzia za kredyty: green screen, stabilizacja, efekty głosu, LUT, krzywe",
-          perExport: "Kredyty za eksport: {n}",
         },
-        footnote: "Kredyty są zużywane przez narzędzia AI (usuwanie tła, wyostrzanie) i przez eksporty z narzędziem za kredyty: green screen, stabilizacja, efekty głosu, LUT lub krzywe (kredyty za eksport: {n}). Każde konto dostaje codziennie darmowe kredyty ({daily}).",
       },
       tiers: {
         free: {

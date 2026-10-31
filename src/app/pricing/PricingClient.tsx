@@ -8,7 +8,7 @@ import { TIER_LIMITS, TIERS as TIER_ORDER, toTier, type Tier } from "@/lib/entit
 import { createClient } from "@/lib/supabase/client";
 import { landingPagePath, trackEvent } from "@/lib/analytics";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
-import { EXPORT_CREDIT_COST, PAYMENTS_ENABLED, TRIAL_DAYS } from "@/lib/launch";
+import { TRIAL_DAYS } from "@/lib/launch";
 import { useI18n, useLocaleHref } from "@/i18n/client";
 import { fmt } from "@/i18n/format";
 import { rich } from "@/i18n/rich";
@@ -131,14 +131,13 @@ type PricingMessages = ClientMessages["pricing"];
  * English while that feature is off. */
 function tierCards(t: PricingMessages): { tier: Tier; tagline: string; popular?: boolean; features: string[] }[] {
   return TIER_ORDER.map((tier) => {
-    const launchFree = tier === "free" && !PAYMENTS_ENABLED;
-    const copy = launchFree ? { tagline: fmt(t.launch.freeTagline, { days: TRIAL_DAYS }), features: t.launch.freeFeatures } : t.tiers[tier];
-    const features = copy.features.map((f) =>
+    const copy = t.tiers[tier];
+    const features = [...(tier === "free" ? [t.trial.feature] : []), ...copy.features].map((f) =>
       fmt(f, {
+        days: TRIAL_DAYS,
         res: res(TIER_LIMITS[tier].maxResolution),
         daily: FREE_DAILY_CREDITS,
         credits: tier === "free" ? 0 : PLANS[tier].credits,
-        days: TRIAL_DAYS,
       }),
     );
     // The cleanup lines follow the credits line, which is last except on
@@ -159,22 +158,21 @@ const SUBSCRIPTION_KEYS: Record<Exclude<Tier, "free">, Record<Billing, PlanKey>>
 function comparison(t: PricingMessages): { label: string; values: Record<Tier, string | boolean> }[] {
   const r = t.rows;
   const all = (n: number) => fmt(r.all, { n });
-  const lr = t.launch.rows;
-  const launch = !PAYMENTS_ENABLED;
-  const paid = { lite: true, starter: true, pro: true } as const;
+  const tr = t.trial.rows;
+  const paid = { free: false, lite: true, starter: true, pro: true };
   return [
-  ...(launch ? [{ label: fmt(lr.trial, { days: TRIAL_DAYS }), values: { free: true, lite: true, starter: true, pro: true } }] : []),
-  { label: lr.recorder, values: { free: true, lite: true, starter: true, pro: true } },
+  { label: fmt(tr.trial, { days: TRIAL_DAYS }), values: { free: true, lite: true, starter: true, pro: true } },
+  { label: tr.recorder, values: { free: true, lite: true, starter: true, pro: true } },
   { label: r.trim, values: { free: true, lite: true, starter: true, pro: true } },
   { label: r.text, values: { free: true, lite: true, starter: true, pro: true } },
   { label: r.canvas, values: { free: true, lite: true, starter: true, pro: true } },
   { label: r.basicTransitions, values: { free: true, lite: true, starter: true, pro: true } },
-  { label: r.premiumTransitions, values: { free: launch, ...paid } },
-  { label: r.filters, values: { free: launch ? all(10) : fmt(r.basic, { n: 4 }), lite: all(10), starter: all(10), pro: all(10) } },
-  { label: r.effects, values: { free: launch ? all(11) : fmt(r.basic, { n: 3 }), lite: all(11), starter: all(11), pro: all(11) } },
-  { label: lr.proTools, values: { free: launch, ...paid } },
-  { label: lr.outputs, values: { free: launch, ...paid } },
-  { label: lr.creditTools, values: { free: launch ? fmt(lr.perExport, { n: EXPORT_CREDIT_COST }) : false, ...paid } },
+  { label: r.premiumTransitions, values: { free: false, lite: true, starter: true, pro: true } },
+  { label: r.filters, values: { free: fmt(r.basic, { n: 4 }), lite: all(10), starter: all(10), pro: all(10) } },
+  { label: r.effects, values: { free: fmt(r.basic, { n: 3 }), lite: all(11), starter: all(11), pro: all(11) } },
+  { label: tr.powerTools, values: paid },
+  { label: tr.proTools, values: paid },
+  { label: tr.outputs, values: paid },
   {
     label: r.resolution,
     values: {
@@ -241,7 +239,7 @@ export default function PricingClient({ children }: { children?: React.ReactNode
   const [promoChecking, setPromoChecking] = useState(false);
   const promo = promoCode ? checkoutConfig?.promo ?? null : null;
   const showLkr = checkoutConfig?.gateway !== "paddle";
-  const manualPayments = PAYMENTS_ENABLED && (MANUAL_PAYMENTS_FLAG || checkoutConfig?.gateway === null);
+  const manualPayments = MANUAL_PAYMENTS_FLAG || checkoutConfig?.gateway === null;
 
   useEffect(() => {
     if (checkoutUrl) window.location.href = checkoutUrl;
@@ -409,30 +407,26 @@ export default function PricingClient({ children }: { children?: React.ReactNode
 
         <div className="mx-auto max-w-3xl text-center">
           <div className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-surface-2/90 border border-border px-3.5 py-1 text-xs font-semibold text-muted">
-            {PAYMENTS_ENABLED ? t.badge : t.launch.badge}
+            {t.badge}
           </div>
           <h1 className="font-display text-4xl font-extrabold tracking-tight sm:text-5xl text-foreground">
-            {PAYMENTS_ENABLED ? t.title : t.launch.title}
-            <span className="text-gradient">{PAYMENTS_ENABLED ? t.titleHighlight : t.launch.titleHighlight}</span>
+            {t.title}<span className="text-gradient">{t.titleHighlight}</span>
           </h1>
           <p className="mt-4 text-base sm:text-lg text-muted max-w-xl mx-auto">
-            {PAYMENTS_ENABLED ? fmt(t.intro, { price: PLANS.lite.priceLabel }) : fmt(t.launch.intro, { days: TRIAL_DAYS })}
+            {fmt(t.intro, { price: PLANS.lite.priceLabel })}
           </p>
-          {!PAYMENTS_ENABLED && (
-            <div
-              role="status"
-              className="mx-auto mt-6 max-w-xl rounded-2xl border border-emerald-500/50 bg-emerald-500/10 px-5 py-3 text-sm text-foreground"
-            >
-              {trialEndsAt && (
-                <p className="font-semibold">
-                  {fmt(t.launch.trialActive, {
+          <div
+            role="status"
+            className="mx-auto mt-6 max-w-xl rounded-2xl border border-emerald-500/50 bg-emerald-500/10 px-5 py-3 text-sm text-foreground"
+          >
+            <p className="font-semibold">
+              {trialEndsAt
+                ? fmt(t.trial.active, {
                     date: new Date(trialEndsAt).toLocaleDateString(lang, { month: "long", day: "numeric", year: "numeric" }),
-                  })}
-                </p>
-              )}
-              <p className={trialEndsAt ? "mt-1 text-muted" : "font-semibold"}>{t.launch.paymentsLater}</p>
-            </div>
-          )}
+                  })
+                : fmt(t.trial.banner, { days: TRIAL_DAYS })}
+            </p>
+          </div>
 
           <div className="mt-8 inline-flex rounded-full border border-border bg-surface-2/80 p-1 text-sm font-semibold" role="radiogroup" aria-label={t.billingPeriod}>
             {(["month", "year"] as const).map((b) => (
@@ -451,7 +445,7 @@ export default function PricingClient({ children }: { children?: React.ReactNode
           </div>
         </div>
 
-        {PAYMENTS_ENABLED && !manualPayments && checkoutConfig && (
+        {!manualPayments && checkoutConfig && (
           promo ? (
             <div
               role="status"
@@ -586,14 +580,7 @@ export default function PricingClient({ children }: { children?: React.ReactNode
                 </div>
 
                 <div className="mt-8">
-                  {key && plan && !PAYMENTS_ENABLED ? (
-                    <span
-                      aria-disabled
-                      className="block w-full cursor-not-allowed rounded-full border border-border py-3 text-center text-xs font-semibold text-muted opacity-70"
-                    >
-                      {t.launch.comingSoon}
-                    </span>
-                  ) : key && plan ? (
+                  {key && plan ? (
                     <button
                       onClick={() => buy(key)}
                       disabled={loading !== null}
@@ -631,25 +618,17 @@ export default function PricingClient({ children }: { children?: React.ReactNode
               {t.paygNote}
             </p>
           </div>
-          {PAYMENTS_ENABLED ? (
-            <button
-              onClick={() => buy("payg")}
-              disabled={loading !== null}
-              className="btn-secondary shrink-0 rounded-full px-6 py-3 text-xs font-bold disabled:opacity-50"
-            >
-              {loading === "payg" ? t.openingCheckout : manualPayments ? t.creditsViaWhatsapp : t.buyCredits}
-            </button>
-          ) : (
-            <span aria-disabled className="shrink-0 cursor-not-allowed rounded-full border border-border px-6 py-3 text-xs font-semibold text-muted opacity-70">
-              {t.launch.comingSoon}
-            </span>
-          )}
+          <button
+            onClick={() => buy("payg")}
+            disabled={loading !== null}
+            className="btn-secondary shrink-0 rounded-full px-6 py-3 text-xs font-bold disabled:opacity-50"
+          >
+            {loading === "payg" ? t.openingCheckout : manualPayments ? t.creditsViaWhatsapp : t.buyCredits}
+          </button>
         </div>
 
         <p className="mx-auto mt-6 max-w-2xl text-center text-xs text-muted">
-          {!PAYMENTS_ENABLED ? (
-            fmt(t.launch.footnote, { n: EXPORT_CREDIT_COST, daily: FREE_DAILY_CREDITS })
-          ) : AI_CLEANUP_ENABLED ? (
+          {AI_CLEANUP_ENABLED ? (
             <>
               Plans are prepaid for the period shown and don&apos;t renew automatically. Renewing early adds the time to
               your current plan. AI credits are used by the AI tools (object cleanup, background removal, sharpening);

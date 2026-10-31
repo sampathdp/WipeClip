@@ -276,33 +276,17 @@ const fr: Dict = {
       feature: "Fonction",
       included: "Inclus",
       notIncluded: "Non inclus",
-      launch: {
-        badge: "Offre de lancement",
-        title: "Tous les outils gratuits ",
-        titleHighlight: "pendant 30 jours.",
-        intro: "Chaque nouveau compte reçoit {days} jours de Pro : tous les outils et des exports jusqu'en 4K, sans carte. Ensuite, le forfait gratuit reste gratuit.",
-        trialActive: "Votre essai Pro dure jusqu'au {date}.",
-        paymentsLater: "Les forfaits payants arriveront plus tard. Rien à acheter aujourd'hui.",
-        comingSoon: "Bientôt disponible",
-        freeTagline: "Gratuit pour toujours, après {days} jours d'essai Pro.",
-        freeFeatures: [
-          "{days} jours d'essai Pro pour chaque nouveau compte",
-          "Enregistreur d'écran, zooms de focus et sous-titres",
-          "Éditeur vidéo complet avec toutes les transitions, filtres et effets",
-          "Modes de fusion, courbes de vitesse, texte karaoké, masques et polices personnalisées",
-          "Exports GIF, audio seul, haute qualité et 60 i/s",
-          "Exports jusqu'en {res}",
-          "{daily} crédits gratuits par jour pour les outils IA et les outils à crédits",
-        ],
+      trial: {
+        banner: "Chaque nouveau compte reçoit {days} jours de Pro : tous les outils et des exports jusqu'en 4K, sans carte.",
+        active: "Votre essai Pro dure jusqu'au {date}.",
+        feature: "{days} jours d'essai Pro pour chaque nouveau compte",
         rows: {
           trial: "{days} jours d'essai Pro pour les nouveaux comptes",
           recorder: "Enregistreur d'écran, zooms de focus, sous-titres",
+          powerTools: "Fond vert, stabilisation, effets de voix, LUT, courbes",
           proTools: "Modes de fusion, courbes de vitesse, texte karaoké, masques, polices personnalisées, atténuation auto",
           outputs: "Export GIF, audio seul, haute qualité et 60 i/s",
-          creditTools: "Outils à crédits : fond vert, stabilisation, effets de voix, LUT, courbes",
-          perExport: "{n} crédit par export",
         },
-        footnote: "Les crédits servent aux outils IA (suppression d'arrière-plan, netteté) et aux exports qui utilisent un outil à crédits : fond vert, stabilisation, effets de voix, LUT ou courbes ({n} crédit par export). Chaque compte reçoit {daily} crédits gratuits par jour.",
       },
       tiers: {
         free: {

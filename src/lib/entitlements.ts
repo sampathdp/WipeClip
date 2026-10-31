@@ -2,7 +2,6 @@ import type { Resolution } from "./toolsApi";
 import type { EffectType, FilterId, TransitionType } from "./editor/types";
 import { EFFECT_LABELS, TRANSITION_LABELS } from "./editor/timeline.ts";
 import { FILTERS } from "./editor/look.ts";
-import { PAYMENTS_ENABLED } from "./launch.ts";
 
 /** What each subscription tier unlocks. Every tool is
  * usable in the editor on any tier, premium ones carry a badge, and the
@@ -89,12 +88,6 @@ export const PREMIUM = {
   fps: "Over 30 fps export",
 } as const;
 
-/** The premium tools the free plan still holds back while payments are off
- * (src/lib/launch.ts). Exporting a project that uses any of them costs
- * EXPORT_CREDIT_COST credits instead of needing a paid plan; every other
- * premium feature is free until payments open. */
-export const CREDIT_TOOLS: ReadonlySet<string> = new Set([PREMIUM.chromaKey, PREMIUM.stabilize, PREMIUM.voice, PREMIUM.lut, PREMIUM.curves]);
-
 /** Free masks: circle and rectangle, not inverted. */
 export const isPremiumMask = (m: { shape?: string; invert?: boolean } | null | undefined) => !!m && (m.invert === true || (m.shape !== "circle" && m.shape !== "rect"));
 
@@ -145,13 +138,6 @@ function curvesUsed(look: PremiumCheckable["clips"][number]["look"]): boolean {
   if (Array.isArray(look?.curve)) return true;
   const c = look?.curves as Record<string, [number, number][]> | undefined;
   return !!c && Object.values(c).some((pts) => Array.isArray(pts) && pts.some((p) => Array.isArray(p) && Math.abs(p[0] - p[1]) > 1e-4));
-}
-
-/** The premium features a project uses that the free plan can't export
- * freely: all of them once payments are on, only the credit tools before. */
-export function lockedFeaturesUsed(project: PremiumCheckable): string[] {
-  const used = premiumFeaturesUsed(project);
-  return PAYMENTS_ENABLED ? used : used.filter((f) => CREDIT_TOOLS.has(f));
 }
 
 /** Human-readable names of the premium features a project uses, deduped

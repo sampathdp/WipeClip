@@ -276,33 +276,17 @@ const es: Dict = {
       feature: "Función",
       included: "Incluido",
       notIncluded: "No incluido",
-      launch: {
-        badge: "Oferta de lanzamiento",
-        title: "Todas las herramientas gratis ",
-        titleHighlight: "durante 30 días.",
-        intro: "Cada cuenta nueva recibe {days} días de Pro: todas las herramientas y exportaciones hasta 4K, sin tarjeta. Después, el plan gratuito sigue siendo gratis.",
-        trialActive: "Tu prueba de Pro dura hasta el {date}.",
-        paymentsLater: "Los planes de pago llegarán más adelante. Hoy no hay nada que comprar.",
-        comingSoon: "Muy pronto",
-        freeTagline: "Gratis para siempre, tras {days} días de prueba de Pro.",
-        freeFeatures: [
-          "{days} días de prueba de Pro para cada cuenta nueva",
-          "Grabador de pantalla, zooms de enfoque y subtítulos",
-          "Editor de vídeo completo con todas las transiciones, filtros y efectos",
-          "Modos de fusión, curvas de velocidad, texto karaoke, máscaras y fuentes propias",
-          "Exportación GIF, solo audio, alta calidad y 60 fps",
-          "Exportaciones hasta {res}",
-          "{daily} créditos gratis al día para las herramientas de IA y de créditos",
-        ],
+      trial: {
+        banner: "Cada cuenta nueva recibe {days} días de Pro: todas las herramientas y exportaciones hasta 4K, sin tarjeta.",
+        active: "Tu prueba de Pro dura hasta el {date}.",
+        feature: "{days} días de prueba de Pro para cada cuenta nueva",
         rows: {
           trial: "{days} días de prueba de Pro para cuentas nuevas",
           recorder: "Grabador de pantalla, zooms de enfoque, subtítulos",
+          powerTools: "Pantalla verde, estabilización, efectos de voz, LUT, curvas",
           proTools: "Modos de fusión, curvas de velocidad, texto karaoke, máscaras, fuentes propias, atenuación automática",
           outputs: "Exportación GIF, solo audio, alta calidad y 60 fps",
-          creditTools: "Herramientas de créditos: pantalla verde, estabilización, efectos de voz, LUT, curvas",
-          perExport: "{n} crédito por exportación",
         },
-        footnote: "Los créditos los usan las herramientas de IA (quitar fondo, enfocar) y las exportaciones con una herramienta de créditos: pantalla verde, estabilización, efectos de voz, LUT o curvas ({n} crédito por exportación). Cada cuenta recibe {daily} créditos gratis al día.",
       },
       tiers: {
         free: {
