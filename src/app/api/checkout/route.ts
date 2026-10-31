@@ -3,6 +3,7 @@ import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/s
 import { PLANS, type PlanKey } from "@/lib/credits";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { effectivePlan } from "@/lib/plan";
+import { PAYMENTS_ENABLED } from "@/lib/launch";
 import { TIER_LABELS, TIERS, toTier } from "@/lib/entitlements";
 import { createCheckout, PaymentsLkError } from "@/lib/paymentsLk";
 import { createTransaction, getClientToken, PaddleError, paddleEnvironment, priceIdFor } from "@/lib/paddle";
@@ -92,6 +93,11 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  // Launch mode (src/lib/launch.ts): the pricing page shows the plans as
+  // coming soon, and nothing can be bought until payments open.
+  if (!PAYMENTS_ENABLED) {
+    return NextResponse.json({ error: "Paid plans open later. Everything you need is free for now." }, { status: 403 });
+  }
   if (!isSupabaseConfigured()) {
     return NextResponse.json({ error: "Accounts aren't configured yet." }, { status: 501 });
   }

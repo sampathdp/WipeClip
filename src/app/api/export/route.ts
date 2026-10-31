@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRequestAuth, isSupabaseConfigured } from "@/lib/supabase/server";
+import { createServiceClient, getRequestAuth, isSupabaseConfigured } from "@/lib/supabase/server";
 import { preflight, withCors } from "@/lib/cors";
 import { BACKEND_DISABLED, BACKEND_DISABLED_MESSAGE, type Resolution } from "@/lib/toolsApi";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { issueTicket, sha256Hex } from "@/lib/jobTicket";
-import { effectivePlan } from "@/lib/plan";
+import { accessPlan } from "@/lib/plan";
+import { EXPORT_CREDIT_COST, PAYMENTS_ENABLED } from "@/lib/launch";
 import {
   canExportAt,
-  premiumFeaturesUsed,
+  lockedFeaturesUsed,
   TIER_LABELS,
   TIER_LIMITS,
   tierForResolution,
@@ -30,7 +31,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * why they don't pass through here). The ticket pins the checked project
  * (by hash), resolution, branding and compact encoding.
  *
- * Exports don't spend credits - the subscription tier decides what's
+ * While payments are off (src/lib/launch.ts), the free plan exports every
+ * premium feature except the credit tools, which cost EXPORT_CREDIT_COST
+ * credits per export instead of a paid plan.
+ *
+ * Otherwise exports don't spend credits - the subscription tier decides what's
  * allowed (see src/lib/entitlements.ts): the highest resolution, whether
  * premium transitions/filters/effects may be rendered, the daily export
  * count, and whether the backend stamps the free-tier "Made with WipeClip"
@@ -57,8 +62,8 @@ async function handle(request: NextRequest) {
     if (!(await checkRateLimit(`${rateLimitKeyFor(request, user.id)}:export`, 30, 60 * 60 * 1000))) {
       return errorResponse("rate_limited", "Too many exports. Try again later.", 429);
     }
-    const { data: profile } = await supabase.from("profiles").select("plan, plan_expires_at").eq("id", user.id).single();
-    tier = profile ? toTier(effectivePlan(profile)) : "free";
+    const { data: profile } = await supabase.from("profiles").select("plan, plan_expires_at, created_at").eq("id", user.id).single();
+    tier = profile ? toTier(accessPlan(profile)) : "free";
   }
   const limits = TIER_LIMITS[tier];
 
@@ -90,15 +95,18 @@ async function handle(request: NextRequest) {
   } catch {
     return errorResponse("bad_project", "Invalid project data.", 400);
   }
-  if (!limits.premiumEffects) {
-    const premium = premiumFeaturesUsed(project);
-    if (premium.length) {
-      return errorResponse(
-        "plan_required",
-        `This project uses premium features (${premium.join(", ")}). Upgrade to any paid plan (from Lite) or remove them to export.`,
-        403
-      );
-    }
+  const locked = limits.premiumEffects ? [] : lockedFeaturesUsed(project);
+  let creditCost = 0;
+  if (locked.length && PAYMENTS_ENABLED) {
+    return errorResponse(
+      "plan_required",
+      `This project uses premium features (${locked.join(", ")}). Upgrade to any paid plan (from Lite) or remove them to export.`,
+      403
+    );
+  }
+  if (locked.length) {
+    if (!user) return errorResponse("auth_required", `Sign in to export with ${locked.join(", ")}.`, 401);
+    creditCost = EXPORT_CREDIT_COST;
   }
 
   // Counted only once the export is otherwise allowed, so a refused
@@ -110,6 +118,24 @@ async function handle(request: NextRequest) {
       user ? "Daily export limit reached for your plan. Upgrade for more exports." : "Free export limit reached for today. Sign in for more.",
       429
     );
+  }
+
+  // Last, so a refused export never spends the credit. Not refunded if the
+  // render then fails: it's one of the free daily credits.
+  if (creditCost && user) {
+    const { data: consumed, error } = await createServiceClient().rpc("consume_credits", {
+      p_user_id: user.id,
+      p_amount: creditCost,
+      p_resolution: "export",
+    });
+    if (error) return errorResponse("server_error", "Could not check your credits. Try again.", 500);
+    if (!consumed) {
+      return errorResponse(
+        "insufficient_credits",
+        `Not enough credits: this export uses ${locked.join(", ")} (${creditCost} credit). Free credits renew daily.`,
+        402
+      );
+    }
   }
 
   const ticket = issueTicket({

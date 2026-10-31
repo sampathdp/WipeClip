@@ -160,7 +160,8 @@ import {
   clipTransformAt,
   overlayValues,
 } from "@/lib/editor/keyframes";
-import { PremiumLocked, type KeyframeControls } from "./Panels";
+import { CreditLocked, PremiumLocked, type KeyframeControls } from "./Panels";
+import { PAYMENTS_ENABLED } from "@/lib/launch";
 import { activeRamp } from "@/lib/editor/speed";
 import { DEFAULT_DUCK_AMOUNT, speechRegions } from "@/lib/editor/ducking";
 import { BEAT_RATE, detectBeats } from "@/lib/editor/beats";
@@ -364,7 +365,11 @@ export default function VideoEditor({
     };
   }, [isSignedIn]);
   const tier: Tier = isSignedIn ? signedInTier : "free";
-  const premiumLocked = !TIER_LIMITS[tier].premiumEffects;
+  // While payments are off the free plan keeps the premium tools; only the
+  // credit tools are marked (src/lib/launch.ts).
+  const planLocked = !TIER_LIMITS[tier].premiumEffects;
+  const premiumLocked = planLocked && PAYMENTS_ENABLED;
+  const creditLocked = planLocked && !PAYMENTS_ENABLED;
 
   // --- saved projects -------------------------------------------------------
   const refreshRecents = useCallback(() => listProjects().then(setRecents), []);
@@ -3115,7 +3120,9 @@ export default function VideoEditor({
         </main>
 
         <aside className="border-t border-border bg-surface/50 lg:w-80 lg:shrink-0 lg:overflow-hidden lg:border-l lg:border-t-0 xl:w-96" aria-label="Properties">
-          <PremiumLocked.Provider value={premiumLocked}>{panel}</PremiumLocked.Provider>
+          <PremiumLocked.Provider value={premiumLocked}>
+            <CreditLocked.Provider value={creditLocked}>{panel}</CreditLocked.Provider>
+          </PremiumLocked.Provider>
         </aside>
       </div>
 

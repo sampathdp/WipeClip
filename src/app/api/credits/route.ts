@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestAuth, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { effectivePlan } from "@/lib/plan";
+import { accessPlan } from "@/lib/plan";
+import { inTrial, trialEndsAt } from "@/lib/launch";
 import { preflight, withCors } from "@/lib/cors";
 import { edgeCountry, rememberCountry } from "@/lib/geo";
 
@@ -37,7 +38,7 @@ async function handle(request: NextRequest) {
 
   const { data: profile, error } = await supabase
     .from("profiles")
-    .select("plan, plan_expires_at, free_credits, paid_credits, country")
+    .select("plan, plan_expires_at, free_credits, paid_credits, country, created_at")
     .eq("id", user.id)
     .single();
 
@@ -57,7 +58,8 @@ async function handle(request: NextRequest) {
 
   return NextResponse.json({
     email: user.email,
-    plan: effectivePlan(profile),
+    plan: accessPlan(profile),
+    trialEndsAt: inTrial(profile.created_at) ? trialEndsAt(profile.created_at).toISOString() : null,
     planExpiresAt: profile.plan_expires_at,
     freeCredits: profile.free_credits,
     paidCredits: profile.paid_credits,

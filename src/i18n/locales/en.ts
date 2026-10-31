@@ -552,6 +552,7 @@ const en = {
     plan: "Plan",
     upgrade: "Upgrade for more credits and Pro features.",
     activeUntil: "Active until {date}",
+    trialUntil: "Free Pro trial until {date}",
     active: "Active",
     seePlans: "See plans",
     managePlan: "Manage plan",
