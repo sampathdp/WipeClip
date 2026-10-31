@@ -67,7 +67,7 @@ pub fn offer(app: &tauri::AppHandle, paths: Vec<PathBuf>) {
         let state = app.state::<OpenedState>();
         let mut pending = state.pending.lock().unwrap();
         for p in paths {
-            log::info!("project file to open: {}", p.display());
+            log::info!("project file to open: {}", crate::media::log_name(&p));
             pending.push((uuid::Uuid::new_v4().to_string(), p));
         }
     }
@@ -107,7 +107,7 @@ pub async fn opened_file_read(state: tauri::State<'_, OpenedState>, token: Strin
         return Err("This project file is too large to open by double-clicking. Open it with \"Open a project file\" on WipeClip's start screen.".into());
     }
     let bytes = fs::read(&path).map_err(|e| {
-        log::error!("reading {} failed: {e}", path.display());
+        log::error!("reading {} failed: {e}", crate::media::log_name(&path));
         "The project file couldn't be read.".to_string()
     })?;
     Ok(tauri::ipc::Response::new(bytes))

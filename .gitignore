@@ -107,3 +107,6 @@ desktop.ini
 *.swp
 *.swo
 .idea/
+
+# Export benchmark media and results (backend/bench/export_bench.py)
+.bench/

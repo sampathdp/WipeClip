@@ -3,7 +3,8 @@
 import { useState, type ReactNode } from "react";
 import { FOCUS_PRESETS, type FocusPreset, type FocusSettings } from "@/lib/editor/focus";
 import { formatTime } from "@/lib/editor/timeline";
-import { DEFAULT_POINTER, type CameraZoom, type PointerStyle, type ZoomEase } from "@/lib/editor/types";
+import { MAX_INTENSITY, MIN_INTENSITY } from "@/lib/editor/focusPrefs";
+import { DEFAULT_POINTER, type CameraZoom, type FocusPrefs, type PointerStyle, type ZoomEase } from "@/lib/editor/types";
 import { ActionButton, PanelShell } from "./Inspector";
 import { SliderField, type Gesture } from "./Panels";
 import { TrashIcon } from "./icons";
@@ -74,6 +75,15 @@ export function FocusPanel({
   onAddAtPlayhead,
   onSelect,
   onPointerChange,
+  focus,
+  onFocusChange,
+  comparing,
+  onCompare,
+  onExcludeAtPlayhead,
+  onRemoveExclusion,
+  onIgnoreClickAtPlayhead,
+  onRestoreClick,
+  onSeek,
   onClose,
   gesture,
 }: {
@@ -90,6 +100,17 @@ export function FocusPanel({
   onAddAtPlayhead: () => void;
   onSelect: (id: string) => void;
   onPointerChange: (p: PointerStyle | null) => void;
+  focus: FocusPrefs;
+  onFocusChange: (patch: Partial<Pick<FocusPrefs, "intensity" | "bypass">>) => void;
+  /** Preview-only comparison with the unzoomed recording. */
+  comparing: boolean;
+  onCompare: (on: boolean) => void;
+  onExcludeAtPlayhead: () => void;
+  onRemoveExclusion: (id: string) => void;
+  onIgnoreClickAtPlayhead: () => void;
+  onRestoreClick: (t: number) => void;
+  /** Moves the playhead to a source time of the recording. */
+  onSeek: (sourceTime: number) => void;
   onClose: () => void;
   gesture: Gesture;
 }) {
@@ -189,6 +210,85 @@ export function FocusPanel({
 
       {zooms.length > 0 && (
         <>
+          <Title>View</Title>
+          <div className="space-y-3">
+            <button
+              type="button"
+              aria-pressed={comparing}
+              disabled={focus.bypass}
+              onClick={() => onCompare(!comparing)}
+              className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50 ${comparing ? "border-accent bg-accent/15 text-accent" : "border-border bg-surface text-foreground hover:border-accent/50"}`}
+            >
+              {comparing ? "Showing original - click to show zooms" : "Compare with original"}
+            </button>
+            <p className="-mt-2 text-[11px] text-muted">Preview only: the recording without zooms, to check what they add. Not saved; the export is unchanged.</p>
+            <Check
+              label="Original view"
+              checked={focus.bypass}
+              onChange={(v) => onFocusChange({ bypass: v })}
+              hint="Shows and exports the recording without zooms. Your zooms are kept; turn this off to bring them back."
+            />
+            <SliderField
+              label="Zoom intensity"
+              value={focus.intensity}
+              min={MIN_INTENSITY}
+              max={MAX_INTENSITY}
+              step={0.05}
+              format={(v) => `${Math.round(v * 100)}%`}
+              onChange={(v) => onFocusChange({ intensity: v })}
+              gesture={gesture}
+            />
+            <p className="text-[11px] text-muted">Scales every zoom at once without changing them; 100% shows each zoom as set.</p>
+          </div>
+        </>
+      )}
+
+      {available && (
+        <>
+          <Title>Leave out</Title>
+          <p className="mb-2 text-xs text-muted">Parts of the recording where no zooms are suggested, and clicks to ignore (no ring, no zoom).</p>
+          <div className="flex flex-wrap gap-2">
+            <ActionButton onClick={onExcludeAtPlayhead} title="No zoom suggestions for the 10 seconds from the playhead">
+              No zooms for 10 s from playhead
+            </ActionButton>
+            <ActionButton onClick={onIgnoreClickAtPlayhead} title="Ignore the recorded click nearest the playhead">
+              Ignore click at playhead
+            </ActionButton>
+          </div>
+          {(focus.excluded.length > 0 || focus.ignoredClicks.length > 0) && (
+            <ul className="mt-2 space-y-1">
+              {[...focus.excluded]
+                .sort((a, b) => a.start - b.start)
+                .map((r) => (
+                  <li key={r.id} className="flex items-center gap-2 rounded-lg border border-border px-2 py-1 text-xs">
+                    <button type="button" className="min-w-0 flex-1 truncate text-left text-foreground hover:underline" onClick={() => onSeek(r.start)}>
+                      No zooms {formatTime(r.start)}–{formatTime(r.end)}
+                    </button>
+                    <button type="button" className="font-semibold text-accent-2 underline" onClick={() => onRemoveExclusion(r.id)}>
+                      Allow
+                    </button>
+                  </li>
+                ))}
+              {[...focus.ignoredClicks]
+                .sort((a, b) => a.t - b.t)
+                .map((c) => (
+                  <li key={`${c.sourceId}-${c.t}`} className="flex items-center gap-2 rounded-lg border border-border px-2 py-1 text-xs">
+                    <button type="button" className="min-w-0 flex-1 truncate text-left text-foreground hover:underline" onClick={() => onSeek(c.t)}>
+                      Ignored click at {formatTime(c.t)}
+                    </button>
+                    <button type="button" className="font-semibold text-accent-2 underline" onClick={() => onRestoreClick(c.t)}>
+                      Restore
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          )}
+          <p className="mt-2 text-[11px] text-muted">Your own zooms are never removed. Analyze again to apply these to new suggestions.</p>
+        </>
+      )}
+
+      {zooms.length > 0 && (
+        <>
           <Title>Zooms ({zooms.length})</Title>
           <ul className="space-y-1">
             {[...zooms]
@@ -260,6 +360,7 @@ export function ZoomPanel({
   canCenterOnPointer,
   onSplit,
   onDelete,
+  onNeverHere,
   onClose,
   gesture,
 }: {
@@ -270,6 +371,8 @@ export function ZoomPanel({
   canCenterOnPointer: boolean;
   onSplit: () => void;
   onDelete: () => void;
+  /** Deletes this zoom and keeps suggestions out of its range. */
+  onNeverHere: () => void;
   onClose: () => void;
   gesture: Gesture;
 }) {
@@ -308,6 +411,9 @@ export function ZoomPanel({
             Focus on pointer
           </ActionButton>
           <ActionButton onClick={onSplit}>Split at playhead</ActionButton>
+          <ActionButton onClick={onNeverHere} title="Delete this zoom and don't suggest zooms here again">
+            No zooms here
+          </ActionButton>
           <ActionButton tone="danger" onClick={onDelete}>
             <TrashIcon width={14} height={14} /> Delete
           </ActionButton>

@@ -108,7 +108,7 @@ from app.config import (
     RESOLUTION_HEIGHTS,
     SHARPEN_AMOUNT_PRESETS,
 )
-from app.pipeline import audio_clean, io_utils, moderation
+from app.pipeline import activity, audio_clean, encoders, io_utils, moderation
 from app.pipeline import editor as editor_pipeline
 from app.pipeline import video as video_pipeline
 from app.queue import get_queue
@@ -363,12 +363,14 @@ async def _receive_video(
     tmp: str,
     max_bytes: int = MAX_VIDEO_UPLOAD_BYTES,
     path: Optional[str] = None,
+    suffixes: Optional[set[str]] = None,
 ) -> str:
     """Puts the job's video in `tmp` - from the bucket when the browser
     uploaded it there (`upload_id`), else from the request body - and
-    returns its path. A local `path` (desktop engine) is returned as is."""
+    returns its path. A local `path` (desktop engine) is returned as is;
+    `suffixes` widens which files it may be (default: videos)."""
     if path:
-        return _local_file(path, _VIDEO_SUFFIXES)
+        return _local_file(path, suffixes or _VIDEO_SUFFIXES)
     if upload_id:
         in_path = os.path.join(tmp, f"input{uploads.suffix(upload_id)}")
         await asyncio.to_thread(uploads.download, upload_id, in_path, max_bytes)
@@ -389,24 +391,75 @@ async def api_audio_clean(
     denoise: float = Form(0.6, ge=0, le=1),
     level: bool = Form(True),
 ):
-    """Desktop engine only: a cleaned copy of a clip's sound (noise reduced,
-    loudness evened out - app/pipeline/audio_clean.py) for source seconds
-    `start`..`end`, as an AAC file. Free and unmetered like the import
-    check: it runs on the user's own machine. The cloud backend refuses it.
+    """Desktop engine only: a cleaned copy of a clip's or an audio track's
+    sound (noise reduced, loudness evened out if `level` -
+    app/pipeline/audio_clean.py) for source seconds `start`..`end`, as an
+    AAC file. Audio tracks send their whole file (start 0), so the copy
+    lines up with the original sample for sample. Free and unmetered like
+    the import check: it runs on the user's own machine. The cloud backend
+    refuses it; the recording never leaves the device.
     """
     if not LOCAL_MODE:
         raise HTTPException(status_code=404, detail="Not available here.")
     if end <= start or end - start > MAX_VIDEO_DURATION_SECONDS + 1:
         raise HTTPException(status_code=400, detail="Invalid range")
     with tempfile.TemporaryDirectory() as tmp:
-        in_path = await _receive_video(file, None, tmp, path=path)
+        in_path = await _receive_video(file, None, tmp, path=path, suffixes=_VIDEO_SUFFIXES | _AUDIO_SUFFIXES)
         out_path = os.path.join(tmp, "clean.m4a")
         try:
             await audio_clean.clean_audio(in_path, out_path, start, end, denoise, level)
         except RuntimeError as exc:
             traceback.print_exc()
-            raise HTTPException(status_code=400, detail="This clip's audio couldn't be cleaned up.") from exc
+            raise HTTPException(
+                status_code=400, detail="This audio couldn't be cleaned up. The file may have no sound, or a format that can't be read."
+            ) from exc
         return _stream_result(out_path, "audio/mp4")
+
+
+MAX_ACTIVITY_RANGES = 50
+
+
+@app.post("/api/video/activity")
+async def api_video_activity(path: str = Form(...), ranges: str = Form(...)):
+    """Desktop engine only: how much the picture changes in each of up to
+    MAX_ACTIVITY_RANGES source-time ranges ([[start, end], ...] JSON) of a
+    video on this machine (app/pipeline/activity.py). Used by the editor's
+    silence review; only those ranges are decoded."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    try:
+        raw = json.loads(ranges)
+        parsed = [(float(a), float(b)) for a, b in raw]
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid ranges") from None
+    if not parsed or len(parsed) > MAX_ACTIVITY_RANGES:
+        raise HTTPException(status_code=400, detail="Invalid ranges")
+    for a, b in parsed:
+        if not (math.isfinite(a) and math.isfinite(b)) or a < 0 or b <= a or b - a > 3600:
+            raise HTTPException(status_code=400, detail="Invalid range")
+    in_path = _local_file(path, _VIDEO_SUFFIXES)
+    try:
+        result = await activity.measure_ranges(in_path, parsed)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail="This video couldn't be read.") from exc
+    return {"ranges": result}
+
+
+@app.post("/api/video/motion")
+async def api_video_motion(path: str = Form(...), start: float = Form(...), end: float = Form(...)):
+    """Desktop engine only: picture change and scene-change scores through
+    source seconds start..end (at most activity.MAX_PROFILE_SECONDS) of a
+    video on this machine (app/pipeline/activity.py motion_profile). Used by
+    the editor's highlight suggestions."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    if not (math.isfinite(start) and math.isfinite(end)) or start < 0 or end <= start or end - start > activity.MAX_PROFILE_SECONDS:
+        raise HTTPException(status_code=400, detail="Invalid range")
+    in_path = _local_file(path, _VIDEO_SUFFIXES)
+    try:
+        return await activity.motion_profile(in_path, start, end)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail="This video couldn't be read.") from exc
 
 
 @app.post("/api/video/probe")
@@ -714,7 +767,9 @@ class _EditorClip(BaseModel):
     crop: _EditorCrop = Field(default_factory=_EditorCrop)
     transition: Optional[_EditorTransition] = None
     speed: float = Field(1, ge=0.5, le=2)
-    volume: float = Field(1, ge=0, le=2)
+    # The clip's own volume (0..2) times the video-sound track's (0..2,
+    # src/lib/editor/mix.ts clipMixVolume).
+    volume: float = Field(1, ge=0, le=4)
     transform: _EditorTransform = Field(default_factory=_EditorTransform)
     look: _EditorLook = Field(default_factory=_EditorLook)
     # Focus zoom rows [t, x, y, s] in clip time (see PlanClip.camera).
@@ -929,6 +984,9 @@ class _EditorProject(BaseModel):
     # MP4's quality (QUALITY_CRF).
     format: str = "mp4"
     quality: str = "standard"
+    # Loudness normalization, dB, measured by the editor (loudness.ts) so
+    # the preview plays the same level; the export's limiter follows it.
+    masterGain: float = Field(0, ge=-editor_pipeline.MAX_MASTER_GAIN_DB, le=editor_pipeline.MAX_MASTER_GAIN_DB)
 
 
 _VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
@@ -1158,6 +1216,7 @@ async def api_video_export(
 
             audio_paths: list[str] = []
             audio_durations: list[float] = []
+            audio_monos: list[bool] = []
             for i, (kind, item) in enumerate(audio_items):
                 if kind == "path":
                     # Extracted audio of a video on disk: the video file itself.
@@ -1170,6 +1229,7 @@ async def api_video_export(
                         raise HTTPException(status_code=400, detail="Project files are too large to export together")
                 try:
                     audio_durations.append(editor_pipeline.probe_audio(path))
+                    audio_monos.append(editor_pipeline.probe_audio_mono(path))
                 except ValueError as exc:
                     raise HTTPException(status_code=400, detail="An audio file could not be read") from exc
                 audio_paths.append(path)
@@ -1228,6 +1288,7 @@ async def api_video_export(
                     editor_pipeline.PlanClip(
                         source_path=source_paths[c.source],
                         source_has_audio=info.has_audio and c.freeze is None,
+                        source_mono=info.audio_mono,
                         source_width=info.width,
                         source_height=info.height,
                         start=start,
@@ -1279,6 +1340,7 @@ async def api_video_export(
             if spec.pointer and (spec.pointer.cursorRows or spec.pointer.ringRows):
                 plan.pointer = _pointer_plan(spec.pointer, overlay_images)
             plan.output_format = spec.format
+            plan.master_gain_db = spec.masterGain
             plan.crf = editor_pipeline.QUALITY_CRF[spec.quality]
             if compact:
                 plan.crf = EDITOR_COMPACT_CRF
@@ -1307,7 +1369,9 @@ async def api_video_export(
                     path, iw, ih = source_paths[o.video], info.width, info.height
                     if info.has_audio and o.volume > 0:
                         layer_audio.append(
-                            editor_pipeline.PlanAudio(path=path, start=start, offset=o.offset, duration=end - start, volume=o.volume)
+                            editor_pipeline.PlanAudio(
+                                path=path, start=start, offset=o.offset, duration=end - start, volume=o.volume, mono=info.audio_mono
+                            )
                         )
                 else:
                     path, iw, ih = overlay_images[o.image]  # type: ignore[index]
@@ -1349,12 +1413,12 @@ async def api_video_export(
                     plan.effects.append(editor_pipeline.PlanEffect(type=e.type, start=start, end=end, intensity=e.intensity))
             for a in spec.audio:
                 if a.audio is not None:
-                    path, src_duration = audio_paths[a.audio], audio_durations[a.audio]
+                    path, src_duration, mono = audio_paths[a.audio], audio_durations[a.audio], audio_monos[a.audio]
                 else:
                     info = source_infos[a.video]  # type: ignore[index]
                     if not info.has_audio:
                         continue
-                    path, src_duration = source_paths[a.video], info.duration  # type: ignore[index]
+                    path, src_duration, mono = source_paths[a.video], info.duration, info.audio_mono  # type: ignore[index]
                 duration = min(a.duration, src_duration - a.offset, total - a.start)
                 if duration < 0.05:
                     continue
@@ -1363,6 +1427,7 @@ async def api_video_export(
                         path=path, start=a.start, offset=a.offset, duration=duration,
                         volume=a.volume, fade_in=min(a.fadeIn, duration / 2), fade_out=min(a.fadeOut, duration / 2),
                         voice=a.voice,
+                        mono=mono,
                         duck_amount=a.duck.amount if a.duck else 0.0,
                         duck_regions=[(r[0], r[1]) for r in a.duck.regions] if a.duck else [],
                     )
@@ -1386,6 +1451,16 @@ async def api_video_export(
                 await _run_pipeline_job(jobs.editor_export_job, plan_json, out_path, job_id if job else None, timeout=job_timeout)
             except progress.Cancelled:
                 raise
+            except encoders.DiskFull as exc:
+                need = f" It needs about {exc.needed / 1e9:.1f} GB" if exc.needed else ""
+                free = f"; {exc.free / 1e9:.1f} GB is free" if exc.free is not None else ""
+                raise HTTPException(
+                    status_code=507,
+                    detail={
+                        "code": "disk_full",
+                        "message": f"Not enough free disk space to export.{need}{free}. Free some space (or empty the Recycle Bin / Trash) and export again. Your project is unchanged.",
+                    },
+                ) from exc
             except Exception as exc:  # noqa: BLE001
                 traceback.print_exc()
                 raise HTTPException(

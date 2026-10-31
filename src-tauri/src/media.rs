@@ -79,6 +79,30 @@ fn approve(app: &tauri::AppHandle, state: &MediaState, path: &Path) -> Result<()
     app.asset_protocol_scope().allow_file(path).map_err(|e| e.to_string())
 }
 
+/// Whether `path` is an existing file the editor uses as a source: a video
+/// approved here, or a track in a known recording folder. Saving over one
+/// would replace the original recording, so export.rs refuses it. Compared
+/// after resolving both sides, so another spelling of the same file (case,
+/// `..`, short names) is caught too.
+pub(crate) fn is_source(app: &tauri::AppHandle, state: &MediaState, recordings: &crate::recording::RecordingState, path: &Path) -> bool {
+    let Ok(target) = fs::canonicalize(path) else { return false };
+    if has_ext(&target, &RECORDING_EXTS)
+        && [path.parent(), target.parent()].into_iter().flatten().any(|d| recordings.is_known_folder(d))
+    {
+        return true;
+    }
+    with_approved(app, state, |set| set.iter().any(|p| fs::canonicalize(p).is_ok_and(|p| p == target)))
+}
+
+/// How a file appears in the log: its extension only, never its name or
+/// folder (redact.rs catches whatever else slips through).
+pub(crate) fn log_name(path: &Path) -> String {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) => format!("a .{} file", ext.to_ascii_lowercase()),
+        None => "a file".into(),
+    }
+}
+
 fn describe(path: &Path) -> Result<MediaFile, String> {
     let meta = fs::metadata(path).map_err(|_| "That file can't be read.".to_string())?;
     Ok(MediaFile {
@@ -103,7 +127,7 @@ pub async fn media_choose(app: tauri::AppHandle, state: State<'_, MediaState>, l
         return Err("Please choose a video file (MP4, MOV or WebM).".into());
     }
     approve(&app, &state, &path)?;
-    log::info!("media picked: {}", path.display());
+    log::info!("media picked: {}", log_name(&path));
     describe(&path).map(Some)
 }
 

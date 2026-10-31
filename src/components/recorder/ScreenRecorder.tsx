@@ -61,6 +61,7 @@ import {
   type InputSettings,
   type Rect,
 } from "@/lib/recorder/format";
+import { errorText, mediaError, type RecorderPlatform } from "@/lib/recorder/mediaErrors";
 import { LOW_DISK_BYTES, RecordingSession, type FinishedRecording, type SessionTrackInput } from "@/lib/recorder/session";
 import { CloseIcon } from "@/components/editor/icons";
 import ToolFeedback from "@/components/ToolFeedback";
@@ -68,7 +69,7 @@ import { LevelMeter, LivePreview, Note, RegionSelector, Section, Select, Toggle,
 import SourcePicker from "./SourcePicker";
 
 type Step = "setup" | "countdown" | "recording" | "review";
-type Platform = "windows" | "macos" | "linux" | "web";
+type Platform = RecorderPlatform;
 type Resolution = "native" | "1080" | "720";
 type Quality = "low" | "standard" | "high";
 
@@ -125,30 +126,6 @@ function folderName(d = new Date()) {
   return `WipeClip Recording ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} at ${p(d.getHours())}.${p(d.getMinutes())}.${p(d.getSeconds())}`;
 }
 
-function errorText(e: unknown, fallback: string): string {
-  return e instanceof Error && e.message ? e.message : typeof e === "string" ? e : fallback;
-}
-
-/** getUserMedia/getDisplayMedia failures in words, with the settings page
- * that fixes them where there is one. */
-function mediaError(e: unknown, what: "screen" | "microphone" | "camera", platform: Platform): { message: string; settings?: PrivacyKind } {
-  const name = (e as DOMException)?.name;
-  const thing = what === "screen" ? "screen recording" : what;
-  if (name === "NotAllowedError" || name === "SecurityError") {
-    if (what === "screen" && platform === "windows") return { message: "Screen selection was cancelled." };
-    return {
-      message:
-        platform === "macos"
-          ? `WipeClip isn't allowed to use ${thing}. Turn it on for WipeClip in System Settings > Privacy & Security${what === "screen" ? ", then quit and reopen WipeClip" : ""}.`
-          : `Access to the ${thing} was blocked. Allow it for WipeClip in Windows Settings > Privacy & security.`,
-      settings: what === "screen" ? "screen" : what,
-    };
-  }
-  if (name === "NotFoundError" || name === "OverconstrainedError") return { message: `No ${what === "screen" ? "screen to capture" : what} was found.` };
-  if (name === "NotReadableError" || name === "AbortError") return { message: `The ${thing === "screen recording" ? "screen" : what} is in use by another app or couldn't be started.` };
-  if (name === "NotSupportedError" || name === "TypeError") return { message: `${what === "screen" ? "Screen capture" : `The ${what}`} isn't supported by this system's web engine.` };
-  return { message: errorText(e, `Couldn't start the ${what}.`) };
-}
 
 const AUTO_OPEN_KEY = "wipeclip.recorder.autoOpen";
 function readAutoOpen(): boolean {

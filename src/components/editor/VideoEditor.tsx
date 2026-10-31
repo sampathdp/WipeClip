@@ -1,5 +1,6 @@
 "use client";
 
+import { modKey, useShortcutKeys } from "@/lib/platform/keys";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import AuthStatus from "@/components/AuthStatus";
@@ -8,7 +9,7 @@ import SignInModal from "@/components/SignInModal";
 import ThemeToggle from "@/components/ThemeToggle";
 import { trackEvent, useToolView } from "@/lib/analytics";
 import { createClient } from "@/lib/supabase/client";
-import { apiFetch, confirmAction, IS_DESKTOP, openNotices, saveExportFile, showDesktopError, watchOpenedProjectFiles } from "@/lib/platform";
+import { apiFetch, confirmAction, EngineUnavailableError, IS_DESKTOP, openNotices, saveExportFile, showDesktopError, watchOpenedProjectFiles } from "@/lib/platform";
 import { createClock, useClockTime, type Clock } from "@/lib/editor/clock";
 import { useProjectHistory } from "@/lib/editor/history";
 import {
@@ -69,8 +70,11 @@ import {
   newClip,
   type CameraZoom,
   type AudioClip,
+  type CamLayout,
   type Clip,
   type EffectClip,
+  type LoudnessTarget,
+  type MasterAudio,
   type EffectType,
   type Look,
   type DiskMedia,
@@ -88,15 +92,26 @@ import { planRecordingProject, type ImportedTrack } from "@/lib/recorder/importP
 import { sourceTimeOf, timelineTimeOf, zoomSpans } from "@/lib/editor/camera";
 import { MIN_ZOOM_LENGTH, dragZoom, mergeSuggestions, patchZoom, removeZoom, splitZoom as splitZoomAt } from "@/lib/editor/zoomEdits";
 import { analyzeFocus, type FocusSettings } from "@/lib/editor/focus";
+import { interactionTimeline, skipTarget } from "@/lib/editor/insights";
+import { eventsForSuggestions, excludeRange, focusPrefs, isClickIgnored, patchFocusPrefs, previewWithoutZooms, removeExclusion, setClickIgnored } from "@/lib/editor/focusPrefs";
 import { buildPointerTrack, pointerAt, recordingEvents } from "@/lib/editor/pointer";
 import { FocusPanel, ZoomPanel, type AnalysisState } from "./FocusPanel";
 import MaskEditLayer from "./MaskEditLayer";
 import { SHAPE_LABELS } from "@/lib/editor/shapes";
 import { MaskPanel, TutorialPanel } from "./TutorialPanel";
 import { useTutorialTools } from "./useTutorialTools";
+import { HighlightsPanel } from "./HighlightsPanel";
+import { useHighlights } from "./useHighlights";
+import { CREATOR_PRESETS, applyCreatorPreset, type CreatorPresetId } from "@/lib/editor/creatorPresets";
+import { DEFAULT_KEYSTROKES, keystrokeOverlays } from "@/lib/editor/keystrokes";
 import { captionCues, toPlainTranscript, toSrt, toVtt } from "@/lib/editor/transcript";
-import { buildSpeechMix, speechModel, speechModelCached, type SpeechModel } from "@/lib/editor/captions";
+import { buildSpeechMix, cancelSpeech, speechModel, speechModelCached, type SpeechModel } from "@/lib/editor/captions";
 import { ANALYSIS_RATE } from "@/lib/editor/audioAnalysis";
+import { renderProgramMix } from "@/lib/editor/programMix";
+import { LOUDNESS_TARGETS, measureLoudness, normalizationGain } from "@/lib/editor/loudness";
+import { liveSolo, masterOf, mixKey, toggleSolo, withCleanup } from "@/lib/editor/mix";
+import { applyCamLayout, placeWebcam, relayoutWebcams, screenAspectOf, screenForLayout } from "@/lib/editor/webcamLayout";
+import MixerPanel from "./MixerPanel";
 import { saveTextFile } from "@/lib/platform";
 import {
   buildSpeechAudio,
@@ -112,6 +127,7 @@ import {
 import { TIER_LIMITS, toTier, type Tier } from "@/lib/entitlements";
 import AiCleanupDialog from "./AiCleanupDialog";
 import ExportDialog from "./ExportDialog";
+import BatchExportDialog, { type BatchFormat, type BatchItem } from "./BatchExportDialog";
 import { ActionButton, ClipPanel, PanelShell, TransitionPanel } from "./Inspector";
 import OverlayLayer from "./OverlayLayer";
 import RecentProjects from "./RecentProjects";
@@ -197,8 +213,14 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const EMPTY: Project = { clips: [], overlays: [], audio: [], effects: [], canvas: DEFAULT_CANVAS };
 const RATES = [0.5, 1, 1.5, 2];
 
-type Tool = "text" | "captions" | "transcript" | "elements" | "audio" | "effects" | "filters" | "adjust" | "canvas" | "layers" | "focus" | "tutorial";
-type Dialogs = { kind: "cleanup"; clipId: string; frameTime: number } | { kind: "export" } | null;
+type Tool = "text" | "captions" | "transcript" | "elements" | "audio" | "effects" | "filters" | "adjust" | "canvas" | "layers" | "focus" | "tutorial" | "highlights";
+type Dialogs =
+  | { kind: "cleanup"; clipId: string; frameTime: number }
+  /** `clip`: export a copy holding only part of the timeline (a highlight). */
+  | { kind: "export"; clip?: { project: Project; total: number; title: string; nameSuffix: string } }
+  /** Several highlights, each its own file (BatchExportDialog). */
+  | { kind: "batch"; items: BatchItem[]; vertical: boolean }
+  | null;
 type ClipboardItem = { kind: "overlay"; item: Overlay } | { kind: "audio"; item: AudioClip } | { kind: "effect"; item: EffectClip };
 
 /** A finished screen recording to open (desktop app, see
@@ -239,6 +261,7 @@ export default function VideoEditor({
   suspended?: boolean;
 }) {
   useToolView(TOOL);
+  const keys = useShortcutKeys();
   const clock = useMemo(() => createClock(), []);
   const { project, canUndo, canRedo, apply, beginGesture, endGesture, undo, redo, reset } = useProjectHistory(EMPTY);
 
@@ -251,6 +274,8 @@ export default function VideoEditor({
   const [originalId, setOriginalId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [tool, setTool] = useState<Tool | null>(null);
+  // Focus panel's "Compare with original": preview only, while the panel is open.
+  const [comparingZooms, setComparingZooms] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
   const [volume, setVolume] = useState(1);
@@ -260,6 +285,10 @@ export default function VideoEditor({
   const [dialog, setDialog] = useState<Dialogs>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Solo is a listening aid (mix.ts): kept out of the project and history.
+  const [soloRaw, setSolo] = useState<ReadonlySet<string>>(() => new Set());
+  const [cleaningTrack, setCleaningTrack] = useState<string | null>(null);
+  const [measuring, setMeasuring] = useState(false);
   const [captionOpts, setCaptionOpts] = useState<CaptionOptions>({ language: "auto", maxWords: 3, style: "bold", y: 0.82 });
   const [captioning, setCaptioning] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState(false);
@@ -551,7 +580,7 @@ export default function VideoEditor({
           blocked = true;
         } else if (e instanceof Error && e.message === "media_error") {
           message = "Your browser can't play this video's format. Try an MP4 (H.264) file.";
-        } else if (e instanceof ApiError) {
+        } else if (e instanceof ApiError || e instanceof EngineUnavailableError) {
           message = e.message;
         } else if (e instanceof TypeError) {
           message = "Couldn't reach WipeClip to check this video. Check your connection and try again.";
@@ -721,7 +750,10 @@ export default function VideoEditor({
     (id: string, patch: Partial<Overlay>) =>
       apply((p) => {
         const o = p.overlays.find((x) => x.id === id);
-        return updateOverlay(p, id, o ? animateOverlayPatch(o, patch, clock.get()) : patch);
+        // Moving or resizing a webcam placed by a layout frees it.
+        const freed = o?.kind === "video" && o.camLayout && ("x" in patch || "y" in patch || "width" in patch) && !("camLayout" in patch);
+        const next = freed ? ({ ...patch, camLayout: undefined } as Partial<Overlay>) : patch;
+        return updateOverlay(p, id, o ? animateOverlayPatch(o, next, clock.get()) : next);
       }),
     [apply, clock]
   );
@@ -905,7 +937,7 @@ export default function VideoEditor({
     const c = currentItem();
     if (!c) return false;
     clipboard.current = c;
-    say("Copied. Press Ctrl+V to paste at the playhead.");
+    say(`Copied. Press ${modKey()}+V to paste at the playhead.`);
     return true;
   }, [currentItem, say]);
 
@@ -1021,7 +1053,7 @@ export default function VideoEditor({
         addOverlay({ ...baseOverlay(meta.duration), width, kind: "video", sourceId: src.id, offset: 0, volume: 1 });
       } catch (e) {
         URL.revokeObjectURL(url);
-        if (e instanceof ContentBlockedError || e instanceof ApiError) say(e.message);
+        if (e instanceof ContentBlockedError || e instanceof ApiError || e instanceof EngineUnavailableError) say(e.message);
         else if (e instanceof Error && e.message === "media_error") say("Your browser can't play this video's format. Try an MP4 (H.264) file.");
         else say("Couldn't add this video. Check your connection and try again.");
       } finally {
@@ -1033,7 +1065,19 @@ export default function VideoEditor({
 
   // --- auto captions and the transcript ---------------------------------------
   /** The timeline's speech as a word-timed transcript (null: no sound). */
+  // Cancel: set when the user stops a transcription, checked between steps
+  // (the audio is prepared before the model workers run).
+  const speechCancelled = useRef(false);
+  const cancelTranscription = useCallback(() => {
+    speechCancelled.current = true;
+    cancelSpeech();
+  }, []);
+
   const transcribeTimeline = useCallback(async (): Promise<Transcript | null> => {
+    speechCancelled.current = false;
+    const stopIfCancelled = () => {
+      if (speechCancelled.current) throw new DOMException("Speech recognition cancelled", "AbortError");
+    };
     const progress = ({ stage, value }: CaptionsProgress) =>
       setBusy(
         stage === "download"
@@ -1044,9 +1088,11 @@ export default function VideoEditor({
       );
     setBusy("Preparing audio…");
     const samples = await buildSpeechAudio(lay, project, sources, speechModelProbe(progress));
+    stopIfCancelled();
     if (!samples) return null;
     setBusy("Loading speech model…");
     const res = await transcribe(samples, captionOpts.language, progress);
+    stopIfCancelled();
     return { language: res.language, words: res.words, total: lay.total };
   }, [lay, project, sources, captionOpts.language]);
 
@@ -1070,6 +1116,10 @@ export default function VideoEditor({
       apply((p) => ({ ...p, overlays: [...p.overlays.filter((o) => !o.caption), ...caps], transcript }));
       say(`Added ${caps.length} captions. Click one to edit its text.`);
     } catch (e) {
+      if ((e as Error)?.name === "AbortError") {
+        say("Captioning cancelled. Nothing was changed.");
+        return;
+      }
       console.error("[captions]", e);
       say("Captioning failed. Check your connection and try again.");
     } finally {
@@ -1090,6 +1140,10 @@ export default function VideoEditor({
       apply((p) => ({ ...p, transcript }));
       say(transcript.words.length ? `Transcribed ${transcript.words.length} words.` : "No speech was found in your clips.");
     } catch (e) {
+      if ((e as Error)?.name === "AbortError") {
+        say("Transcribing cancelled. Nothing was changed.");
+        return;
+      }
       console.error("[transcript]", e);
       say("Transcribing failed. Check your connection and try again.");
     } finally {
@@ -1431,6 +1485,115 @@ export default function VideoEditor({
     [lay, sources, apply, say, addSource]
   );
 
+  /** Noise reduction for an audio track: a cleaned copy of its whole
+   * file, made by the local engine and played (and exported) instead of
+   * the original, which is never changed (mix.ts). Every part of the same
+   * file (a microphone split by cuts) gets it, so they stay alike. */
+  const cleanTrack = useCallback(
+    async (audioId: string, strength: number) => {
+      const a = project.audio.find((x) => x.id === audioId);
+      const src = a && sources[a.sourceId];
+      if (!a || !src) return;
+      const duration = src.duration > 0 ? src.duration : a.offset + a.duration;
+      setPlaying(false);
+      setCleaningTrack(audioId);
+      try {
+        const blob = await cleanAudio(sourceInput(src), 0, duration, { denoise: strength, level: false });
+        const file = new File([blob], `clean-${sourceName(src).replace(/.[^.]+$/, "")}.m4a`, { type: "audio/mp4" });
+        const cleaned: MediaSource = {
+          id: newId("snd"),
+          kind: "audio",
+          file,
+          url: URL.createObjectURL(file),
+          duration,
+          width: 0,
+          height: 0,
+          fps: 0,
+          hasAudio: true,
+        };
+        addSource(cleaned);
+        const parts = project.audio.filter((x) => x.sourceId === a.sourceId).length;
+        apply((p) => ({ ...p, audio: p.audio.map((x) => (x.sourceId === a.sourceId ? withCleanup(x, cleaned.id, strength) : x)) }));
+        say(`Background noise reduced${parts > 1 ? ` on all ${parts} parts of this track` : ""}. Switch to Original in the panel to compare; undo removes it.`);
+      } catch (e) {
+        console.error("[editor] track noise reduction failed", e);
+        say(e instanceof Error && e.message ? e.message : "This track's noise couldn't be reduced.");
+      } finally {
+        setCleaningTrack(null);
+      }
+    },
+    [project.audio, sources, apply, say, addSource]
+  );
+
+  /** Measures the whole mix's loudness (programMix.ts, loudness.ts) and
+   * sets the master gain for `target`, one undo step. */
+  const measureMix = useCallback(
+    async (target: Exclude<LoudnessTarget, "off">) => {
+      setPlaying(false);
+      setMeasuring(true);
+      try {
+        const key = mixKey(project);
+        const mix = await renderProgramMix(lay, project, sources);
+        if (!mix.samples) {
+          say("There's no sound on the timeline to measure.");
+          return;
+        }
+        const result = measureLoudness(mix.samples, ANALYSIS_RATE);
+        const plan = normalizationGain(result, LOUDNESS_TARGETS[target].lufs);
+        if (!plan) {
+          say("The mix is silent, so there's nothing to bring up to a loudness. Check that the tracks aren't muted.");
+          return;
+        }
+        const round = (v: number) => Math.round(v * 10) / 10;
+        apply((p) => ({
+          ...p,
+          master: { ...masterOf(p), loudness: target, gainDb: plan.gainDb, measured: { lufs: round(result.lufs), peakDb: round(result.peakDb), key } },
+        }));
+        if (mix.skipped.length) say(`Measured without ${mix.skipped.join(", ")}: ${mix.skipped.length === 1 ? "it couldn't" : "they couldn't"} be read here.`);
+      } catch (e) {
+        console.error("[editor] loudness measurement failed", e);
+        say("The mix couldn't be measured.");
+      } finally {
+        setMeasuring(false);
+      }
+    },
+    [lay, project, sources, apply, say]
+  );
+
+  /** Places a video layer as a webcam (webcamLayout.ts); null frees it.
+   * A side-by-side layout moves the screen clips too, and leaving one puts
+   * them back to full size. */
+  const setCamLayout = useCallback(
+    (id: string, l: CamLayout | null) =>
+      apply((p) => {
+        const o = p.overlays.find((x) => x.id === id);
+        if (!o || o.kind !== "video") return p;
+        const src = sources[o.sourceId];
+        const aspect = canvasSize.width / Math.max(1, canvasSize.height);
+        const camAspect = src && src.height > 0 ? src.width / src.height : 16 / 9;
+        const wasSplit = !!o.camLayout?.split;
+        if (!l) {
+          const { camLayout: _drop, ...free } = o;
+          void _drop;
+          return { ...p, clips: wasSplit ? screenForLayout(p.clips, null) : p.clips, overlays: p.overlays.map((x) => (x.id === id ? free : x)) };
+        }
+        const screen = screenAspectOf(p, sources);
+        const placement = placeWebcam(l, aspect, camAspect, screen);
+        const clips = placement.screen || wasSplit ? screenForLayout(p.clips, placement) : p.clips;
+        return { ...p, clips, overlays: p.overlays.map((x) => (x.id === id ? applyCamLayout(o, l, aspect, camAspect, screen) : x)) };
+      }),
+    [apply, sources, canvasSize]
+  );
+
+  // Webcam layouts follow canvas size changes. Not its own undo step: undoing
+  // the canvas change brings back the layout that went with it.
+  useEffect(() => {
+    apply((p) => relayoutWebcams(p, sources, canvasSize.width / Math.max(1, canvasSize.height)), false);
+  }, [apply, sources, canvasSize]);
+
+  const solo = useMemo(() => liveSolo(soloRaw, project), [soloRaw, project]);
+  const onSolo = useCallback((key: string) => setSolo((s) => toggleSolo(s, key)), []);
+
   const addEffect = useCallback(
     (type: EffectType) => {
       const e: EffectClip = { id: newId("fx"), type, ...placeAt(2), intensity: 50 };
@@ -1533,10 +1696,74 @@ export default function VideoEditor({
     fileName: (original && sourceName(original)) || "wipeclip",
     onClose: () => setTool(null),
   });
+  const highlights = useHighlights({
+    project,
+    lay,
+    sources,
+    recSource,
+    clock,
+    apply,
+    say,
+    setPlaying,
+    openExport: (clip) => setDialog({ kind: "export", clip }),
+    openBatchExport: (items, vertical) => setDialog({ kind: "batch", items, vertical }),
+  });
+  /** A highlight's copy in another shape for a batch export: the vertical or
+   * square creator preset, reframed from the activity in that copy's own
+   * clips (and shown whole where it's spread too wide). */
+  const reframeCopy = (copy: Project, format: BatchFormat): { project: Project; notes: string[] } => {
+    if (format === "project" || !originalId) return { project: copy, notes: [] };
+    const copyLay = layout(copy, lay.fps);
+    const events = recordingEvents(recSource);
+    const acts = recSource && events ? interactionTimeline(copyLay, recSource.id, events) : null;
+    return applyCreatorPreset(copy, format === "vertical" ? "vertical" : "square", {
+      lay: copyLay,
+      sources,
+      originalId,
+      acts,
+      recSourceId: recSource?.id ?? null,
+      cursorCaptured: recSource?.recording?.manifest.capture.cursorCaptured !== false,
+      keystrokes: [],
+    });
+  };
+  /** Canvas > Made for: a creator preset as one undo step (creatorPresets.ts). */
+  const applyPreset = (id: CreatorPresetId) => {
+    if (!originalId) return;
+    const events = recordingEvents(recSource);
+    const acts = recSource && events ? interactionTimeline(lay, recSource.id, events) : null;
+    const isMac = recSource?.recording?.manifest.app?.platform === "macos";
+    const keystrokes = id === "tutorial" && acts ? keystrokeOverlays(acts, DEFAULT_KEYSTROKES, lay.total, isMac, () => newId("key")) : [];
+    let notes: string[] = [];
+    apply((p) => {
+      const r = applyCreatorPreset(p, id, {
+        lay,
+        sources,
+        originalId,
+        acts,
+        recSourceId: recSource?.id ?? null,
+        cursorCaptured: recSource?.recording?.manifest.capture.cursorCaptured !== false,
+        keystrokes,
+      });
+      notes = r.notes;
+      return r.project;
+    });
+    const label = CREATOR_PRESETS.find((x) => x.id === id)?.label ?? id;
+    say([`${label} preset applied.`, ...notes].join(" "));
+  };
+  // "Preview the result": while playing, jump over the pending cuts.
+  const skipRanges = tutorial.skipRanges;
+  useEffect(() => {
+    if (!playing || !skipRanges.length) return;
+    return clock.subscribe(() => {
+      const t = clock.get();
+      const to = skipTarget(skipRanges, t);
+      if (to !== t) clock.set(Math.min(to, lay.total));
+    });
+  }, [playing, skipRanges, clock, lay.total]);
   const [modelCached, setModelCached] = useState<boolean | null>(null);
   const [captionModel, setCaptionModel] = useState<SpeechModel | null>(null);
   useEffect(() => {
-    if (tool !== "captions") return;
+    if (tool !== "captions" && tool !== "transcript") return;
     let cancelled = false;
     void speechModel().then((m) => !cancelled && setCaptionModel(m));
     void speechModelCached().then((v) => !cancelled && setModelCached(v));
@@ -1567,6 +1794,7 @@ export default function VideoEditor({
   const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
   const analysisCtrl = useRef<AbortController | null>(null);
   useEffect(() => () => analysisCtrl.current?.abort(), []);
+  const projectFocus = project.focus;
 
   const runAnalysis = useCallback(
     async (settings: FocusSettings) => {
@@ -1578,7 +1806,7 @@ export default function VideoEditor({
       setAnalysis({ stage: "reading", value: 0 });
       try {
         const res = await analyzeFocus(
-          { events, duration: recSource.duration, aspect: recSource.width / Math.max(1, recSource.height), sourceId: recSource.id },
+          { events: eventsForSuggestions(events, recSource.id, focusPrefs({ focus: projectFocus })), duration: recSource.duration, aspect: recSource.width / Math.max(1, recSource.height), sourceId: recSource.id },
           settings,
           () => newId("zm"),
           { signal: ctrl.signal, onProgress: (pr) => pr.stage !== "done" && setAnalysis({ stage: pr.stage, value: pr.value }) }
@@ -1609,7 +1837,7 @@ export default function VideoEditor({
         }
       }
     },
-    [recSource, apply, say]
+    [recSource, projectFocus, apply, say]
   );
 
   const selectZoom = useCallback(
@@ -1662,6 +1890,44 @@ export default function VideoEditor({
     apply((p) => ({ ...p, zooms: [...(p.zooms ?? []), z] }));
     setSelection({ kind: "zoom", id: z.id });
   }, [clock, lay, rawPointer, recSource, apply, say]);
+
+  /** Source time under the playhead, on the recorded source. */
+  const recordedTimeAtPlayhead = useCallback((): number | null => {
+    const loc = locate(lay, clock.get());
+    const laid = loc ? lay.clips[loc.primary.index] : undefined;
+    if (!laid || !recSource || laid.clip.sourceId !== recSource.id || laid.clip.freeze !== null) return null;
+    return sourceTimeOf(laid, clock.get());
+  }, [clock, lay, recSource]);
+
+  /** No zoom suggestions from the playhead for `seconds` (or over a
+   * zoom's range); unedited suggestions there are removed. One undo step. */
+  const excludeFocusRange = useCallback(
+    (range?: { start: number; end: number }) => {
+      const s = range ? null : recordedTimeAtPlayhead();
+      if (!recSource || (!range && s === null)) {
+        say("Move the playhead onto the recording first.");
+        return;
+      }
+      const start = range?.start ?? s!;
+      const end = range?.end ?? Math.min(recSource.duration, s! + 10);
+      apply((p) => excludeRange(p, { id: newId("fx"), sourceId: recSource.id, start, end }));
+    },
+    [recSource, recordedTimeAtPlayhead, apply, say]
+  );
+
+  /** Ignores the recorded click nearest the playhead (within 0.5 s). */
+  const ignoreClickAtPlayhead = useCallback(() => {
+    const s = recordedTimeAtPlayhead();
+    const near = s === null || !rawPointer ? undefined : rawPointer.clicks.reduce<{ t: number; d: number } | undefined>((best, c) => {
+      const d = Math.abs(c.t - s);
+      return d <= 0.5 && (!best || d < best.d) ? { t: c.t, d } : best;
+    }, undefined);
+    if (!near || !recSource) {
+      say("No recorded click within half a second of the playhead.");
+      return;
+    }
+    apply((p) => setClickIgnored(p, recSource.id, near.t, true));
+  }, [recordedTimeAtPlayhead, rawPointer, recSource, apply, say]);
 
   const splitZoom = useCallback(() => {
     const z = selection?.kind === "zoom" ? (project.zooms ?? []).find((x) => x.id === selection.id) : undefined;
@@ -1872,10 +2138,10 @@ export default function VideoEditor({
       <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
         {phase === "edit" && (
           <>
-            <ToolButton label="Undo (Ctrl+Z)" onClick={undo} disabled={!canUndo}>
+            <ToolButton label={`Undo (${keys.mod}+Z)`} onClick={undo} disabled={!canUndo}>
               <UndoIcon />
             </ToolButton>
-            <ToolButton label="Redo (Ctrl+Shift+Z)" onClick={redo} disabled={!canRedo}>
+            <ToolButton label={`Redo (${keys.mod}+Shift+Z)`} onClick={redo} disabled={!canRedo}>
               <RedoIcon />
             </ToolButton>
             <button
@@ -2028,9 +2294,16 @@ export default function VideoEditor({
     if (rawPointer && recSource) {
       for (const c of layClips) {
         if (c.clip.sourceId !== recSource.id) continue;
+        const prefs = focusPrefs({ focus: projectFocus });
         for (const k of rawPointer.clicks) {
           const t = timelineTimeOf(c, k.t);
-          if (t !== null && ticks.length < 3000) ticks.push({ t, className: k.button === "left" ? "bg-cyan-400/80" : "bg-amber-400/80", title: `${k.button} click` });
+          if (t === null || ticks.length >= 3000) continue;
+          const ignored = isClickIgnored(prefs, recSource.id, k.t);
+          ticks.push({
+            t,
+            className: ignored ? "bg-muted/40" : k.button === "left" ? "bg-cyan-400/80" : "bg-amber-400/80",
+            title: ignored ? `${k.button} click (ignored)` : `${k.button} click`,
+          });
         }
       }
     }
@@ -2045,14 +2318,14 @@ export default function VideoEditor({
           end: sp.end,
           label: `${z.zoom.toFixed(1)}× ${z.reason ?? "Zoom"}`,
           glyph: "⌕",
-          hidden: !z.enabled,
+          hidden: !z.enabled || !!projectFocus?.bypass,
           selected: selIs(selection, "zoom", z.id),
           sel: { kind: "zoom" as const, id: z.id },
         }))
       ),
       ticks,
     };
-  }, [anyRecording, zooms, rawPointer, recSource, layClips, selection]);
+  }, [anyRecording, zooms, rawPointer, recSource, layClips, selection, projectFocus]);
   const effectsTrack = useMemo<TimelineTrack>(
     () => ({
       key: "effects",
@@ -2267,6 +2540,18 @@ export default function VideoEditor({
   } else if (tool === "audio") {
     panel = (
       <AudioAddPanel
+        mixer={
+          <MixerPanel
+            project={project}
+            solo={solo}
+            onSolo={onSolo}
+            onMaster={(patch: Partial<MasterAudio>) => apply((p) => ({ ...p, master: { ...masterOf(p), ...patch } }))}
+            onTrack={(id, patch) => apply((p) => updateAudio(p, id, patch))}
+            onMeasure={(target) => void measureMix(target)}
+            measuring={measuring}
+            gesture={gesture}
+          />
+        }
         audio={project.audio}
         onUpload={(f) => void uploadAudio(f)}
         onAddSfx={(def) =>
@@ -2299,6 +2584,7 @@ export default function VideoEditor({
         onUploadBackground={(f) => void uploadBackground(f)}
         onClose={() => setTool(null)}
         gesture={gesture}
+        onPreset={originalId ? applyPreset : undefined}
       />
     );
   } else if (tool === "transcript") {
@@ -2314,6 +2600,9 @@ export default function VideoEditor({
           seek(t);
         }}
         onTranscribe={() => void runTranscript()}
+        onCancel={cancelTranscription}
+        modelCached={modelCached}
+        model={captionModel}
         onDelete={cutByWords}
         onClose={() => setTool(null)}
       />
@@ -2326,6 +2615,7 @@ export default function VideoEditor({
         count={project.overlays.filter((o) => o.caption).length}
         busy={captioning}
         onGenerate={() => void runCaptions()}
+        onCancel={cancelTranscription}
         onRestyle={restyleCaptions}
         onRemoveAll={() => apply((p) => ({ ...p, overlays: p.overlays.filter((o) => !o.caption) }))}
         onClose={() => setTool(null)}
@@ -2364,6 +2654,19 @@ export default function VideoEditor({
         onAddAtPlayhead={addZoomAtPlayhead}
         onSelect={selectZoom}
         onPointerChange={(pointer) => apply((p) => ({ ...p, pointer }))}
+        focus={focusPrefs(project)}
+        onFocusChange={(patch) => apply((p) => patchFocusPrefs(p, patch))}
+        comparing={comparingZooms}
+        onCompare={setComparingZooms}
+        onExcludeAtPlayhead={() => excludeFocusRange()}
+        onRemoveExclusion={(id) => apply((p) => removeExclusion(p, id))}
+        onIgnoreClickAtPlayhead={ignoreClickAtPlayhead}
+        onRestoreClick={(t) => recSource && apply((p) => setClickIgnored(p, recSource.id, t, false))}
+        onSeek={(s) => {
+          const at = recSource ? lay.clips.filter((c) => c.clip.sourceId === recSource.id).map((c) => timelineTimeOf(c, s)).find((v) => v !== null) : null;
+          if (at != null) seek(at);
+          else say("That part of the recording isn't on the timeline.");
+        }}
         onClose={() => setTool(null)}
         gesture={gesture}
       />
@@ -2385,6 +2688,8 @@ export default function VideoEditor({
         onClose={() => setTool(null)}
       />
     );
+  } else if (tool === "highlights") {
+    panel = <HighlightsPanel {...highlights} onClose={() => setTool(null)} />;
   } else if (tool === "tutorial" || selection?.kind === "chapter") {
     panel = <TutorialPanel {...tutorial.panelProps} />;
   } else if (selectedMask) {
@@ -2431,6 +2736,11 @@ export default function VideoEditor({
         }}
         onSplit={splitZoom}
         onDelete={deleteSelection}
+        onNeverHere={() => {
+          const z = selectedZoom;
+          apply((p) => excludeRange({ ...p, zooms: removeZoom(p.zooms ?? [], z.id) }, { id: newId("fx"), sourceId: z.sourceId, start: z.start, end: z.end }));
+          setSelection(null);
+        }}
         onClose={() => setSelection(null)}
         gesture={gesture}
       />
@@ -2500,6 +2810,7 @@ export default function VideoEditor({
         total={lay.total}
         sourceDuration={selectedOverlay.kind === "video" ? sources[selectedOverlay.sourceId]?.duration : undefined}
         onChange={(patch) => changeOverlay(selectedOverlay.id, patch)}
+        onCamLayout={selectedOverlay.kind === "video" ? (l) => setCamLayout(selectedOverlay.id, l) : undefined}
         keys={overlayKeys(selectedOverlay)}
         fonts={{
           custom: Object.values(sources)
@@ -2527,7 +2838,12 @@ export default function VideoEditor({
   } else if (selectedAudio) {
     panel = (
       <AudioPanel
+        key={selectedAudio.id}
         clip={selectedAudio}
+        soloed={solo.has(selectedAudio.id)}
+        onSolo={() => onSolo(selectedAudio.id)}
+        onCleanup={IS_DESKTOP ? (strength) => void cleanTrack(selectedAudio.id, strength) : undefined}
+        cleaning={cleaningTrack === selectedAudio.id}
         sourceDuration={sources[selectedAudio.sourceId]?.duration ?? selectedAudio.offset + selectedAudio.duration}
         total={lay.total}
         onChange={(patch) => apply((p) => updateAudio(p, selectedAudio.id, patch))}
@@ -2582,8 +2898,8 @@ export default function VideoEditor({
           )}
         </div>
         <p className="mt-6 text-[11px] leading-relaxed text-muted">
-          Shortcuts: Space play/pause · S split · F freeze frame · T text · Delete remove · Ctrl+C / Ctrl+V copy/paste · Ctrl+D duplicate · ←/→ frame step (Shift:
-          1s) · Alt+←/→ move clip · Ctrl+Z / Ctrl+Shift+Z undo/redo
+          Shortcuts: Space play/pause · S split · F freeze frame · T text · Delete remove · {keys.mod}+C / {keys.mod}+V copy/paste · {keys.mod}+D duplicate · ←/→ frame step (Shift:
+          1s) · {keys.alt}+←/→ move clip · {keys.mod}+Z / {keys.mod}+Shift+Z undo/redo
         </p>
       </PanelShell>
     );
@@ -2665,7 +2981,7 @@ export default function VideoEditor({
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="h-[42dvh] min-h-[200px] p-3 lg:h-auto lg:min-h-0 lg:flex-1">
             <PreviewPlayer
-              project={project}
+              project={comparingZooms && tool === "focus" ? previewWithoutZooms(project) : project}
               lay={lay}
               sources={sources}
               canvas={project.canvas}
@@ -2679,13 +2995,15 @@ export default function VideoEditor({
               volume={volume}
               muted={muted}
               stageRef={stageRef}
+              solo={solo}
+              meters={tool === "audio"}
             >
               <OverlayLayer
                 clock={clock}
                 canvasSize={canvasSize}
                 overlays={project.overlays}
                 rasters={rasters}
-                playback={{ playing, rate, volume, muted }}
+                playback={{ playing, rate, volume, muted: muted || solo.size > 0 }}
                 selectedId={selectedOverlay?.id ?? null}
                 onSelect={(id) => {
                   if (id) select({ kind: "overlay", id });
@@ -2760,6 +3078,7 @@ export default function VideoEditor({
               <TransitionIcon />
             </ToolButton>
             {(IS_DESKTOP || zooms.length > 0) && toolBtn("focus", "Focus", <ZoomInIcon />, "Automatic zoom, click highlights and cursor")}
+            {toolBtn("highlights", "Highlights", <SparkleIcon />, "Suggest moments worth their own clip")}
             {toolBtn("tutorial", "Tutorial", <SparkleIcon />, "Review pauses, chapters, shortcuts, privacy masks, annotations, retakes")}
             {toolBtn("canvas", "Canvas", <CanvasIcon />, "Canvas size and background")}
             {toolBtn("layers", "Layers", <LayersIcon />, "Layer order, hide and lock")}
@@ -2825,15 +3144,30 @@ export default function VideoEditor({
       {tutorial.dialog}
       {dialog?.kind === "export" && originalId && (
         <ExportDialog
-          project={project}
+          project={dialog.clip?.project ?? project}
           sources={sources}
           originalId={originalId}
-          total={lay.total}
+          total={dialog.clip?.total ?? lay.total}
+          title={dialog.clip?.title}
+          nameSuffix={dialog.clip?.nameSuffix}
           isSignedIn={isSignedIn}
           tier={tier}
-          initialResult={pendingExport}
+          initialResult={dialog.clip ? null : pendingExport}
           onClose={() => setDialog(null)}
           onSignIn={() => setShowSignIn(true)}
+        />
+      )}
+      {dialog?.kind === "batch" && originalId && (
+        <BatchExportDialog
+          items={dialog.items}
+          sources={sources}
+          originalId={originalId}
+          isSignedIn={isSignedIn}
+          tier={tier}
+          defaultFormat={dialog.vertical ? "vertical" : "project"}
+          reframe={reframeCopy}
+          onExported={(n) => apply((p) => (p.highlights ? { ...p, highlights: { ...p.highlights, stats: { ...p.highlights.stats, exported: p.highlights.stats.exported + n } } } : p), false)}
+          onClose={() => setDialog(null)}
         />
       )}
       <SignInModal open={showSignIn} onClose={() => setShowSignIn(false)} />

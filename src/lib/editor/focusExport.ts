@@ -7,6 +7,7 @@
  * stretches cost nothing. Pure - see tests/desktop/focus.test.ts.
  */
 import { CameraCache, cameraSamples, clipView } from "./camera.ts";
+import { appliedZooms } from "./focusPrefs.ts";
 import { PointerCache, pointerScene } from "./pointer.ts";
 import type { Layout } from "./timeline.ts";
 import type { MediaSource, Project } from "./types.ts";
@@ -38,7 +39,7 @@ export function cameraPayload(
 ): (number[][] | null)[] {
   return lay.clips.map((c) => {
     const view = clipView(c.clip, sources[c.clip.sourceId], canvas, project.canvas);
-    const track = cache.track(project.zooms, c.clip, view);
+    const track = cache.track(appliedZooms(project), c.clip, view);
     return track ? cameraSamples(track, c, lay.fps) : null;
   });
 }

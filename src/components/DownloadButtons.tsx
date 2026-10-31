@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { DESKTOP_DOWNLOADS } from "@/lib/download";
 import { currentPath, trackEvent } from "@/lib/analytics";
 import { useI18n } from "@/i18n/client";
@@ -19,6 +19,17 @@ function detectOs(): Os | null {
     // Best-effort only; both buttons stay equal.
   }
   return null;
+}
+
+/** One request per page, however many button groups it shows. */
+let countRequest: Promise<number | null> | null = null;
+
+function fetchDownloadCount(): Promise<number | null> {
+  countRequest ??= fetch("/api/downloads")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((c: { total?: number } | null) => (typeof c?.total === "number" ? c.total : null))
+    .catch(() => null);
+  return countRequest;
 }
 
 const ICONS: Record<Os, React.ReactNode> = {
@@ -41,12 +52,28 @@ export default function DownloadButtons({ compact = false }: { compact?: boolean
   // The server render (and first client render) knows no OS; the client
   // then reads it from the user agent, which never changes.
   const os = useSyncExternalStore(noSubscribe, detectOs, () => null);
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
+  const [downloads, setDownloads] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetchDownloadCount().then((n) => live && setDownloads(n));
+    return () => {
+      live = false;
+    };
+  }, []);
+  const countLine = downloads ? (
+    <p className="inline-flex items-center gap-1.5 text-xs font-medium text-muted">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+      </svg>
+      {fmt(t.downloads.downloadCount, { count: downloads.toLocaleString(lang) })}
+    </p>
+  ) : null;
 
   const items = [...DESKTOP_DOWNLOADS].sort((a, b) => Number(b.os === os) - Number(a.os === os));
 
   return (
-    <div className={compact ? "flex flex-wrap gap-3" : "grid gap-4 sm:grid-cols-2"}>
+    <div className={compact ? "flex flex-wrap items-center gap-3" : "grid gap-4 sm:grid-cols-2"}>
       {items.map((d) => {
         const primary = os ? d.os === os : d.os === "windows";
         const copy = t.downloads[d.os];
@@ -85,6 +112,7 @@ export default function DownloadButtons({ compact = false }: { compact?: boolean
           </div>
         );
       })}
+      {countLine && (compact ? countLine : <div className="flex justify-center sm:col-span-2">{countLine}</div>)}
     </div>
   );
 }

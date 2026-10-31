@@ -76,57 +76,6 @@ function loadWorklet(ctx: AudioContext): Promise<void> {
   return p;
 }
 
-/** Routes preview audio elements through Web Audio once one needs a voice
- * effect (an element can't be un-routed after that, so it stays routed and
- * its volume moves to a gain node - which also allows >100%). */
-export class AudioFxRouter {
-  private ctx: AudioContext | null = null;
-  private routes = new Map<HTMLMediaElement, { src: MediaElementAudioSourceNode; gain: GainNode; fx: VoiceFx; pending: boolean; dispose: () => void }>();
-
-  /** The gain node that now sets `el`'s volume, or null if it plays directly. */
-  apply(el: HTMLMediaElement, fx: VoiceFx): GainNode | null {
-    let r = this.routes.get(el);
-    if (!r) {
-      if (fx === "none") return null;
-      const ctx = (this.ctx ??= new AudioContext());
-      const src = ctx.createMediaElementSource(el);
-      const gain = ctx.createGain();
-      gain.connect(ctx.destination);
-      r = { src, gain, fx: "none", pending: false, dispose: () => {} };
-      src.connect(gain);
-      r.dispose = () => src.disconnect();
-      this.routes.set(el, r);
-    }
-    const ctx = this.ctx!;
-    if (ctx.state === "suspended") void ctx.resume().catch(() => {});
-    if (r.fx !== fx && !r.pending) {
-      const route = r;
-      route.pending = true;
-      route.dispose();
-      connectVoiceFx(ctx, fx, route.src, route.gain)
-        .then((dispose) => {
-          route.dispose = dispose;
-          route.fx = fx;
-        })
-        .catch(() => {
-          route.src.connect(route.gain);
-          route.dispose = () => route.src.disconnect();
-          route.fx = fx;
-        })
-        .finally(() => {
-          route.pending = false;
-        });
-    }
-    return r.gain;
-  }
-
-  close(): void {
-    void this.ctx?.close().catch(() => {});
-    this.ctx = null;
-    this.routes.clear();
-  }
-}
-
 /** Builds the effect between `input` and `output`; returns a disposer. */
 export async function connectVoiceFx(ctx: AudioContext, fx: VoiceFx, input: AudioNode, output: AudioNode): Promise<() => void> {
   const nodes: AudioNode[] = [];

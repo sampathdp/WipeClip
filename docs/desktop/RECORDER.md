@@ -98,6 +98,7 @@ All paths in the manifest are relative to the folder. Readers accept any `versio
 - Display resolution or captured window size changes: a `surface` event is stored; coordinates stay normalized.
 - App closed or crashed while recording: on exit the native side stops the hooks and fsyncs open files. Next time the recorder opens it lists recordings whose manifest still says `recording` and offers **Recover** (rebuilds the manifest from what is on disk, status `recovered`) or **Delete**.
 - Low disk warning in setup and during recording; a recording won't start with under 150 MB free.
+- A disk that stops keeping up (unplugged USB drive, network share, a scanner holding the file): chunks the page hasn't written yet are counted every second (`backlogState` in `writer.ts`). From 64 MB waiting in memory the recorder warns; at 256 MB it stops and finalizes what reached disk, instead of growing until the app runs out of memory. Applies to the tracks the page writes (microphone, webcam, events; on macOS also the screen). The native Windows screen and system-audio tracks are written by Media Foundation directly.
 - Recording runs off the UI thread: file writes and input handling are async Tauri commands and background threads; the hook callbacks only push into a bounded buffer (200,000 events) so input is never delayed.
 - The window keeps recording when minimized (`background_throttling: Disabled`, macOS 14+; Chromium doesn't freeze pages that are capturing).
 
@@ -121,6 +122,8 @@ Registered only while the recorder is open (shown in the recorder; "unavailable"
 - **macOS screen capture depends on WKWebView's `getDisplayMedia`.** If the installed macOS's web engine doesn't provide it, the recorder says so and recording is unavailable (the editor is unaffected). A native ScreenCaptureKit backend would remove this dependency; it isn't part of Phase 1.
 - **No system audio on macOS** (WKWebView doesn't capture it). Windows needs an entire-screen source with "Share system audio".
 - **macOS: the OS picker chooses the source.** The app can't preselect a display or window there, and can't hide its own window from a full-screen capture (use "Minimize WipeClip while recording"). On Windows the in-app picker and "Hide WipeClip from the recording" cover both.
+- **Protected content is recorded black (Windows).** A window that asks for content protection (`SetWindowDisplayAffinity` with `WDA_MONITOR`, used by DRM video players and some password managers) shows on the monitor but is black in the recording (measured: luma 16 where the window was white, `live_sync::protected_window_records_without_content`). Windows with `WDA_EXCLUDEFROMCAPTURE` (like WipeClip's own mini player) don't appear at all. Nothing works around this, on purpose. See <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowdisplayaffinity>.
+- **Games and full-screen apps: not verified.** Borderless and windowed games go through the same desktop composition as any window; exclusive full-screen games and anti-cheat protected games haven't been tested and may record black or not at all.
 - Windows: minimized windows can't be recorded (they're listed but disabled until restored). A window that is resized while recording is letterboxed into the size it had at the start. Displays larger than 4096×2304 are scaled down to fit the H.264 encoder.
 - **Display identification** compares the capture's size with the connected displays. Two identical displays need the user to pick ("Which display is this?"); window captures store events in desktop coordinates plus active-window bounds.
 - **Editor limits apply**: recordings open in the editor at any size (they're edited in place in their folder, see RELEASE.md Projects); exports are up to 10 minutes, and longer recordings save fine with a warning.
@@ -140,6 +143,10 @@ npm run desktop:test      # Rust, incl. keyboard privacy filter (input/keys.rs),
 ```
 
 `cargo test --lib capture::video::live -- --ignored --nocapture` records the main display for 3 s with a pause on the machine it runs on and checks the screen and system-audio durations against the clock.
+
+`cargo test --lib capture::video::live_sync::flips_in_the_file_match_the_clock -- --ignored --nocapture` checks recording time against the pictures in the file: a small topmost window turns black and white at known recording times, two before and two after a pause, and ffmpeg (`WIPECLIP_FFMPEG`, or the engine's imageio-ffmpeg in `backend/.venv`) finds each flip in `screen.mp4`. Each must appear once, never before its time and at most 100 ms plus one frame after it; nothing from the pause may appear. `live_sync::long_session` records the primary display with system audio for `WIPECLIP_LIVE_SECS` (default 600) and checks for dropped frames, steady file growth and final lengths; watch the test process's memory from outside.
+
+`node tests/desktop/manual/media-errors.mjs` (app started with `--deny-permission-prompts`, see its header) checks that the real WebView2 throws the error names the recorder's messages (`mediaErrors.ts`) are written for, for refused and missing microphone and camera.
 
 `keys.rs` and `recording/paths.rs` have no crate dependencies and can also be tested without the full toolchain: `rustc --edition 2021 --test src-tauri/src/input/keys.rs -o keys && ./keys`.
 
@@ -162,7 +169,19 @@ Run on Windows 11 (125% display scaling, 1920×1080), built with MSVC 14.44: `ca
 | Open in editor | Imported with Zoom, Audio tracks; no console errors |
 | Log privacy | Only "recording started/finished", "input monitor started/stopped" |
 
-Found and fixed during these runs:
+Second pass, 28 October 2026 (same machine, Windows 11 Pro 10.0.26200, 1920×1080 at 125%):
+
+| Check | Result |
+|---|---|
+| Recording time vs the pictures in the file (`live_sync::flips_in_the_file_match_the_clock`, 3 runs) | Every flip in the file exactly one frame after its clock time (+32.4 to +33.1 ms at 30 fps), before and after a pause; nothing from the pause in the file |
+| 10-minute recording, 1080p30 + system audio, hardware H.264 (`live_sync::long_session`) | 18,001 frames, 0 dropped; clock 600.010 s, video 600.033 s, audio 600.021 s; screen file +22.3–22.5 MB every 30 s; full decode with ffmpeg 7.1: 0 errors; test process memory flat (private 155 MB → 166 MB, working set 155–170 MB) |
+| Protected window (`WDA_MONITOR`) | Recorded black |
+| Real app, end to end (`desktop-recording.mjs`) | Native capture + system audio + fake microphone, pause, marker, screenshot; manifest `complete`; cursor probes mapped; no events while paused; opened in the editor with its audio tracks; no console errors |
+| Microphone refused / missing devices in the real WebView2 (`media-errors.mjs`) | `NotAllowedError` when refused, `OverconstrainedError`/`NotFoundError` for a missing device, `NotFoundError` with no camera at all - all mapped to messages |
+
+Not run: webcam (no camera on the machine), a real stalled disk (the backlog limit is unit-tested only), crash recovery, multiple displays.
+
+Found and fixed during the first pass:
 - the ~0.35 s timing offset;
 - WebView2's wrong `cursor` report;
 - `window.confirm` always returning a truthy Promise in the desktop app, which silently skipped every confirmation, including "Discard this recording?". It is now a native dialog through `confirm_action`, and lint forbids `window.confirm`.

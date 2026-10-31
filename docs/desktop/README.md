@@ -9,8 +9,10 @@ The desktop app is the website's real video editor (`src/components/editor`), bu
 - a screen recorder (screen, window or area, with system audio, microphone, webcam and mouse/keyboard metadata) that saves locally and opens recordings in the editor - see [RECORDER.md](RECORDER.md),
 - automatic focus zooms, click highlights and a drawn cursor for those recordings - see [FOCUS.md](FOCUS.md),
 - tutorial tools: pause and dead-time review, captions with subtitle export, shortcut indicators, chapters, privacy masks, annotations and retakes - see [TUTORIAL.md](TUTORIAL.md).
+- highlight suggestions and creator presets (landscape, vertical, square, software tutorial) - see [CREATOR.md](CREATOR.md).
+- audio and camera: noise reduction for tracks (on this computer), loudness normalization with a limiter, a mixer with meters, mute and solo, and webcam layouts - see [AUDIO.md](AUDIO.md).
 
-See [ARCHITECTURE-AUDIT.md](ARCHITECTURE-AUDIT.md) for why it's built this way, and [RELEASE.md](RELEASE.md) for release readiness, test results, packaging and the manual checklist.
+See [ARCHITECTURE-AUDIT.md](ARCHITECTURE-AUDIT.md) for why it's built this way, [RELEASE.md](RELEASE.md) for release readiness, test results, packaging and the manual checklist, [BETA-READINESS.md](BETA-READINESS.md) for the beta audit, test matrix and roadmap, and [RELEASE-VALIDATION.md](RELEASE-VALIDATION.md) for the latest verified status, bug list and release checklist.
 
 ## Layout
 
@@ -26,6 +28,7 @@ See [ARCHITECTURE-AUDIT.md](ARCHITECTURE-AUDIT.md) for why it's built this way, 
 | `src/lib/recorder/`, `src/components/recorder/` | Screen recorder: recording format, timing, event mapping, session, UI ([RECORDER.md](RECORDER.md)) |
 | `src-tauri/src/recording/`, `src-tauri/src/input/`, `src-tauri/src/shortcuts.rs` | Recorder native side: recording files, input monitor, hotkeys |
 | `src/lib/editor/camera.ts`, `pointer.ts`, `focus.ts`, `focusExport.ts` | Focus zooms, pointer reconstruction, suggestions, export rows ([FOCUS.md](FOCUS.md)) |
+| `src/lib/editor/mix.ts`, `loudness.ts`, `programMix.ts`, `audioMixer.ts`, `webcamLayout.ts` | Mix model, loudness, preview mixer, webcam layouts ([AUDIO.md](AUDIO.md)) |
 | `tests/desktop/` | Node tests for CORS, the secret scan, the recorder and focus effects; `manual/` holds the headless-Chrome preview check |
 | `.github/workflows/desktop.yml` | Windows and macOS builds on GitHub runners |
 
@@ -116,14 +119,14 @@ Output goes to `src-tauri/target/release/bundle/`.
 - **Auto captions** download the Whisper model from Hugging Face on first use, as on the website.
 - **Screen recorder**: see [RECORDER.md](RECORDER.md) for permissions, format, limitations and the manual test checklist.
 - **Updates**: the app offers new versions from GitHub Releases and installs them on a click; see [RELEASE.md](RELEASE.md#updates).
-- **Not in this release**: GPU processing, offline export, Linux packages.
+- **Not in this release**: GPU processing other than NVENC export encoding, offline export, Linux packages.
 
 ## Local engine
 
 The website's FastAPI backend (`backend/`), packaged with PyInstaller (`backend/desktop.spec`, `backend/requirements-desktop.txt`) and shipped in the app as `resources/engine/`. `src-tauri/src/engine.rs` starts it on first use (opening a video or the AI cleanup dialog) on a free `127.0.0.1` port, with a random per-launch token every request must carry as `X-Local-Token`. It exits with the app, also after a crash (it watches the app's process id). The page reaches it through `localEngine()` in `src/lib/platform`; `src/lib/toolsApi.ts` sends the probe, AI cleanup and export there instead of to the cloud backend.
 
 - **Plan checks stay on the site.** Jobs still need a ticket from `/api/process` or `/api/export`. The app asks with `local: true`: AI cleanup then needs a paid plan and spends no credits; free plans get `plan_required` and the app falls back to the cloud backend with credits, as on the website. Export rules (resolution, premium features, daily limit, branding) are unchanged. The cloud backend refuses `local` tickets, so they can't buy a credit-free job there. The engine runs on the user's machine, so a determined user could bypass these checks.
-- **CPU only**, all cores. Speed scales with the machine.
+- **CPU**, all cores, plus NVIDIA's hardware H.264 encoder for exports when it works (RELEASE.md, Export). Speed scales with the machine.
 - **Size**: about 300 MB unpacked, adding roughly 120–150 MB to the installer.
 - **Build it**: `cd backend && pip install -r requirements-desktop.txt && pyinstaller desktop.spec --noconfirm`, then copy `dist/wipeclip-engine` to `src-tauri/resources/engine`. `desktop.yml` does this on both runners (and signs it on macOS). Without that folder a build still works, processing on the cloud backend; CI sets `WIPECLIP_REQUIRE_ENGINE=1` so a release can't miss it.
 - **Dev**: `npm run desktop:dev` runs `backend/desktop_engine.py` from `backend/.venv` instead.
@@ -159,7 +162,9 @@ Unsupported files fail at import with the existing "can't play this video's form
 
 ## Test status
 
-Automated (run on this branch):
+The current, verified status is in [RELEASE-VALIDATION.md](RELEASE-VALIDATION.md) (Phase 7, 29 October 2026). The list below is from the first desktop build and is kept for history.
+
+Automated (first desktop build):
 
 - `npm run build` (website) passes with the same route table.
 - `npx tsc --noEmit` for the website and `-p desktop` pass; ESLint passes on changed files.

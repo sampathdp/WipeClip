@@ -4,15 +4,17 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } 
 import type { Clock } from "@/lib/editor/clock";
 import { gradeOf, isNeutralColor } from "@/lib/editor/look";
 import { DIP_AUDIO, frameShadow, locate, sourceTimeAt, videoBox, type Layout } from "@/lib/editor/timeline";
-import type { AudioClip, Canvas, Clip, Crop, EffectClip, MediaSource, Project } from "@/lib/editor/types";
+import type { AudioClip, Canvas, Clip, Crop, EffectClip, MediaSource, Project, VoiceFx } from "@/lib/editor/types";
 import { CameraCache, cameraCrop, clipView, evalCamera } from "@/lib/editor/camera";
+import { appliedZooms } from "@/lib/editor/focusPrefs";
 import { PointerCache, pointerScene } from "@/lib/editor/pointer";
 import { drawScene } from "@/lib/editor/pointerDraw";
 import { drawMasks } from "@/lib/editor/maskDraw";
 import { clipKeyTime, clipTransformAt } from "@/lib/editor/keyframes";
 import { sourceToLocal, speedAt } from "@/lib/editor/speed";
-import { duckGain } from "@/lib/editor/ducking";
-import { AudioFxRouter } from "@/lib/editor/voiceFx";
+import { previewMixer, type PreviewMixer } from "@/lib/editor/audioMixer";
+import { VIDEO_TRACK, heardWithSolo, masterGainDb, masterOf, playedSourceId, trackGainAt } from "@/lib/editor/mix";
+import { dbToGain } from "@/lib/editor/loudness";
 import { shapeMaskUrl } from "@/lib/editor/shapeMask";
 import { LutRenderer, lutNow } from "@/lib/editor/lut";
 import { sourceFile } from "@/lib/editor/sourceFile";
@@ -64,8 +66,14 @@ export default function PreviewPlayer({
   muted,
   stageRef,
   project,
+  solo,
+  meters = false,
   children,
 }: {
+  /** Tracks soloed for listening (mix.ts); empty = all heard. */
+  solo?: ReadonlySet<string>;
+  /** The mixer panel is open: play through Web Audio so it can meter. */
+  meters?: boolean;
   /** For focus zooms and the pointer layer (recorded sources). */
   project?: Project;
   lay: Layout;
@@ -102,20 +110,19 @@ export default function PreviewPlayer({
   const maskWrapRef = useRef<HTMLDivElement>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement>(null);
   const caches = useRef({ camera: new CameraCache(), pointer: new PointerCache() });
-  const audioFx = useRef<AudioFxRouter | null>(null);
   // Per slot: the WebGL canvas that stands in for the video when its clip
   // has an imported LUT (lut.ts).
   const lutRenderers = useRef<(LutRenderer | null)[]>([null, null]);
-  useEffect(() => () => audioFx.current?.close(), []);
-  const state = useRef({ lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project });
+  const mix = useMemo(() => previewMix(project, audio, lay, solo, meters), [project, audio, lay, solo, meters]);
+  const state = useRef({ lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project, mix });
   const playPending = useRef([false, false]);
   const audioPool = useRef(new Map<string, HTMLAudioElement>());
   const outerRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
-    state.current = { lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project };
-  }, [lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project]);
+    state.current = { lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project, mix };
+  }, [lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project, mix]);
 
   // Letterbox the stage into whatever space the layout gives the preview,
   // keeping the canvas's exact aspect ratio (9:16, 1:1, 16:9, ...).
@@ -140,6 +147,8 @@ export default function PreviewPlayer({
     let raf = 0;
     let last = performance.now();
     const pool = audioPool.current;
+    const mixer = previewMixer();
+    let masterGain = 1;
 
     const ensureSrc = (el: HTMLMediaElement, url: string) => {
       if (el.dataset.src !== url) {
@@ -151,7 +160,13 @@ export default function PreviewPlayer({
     const tick = (now: number) => {
       const dt = Math.min(0.25, (now - last) / 1000);
       last = now;
-      const { lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project } = state.current;
+      const { lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project, mix } = state.current;
+      if (mix.engage && !mixer.engaged) mixer.engage();
+      if (mixer.engaged && mix.masterGain !== masterGain) {
+        masterGain = mix.masterGain;
+        mixer.setMasterGain(masterGain);
+      }
+      const setLevel = (el: HTMLMediaElement, key: string, level: number, fx: VoiceFx = "none") => playLevel(mixer, el, key, level, muted, fx);
       const els = [slotA.current, slotB.current];
       const stage = fxRef.current;
       if (!els[0] || !els[1] || !stage || lay.clips.length === 0) {
@@ -247,10 +262,10 @@ export default function PreviewPlayer({
         if (!need) return null;
         const clip = lay.clips[need.index].clip;
         const view = clipView(clip, sources[clip.sourceId], canvasSize, canvas);
-        const cam = caches.current.camera.track(project?.zooms, clip, view);
+        const cam = caches.current.camera.track(project ? appliedZooms(project) : undefined, clip, view);
         return cam ? cameraCrop(clip.crop, evalCamera(cam, need.time)) : clip.crop;
       });
-      applyComposite(els as HTMLVideoElement[], [shadowA.current, shadowB.current], needs, crops, loc, lay, sources, canvas, canvasSize, stageW, stageH, dipRef.current, volume, muted, t);
+      applyComposite(els as HTMLVideoElement[], [shadowA.current, shadowB.current], needs, crops, loc, lay, sources, canvas, canvasSize, stageW, stageH, dipRef.current, (el, level) => setLevel(el, VIDEO_TRACK, volume * mix.video * level), t);
       for (let slot = 0; slot < 2; slot++) {
         const el = els[slot]!;
         const need = needs[slot];
@@ -289,7 +304,7 @@ export default function PreviewPlayer({
         letterbox: letterboxRef.current,
         source: loc ? els[loc.primary.index % 2]! : null,
       });
-      syncAudio(pool, audio, sources, t, playing && !stalled, rate, volume, muted, ensureSrc, (audioFx.current ??= new AudioFxRouter()));
+      syncAudio(pool, audio, sources, t, playing && !stalled, rate, (a) => volume * (heardWithSolo(a.id, mix.solo) ? 1 : 0), ensureSrc, setLevel);
 
       clock.set(t);
       raf = requestAnimationFrame(tick);
@@ -424,8 +439,8 @@ function applyComposite(
   W: number,
   H: number,
   dip: HTMLDivElement | null,
-  volume: number,
-  muted: boolean,
+  /** Sets a slot's level (the clip's volume times its transition fade). */
+  setLevel: (el: HTMLMediaElement, level: number) => void,
   t: number
 ) {
   const smooth = (p: number) => p * p * (3 - 2 * p);
@@ -589,9 +604,7 @@ function applyComposite(
     if (g.blur > 0) filters.push(`blur(${(g.blur * H).toFixed(2)}px)`);
     if (extra[slot].filter) filters.push(extra[slot].filter);
     el.style.filter = filters.join(" ");
-    el.muted = muted;
-    // HTML media volume can't exceed 1, so >100% clip volume previews at 100%.
-    el.volume = Math.min(1, Math.max(0, volume * clip.volume * extra[slot].vol));
+    setLevel(el, Math.max(0, clip.volume * extra[slot].vol));
   }
 }
 
@@ -830,15 +843,16 @@ function syncAudio(
   t: number,
   playing: boolean,
   rate: number,
-  volume: number,
-  muted: boolean,
+  /** The preview volume for a track (0 when another track is soloed). */
+  volumeOf: (a: AudioClip) => number,
   ensureSrc: (el: HTMLMediaElement, url: string) => void,
-  fx: AudioFxRouter
+  setLevel: (el: HTMLMediaElement, key: string, level: number, fx: VoiceFx) => void
 ) {
   const live = new Set<string>();
   for (const a of audio) {
     live.add(a.id);
-    const src = sources[a.sourceId];
+    // The cleaned copy unless bypassed (it's time-aligned with the original).
+    const src = sources[playedSourceId(a, sources)];
     if (!src) continue;
     let el = pool.get(a.id);
     if (!el) {
@@ -857,19 +871,7 @@ function syncAudio(
     }
     const want = a.offset + local;
     if (el.readyState >= 1 && !el.seeking && Math.abs(el.currentTime - want) > (playing ? 0.25 : 0.05)) el.currentTime = want;
-    const fadeIn = a.fadeIn > 0 ? Math.min(1, local / a.fadeIn) : 1;
-    const fadeOut = a.fadeOut > 0 ? Math.min(1, (a.duration - local) / a.fadeOut) : 1;
-    const level = Math.max(0, volume * a.volume * fadeIn * fadeOut * duckGain(a, t));
-    const gain = fx.apply(el, a.voice ?? "none");
-    if (gain) {
-      // Routed through Web Audio (voice effect): the gain node sets the level.
-      el.muted = false;
-      el.volume = 1;
-      gain.gain.value = muted || a.muted ? 0 : level;
-    } else {
-      el.muted = muted || a.muted;
-      el.volume = Math.min(1, level);
-    }
+    setLevel(el, a.id, volumeOf(a) * trackGainAt(a, t), a.voice ?? "none");
     el.playbackRate = rate;
     if (playing && el.paused) el.play().catch(() => {});
     if (!playing && !el.paused) el.pause();
@@ -879,5 +881,38 @@ function syncAudio(
     el.pause();
     el.removeAttribute("src");
     pool.delete(id);
+  }
+}
+
+/** What the preview's mix needs from the project: the video-sound level
+ * (with solo), the master gain, and whether to play through the mixer -
+ * needed for levels above 100%, the master gain and the meters; otherwise
+ * elements play straight out, as before. */
+function previewMix(project: Project | undefined, audio: AudioClip[], lay: Layout, solo: ReadonlySet<string> | undefined, meters: boolean) {
+  const m = masterOf(project ?? {});
+  const soloSet = solo ?? new Set<string>();
+  const video = (m.videoMuted ? 0 : m.videoVolume) * (heardWithSolo(VIDEO_TRACK, soloSet) ? 1 : 0);
+  const gainDb = project ? masterGainDb(project) : 0;
+  const engage =
+    meters ||
+    Math.abs(gainDb) >= 0.05 ||
+    m.videoVolume > 1 ||
+    audio.some((a) => a.volume > 1) ||
+    lay.clips.some((c) => c.clip.volume * m.videoVolume > 1);
+  return { video, solo: soloSet, masterGain: dbToGain(gainDb), engage };
+}
+
+/** Sets an element's level: through the mixer when it's engaged (or for a
+ * voice effect), where it can go above 100%, else on the element. */
+function playLevel(mixer: PreviewMixer, el: HTMLMediaElement, key: string, level: number, muted: boolean, fx: VoiceFx) {
+  const gain = mixer.route(el, key, fx);
+  if (gain) {
+    el.muted = false;
+    el.volume = 1;
+    gain.gain.value = muted ? 0 : level;
+  } else {
+    el.muted = muted;
+    // HTML media volume can't exceed 1; the mixer is engaged when it would.
+    el.volume = Math.min(1, Math.max(0, level));
   }
 }

@@ -9,6 +9,7 @@
  * get the mask's axis-aligned bounding box (it covers at least the area).
  */
 import { CameraCache, cameraCrop, evalCamera, visibleView } from "./camera.ts";
+import { appliedZooms } from "./focusPrefs.ts";
 import { PointerCache, pointerAt } from "./pointer.ts";
 import { locate, sourceTimeAt, videoBox, type Layout } from "./timeline.ts";
 import type { MediaSource, PrivacyMask, Project } from "./types.ts";
@@ -59,7 +60,7 @@ export function maskRect(
     const clip = laid.clip;
     const s = sourceTimeAt(laid, Math.min(t, laid.start + laid.duration));
     const box = videoBox(clip, src, canvas, project.canvas);
-    const cam = caches.camera.track(project.zooms, clip, visibleView(box, clip.transform));
+    const cam = caches.camera.track(appliedZooms(project), clip, visibleView(box, clip.transform));
     const crop = cam ? cameraCrop(clip.crop, evalCamera(cam, s)) : clip.crop;
     return { clip, s, crop, box };
   };

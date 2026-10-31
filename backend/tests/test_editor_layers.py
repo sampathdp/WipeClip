@@ -143,6 +143,39 @@ class KeyframeExportTest(unittest.TestCase):
             self.assertAlmostEqual(x / W, want, delta=0.02, msg=f"x at {t}")
             self.assertAlmostEqual(y / H, 0.5, delta=0.03)
 
+    def test_late_layers_show_only_in_their_time(self) -> None:
+        """Still layers are looped for their own length and shifted into
+        place (not looped from 0): they must still appear exactly in their
+        range, keyframes in timeline time, shape masks lined up."""
+        from PIL import ImageDraw
+
+        mask = os.path.join(self.tmp, "disc.png")
+        img = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+        ImageDraw.Draw(img).ellipse((8, 8, 24, 24), fill=(255, 255, 255, 255))
+        img.save(mask)
+        plan = base_plan(self.black)
+        plan.overlays.append(self.layer(start=1.0, end=2.0, keyframes=[kf(1.0, x=0.25), kf(2.0, x=0.75)]))
+        plan.overlays.append(self.layer(start=2.2, end=2.9, width=0.4, mask_path=mask))
+        out = os.path.join(self.tmp, "late.mp4")
+        render(plan, out)
+        import numpy as np
+
+        def magenta(frame) -> int:
+            b, g, r = (frame[..., i].astype(int) for i in range(3))
+            return int(((r > 180) & (b > 180) & (g < 90)).sum())
+
+        self.assertEqual(magenta(frame_at(out, 0.8)), 0, "nothing before the layer starts")
+        x, _ = magenta_center(frame_at(out, 1.5))
+        self.assertAlmostEqual(x / W, 0.5, delta=0.03, msg="keyframes in timeline time")
+        self.assertEqual(magenta(frame_at(out, 2.1)), 0, "gone after its end")
+        f = frame_at(out, 2.5)
+        self.assertGreater(magenta(f), 0, "the masked layer shows in its range")
+        b, g, r = (int(v) for v in f[H // 2, W // 2])
+        self.assertTrue(r > 180 and b > 180, f"inside the disc, got {(r, g, b)}")
+        side = W // 2 - int(0.4 * W * 0.45)
+        self.assertLess(int(np.asarray(f[H // 2, side]).max()), 60, "outside the disc is hidden")
+        self.assertEqual(magenta(frame_at(out, 2.95)), 0)
+
     def test_layer_scale_rotation_opacity(self) -> None:
         plan = base_plan(self.black)
         plan.overlays.append(

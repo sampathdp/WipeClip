@@ -1,12 +1,14 @@
 // Manual end-to-end check of Phase 3 tutorial tools in the real editor
 // (needs Chrome and a running dev server; see preview-focus.mjs):
 //
-//   node tests/desktop/manual/preview-tutorial.mjs http://localhost:3005/editor out-dir
+//   node tests/desktop/manual/preview-tutorial.mjs http://localhost:3100/ out-dir
 //
 // Opens a saved project (4-color video with speech-like sound, a pause
 // in the middle) with a solid and a blur privacy mask and an arrow, checks
 // the preview pixels, then runs Tutorial > Review > Analyze, accepts the
-// suggested cut, checks the timeline got shorter, and undoes it.
+// suggested cut, checks the timeline got shorter, undoes it, plays with
+// "Preview the result" (the pending cut must be skipped, nothing removed)
+// and analyzes again (the mix's levels must be reused).
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -81,7 +83,33 @@ try {
   await b.key("z", "KeyZ", 90, 2); // Ctrl+Z
   await sleep(800);
   results.totalAfterUndo = await total();
-  results.errors = b.errors;
+
+  // Preview the result: playback jumps over the pending cut (still not applied).
+  const playhead = () => b.evaluate(`(() => { const t = [...document.querySelectorAll("*")].map(e => e.childNodes[0]?.textContent?.trim()).find(t => /^\\d+:\\d\\d\\.\\d+$/.test(t ?? "")); if (!t) return null; const [m, s] = t.split(":"); return Number(m) * 60 + Number(s); })()`);
+  const cutRange = await b.evaluate(`(() => { const p = [...document.querySelectorAll("li")].map(li => li.textContent).find(t => /pause|dead time|silence/i.test(t)); return p ?? null; })()`);
+  results.previewToggle = await b.evaluate(`(() => { const l = [...document.querySelectorAll("label")].find(l => l.textContent.trim().startsWith("Preview the result")); l?.querySelector("input")?.click(); return !!l?.querySelector("input")?.checked; })()`);
+  await b.evaluate(`document.activeElement?.blur?.()`);
+  for (let i = 0; i < 10; i++) await b.key("ArrowLeft", "ArrowLeft", 37, 8); // Shift: 1 s steps, back to the start
+  await b.key(" ", "Space", 32); // play
+  const seen = [];
+  for (let i = 0; i < 45; i++) {
+    await sleep(100);
+    seen.push(await playhead());
+  }
+  await b.key(" ", "Space", 32); // pause
+  results.previewPlayheads = seen;
+  // The pause is 2.5-6 s; with 0.35 s kept each side the cut is ~2.85-5.65 s.
+  results.previewSkipped = seen.some((t) => t !== null && t >= 5.6) && !seen.some((t) => t !== null && t > 3.0 && t < 5.5);
+  results.totalWhilePreviewing = await total();
+  results.cutRangeText = cutRange;
+
+  // Analyze again with nothing changed: the mix's levels are reused.
+  await b.evaluate(`(() => { window.__info = []; const i = console.info; console.info = (...a) => { window.__info.push(a.join(" ")); i(...a); }; })()`);
+  await b.click("Analyze recording");
+  for (let i = 0; i < 40 && !(await b.evaluate(`window.__info.some(l => l.startsWith("[review] analysis took"))`)); i++) await sleep(250);
+  results.reanalysis = await b.evaluate(`window.__info.find(l => l.startsWith("[review] analysis took")) ?? null`);
+  // Outside the desktop app the shell's Tauri calls fail; not what this checks.
+  results.errors = b.errors.filter((e) => !/reading '(invoke|transformCallback)'/.test(e));
 } finally {
   b.close();
 }
@@ -89,5 +117,7 @@ writeFileSync(join(out, "result.json"), JSON.stringify(results, null, 2));
 console.log(JSON.stringify(results, null, 2));
 const ok =
   results.solidMagenta && results.blurMixes && results.outsideSharpRed && results.arrowDrawn && results.cutClicked &&
-  results.totalBefore !== results.totalAfterCut && results.totalAfterUndo === results.totalBefore && results.errors.length === 0;
+  results.totalBefore !== results.totalAfterCut && results.totalAfterUndo === results.totalBefore &&
+  results.previewSkipped && results.totalWhilePreviewing === results.totalBefore && /levels reused/.test(results.reanalysis ?? "") &&
+  results.errors.length === 0;
 process.exit(ok ? 0 : 1);

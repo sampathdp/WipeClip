@@ -959,3 +959,7 @@ mod live_preview {
         assert!((v - s.duration_ms / 1000.0).abs() < 0.1);
     }
 }
+
+#[cfg(test)]
+#[path = "video_sync_test.rs"]
+mod live_sync;

@@ -18,6 +18,7 @@ import asyncio
 import math
 import re
 import subprocess
+from functools import lru_cache
 
 import numpy as np
 
@@ -37,7 +38,13 @@ def _decode(in_path: str, start: float, dur: float, filters: str | None = None) 
     if filters:
         args += ["-af", filters]
     args += ["-ac", "1", "-ar", str(_RATE), "-f", "f32le", "-"]
-    return np.frombuffer(subprocess.run(args, capture_output=True, check=True).stdout, np.float32)
+    res = subprocess.run(args, capture_output=True)
+    if res.returncode != 0:
+        # A RuntimeError like _run_ffmpeg's, which the route turns into a
+        # message; without the command (or the chained error), which names
+        # the user's file.
+        raise RuntimeError(f"ffmpeg couldn't decode the audio (exit {res.returncode})")
+    return np.frombuffer(res.stdout, np.float32)
 
 
 def noise_floor_db(samples: np.ndarray) -> float:
@@ -64,13 +71,37 @@ def _loudness(in_path: str, filters: str) -> tuple[float, float] | None:
     return float(i[-1]), float(p[-1])
 
 
+@lru_cache(maxsize=8)
+def filter_delay(filters: str) -> int:
+    """Samples `filters` delay the sound at _RATE, measured on an impulse.
+    afftdn outputs its FFT window late (1200 samples, 25 ms, at 48 kHz with
+    ffmpeg 7.1) and ffmpeg doesn't compensate; uncorrected, the cleaned
+    copy played 25 ms behind the picture (measured)."""
+    src = f"aevalsrc='between(n\\,{_RATE // 2}\\,{_RATE // 2})':s={_RATE}:d=1"
+    res = subprocess.run(
+        [get_ffmpeg_path(), "-loglevel", "error", "-f", "lavfi", "-i", src, "-af", f"apad=pad_dur=0.5,{filters}", "-ac", "1", "-f", "f32le", "-"],
+        capture_output=True,
+    )
+    x = np.frombuffer(res.stdout, np.float32)
+    if res.returncode != 0 or len(x) < _RATE or not np.any(x):
+        return 0
+    return max(0, int(np.argmax(np.abs(x))) - _RATE // 2)
+
+
 def clean_filters(denoise: float, floor_db: float | None) -> str:
-    """`denoise` 0..1 maps to afftdn's noise reduction of 6..40 dB."""
-    parts = ["highpass=f=70"]
+    """`denoise` 0..1 maps to afftdn's noise reduction of 6..40 dB. Runs at
+    _RATE, so the denoiser's delay is the same for every file, and is
+    compensated: the input is padded by it and the output starts that much
+    later, so the copy lines up with the original sample for sample."""
+    parts = [f"aresample={_RATE}", "highpass=f=70"]
     d = max(0.0, min(1.0, denoise))
     if d > 0 and floor_db is not None:
         parts.append(f"afftdn=nr={6 + 34 * d:.1f}:nf={floor_db:.1f}")
-    return ",".join(parts)
+    chain = ",".join(parts)
+    delay = filter_delay(chain)
+    if delay:
+        chain = f"{parts[0]},apad=pad_len={delay},{','.join(parts[1:])},atrim=start_sample={delay},asetpts=PTS-STARTPTS"
+    return chain
 
 
 async def clean_audio(in_path: str, out_path: str, start: float, end: float, denoise: float, level: bool) -> None:

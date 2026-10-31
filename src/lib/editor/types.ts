@@ -105,6 +105,9 @@ export interface ShapeMask {
   feather: number;
   /** Shows the outside instead. */
   invert: boolean;
+  /** Rectangles: corner radius as a share of half the short side (0..1);
+   * absent = square corners. */
+  radius?: number;
 }
 
 /** One keyframe of a clip's or layer's animation (see keyframes.ts). */
@@ -257,7 +260,7 @@ export type Overlay =
   | (OverlayBase & { kind: "text"; text: TextStyle })
   /** Picture-in-picture: a video playing from `offset` (source seconds)
    * for the layer's time range, with its own sound at `volume` (0..2). */
-  | (OverlayBase & { kind: "video"; sourceId: string; offset: number; volume: number })
+  | (OverlayBase & { kind: "video"; sourceId: string; offset: number; volume: number; camLayout?: CamLayout })
   /** Arrow, highlight circle, rectangle, numbered step, callout, focus outline. */
   | (OverlayBase & { kind: "shape"; shape: ShapeStyle });
 
@@ -285,6 +288,49 @@ export interface AudioClip {
   /** Detected beats (beats.ts), in seconds of the audio file, so trims
    * keep them on the music. */
   beats?: { bpm: number; times: number[] };
+  /** Noise reduction (mix.ts): a cleaned copy of the whole source file,
+   * made on this device and time-aligned with it, played instead of the
+   * original unless bypassed. The original is never changed. Absent = off. */
+  clean?: AudioCleanup;
+}
+
+export interface AudioCleanup {
+  sourceId: string;
+  /** 0..1, what the copy was made with (audio_clean.py: 6..40 dB). */
+  strength: number;
+  /** Plays (and exports) the original instead. */
+  bypass: boolean;
+}
+
+/** Loudness targets for the whole mix (loudness.ts LOUDNESS_TARGETS). */
+export type LoudnessTarget = "off" | "online" | "voice" | "broadcast";
+
+/** The mix bus (mix.ts): the clips' own sound as one track, and loudness
+ * normalization. Absent = defaults (video sound at 100%, no
+ * normalization). A peak limiter always protects the export. */
+export interface MasterAudio {
+  /** The clips' own sound, multiplying every clip's volume (0..2). */
+  videoVolume: number;
+  videoMuted: boolean;
+  loudness: LoudnessTarget;
+  /** Gain bringing the measured mix to the target, dB. Applied by the
+   * preview and the export alike; 0 when off. */
+  gainDb: number;
+  /** What it was measured from: integrated loudness (LUFS), sample peak
+   * (dBFS) and the mix's key (mix.ts mixKey), to tell when it's out of
+   * date. Absent = not measured. */
+  measured?: { lufs: number; peakDb: number; key: string };
+}
+
+/** A webcam layer's layout preset (webcamLayout.ts), kept so it can be
+ * placed again when the canvas size changes. Absent = placed by hand. */
+export interface CamLayout {
+  shape: "circle" | "rounded" | "rect";
+  size: "small" | "medium" | "large";
+  corner: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  /** Next to the screen (landscape canvas) or under it (portrait), instead
+   * of a corner bubble. */
+  split?: boolean;
 }
 
 export type VoiceFx = "none" | "chipmunk" | "deep" | "robot" | "echo" | "telephone" | "radio";
@@ -411,6 +457,26 @@ export interface PointerStyle {
 
 // --- Tutorial tools (Phase 3) -------------------------------------------------
 
+/** A source-time range where no zooms are suggested. */
+export interface FocusExclusion {
+  id: string;
+  sourceId: string;
+  start: number;
+  end: number;
+}
+
+/** Project-wide focus controls (src/lib/editor/focusPrefs.ts). */
+export interface FocusPrefs {
+  /** Scales every zoom's strength above 1x (1 = as set, 0.25..1.5). */
+  intensity: number;
+  /** Original view: zooms are kept but not applied. */
+  bypass: boolean;
+  excluded: FocusExclusion[];
+  /** Recorded clicks left out (no ring, no suggestion), by press time in
+   * source seconds. */
+  ignoredClicks: { sourceId: string; t: number }[];
+}
+
 export type MaskMode = "blur" | "pixelate" | "solid";
 
 /** A privacy mask over part of the picture for a time range (timeline
@@ -448,7 +514,11 @@ export type SuggestionKind =
   | "possible-retake"
   | "navigation"
   | "milestone"
-  | "retake";
+  | "retake"
+  // From the transcript (speechEdits.ts).
+  | "filler"
+  | "repeat"
+  | "no-speech";
 
 /** Something worth a look, in timeline seconds. Suggestions never change
  * the edit by themselves: "cut" ones remove their range only when the
@@ -475,6 +545,97 @@ export interface Chapter {
   auto: boolean;
 }
 
+/** Version of `Draft`; a draft with another version is dropped on load
+ * (it's only suggestions - generating again recreates it). */
+export const DRAFT_VERSION = 1;
+
+export type DraftItemKind = "zoom" | "highlights" | "cut" | "chapter" | "review";
+
+/** One proposal of a draft (src/lib/editor/draft.ts). Nothing in it is
+ * applied until the user applies the draft. */
+export interface DraftItem {
+  id: string;
+  kind: DraftItemKind;
+  status: "pending" | "accepted" | "rejected";
+  title: string;
+  /** What it's based on, in plain words. */
+  detail: string;
+  confidence: "low" | "medium" | "high";
+  /** Timeline seconds where it shows (a zoom: its first visible span). */
+  start: number;
+  end: number;
+  /** kind "zoom": the zoom, in source time like every zoom. */
+  zoom?: CameraZoom;
+  /** kind "cut" / "review": the suggestion, in timeline time. */
+  suggestion?: EditSuggestion;
+  /** kind "chapter". */
+  chapter?: Chapter;
+  /** kind "zoom"/"chapter": the cut that would remove it (mostly inside). */
+  insideCut?: string;
+}
+
+/** Highlight suggestions (highlights.ts): candidate moments worth a clip,
+ * from explainable signals. Suggestions only: nothing in the timeline
+ * changes, and a highlight is exported as its own file from a copy of the
+ * project. Times are timeline seconds. */
+export const HIGHLIGHTS_VERSION = 1;
+
+export type HighlightSignal = "sound" | "picture" | "scene" | "input" | "marker" | "speech" | "app" | "click";
+
+export interface Highlight {
+  id: string;
+  start: number;
+  end: number;
+  /** The strongest moment inside the range. */
+  peak: number;
+  /** 0..1, for ranking. */
+  score: number;
+  confidence: "high" | "medium" | "low";
+  /** What the suggestion is based on, in plain words. */
+  reasons: { signal: HighlightSignal; text: string }[];
+  status: "pending" | "kept" | "rejected";
+  /** Its range was changed by hand. */
+  edited?: boolean;
+  title?: string;
+  /** The same range in the recording's own time (one clip, played forward),
+   * so it can be found again after trims, splits and moves (highlights.ts
+   * placeHighlights). Missing when it spans clips. */
+  anchor?: { sourceId: string; start: number; end: number };
+  /** Its footage was cut, split or changed since: preview and export are
+   * off until it's found again or its range is set again. */
+  outdated?: boolean;
+}
+
+export interface HighlightSet {
+  version: typeof HIGHLIGHTS_VERSION;
+  createdAt: string;
+  /** The timeline the times refer to (draft.ts timelineKey). */
+  timelineKey: string;
+  /** What the suggestions were made from, to skip unchanged work. */
+  inputsKey: string;
+  items: Highlight[];
+  notes: string[];
+  /** Local counts for the user's own review (never sent anywhere): how many
+   * suggestions were made, kept, rejected and edited. */
+  stats: { suggested: number; kept: number; rejected: number; edited: number; exported: number };
+}
+
+/** A generated draft: proposals from the recording's events and the
+ * analysis results, reviewed before anything changes. */
+export interface Draft {
+  version: typeof DRAFT_VERSION;
+  createdAt: string;
+  /** The timeline the times refer to (draft.ts timelineKey). Cuts and
+   * chapters can't be applied once it has changed. */
+  timelineKey: string;
+  /** What the analysis was made from, to skip unchanged work. */
+  inputsKey: string;
+  items: DraftItem[];
+  /** Short notes on what couldn't be analyzed. */
+  notes: string[];
+  appliedAt?: string;
+}
+
 /** The undoable part of the editor state. */
 export interface Project {
   clips: Clip[];
@@ -487,6 +648,11 @@ export interface Project {
   zooms?: CameraZoom[];
   /** Click/cursor drawing for recorded sources; null/absent = off. */
   pointer?: PointerStyle | null;
+  /** Intensity, original view, excluded ranges, ignored clicks; absent =
+   * defaults. */
+  focus?: FocusPrefs;
+  /** The last generated draft (suggestions only until applied). */
+  draft?: Draft;
   /** Privacy masks (blur / pixelate / solid), drawn above the video. */
   masks?: PrivacyMask[];
   /** Review items from silence and interaction analysis, or user marks. */
@@ -496,6 +662,10 @@ export interface Project {
    * (wordEdit.ts). Kept in sync by ripple cuts and inserts; `total` is the
    * timeline length it matches, so other edits show it's out of date. */
   transcript?: Transcript;
+  /** The last highlight suggestions (highlights.ts). */
+  highlights?: HighlightSet;
+  /** Mix bus and loudness (mix.ts); absent = defaults. */
+  master?: MasterAudio;
 }
 
 export interface TranscriptWord {
@@ -588,6 +758,7 @@ export const NEUTRAL_ADJUST: Adjustments = {
 export const DEFAULT_LOOK: Look = { filter: "original", intensity: 100, adjust: NEUTRAL_ADJUST };
 export const DEFAULT_TRANSFORM: VideoTransform = { x: 0.5, y: 0.5, scale: 1, rotation: 0 };
 export const FULL_CROP: Crop = { x: 0, y: 0, w: 1, h: 1 };
+export const DEFAULT_MASTER: MasterAudio = { videoVolume: 1, videoMuted: false, loudness: "off", gainDb: 0 };
 export const DEFAULT_CANVAS: Canvas = { aspect: "original", fit: "fit", background: { type: "color", color: "#000000" } };
 
 export function newClip(id: string, sourceId: string, start: number, end: number): Clip {
@@ -651,7 +822,62 @@ export function migrateProject(raw: unknown): Project {
     suggestions: (p.suggestions as EditSuggestion[] | undefined) ?? [],
     chapters: (p.chapters as Chapter[] | undefined) ?? [],
     ...(p.transcript ? { transcript: p.transcript as Transcript } : {}),
+    ...(validDraft(p.draft) ? { draft: p.draft } : {}),
+    ...(validHighlights(p.highlights) ? { highlights: p.highlights } : {}),
+    ...(p.master ? { master: { ...DEFAULT_MASTER, ...(p.master as Partial<MasterAudio>) } } : {}),
+    ...(p.focus
+      ? {
+          focus: {
+            intensity: 1,
+            bypass: false,
+            ...(p.focus as Partial<FocusPrefs>),
+            excluded: (p.focus as Partial<FocusPrefs>).excluded ?? [],
+            ignoredClicks: (p.focus as Partial<FocusPrefs>).ignoredClicks ?? [],
+          },
+        }
+      : {}),
   };
+}
+
+const DRAFT_KINDS = new Set<DraftItemKind>(["zoom", "highlights", "cut", "chapter", "review"]);
+
+/** A saved draft is kept only if it's this version and every item is
+ * well-formed; anything else is dropped (it can be generated again). */
+export function validDraft(raw: unknown): raw is Draft {
+  const d = raw as Partial<Draft> | null | undefined;
+  if (!d || d.version !== DRAFT_VERSION || !Array.isArray(d.items) || typeof d.timelineKey !== "string") return false;
+  return d.items.every(
+    (i) =>
+      i &&
+      typeof i.id === "string" &&
+      DRAFT_KINDS.has(i.kind) &&
+      ["pending", "accepted", "rejected"].includes(i.status) &&
+      Number.isFinite(i.start) &&
+      Number.isFinite(i.end) &&
+      (i.kind !== "zoom" || (!!i.zoom && Number.isFinite(i.zoom.start) && Number.isFinite(i.zoom.end))) &&
+      ((i.kind !== "cut" && i.kind !== "review") || !!i.suggestion) &&
+      (i.kind !== "chapter" || !!i.chapter)
+  );
+}
+
+/** Saved highlights are kept only if they're this version and well-formed;
+ * anything else is dropped (they can be found again). */
+export function validHighlights(raw: unknown): raw is HighlightSet {
+  const h = raw as Partial<HighlightSet> | null | undefined;
+  if (!h || h.version !== HIGHLIGHTS_VERSION || !Array.isArray(h.items) || typeof h.timelineKey !== "string" || !h.stats) return false;
+  return h.items.every(
+    (i) =>
+      i &&
+      typeof i.id === "string" &&
+      Number.isFinite(i.start) &&
+      Number.isFinite(i.end) &&
+      i.end > i.start &&
+      Number.isFinite(i.peak) &&
+      ["pending", "kept", "rejected"].includes(i.status) &&
+      Array.isArray(i.reasons) &&
+      (i.anchor === undefined ||
+        (typeof i.anchor?.sourceId === "string" && Number.isFinite(i.anchor.start) && Number.isFinite(i.anchor.end) && i.anchor.end > i.anchor.start))
+  );
 }
 
 export const DEFAULT_POINTER: PointerStyle = {

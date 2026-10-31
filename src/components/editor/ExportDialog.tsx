@@ -10,7 +10,7 @@ import { saveLastExport } from "@/lib/editor/projectStore";
 import { canvasSize, formatTime } from "@/lib/editor/timeline";
 import type { MediaSource, Project } from "@/lib/editor/types";
 import { ContentBlockedError, PlanRequiredError, type RenderProgress, type Resolution } from "@/lib/toolsApi";
-import { IS_DESKTOP, notifyIfAway, revealExport, saveExportFile } from "@/lib/platform";
+import { EngineUnavailableError, IS_DESKTOP, notifyIfAway, revealExport, saveExportFile } from "@/lib/platform";
 import Dialog from "./Dialog";
 import { ExportIcon } from "./icons";
 import PremiumBadge from "./PremiumBadge";
@@ -90,7 +90,13 @@ export default function ExportDialog({
   initialResult,
   onClose,
   onSignIn,
+  title = "Export video",
+  nameSuffix = "edit",
 }: {
+  /** "Export highlight" etc. */
+  title?: string;
+  /** End of the suggested file name ("edit", "highlight-1"). */
+  nameSuffix?: string;
   project: Project;
   sources: Record<string, MediaSource>;
   originalId: string;
@@ -179,7 +185,7 @@ export default function ExportDialog({
         setError({ message: "Export took too long. Try a shorter video or a lower resolution. Your project is safe." });
       } else if (e instanceof PlanRequiredError) {
         setError({ message: e.message, upgrade: true });
-      } else if (e instanceof ContentBlockedError) {
+      } else if (e instanceof ContentBlockedError || e instanceof EngineUnavailableError) {
         setError({ message: e.message });
       } else if (e instanceof TypeError) {
         setError({ message: "Network problem during export. Check your connection and try again. Your project is safe." });
@@ -200,10 +206,10 @@ export default function ExportDialog({
     }
   };
 
-  const filename = `wipeclip-${sourceName(original).replace(/\.[^.]+$/, "")}-edit.${OUTPUT_EXT[output.format]}`;
+  const filename = `wipeclip-${sourceName(original).replace(/\.[^.]+$/, "")}-${nameSuffix}.${OUTPUT_EXT[output.format]}`;
 
   return (
-    <Dialog title="Export video" onClose={state === "rendering" ? undefined : onClose}>
+    <Dialog title={title} onClose={state === "rendering" ? undefined : onClose}>
       {state === "setup" && (
         <div className="space-y-5">
           <div className="grid grid-cols-3 gap-2 rounded-xl border border-border bg-surface-2/60 p-3 text-center text-xs">

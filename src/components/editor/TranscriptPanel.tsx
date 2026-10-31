@@ -6,6 +6,7 @@ import { formatTime } from "@/lib/editor/timeline";
 import type { Transcript } from "@/lib/editor/types";
 import { fillerIndices } from "@/lib/editor/wordEdit";
 import { ActionButton, PanelShell } from "./Inspector";
+import { SpeechModelNotice } from "./Panels";
 
 /** Editing by text: the timeline's speech as words. Click a word to jump
  * there; click another with Shift held to select the words between; delete
@@ -19,6 +20,9 @@ export default function TranscriptPanel({
   hasCaptions,
   onSeek,
   onTranscribe,
+  onCancel,
+  modelCached,
+  model,
   onDelete,
   onClose,
 }: {
@@ -30,6 +34,11 @@ export default function TranscriptPanel({
   hasCaptions: boolean;
   onSeek: (t: number) => void;
   onTranscribe: () => void;
+  /** Stops the model download or transcription in progress. */
+  onCancel: () => void;
+  /** null = still checking; false = the first Transcribe asks to download it. */
+  modelCached: boolean | null;
+  model: { sizeMb: number; gpu: boolean } | null;
   onDelete: (indices: number[]) => void;
   onClose: () => void;
 }) {
@@ -40,6 +49,17 @@ export default function TranscriptPanel({
   const anchor = sel?.words === words ? sel.anchor : null;
   const focus = sel?.words === words ? sel.focus : null;
   const t = useClockTime(clock);
+  const [consent, setConsent] = useState(false);
+  const transcribeButton = (label: string) =>
+    busy ? (
+      <ActionButton onClick={onCancel}>Cancel transcribing</ActionButton>
+    ) : modelCached === false && !consent ? (
+      <SpeechModelNotice model={model} busy={busy} onConsent={() => setConsent(true)} />
+    ) : (
+      <ActionButton onClick={onTranscribe} disabled={modelCached === null}>
+        {label}
+      </ActionButton>
+    );
   const fillers = useMemo(() => fillerIndices(words), [words]);
 
   const lo = anchor === null ? null : Math.min(anchor, focus ?? anchor);
@@ -61,10 +81,8 @@ export default function TranscriptPanel({
               ? "The edit changed since the transcript was made, so its words no longer line up. Transcribe again to edit by text."
               : "Transcribe the video's speech, then delete words to cut them out of the video - pauses, retakes and filler words included."}
           </p>
-          <ActionButton onClick={onTranscribe} disabled={busy}>
-            {busy ? "Transcribing…" : transcript ? "Transcribe again" : "Transcribe"}
-          </ActionButton>
-          <p className="text-[11px] text-muted">Runs on this device with the same speech model as auto captions.</p>
+          {transcribeButton(transcript ? "Transcribe again" : "Transcribe")}
+          <p className="text-[11px] text-muted">Runs on this device with the same speech model as auto captions; your audio and transcript are not uploaded.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -107,9 +125,7 @@ export default function TranscriptPanel({
           <p className="text-[11px] text-muted">
             Each cut is one undo step.{hasCaptions ? " Captions are rebuilt from the transcript after a cut, so edits made to caption text are replaced." : ""}
           </p>
-          <ActionButton onClick={onTranscribe} disabled={busy}>
-            {busy ? "Transcribing…" : "Transcribe again"}
-          </ActionButton>
+          {transcribeButton("Transcribe again")}
         </div>
       )}
     </PanelShell>

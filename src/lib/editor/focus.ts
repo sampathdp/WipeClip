@@ -186,6 +186,20 @@ export interface FocusResult {
 
 const inside = (x: number, y: number) => x >= 0 && x <= 1 && y >= 0 && y <= 1;
 
+/** Events inside the recording with usable numbers, in time order. A
+ * damaged or hand-edited events file can hold NaN, a time past the end
+ * or a negative one; those used to produce a zoom with no end. */
+function validEvents(events: InteractionEvent[], duration: number): InteractionEvent[] {
+  const endMs = duration * 1000;
+  const ok = events.filter((e) => {
+    if (!Number.isFinite(e.t) || e.t < 0 || e.t > endMs) return false;
+    if ("x" in e && !(Number.isFinite(e.x) && Number.isFinite(e.y))) return false;
+    return true;
+  });
+  for (let i = 1; i < ok.length; i++) if (ok[i].t < ok[i - 1].t) return ok.sort((a, b) => a.t - b.t);
+  return ok;
+}
+
 /** Pointer speed just before `t`, from move samples (frame widths/s). */
 function speedBefore(moves: { t: number; x: number; y: number }[], t: number, aspect: number): number {
   // Binary search for the last move at or before t.
@@ -387,6 +401,9 @@ interface Candidate {
   points: ZoomPathPoint[];
   forced: boolean;
   long: boolean;
+  /** Frames two areas the camera went back and forth between: kept
+   * still (no follow path) when more is merged in. */
+  wide?: boolean;
 }
 
 /** Every position of a cluster in time order: each interaction and the
@@ -483,7 +500,7 @@ function rangeFor(first: number, last: number, cuts: number[], duration: number,
 
 export function suggestZooms(input: FocusInput, s: FocusSettings, ids: () => string): FocusResult {
   const { events, duration, aspect, sourceId } = input;
-  const { interactions, moves, cuts, markers, clicks } = collectInteractions(events, aspect, s);
+  const { interactions, moves, cuts, markers, clicks } = collectInteractions(validEvents(events, duration), aspect, s);
   const clusters = clusterInteractions(interactions, cuts, aspect, s);
 
   // Markers boost the cluster around them, or get their own focus.
@@ -547,16 +564,59 @@ export function suggestZooms(input: FocusInput, s: FocusSettings, ids: () => str
   cands.sort((a, b) => a.start - b.start);
 
   // Pacing: merge or chain neighbours that come too soon.
+  const isNear = (a: Candidate, b: Candidate) => Math.hypot(a.x - b.x, (a.y - b.y) / aspect) < s.clusterRadius * 1.5;
+  const lengthLimit = (...cs: Candidate[]) => (cs.some((x) => x.long) ? Math.max(s.maxDuration, TYPING_MAX_DURATION) : s.maxDuration);
   const paced: Candidate[] = [];
+  let skippedBack = 0;
   for (const c of cands) {
     const prev = paced[paced.length - 1];
+    const before = paced[paced.length - 2];
+    // Back and forth: A, then B right after, then A again soon. Panning
+    // there and back reverses the camera every second or two, which is
+    // hard to follow; one still zoom wide enough for both areas shows the
+    // same clicks calmly. If no useful zoom fits both, the return trip
+    // gets no zoom of its own (that area was just shown).
+    if (
+      prev &&
+      before &&
+      c.start < prev.end + s.minGap &&
+      prev.start <= before.end + CHAIN_GAP &&
+      isNear(c, before) &&
+      !isNear(c, prev) &&
+      !cutBetween(cuts, before.end, c.start)
+    ) {
+      const end = Math.max(prev.end, c.end);
+      const points = [...before.points, ...prev.points, ...c.points].sort((a, b) => a.t - b.t);
+      const frame = end - before.start <= lengthLimit(before, prev, c) ? frameFor(points, aspect, { ...s, follow: false }) : null;
+      if (frame) {
+        Object.assign(before, {
+          end,
+          x: frame.x,
+          y: frame.y,
+          zoom: frame.zoom,
+          path: [],
+          points,
+          wide: true,
+          long: before.long || prev.long || c.long,
+          score: before.score + prev.score + c.score,
+          forced: before.forced || prev.forced || c.forced,
+          reason: `${before.reason} + ${prev.reason}, back and forth`,
+        });
+        paced.pop();
+        continue;
+      }
+      if (!c.forced && c.start - before.end < 2 * s.minGap) {
+        skippedBack++;
+        continue;
+      }
+    }
     if (prev && c.start < prev.end + s.minGap) {
-      const near = Math.hypot(c.x - prev.x, (c.y - prev.y) / aspect) < s.clusterRadius * 1.5;
+      const near = isNear(c, prev);
       const mergedLength = Math.max(prev.end, c.end) - prev.start;
-      const maxLength = prev.long || c.long ? Math.max(s.maxDuration, TYPING_MAX_DURATION) : s.maxDuration;
+      const maxLength = lengthLimit(prev, c);
       if (near && mergedLength <= maxLength && !cutBetween(cuts, prev.end, c.start)) {
         const points = [...prev.points, ...c.points].sort((a, b) => a.t - b.t);
-        const frame = frameFor(points, aspect, s);
+        const frame = frameFor(points, aspect, prev.wide ? { ...s, follow: false } : s);
         if (frame) {
           const end = Math.max(prev.end, c.end);
           Object.assign(prev, {
@@ -574,10 +634,24 @@ export function suggestZooms(input: FocusInput, s: FocusSettings, ids: () => str
           continue;
         }
       }
+      // A back-and-forth zoom that reached its length limit: the next one
+      // keeps its framing when the action still fits, so the camera stays
+      // put across the seam instead of panning between the two areas.
+      if (prev.wide && near && !cutBetween(cuts, prev.end, c.start)) {
+        const half = 1 / (2 * prev.zoom);
+        const fits = c.points.every((q) => Math.abs(q.x - prev.x) <= half - PAD && Math.abs(q.y - prev.y) <= half - PAD * aspect);
+        if (fits) Object.assign(c, { x: prev.x, y: prev.y, zoom: prev.zoom, path: [], wide: true, reason: prev.reason });
+      }
       // Different spot soon after: pan straight there (chained), no
-      // zoom-out in between.
-      if (c.start < prev.end) c.start = prev.end;
-      else if (c.start - prev.end > CHAIN_GAP * 0.5) prev.end = Math.max(prev.start + 0.5, c.start - CHAIN_GAP * 0.5);
+      // zoom-out in between. When they overlap, the previous zoom ends
+      // once its own action is done (the pan away starts easeOut before
+      // its end) rather than this one starting late: starting late left
+      // the camera on the previous spot when this click happened.
+      if (c.start < prev.end) {
+        const prevLast = prev.points.length ? prev.points[prev.points.length - 1].t : prev.start;
+        prev.end = Math.max(prev.start + 0.5, Math.min(prev.end, Math.max(prevLast + 0.3 + s.easeOut, c.start)));
+        c.start = prev.end;
+      } else if (c.start - prev.end > CHAIN_GAP * 0.5) prev.end = Math.max(prev.start + 0.5, c.start - CHAIN_GAP * 0.5);
       if (c.end - c.start < 0.6) {
         if (c.score > prev.score && !prev.forced) paced[paced.length - 1] = c;
         continue;
@@ -618,7 +692,7 @@ export function suggestZooms(input: FocusInput, s: FocusSettings, ids: () => str
       reason: c.reason,
       ...(c.path.length ? { path: c.path.map((p) => ({ t: round3(p.t), x: round3(p.x), y: round3(p.y) })) } : {}),
     }));
-  return { zooms, stats: { clicks, clusters: clusters.length, suggested: zooms.length, skippedSmall, skippedPacing } };
+  return { zooms, stats: { clicks, clusters: clusters.length, suggested: zooms.length, skippedSmall, skippedPacing: skippedPacing + skippedBack } };
 }
 
 const round3 = (v: number) => Math.round(v * 1000) / 1000;

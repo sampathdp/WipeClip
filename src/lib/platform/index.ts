@@ -71,18 +71,30 @@ export interface LocalEngine {
   token: string;
 }
 
+/** The bundled engine exists but couldn't start (crashed, blocked by
+ * security software, too slow). Nothing was uploaded instead. */
+export class EngineUnavailableError extends Error {
+  code = "engine_unavailable";
+  constructor() {
+    super("WipeClip's processing engine couldn't start, so nothing was processed or uploaded. Restart WipeClip and try again.");
+  }
+}
+
 /** The desktop app's bundled processing engine (src-tauri/src/engine.rs),
  * started on first use. null on the website, or when this build has no
- * engine or it couldn't start - callers then use the cloud backend. Asked
- * per job rather than cached: the app restarts a stopped engine on a new
- * port, and answers instantly while it's running. */
+ * engine at all - callers then use the cloud backend. When the build has
+ * one but it can't start, this throws EngineUnavailableError instead of
+ * returning null: falling back would upload the user's video (often a
+ * screen recording) to the cloud without asking. Asked per job rather than
+ * cached: the app restarts a stopped engine on a new port, and answers
+ * instantly while it's running. */
 export async function localEngine(): Promise<LocalEngine | null> {
   if (!IS_DESKTOP) return null;
   try {
     return await invoke<LocalEngine | null>("local_engine");
   } catch (err) {
-    console.warn("[engine] local engine unavailable, using the cloud backend", err);
-    return null;
+    console.warn("[engine] local engine couldn't start", err);
+    throw new EngineUnavailableError();
   }
 }
 
@@ -126,6 +138,22 @@ export async function saveExportFile(blob: Blob, suggestedName: string, kind: "v
   if (!token) return { status: "cancelled" };
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const path = await invoke<string>("write_export", bytes, { "x-export-token": token });
+  return { status: "saved", path };
+}
+
+/** Where a batch of exports goes: desktop, a folder the user picks once
+ * (null if cancelled); website, the browser's downloads ("downloads"). */
+export async function chooseExportFolder(): Promise<string | null> {
+  if (!IS_DESKTOP) return "downloads";
+  return invoke<string | null>("choose_export_folder");
+}
+
+/** Saves one video of a batch into the folder from chooseExportFolder. The
+ * desktop side never replaces a file: a taken name gets " (2)" etc. */
+export async function saveExportInFolder(folder: string, blob: Blob, name: string): Promise<SaveResult> {
+  if (!IS_DESKTOP) return saveExportFile(blob, name);
+  const token = await invoke<string>("export_path_in", { folder, suggestedName: name });
+  const path = await invoke<string>("write_export", new Uint8Array(await blob.arrayBuffer()), { "x-export-token": token });
   return { status: "saved", path };
 }
 

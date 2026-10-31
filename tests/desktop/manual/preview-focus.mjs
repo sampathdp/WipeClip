@@ -2,8 +2,14 @@
 // editor preview (not part of `npm run desktop:test:js`: needs Chrome and a
 // running dev server).
 //
-//   npx next dev -p 3005            (website)  - in one terminal
-//   node tests/desktop/manual/preview-focus.mjs http://localhost:3005/editor out-dir
+//   npx next dev desktop --port 3100   (desktop frontend) - in one terminal
+//   node tests/desktop/manual/preview-focus.mjs http://localhost:3100/ out-dir [variant]
+//
+// variant (project-wide focus settings, src/lib/editor/focusPrefs.ts):
+//   default  - as set: 2x zoom, ring and drawn cursor at the click
+//   half     - zoom intensity 50%: the same zoom shows at 1.5x
+//   original - original view: no zoom, the ring at its unzoomed place
+//   ignored  - the click is ignored: no ring (cursor off), tick dimmed
 //
 // It makes a 4-color test video with ffmpeg (from the backend venv), stores
 // a saved project in the editor's IndexedDB - a synthetic screen recording
@@ -20,6 +26,8 @@ const outDir = resolve(process.argv[3] ?? join(tmpdir(), "wipeclip-preview-focus
 mkdirSync(outDir, { recursive: true });
 const chrome = process.env.CHROME ?? "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const ffmpeg = execFileSync("backend/.venv/Scripts/python.exe", ["-c", "import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())"]).toString().trim();
+const variant = process.argv[4] ?? "default";
+if (!["default", "half", "original", "ignored"].includes(variant)) throw new Error(`unknown variant ${variant}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const video = join(outDir, "quad.mp4");
@@ -82,6 +90,13 @@ async function goto(u) {
   await send("Page.navigate", { url: u });
   await loaded;
   await sleep(1500);
+  // Seeding needs the editor's database at its current version; a
+  // production build can create it a little later than the load event.
+  for (let i = 0; i < 100; i++) {
+    const ready = await evaluate(`indexedDB.databases().then((ds) => ds.some((d) => d.name === "wipeclip-editor" && d.version >= 2))`);
+    if (ready) break;
+    await sleep(150);
+  }
 }
 
 // --- the saved project ---------------------------------------------------------------
@@ -102,14 +117,25 @@ const project = {
   audio: [],
   effects: [],
   zooms: [{ id: "zm_1", sourceId: "src_1", start: 1, end: 4.5, zoom: 2, x: 0.25, y: 0.25, easeIn: 0.5, easeOut: 0.5, ease: "smooth", enabled: true, auto: false, reason: "Test click" }],
-  pointer: { cursor: true, cursorSize: 0.08, cursorColor: "#ffffff", smoothing: 0.5, clicks: true, leftColor: "#22d3ee", rightColor: "#f59e0b", ringSize: 0.1, ringDuration: 1.5, intensity: 1 },
+  pointer: { cursor: variant !== "ignored", cursorSize: 0.08, cursorColor: "#ffffff", smoothing: 0.5, clicks: true, leftColor: "#22d3ee", rightColor: "#f59e0b", ringSize: 0.1, ringDuration: 1.5, intensity: 1 },
+  ...(variant === "default"
+    ? {}
+    : {
+        focus: {
+          intensity: variant === "half" ? 0.5 : 1,
+          bypass: variant === "original",
+          excluded: [],
+          ignoredClicks: variant === "ignored" ? [{ sourceId: "src_1", t: 2 }] : [],
+        },
+      }),
 };
 
 await goto(url);
 // A Recent projects entry (the page opened the database at its current version above).
 await evaluate(`(async () => {
   const bytes = Uint8Array.from(atob(${JSON.stringify(readFileSync(video).toString("base64"))}), c => c.charCodeAt(0));
-  const db = await new Promise((res, rej) => { const r = indexedDB.open("wipeclip-editor"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  // Opened at the editor's schema version (projectStore.ts), stores created if the page hasn't yet.
+  const db = await new Promise((res, rej) => { const r = indexedDB.open("wipeclip-editor", 2); r.onupgradeneeded = () => { for (const n of ["project", "sources", "projects"]) if (!r.result.objectStoreNames.contains(n)) r.result.createObjectStore(n); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
   const put = (store, value, key) => new Promise((res, rej) => { const tx = db.transaction(store, "readwrite"); tx.objectStore(store).put(value, key); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
   await put("sources", new Blob([bytes], { type: "video/mp4" }), "src_1");
   await put("sources", ${JSON.stringify(recording)}, "src_1#recording");
@@ -143,32 +169,67 @@ const name = ([r, g, b]) =>
   r > 200 && g > 200 && b > 200 ? "white" : r > 180 && g < 90 && b < 90 ? "red" : g > 180 && r < 120 && b < 90 ? "green" : b > 180 && r < 90 && g < 90 ? "blue" : `rgb(${r},${g},${b})`;
 
 const results = [];
-async function check(label, expect) {
+/** Ring-colored (cyan) pixels in a screenshot. */
+const cyanPixels = (png) =>
+  evaluate(`(async () => {
+    const img = new Image(); img.src = "data:image/png;base64,${png}"; await img.decode();
+    const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+    const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, img.width, img.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] < 120 && d[i + 1] > 150 && d[i + 2] > 150) n++;
+    return n;
+  })()`);
+
+/** `ring`: true = a click ring must show, false = none may, undefined = not checked. */
+async function check(label, expect, ring) {
   await sleep(900);
   const clip = await stage();
   const { data } = await send("Page.captureScreenshot", { format: "png", clip: { ...clip, scale: 1 } });
   writeFileSync(join(outDir, `${label}.png`), Buffer.from(data, "base64"));
   const points = Object.keys(expect).map((k) => k.split(",").map(Number));
   const got = (await sample(data, points)).map(name);
-  const ok = Object.values(expect).every((e, i) => (e instanceof RegExp ? e.test(got[i]) : got[i] === e));
-  results.push({ label, playhead: await playhead(), ok, got: Object.fromEntries(Object.keys(expect).map((k, i) => [k, got[i]])) });
+  const cyan = await cyanPixels(data);
+  const ok = Object.values(expect).every((e, i) => (e instanceof RegExp ? e.test(got[i]) : got[i] === e)) && (ring === undefined || (ring ? cyan > 20 : cyan === 0));
+  results.push({ label, playhead: await playhead(), ok, cyan, got: Object.fromEntries(Object.keys(expect).map((k, i) => [k, got[i]])) });
 }
 
+const FOUR = { "0.1,0.1": "red", "0.9,0.1": "green", "0.1,0.9": "blue", "0.9,0.9": "white" };
 for (let i = 0; i < 15; i++) await press(); // 0.5 s: before the zoom
-await check("t0.5", { "0.1,0.1": "red", "0.9,0.1": "green", "0.1,0.9": "blue", "0.9,0.9": "white" });
-await press(8);
-await press(8); // 2.5 s: zoomed on the red quadrant; ring and drawn cursor at the click
-await check("t2.5", { "0.05,0.05": "red", "0.95,0.95": "red", "0.95,0.05": "red", "0.605,0.64": "white" });
+await check("t0.5", FOUR);
+await press(8); // 1.5 s
+for (let i = 0; i < 18; i++) await press(); // 2.1 s: just after the click, ring strong
+await check("t2.1", {}, variant !== "ignored");
+for (let i = 0; i < 12; i++) await press(); // 2.5 s: fully zoomed
+if (variant === "default") {
+  // Zoomed on the red quadrant; ring and drawn cursor at the click.
+  await check("t2.5", { "0.05,0.05": "red", "0.95,0.95": "red", "0.95,0.05": "red", "0.605,0.64": "white" });
+} else if (variant === "half") {
+  // 1.5x on (0.25, 0.25): the window is the frame's top-left 2/3, so red
+  // fills the stage's top-left 3/4 and the other quadrants show at the edges.
+  await check("t2.5", { "0.05,0.05": "red", "0.7,0.7": "red", "0.95,0.05": "green", "0.05,0.95": "blue", "0.95,0.95": "white" });
+} else if (variant === "original") {
+  await check("t2.5", FOUR);
+} else {
+  await check("t2.5", { "0.05,0.05": "red", "0.95,0.95": "red", "0.95,0.05": "red" }, false);
+}
 for (let i = 0; i < 3; i++) await press(8); // 5.5 s: zoomed back out
-await check("t5.5", { "0.1,0.1": "red", "0.9,0.1": "green", "0.9,0.9": "white" });
+await check("t5.5", FOUR);
 
 const ui = await evaluate(`({
   zoomTrackItem: [...document.querySelectorAll("[role=button]")].some(e => (e.getAttribute("aria-label") || "").startsWith("Zoom:")),
   clickTicks: document.querySelectorAll("span[title='left click']").length,
+  ignoredTicks: document.querySelectorAll("span[title='left click (ignored)']").length,
 })`);
-const report = { outDir, results, ui, errors };
+// The editor now runs from the desktop frontend (`npx next dev desktop
+// --port 3100`); outside the app its shell's Tauri calls fail, which isn't
+// what this checks.
+const notTauri = errors.filter((e) => !/reading '(invoke|transformCallback)'/.test(e));
+errors.length = 0;
+errors.push(...notTauri);
+const report = { variant, outDir, results, ui, errors };
 writeFileSync(join(outDir, "result.json"), JSON.stringify(report, null, 2));
 console.log(JSON.stringify(report, null, 2));
 ws.close();
 proc.kill();
-process.exit(results.every((r) => r.ok) && ui.zoomTrackItem && ui.clickTicks === 1 && errors.length === 0 ? 0 : 1);
+process.exit(results.every((r) => r.ok) && ui.zoomTrackItem && ui.clickTicks === (variant === "ignored" ? 0 : 1) && ui.ignoredTicks === (variant === "ignored" ? 1 : 0) && errors.length === 0 ? 0 : 1);

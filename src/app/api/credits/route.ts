@@ -48,6 +48,12 @@ async function handle(request: NextRequest) {
   // Every signed-in page load asks for the balance, so this is where the
   // account's country for the admin stats stays current.
   await rememberCountry(admin, user.id, edgeCountry(request.headers), profile.country);
+  // ...and where today's active accounts are counted: one row per account
+  // per day, so repeat loads are a no-op. A failed write only misses a count.
+  const { error: activeErr } = await admin
+    .from("daily_active_users")
+    .upsert({ user_id: user.id }, { onConflict: "day,user_id", ignoreDuplicates: true });
+  if (activeErr) console.error("Could not record the active account", activeErr.message);
 
   return NextResponse.json({
     email: user.email,

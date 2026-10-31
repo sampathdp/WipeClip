@@ -1,6 +1,8 @@
 "use client";
 
+import { useShortcutKeys } from "@/lib/platform/keys";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { CREATOR_PRESETS, type CreatorPresetId } from "@/lib/editor/creatorPresets";
 import { useClockTime, type Clock } from "@/lib/editor/clock";
 import { voiceoverSupported } from "@/lib/editor/voiceover";
 import { DEFAULT_KEY } from "@/lib/editor/chromaKey";
@@ -25,6 +27,7 @@ import {
   type AnimOut,
   type AudioClip,
   type BlendMode,
+  type CamLayout,
   type Canvas,
   type CanvasFrame,
   type Clip,
@@ -48,6 +51,7 @@ import { DEFAULT_DUCK_AMOUNT } from "@/lib/editor/ducking";
 import { VOICE_FX_LABELS } from "@/lib/editor/voiceFx";
 import { SFX, type SfxDef } from "@/lib/editor/sfx";
 import { DEFAULT_MASK, MASK_LABELS } from "@/lib/editor/shapeMask";
+import { CAM_CORNER_LABELS, CAM_SHAPE_LABELS, DEFAULT_CAM_LAYOUT } from "@/lib/editor/webcamLayout";
 import { DEFAULT_CURVES, IDENTITY_CURVE, curveFn, isIdentityCurve } from "@/lib/editor/curves";
 import { MAX_RAMP_SPEED, MIN_RAMP_SPEED, RAMP_PRESETS, clipTimelineLength } from "@/lib/editor/speed";
 import { CAPTION_POSITIONS, CAPTION_STYLES, type CaptionStyleId } from "@/lib/editor/captions";
@@ -970,12 +974,33 @@ export interface CaptionOptions {
   y: number;
 }
 
+/** Asks before the speech model's first download, with its size and what
+ * transcribing costs on this device (captions.ts speechModel). Shared by
+ * auto captions and the transcript. */
+export function SpeechModelNotice({ model, busy, onConsent }: { model?: { sizeMb: number; gpu: boolean } | null; busy: boolean; onConsent: () => void }) {
+  return (
+    <div className="space-y-2 rounded-xl border border-border bg-surface-2/60 p-3 text-xs text-muted">
+      <p className="font-semibold text-foreground">Speech model needed (one time)</p>
+      <p>
+        {model?.gpu
+          ? `High-accuracy speech model, about ${model.sizeMb} MB, downloaded once and kept on this device. Transcribing runs on your graphics card and uses around 2 GB of memory; a 10-minute recording takes about 3 minutes.`
+          : `Speech model, about ${model?.sizeMb ?? 250} MB, downloaded once and kept on this device. Transcribing uses the CPU and around 1.5 GB of memory; a 10-minute recording takes several minutes.`}{" "}
+        Your audio never leaves this device.
+      </p>
+      <ActionButton tone="accent" onClick={onConsent} disabled={busy}>
+        Download model ({model?.sizeMb ?? 250} MB)
+      </ActionButton>
+    </div>
+  );
+}
+
 export function CaptionsPanel({
   options,
   onOptions,
   count,
   busy,
   onGenerate,
+  onCancel,
   onRestyle,
   onRemoveAll,
   onClose,
@@ -1003,6 +1028,8 @@ export function CaptionsPanel({
   count: number;
   busy: boolean;
   onGenerate: () => void;
+  /** Stops the model download or transcription in progress. */
+  onCancel?: () => void;
   /** Applies the current style/position to the existing captions. */
   onRestyle: (o: CaptionOptions) => void;
   onRemoveAll: () => void;
@@ -1091,18 +1118,9 @@ export function CaptionsPanel({
           />
         </div>
         {needsModel ? (
-          <div className="space-y-2 rounded-xl border border-border bg-surface-2/60 p-3 text-xs text-muted">
-            <p className="font-semibold text-foreground">Speech model needed (one time)</p>
-            <p>
-              {model?.gpu
-                ? `High-accuracy speech model, about ${model.sizeMb} MB, downloaded once and kept on this device. Transcribing runs on your graphics card and uses around 2 GB of memory; a 10-minute recording takes about 3 minutes.`
-                : `Speech model, about ${model?.sizeMb ?? 250} MB, downloaded once and kept on this device. Transcribing uses the CPU and around 1.5 GB of memory; a 10-minute recording takes several minutes.`}{" "}
-              Your audio never leaves this device.
-            </p>
-            <ActionButton tone="accent" onClick={() => setConsent(true)} disabled={busy}>
-              Download model ({model?.sizeMb ?? 250} MB)
-            </ActionButton>
-          </div>
+          <SpeechModelNotice model={model} busy={busy} onConsent={() => setConsent(true)} />
+        ) : busy && onCancel ? (
+          <ActionButton onClick={onCancel}>Cancel</ActionButton>
         ) : (
           <ActionButton onClick={onGenerate} disabled={busy || modelCached === null} tone="accent">
             {busy ? "Generating…" : `${count > 0 ? "Regenerate" : "Generate"} captions · free`}
@@ -1186,8 +1204,11 @@ export function OverlayPanel({
   keys,
   style,
   fonts,
+  onCamLayout,
 }: {
   overlay: Overlay;
+  /** Video layers: place as a webcam (webcamLayout.ts); null = by hand. */
+  onCamLayout?: (layout: CamLayout | null) => void;
   keys: KeyframeControls;
   /** Uploaded fonts to offer, and uploading another. */
   fonts: { custom: { key: string; label: string }[]; onUpload: (file: File) => void };
@@ -1206,6 +1227,7 @@ export function OverlayPanel({
 }) {
   const o = overlay;
   const proLabel = useProLabel();
+  const shortcutKeys = useShortcutKeys();
   const title =
     o.kind === "text"
       ? o.keystroke
@@ -1392,6 +1414,7 @@ export function OverlayPanel({
             </p>
           </div>
         )}
+        {o.kind === "video" && onCamLayout && <CamLayoutSection layout={o.camLayout} onChange={onCamLayout} />}
 
         <OverlayTransformFields overlay={o} onChange={onChange} gesture={gesture} keys={keys} />
 
@@ -1443,7 +1466,7 @@ export function OverlayPanel({
           </ActionButton>
           <ActionButton onClick={() => onChange({ hidden: !o.hidden })}>{o.hidden ? "Show" : "Hide"}</ActionButton>
           <ActionButton onClick={() => onChange({ locked: !o.locked })}>{o.locked ? "Unlock" : "Lock"}</ActionButton>
-          <ActionButton onClick={onDuplicate} title="Duplicate (Ctrl+D)">
+          <ActionButton onClick={onDuplicate} title={`Duplicate (${shortcutKeys.mod}+D)`}>
             Duplicate
           </ActionButton>
           <ActionButton onClick={style.onCopy} title="Copy the look, animation, mask and blend of this layer">
@@ -1519,6 +1542,9 @@ function MaskSection({ mask, onChange, gesture }: { mask: ShapeMask | null | und
           )}
           <SliderField label="Rotation" value={Math.round(m.rotation)} min={-180} max={180} neutral={0} format={(v) => `${v}°`} onChange={(v) => set({ rotation: v })} gesture={gesture} />
           <SliderField label="Feather" value={Math.round(m.feather * 100)} min={0} max={100} neutral={10} format={pct} onChange={(v) => set({ feather: v / 100 })} gesture={gesture} />
+          {m.shape === "rect" && (
+            <SliderField label="Corner radius" value={Math.round((m.radius ?? 0) * 100)} min={0} max={100} neutral={0} format={pct} onChange={(v) => set({ radius: v / 100 })} gesture={gesture} />
+          )}
           <label className="flex items-center justify-between text-xs font-medium text-foreground">
             <span>
               Invert (show the outside)
@@ -1629,7 +1655,10 @@ export function AudioAddPanel({
   onClose,
   voiceover,
   onAddSfx,
+  mixer,
 }: {
+  /** The mix (MixerPanel), shown first. */
+  mixer?: ReactNode;
   audio: AudioClip[];
   onUpload: (file: File) => void;
   onAddSfx: (def: SfxDef) => void;
@@ -1640,6 +1669,7 @@ export function AudioAddPanel({
   const input = useRef<HTMLInputElement>(null);
   return (
     <PanelShell title="Audio" onClose={onClose}>
+      {mixer && <div className="mb-5">{mixer}</div>}
       <input
         ref={input}
         type="file"
@@ -1750,6 +1780,53 @@ function VoiceoverRecorder({ controls }: { controls: VoiceoverControls }) {
   );
 }
 
+/** Webcam layouts for a video layer: shape, size and corner, or side by
+ * side with the screen. Placed again when the canvas size changes. */
+function CamLayoutSection({ layout, onChange }: { layout?: CamLayout; onChange: (l: CamLayout | null) => void }) {
+  const l = layout ?? DEFAULT_CAM_LAYOUT;
+  const set = (patch: Partial<CamLayout>) => onChange({ ...l, ...patch });
+  return (
+    <div className="space-y-3">
+      <SectionTitle>Webcam layout</SectionTitle>
+      <Chips
+        label="Webcam shape"
+        value={layout ? (layout.split ? "split" : layout.shape) : "free"}
+        onChange={(v) => (v === "free" ? onChange(null) : v === "split" ? set({ split: true }) : set({ shape: v as CamLayout["shape"], split: false }))}
+        options={[
+          ...(Object.keys(CAM_SHAPE_LABELS) as CamLayout["shape"][]).map((k) => ({ value: k as string, label: CAM_SHAPE_LABELS[k] })),
+          { value: "split", label: "Side by side" },
+          ...(layout ? [{ value: "free", label: "Free" }] : []),
+        ]}
+      />
+      {layout && !layout.split && (
+        <>
+          <Chips label="Webcam size" value={l.size} onChange={(size) => set({ size })} options={[{ value: "small", label: "S" }, { value: "medium", label: "M" }, { value: "large", label: "L" }]} />
+          <Chips
+            label="Webcam corner"
+            value={l.corner}
+            onChange={(corner) => set({ corner })}
+            options={(Object.keys(CAM_CORNER_LABELS) as CamLayout["corner"][]).map((k) => ({ value: k, label: CAM_CORNER_LABELS[k] }))}
+          />
+        </>
+      )}
+      <p className="text-[11px] text-muted">
+        {layout?.split
+          ? "The screen takes the rest of the frame: beside the webcam in a landscape video, above it in a vertical one."
+          : layout
+            ? "Kept in place when you change the canvas size. Dragging the layer switches to free placement."
+            : "Pick a shape to place this video as a webcam bubble."}
+      </p>
+    </div>
+  );
+}
+
+/** Noise reduction strengths (audio_clean.py: 6..40 dB of reduction). */
+const NOISE_STRENGTHS = [
+  { value: 0.25, label: "Light" },
+  { value: 0.5, label: "Medium" },
+  { value: 0.8, label: "Strong" },
+];
+
 export function AudioPanel({
   clip,
   sourceDuration,
@@ -1762,10 +1839,22 @@ export function AudioPanel({
   gesture,
   onDuck,
   onBeats,
+  onCleanup,
+  cleaning,
+  soloed,
+  onSolo,
 }: {
   clip: AudioClip;
   sourceDuration: number;
   total: number;
+  /** Makes the noise-reduced copy at a strength 0..1; absent = no local
+   * engine (the browser version), so the section explains instead. */
+  onCleanup?: (strength: number) => void;
+  /** A copy is being made for this track. */
+  cleaning?: boolean;
+  /** Solo for listening (preview only). */
+  soloed: boolean;
+  onSolo: () => void;
   /** Finds the speech to duck under and turns ducking on. */
   onDuck: () => void;
   /** Detects the track's beats (timeline markers to snap to). */
@@ -1778,6 +1867,7 @@ export function AudioPanel({
   gesture: Gesture;
 }) {
   const a = clip;
+  const [strength, setStrength] = useState(a.clean?.strength ?? 0.5);
   return (
     <PanelShell title={`Audio · ${a.label}`} onClose={onClose}>
       <div className="space-y-4">
@@ -1851,6 +1941,50 @@ export function AudioPanel({
             </>
           )}
         </div>
+        <div className="space-y-2">
+          <SectionTitle>Noise reduction</SectionTitle>
+          {onCleanup ? (
+            <>
+              <Chips
+                label="Noise reduction strength"
+                value={strength}
+                onChange={setStrength}
+                options={NOISE_STRENGTHS.map((s) => ({ value: s.value, label: s.label }))}
+              />
+              {a.clean && (
+                <Chips
+                  label="Compare"
+                  value={a.clean.bypass ? "original" : "cleaned"}
+                  onChange={(v) => onChange({ clean: { ...a.clean!, bypass: v === "original" } })}
+                  options={[
+                    { value: "cleaned", label: "Cleaned" },
+                    { value: "original", label: "Original" },
+                  ]}
+                />
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {(!a.clean || a.clean.strength !== strength) && (
+                  <ActionButton onClick={() => onCleanup(strength)} disabled={cleaning} title="Reduce steady background noise on this computer">
+                    {cleaning ? "Reducing noise…" : a.clean ? "Apply this strength" : "Reduce background noise"}
+                  </ActionButton>
+                )}
+                {a.clean && !cleaning && (
+                  <button type="button" className="text-[11px] font-semibold text-accent-2 hover:underline" onClick={() => onChange({ clean: undefined })}>
+                    Remove
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-muted">
+                {a.clean
+                  ? `${a.clean.bypass ? "Playing and exporting the original." : "Playing and exporting the cleaned copy."} Switch to compare while it plays.`
+                  : "For steady noise: fans, hum, hiss, room tone. Clicks and other voices stay."}{" "}
+                Made on this computer; the original file isn&apos;t changed.
+              </p>
+            </>
+          ) : (
+            <p className="text-[11px] text-muted">Noise reduction runs on your computer in the WipeClip desktop app, so the recording never leaves it.</p>
+          )}
+        </div>
         <div>
           <SectionTitle>Beats</SectionTitle>
           {a.beats ? (
@@ -1881,6 +2015,9 @@ export function AudioPanel({
         </div>
         <div className="flex flex-wrap gap-2 border-t border-border pt-4">
           <ActionButton onClick={() => onChange({ muted: !a.muted })}>{a.muted ? "Unmute" : "Mute"}</ActionButton>
+          <ActionButton onClick={onSolo} title="Hear only this track (preview only; the export includes every unmuted track)">
+            {soloed ? "Unsolo" : "Solo"}
+          </ActionButton>
           <ActionButton onClick={onSplit} title="Split at the playhead (S)">
             Split
           </ActionButton>
@@ -2016,17 +2153,39 @@ export function CanvasPanel({
   onUploadBackground,
   onClose,
   gesture,
+  onPreset,
 }: {
   canvas: Canvas;
   onChange: (c: Canvas) => void;
   onUploadBackground: (file: File) => void;
   onClose: () => void;
   gesture: Gesture;
+  /** Creator presets (creatorPresets.ts); absent = not offered. */
+  onPreset?: (id: CreatorPresetId) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const bg = canvas.background;
   return (
     <PanelShell title="Canvas" onClose={onClose}>
+      {onPreset && (
+        <>
+          <SectionTitle>Made for</SectionTitle>
+          <div className="mb-1 grid grid-cols-2 gap-2">
+            {CREATOR_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onPreset(p.id)}
+                className="rounded-xl border border-border bg-surface px-3 py-2 text-left transition hover:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+              >
+                <span className="block text-sm font-semibold text-foreground">{p.label}</span>
+                <span className="block text-[11px] text-muted">{p.hint}</span>
+              </button>
+            ))}
+          </div>
+          <p className="mb-4 text-[11px] text-muted">Sets the options below (one undo step); change any of them afterwards.</p>
+        </>
+      )}
       <SectionTitle>Size</SectionTitle>
       <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Canvas size">
         {CANVAS_PRESETS.map((p) => (

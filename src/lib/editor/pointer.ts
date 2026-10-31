@@ -13,6 +13,7 @@
  * around every click so the cursor is exactly where the click happened.
  */
 import { cameraCrop, evalCamera, visibleView, type CameraCache } from "./camera.ts";
+import { appliedZooms, focusPrefs, isClickIgnored } from "./focusPrefs.ts";
 import { locate, sourceTimeAt, videoBox, type Layout } from "./timeline.ts";
 import type { MediaSource, PointerStyle, Project } from "./types.ts";
 import type { InteractionEvent, MouseButton } from "../recorder/format.ts";
@@ -259,7 +260,7 @@ export function pointerScene(
   if (!track || !src) return none;
   const s = sourceTimeAt(laid, Math.min(t, laid.start + laid.duration));
   const box = videoBox(clip, src, canvasSize, project.canvas);
-  const cam = caches.camera.track(project.zooms, clip, visibleView(box, clip.transform));
+  const cam = caches.camera.track(appliedZooms(project), clip, visibleView(box, clip.transform));
   const crop = cam ? cameraCrop(clip.crop, evalCamera(cam, s)) : clip.crop;
   const place = (p: { x: number; y: number }) => sourceToCanvas(p, crop, box, clip.transform, canvasSize);
   const cursorAllowed = style.cursor && src.recording?.manifest.capture.cursorCaptured === false;
@@ -269,7 +270,9 @@ export function pointerScene(
   // Rings only for normal playback; a freeze or reversed clip has no
   // meaningful "moment of the click".
   if (clip.freeze === null && !clip.reverse) {
+    const prefs = focusPrefs(project);
     for (const r of ringsAt(track, s, style)) {
+      if (prefs.ignoredClicks.length && isClickIgnored(prefs, src.id, track.clicks[r.click].t)) continue;
       const c = place(r);
       if (c) rings.push({ ...r, cx: c.x, cy: c.y });
     }
