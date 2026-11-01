@@ -57,6 +57,7 @@ import hmac
 import json
 import math
 import os
+import re
 import tempfile
 import time
 import traceback
@@ -108,7 +109,7 @@ from app.config import (
     RESOLUTION_HEIGHTS,
     SHARPEN_AMOUNT_PRESETS,
 )
-from app.pipeline import activity, audio_clean, encoders, io_utils, moderation
+from app.pipeline import activity, audio_clean, encoders, io_utils, moderation, speech
 from app.pipeline import editor as editor_pipeline
 from app.pipeline import video as video_pipeline
 from app.queue import get_queue
@@ -460,6 +461,67 @@ async def api_video_motion(path: str = Form(...), start: float = Form(...), end:
         return await activity.motion_profile(in_path, start, end)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail="This video couldn't be read.") from exc
+
+
+# One transcription at a time: each uses every core the engine has.
+_speech_lock = asyncio.Lock()
+# Longest speech mix accepted: 2 hours of float32 is about 460 MB.
+MAX_SPEECH_BYTES = 2 * 3600 * speech.RATE * 4
+
+
+@app.get("/api/speech/model")
+def api_speech_model(language: str = "auto") -> dict:
+    """Desktop engine only: whether the speech model for `language` is on
+    this machine yet, and its download size, so the editor asks before the
+    first download (app/pipeline/speech.py)."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    model = speech.model_for(language)
+    return {"ready": speech.is_ready(model), "sizeMb": model.size_mb}
+
+
+@app.post("/api/speech/transcribe")
+async def api_speech_transcribe(
+    audio: UploadFile = File(...),
+    language: str = Form("auto"),
+    job_id: Optional[str] = Form(None),
+):
+    """Desktop engine only: a word-timed transcript of `audio` (raw 16 kHz
+    mono float32, little-endian - the editor's speech mix) with
+    faster-whisper (app/pipeline/speech.py), downloading the model first if
+    needed. Progress and cancel under `job_id` (app/progress.py): phase
+    "download", "prepare" or "transcribe". Free and unmetered: it runs on
+    the user's own machine, and the audio never leaves it."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    if not re.fullmatch(r"auto|[a-z]{2,3}", language):
+        raise HTTPException(status_code=400, detail="Invalid language")
+    raw = await audio.read(MAX_SPEECH_BYTES + 1)
+    if not raw or len(raw) % 4 or len(raw) > MAX_SPEECH_BYTES:
+        raise HTTPException(status_code=400, detail="Invalid audio")
+    samples = np.frombuffer(raw, dtype="<f4")
+
+    job = progress.start(job_id)
+
+    def report(stage: str, value: float) -> None:
+        if job:
+            job.check()
+            job.phase, job.done, job.total = stage, value, 1.0
+
+    try:
+        async with _speech_lock:
+            result = await asyncio.to_thread(speech.transcribe, samples, language, report)
+        return result
+    except progress.Cancelled as exc:
+        raise HTTPException(status_code=409, detail={"code": "cancelled", "message": "Speech recognition cancelled."}) from exc
+    except OSError as exc:  # urllib's errors are OSErrors too
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "model_download", "message": "The speech model couldn't be downloaded. Check your connection and try again."},
+        ) from exc
+    finally:
+        progress.finish(job_id)
 
 
 @app.post("/api/video/probe")

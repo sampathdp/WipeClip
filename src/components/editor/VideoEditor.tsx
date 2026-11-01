@@ -1761,17 +1761,21 @@ export default function VideoEditor({
       if (to !== t) clock.set(Math.min(to, lay.total));
     });
   }, [playing, skipRanges, clock, lay.total]);
-  const [modelCached, setModelCached] = useState<boolean | null>(null);
+  // Per language: the desktop engine has its own model for Sinhala, so a
+  // check for another language reads as "still checking".
+  const [modelCheck, setModelCheck] = useState<{ language: string; cached: boolean } | null>(null);
+  const modelCached = modelCheck?.language === captionOpts.language ? modelCheck.cached : null;
   const [captionModel, setCaptionModel] = useState<SpeechModel | null>(null);
   useEffect(() => {
     if (tool !== "captions" && tool !== "transcript") return;
     let cancelled = false;
-    void speechModel().then((m) => !cancelled && setCaptionModel(m));
-    void speechModelCached().then((v) => !cancelled && setModelCached(v));
+    const language = captionOpts.language;
+    void speechModel(language).then((m) => !cancelled && setCaptionModel(m));
+    void speechModelCached(language).then((cached) => !cancelled && setModelCheck({ language, cached }));
     return () => {
       cancelled = true;
     };
-  }, [tool]);
+  }, [tool, captionOpts.language]);
   const exportCaptions = useCallback(
     async (format: "srt" | "vtt" | "txt") => {
       const cues = captionCues(project.overlays);

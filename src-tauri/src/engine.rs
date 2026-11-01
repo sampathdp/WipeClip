@@ -90,6 +90,11 @@ pub async fn local_engine(app: AppHandle, state: State<'_, EngineState>) -> Resu
     let Some(mut command) = engine_command(&app) else {
         return Ok(None);
     };
+    // Speech models (backend/app/pipeline/speech.py) live with the app's
+    // other local data, so uninstalling with "delete app data" removes them.
+    if let Ok(dir) = app.path().app_local_data_dir() {
+        command.env("WIPECLIP_MODELS_DIR", dir.join("speech-models"));
+    }
     let started = tauri::async_runtime::spawn_blocking(move || start(&mut command))
         .await
         .map_err(|e| e.to_string())??;

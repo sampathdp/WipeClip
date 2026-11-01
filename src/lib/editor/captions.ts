@@ -1,8 +1,10 @@
-/** Auto captions, all in the browser: mixes the timeline's speech down to
- * 16 kHz mono, transcribes it with Whisper in a worker (captions.worker.ts),
- * and turns the word timings into caption text layers.
+/** Auto captions, all on the device: mixes the timeline's speech down to
+ * 16 kHz mono, transcribes it with Whisper - in the desktop app's engine
+ * (backend/app/pipeline/speech.py), else in a browser worker
+ * (captions.worker.ts) - and turns the word timings into caption text layers.
  */
 import { memoryBudgetGb } from "@/lib/platform";
+import { engineSpeechModel, engineTranscribe } from "@/lib/toolsApi";
 import { DEFAULT_TEXT } from "./textRaster";
 import { newId, type Layout } from "./timeline";
 import type { AnimIn, AudioClip, MediaSource, Overlay, Project, TextStyle } from "./types";
@@ -205,6 +207,10 @@ export interface SpeechModel {
   sizeMb: number;
   /** Whether it's the model meant for a WebGPU encoder. */
   gpu: boolean;
+  /** Run by the desktop app's engine (backend/app/pipeline/speech.py). */
+  engine?: boolean;
+  /** The engine's Sinhala model. */
+  sinhala?: boolean;
 }
 
 /** The speech models, downloaded from Hugging Face on first use and kept in
@@ -240,9 +246,16 @@ function rememberSlowGpu(): void {
   }
 }
 
-/** The model this device will use: turbo with a usable WebGPU adapter,
- * small otherwise. */
-export function speechModel(): Promise<SpeechModel> {
+/** The model this device will use for `language`: the desktop engine's
+ * (its Sinhala model for Sinhala), else in the browser turbo with a usable
+ * WebGPU adapter, small otherwise. */
+export async function speechModel(language = "auto"): Promise<SpeechModel> {
+  const engine = await engineSpeechModel(language);
+  if (engine) return { id: `engine:${language}`, sizeMb: engine.sizeMb, gpu: false, engine: true, sinhala: language === "si" };
+  return browserModel();
+}
+
+function browserModel(): Promise<SpeechModel> {
   chosen ??= (async () => {
     if (gpuKnownSlow()) return CPU_MODEL;
     const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
@@ -254,10 +267,12 @@ export function speechModel(): Promise<SpeechModel> {
 
 /** Whether the model is already on this device, so the UI asks before the
  * first download instead of starting it silently. */
-export async function speechModelCached(): Promise<boolean> {
+export async function speechModelCached(language = "auto"): Promise<boolean> {
   try {
+    const engine = await engineSpeechModel(language);
+    if (engine) return engine.ready;
     if (typeof caches === "undefined") return false;
-    const { id } = await speechModel();
+    const { id } = await browserModel();
     const cache = await caches.open("transformers-cache");
     const keys = await cache.keys();
     return keys.some((k) => k.url.includes(id) && /\.onnx/.test(k.url));
@@ -417,7 +432,7 @@ async function getPool(onProgress: (p: CaptionsProgress) => void, forceCpu: bool
   const count = await cpuWorkerCount();
   let threads = threadsPerWorker(count);
   let device: Device = "wasm";
-  if (!forceCpu && (await speechModel()).gpu) {
+  if (!forceCpu && (await browserModel()).gpu) {
     try {
       ({ device } = await first.request<{ device: Device }>({ type: "init", device: "webgpu", model: GPU_MODEL.id, threads }));
     } catch (err) {
@@ -469,6 +484,9 @@ async function getPool(onProgress: (p: CaptionsProgress) => void, forceCpu: bool
   return pool;
 }
 
+/** The engine transcription in progress, for cancelSpeech. */
+let engineRun: AbortController | null = null;
+
 const isAbort = (e: unknown) => (e as Error | null)?.name === "AbortError";
 
 /** Stops a model download or transcription in progress: every speech
@@ -476,6 +494,8 @@ const isAbort = (e: unknown) => (e as Error | null)?.name === "AbortError";
  * Model files already downloaded stay cached; a partly downloaded file is
  * fetched again next time. The next run starts fresh workers. */
 export function cancelSpeech(): void {
+  engineRun?.abort();
+  engineRun = null;
   pool = null;
   for (const w of [...live]) w.terminate();
 }
@@ -485,6 +505,9 @@ export function cancelSpeech(): void {
  * can't be used: the signal alone then decides. */
 export function speechModelProbe(onProgress: (p: CaptionsProgress) => void): SpeechProbe {
   return async (windows) => {
+    // With the desktop engine the browser model is never downloaded just
+    // for this check.
+    if (await engineSpeechModel("auto")) return null;
     try {
       const { workers } = await getPool(onProgress, false);
       const out: number[] = [];
@@ -589,6 +612,20 @@ export async function transcribe(
   language: string,
   onProgress: (p: CaptionsProgress) => void
 ): Promise<{ language: string; words: CaptionWord[] }> {
+  if (speechSegments(samples).length === 0) return { language: language === "auto" ? "en" : language, words: [] };
+  // The desktop engine when there is one; it's never left for the browser
+  // on an error (that would download a second model unasked).
+  const run = new AbortController();
+  engineRun = run;
+  try {
+    const res = await engineTranscribe(samples, language, (stage, value) => onProgress({ stage, value }), run.signal);
+    if (res) return { language: res.language, words: res.words.filter((w) => audible(samples, w)) };
+  } catch (err) {
+    if (run.signal.aborted) throw new DOMException("Speech recognition cancelled", "AbortError");
+    throw err;
+  } finally {
+    if (engineRun === run) engineRun = null;
+  }
   try {
     return await runOnPool(samples, language, onProgress, false);
   } catch (err) {

@@ -6,13 +6,50 @@
 
 | Part | Where | Notes |
 |---|---|---|
-| Speech recognition | `src/lib/editor/captions.ts`, `captions.worker.ts` | Whisper through Transformers.js (Apache-2.0) in Web Workers, on this device. `whisper-small` (about 250 MB, CPU) or `whisper-large-v3-turbo` (about 700 MB, WebGPU), downloaded once from Hugging Face and cached. Word timestamps from the `_timestamped` exports |
+| Speech recognition (desktop) | `backend/app/pipeline/speech.py`, `/api/speech/*` in `main.py` | Since 2 November 2026 the desktop app transcribes in its engine with faster-whisper (CTranslate2, MIT), int8 on the CPU's physical cores. See [Speech in the engine](#speech-in-the-engine) |
+| Speech recognition (website, or no engine) | `src/lib/editor/captions.ts`, `captions.worker.ts` | Whisper through Transformers.js (Apache-2.0) in Web Workers, on this device. `whisper-small` (about 250 MB, CPU) or `whisper-large-v3-turbo` (about 700 MB, WebGPU), downloaded once from Hugging Face and cached. Word timestamps from the `_timestamped` exports |
 | Transcript | `Project.transcript` (`language`, `words[{start,end,text}]`, `total`) | Made by auto captions or the Transcript panel |
 | Editing by text | `wordEdit.ts`, `TranscriptPanel.tsx` | Select words, cut them (one undo step) |
 | Cuts | `ripple.ts` | Shifts or trims captions, the transcript, chapters, masks and suggestions; splits microphone, system-audio and webcam tracks so they stay in sync; zooms are in source time; highlights and drafts carry a timeline key and are marked out of date |
 | Review | `insights.ts`, `TutorialPanel.tsx`, `useTutorialTools.tsx` | Per-suggestion keep/cut, "Preview the result" (playback skips pending cuts), apply accepted as one step |
 
 Licences: the original Whisper models are Apache-2.0 (`openai/whisper-small`) and MIT (`openai/whisper-large-v3-turbo`), per their Hugging Face model cards. **To check:** the ONNX conversions the app downloads (`onnx-community/whisper-*_timestamped`) state no licence on their model cards. They are downloaded at run time, not bundled or redistributed by WipeClip.
+
+## Speech in the engine
+
+2 November 2026. Captions in the desktop app took over 30 minutes for a 2-minute Sinhala video, and the text was mostly nonsense. In the browser, WebAssembly is slow and stock Whisper can't do Sinhala. The desktop app now sends the speech mix (16 kHz mono float32) to its engine instead (`engineTranscribe` in `toolsApi.ts`). The browser path stays for the website.
+
+**Models** (downloaded after consent into the app's local data folder, `speech-models/`, pinned to a revision):
+
+| Language | Model | Download | Kept |
+|---|---|---|---|
+| Sinhala | [SinhaSpeech/whisper-small-sinhala-run12-best](https://huggingface.co/SinhaSpeech/whisper-small-sinhala-run12-best) (Apache-2.0; Whisper-small fine-tuned on Sinhala, 15.5% word error rate reported on its speaker-disjoint test set) | 970 MB | 250 MB |
+| Everything else | Whisper large-v3-turbo, CTranslate2 export (`dropbox-dash/faster-whisper-large-v3-turbo`, MIT) | 1.6 GB | 1.6 GB |
+
+The Sinhala model is only published as a Transformers checkpoint. `convert_whisper` turns it into a CTranslate2 model with int8 weights on the user's machine with numpy, because CTranslate2's own converter needs PyTorch. It mirrors that converter's `WhisperLoader`, and the tokenizer is whisper-small's (vocab, merges and added tokens checked identical). Converting takes about 10 s. "auto" detects the language with the general model and switches to the Sinhala model for Sinhala.
+
+**Decoding:**
+- **Clips:** the audio is cut at quiet points into clips (12 s for Sinhala, 28 s otherwise), decoded 8 or 4 at a time (`BatchedInferencePipeline`).
+- **Text only:** each clip is decoded as text alone, then timed by aligning it to the audio. The Sinhala model was fine-tuned without timestamp tokens.
+- **Loops:** whatever a loop leaves behind is dropped.
+
+**Measured** on an i7-9750H (6 cores) with a 2-minute test file: 33 test-set utterances joined with 0.5 s pauses, so the speakers weren't in training. Word error rate is computed with punctuation stripped.
+
+| | Time | Word error rate |
+|---|---|---|
+| Stock Whisper (browser, 0.1.7) | 30+ min (user report) | mostly nonsense |
+| Engine, Sinhala model, 28 s clips, timestamps on | 316 s | 59% |
+| Engine, Sinhala model, 28 s clips, text only | 55 s | 49% (a quarter of the words missing) |
+| **Engine, Sinhala model, 12 s clips, batched (shipped)** | **84 s** | **26%** |
+
+- **Time per 30 s window:** each window costs the same encoder pass on the CPU however short it is: 3.2 s for whisper-small, 16 s for turbo. 6 threads were faster than 11 (hyperthreads hurt), so the engine uses the physical cores.
+- **English:** turbo wasn't measured on an English recording; expect about 16 s per 28 s of speech on this CPU.
+- **Not used:** the GPU. CTranslate2 on CUDA needs cuBLAS and cuDNN, about 1 GB more to ship.
+
+**Packaging:**
+- `faster-whisper==1.2.1` and `ctranslate2` added to `requirements-desktop.txt`.
+- `av` (FFmpeg bindings, about 70 MB) isn't bundled. faster_whisper imports it but only uses it to decode files, so `pyi_rth_av_stub.py` stands in.
+- onnxruntime (voice detection) stays excluded.
 
 ## New in this phase
 

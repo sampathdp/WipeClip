@@ -31,6 +31,9 @@ binaries = []
 hiddenimports = []
 hiddenimports += collect_submodules("app")  # pipelines are imported lazily
 hiddenimports += collect_submodules("uvicorn")
+# Speech recognition (app/pipeline/speech.py): imported lazily, and
+# ctranslate2's converter specs are loaded by name.
+hiddenimports += collect_submodules("faster_whisper") + collect_submodules("ctranslate2")
 
 a = Analysis(
     ["desktop_engine.py"],
@@ -38,8 +41,11 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
+    # faster_whisper imports av (FFmpeg bindings, ~70 MB) at the top only to
+    # decode files; the engine hands it samples, so a stub stands in.
+    runtime_hooks=["pyi_rth_av_stub.py"],
     # Cloud-server-only modules; app/ imports them lazily and only when configured.
-    excludes=["redis", "rq", "google", "sentry_sdk", "rembg", "onnxruntime", "hypercorn", "a2wsgi", "boto3", "tkinter"],
+    excludes=["redis", "rq", "google", "sentry_sdk", "rembg", "onnxruntime", "hypercorn", "a2wsgi", "boto3", "tkinter", "av", "torch", "transformers", "hf_xet"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

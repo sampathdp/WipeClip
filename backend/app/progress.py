@@ -25,14 +25,16 @@ class Cancelled(Exception):
 
 @dataclass
 class JobProgress:
-    phase: str = "checking"  # "checking" (reading, screening files) | "rendering"
-    done: float = 0.0  # seconds of output rendered
-    total: float = 0.0  # seconds of output
+    # Exports: "checking" (reading, screening files) | "rendering".
+    # Speech recognition: "download" | "prepare" | "transcribe".
+    phase: str = "checking"
+    done: float = 0.0  # seconds of output rendered (speech: a fraction)
+    total: float = 0.0  # seconds of output (speech: 1)
     cancel: threading.Event = field(default_factory=threading.Event)
     started: float = field(default_factory=time.monotonic)
 
     def fraction(self) -> float | None:
-        if self.phase != "rendering" or self.total <= 0:
+        if self.phase in ("checking", "prepare") or self.total <= 0:
             return None
         return max(0.0, min(1.0, self.done / self.total))
 

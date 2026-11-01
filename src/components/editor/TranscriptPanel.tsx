@@ -38,7 +38,7 @@ export default function TranscriptPanel({
   onCancel: () => void;
   /** null = still checking; false = the first Transcribe asks to download it. */
   modelCached: boolean | null;
-  model: { sizeMb: number; gpu: boolean } | null;
+  model: { sizeMb: number; gpu: boolean; engine?: boolean; sinhala?: boolean } | null;
   onDelete: (indices: number[]) => void;
   onClose: () => void;
 }) {

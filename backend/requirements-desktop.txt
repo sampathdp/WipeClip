@@ -12,4 +12,10 @@ opencv-contrib-python-headless>=4.9.0
 numpy>=1.26.0
 Pillow>=10.2.0
 imageio-ffmpeg>=0.5.1
+# Speech recognition for captions (app/pipeline/speech.py). Pinned: speech.py
+# relies on its batched pipeline's clip handling. It also pulls in av and
+# onnxruntime, which desktop.spec leaves out (only used for decoding files
+# and voice detection, neither of which the engine calls).
+faster-whisper==1.2.1
+ctranslate2>=4.5,<5
 pyinstaller>=6.6

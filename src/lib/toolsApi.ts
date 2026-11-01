@@ -420,6 +420,56 @@ export async function cleanAudio(
   return res.blob();
 }
 
+/** Desktop app: the engine's speech model for `language` ("auto" or a
+ * Whisper code; backend/app/pipeline/speech.py): whether it's downloaded
+ * yet and its size. Null without an engine (the website), or when it can't
+ * start - captions then run in the browser. */
+export async function engineSpeechModel(language: string): Promise<{ ready: boolean; sizeMb: number } | null> {
+  const engine = await optionalEngine().catch(() => null);
+  if (!engine) return null;
+  const res = await fetch(`${engine.url}/api/speech/model?language=${encodeURIComponent(language)}`, { headers: engineHeaders(engine) }).catch(() => null);
+  return res?.ok ? ((await res.json()) as { ready: boolean; sizeMb: number }) : null;
+}
+
+/** Desktop app: a word-timed transcript of 16 kHz mono `samples`, made by
+ * the engine (faster-whisper on this machine's cores - much faster than
+ * the browser's), which downloads the model first if needed. `signal`
+ * stops it there too. Null without an engine. */
+export async function engineTranscribe(
+  samples: Float32Array,
+  language: string,
+  onProgress: (stage: "download" | "prepare" | "transcribe", value: number) => void,
+  signal?: AbortSignal
+): Promise<{ language: string; words: { start: number; end: number; text: string }[] } | null> {
+  const engine = await optionalEngine();
+  if (!engine) return null;
+  const jobId = crypto.randomUUID();
+  const body = new FormData();
+  body.append("audio", new Blob([samples as Float32Array<ArrayBuffer>], { type: "application/octet-stream" }), "speech.f32");
+  body.append("language", language);
+  body.append("job_id", jobId);
+  const job = `${engine.url}/api/jobs/${jobId}`;
+  const cancel = () => void fetch(`${job}/cancel`, { method: "POST", headers: engineHeaders(engine) }).catch(() => {});
+  signal?.addEventListener("abort", cancel, { once: true });
+  const poll = setInterval(() => {
+    void fetch(job, { headers: engineHeaders(engine) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p: { phase: string; progress: number | null } | null) => {
+        if (p && (p.phase === "download" || p.phase === "prepare" || p.phase === "transcribe")) onProgress(p.phase, p.progress ?? 0);
+      })
+      .catch(() => {});
+  }, 700);
+  try {
+    const res = await fetch(`${engine.url}/api/speech/transcribe`, { method: "POST", body, headers: engineHeaders(engine), signal });
+    if (res.status === 409) throw new DOMException("Speech recognition cancelled", "AbortError");
+    if (!res.ok) await throwApiError(res, "Speech recognition failed.");
+    return (await res.json()) as { language: string; words: { start: number; end: number; text: string }[] };
+  } finally {
+    clearInterval(poll);
+    signal?.removeEventListener("abort", cancel);
+  }
+}
+
 /** The engine for optional measurements: null when there's none or it
  * couldn't start (the analysis then goes without the picture). */
 async function optionalEngine(): Promise<LocalEngine | null> {
