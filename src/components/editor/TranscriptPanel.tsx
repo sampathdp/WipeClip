@@ -6,7 +6,7 @@ import { formatTime } from "@/lib/editor/timeline";
 import type { Transcript } from "@/lib/editor/types";
 import { fillerIndices } from "@/lib/editor/wordEdit";
 import { ActionButton, PanelShell } from "./Inspector";
-import { SpeechModelNotice } from "./Panels";
+import { SpeechGpuChoice, SpeechModelNotice } from "./Panels";
 
 /** Editing by text: the timeline's speech as words. Click a word to jump
  * there; click another with Shift held to select the words between; delete
@@ -38,7 +38,7 @@ export default function TranscriptPanel({
   onCancel: () => void;
   /** null = still checking; false = the first Transcribe asks to download it. */
   modelCached: boolean | null;
-  model: { sizeMb: number; gpu: boolean; engine?: boolean; sinhala?: boolean } | null;
+  model: { sizeMb: number; gpu: boolean; engine?: boolean; sinhala?: boolean; cuda?: { available: boolean; ready: boolean; sizeMb: number } } | null;
   onDelete: (indices: number[]) => void;
   onClose: () => void;
 }) {
@@ -50,7 +50,13 @@ export default function TranscriptPanel({
   const focus = sel?.words === words ? sel.focus : null;
   const t = useClockTime(clock);
   const [consent, setConsent] = useState(false);
-  const transcribeButton = (label: string) =>
+  const transcribeButton = (label: string) => (
+    <>
+      <SpeechGpuChoice gpu={model?.cuda} busy={busy} />
+      {transcribeAction(label)}
+    </>
+  );
+  const transcribeAction = (label: string) =>
     busy ? (
       <ActionButton onClick={onCancel}>Cancel transcribing</ActionButton>
     ) : modelCached === false && !consent ? (

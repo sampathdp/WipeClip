@@ -420,15 +420,33 @@ export async function cleanAudio(
   return res.blob();
 }
 
+/** The engine's NVIDIA graphics card support (speech.py gpu_status). */
+export interface EngineGpu {
+  available: boolean;
+  /** Its libraries are downloaded. */
+  ready: boolean;
+  sizeMb: number;
+}
+
+/** "auto" heard a language whose own model isn't downloaded (Sinhala). */
+export class ModelNeededError extends ApiError {
+  constructor(
+    message: string,
+    readonly language: string
+  ) {
+    super(message, "model_needed");
+  }
+}
+
 /** Desktop app: the engine's speech model for `language` ("auto" or a
  * Whisper code; backend/app/pipeline/speech.py): whether it's downloaded
- * yet and its size. Null without an engine (the website), or when it can't
- * start - captions then run in the browser. */
-export async function engineSpeechModel(language: string): Promise<{ ready: boolean; sizeMb: number } | null> {
+ * yet, its size, and the graphics card support. Null without an engine
+ * (the website), or when it can't start - captions then run in the browser. */
+export async function engineSpeechModel(language: string): Promise<{ ready: boolean; sizeMb: number; gpu: EngineGpu } | null> {
   const engine = await optionalEngine().catch(() => null);
   if (!engine) return null;
   const res = await fetch(`${engine.url}/api/speech/model?language=${encodeURIComponent(language)}`, { headers: engineHeaders(engine) }).catch(() => null);
-  return res?.ok ? ((await res.json()) as { ready: boolean; sizeMb: number }) : null;
+  return res?.ok ? ((await res.json()) as { ready: boolean; sizeMb: number; gpu: EngineGpu }) : null;
 }
 
 /** Desktop app: a word-timed transcript of 16 kHz mono `samples`, made by
@@ -438,6 +456,7 @@ export async function engineSpeechModel(language: string): Promise<{ ready: bool
 export async function engineTranscribe(
   samples: Float32Array,
   language: string,
+  gpu: boolean,
   onProgress: (stage: "download" | "prepare" | "transcribe", value: number) => void,
   signal?: AbortSignal
 ): Promise<{ language: string; words: { start: number; end: number; text: string }[] } | null> {
@@ -447,6 +466,7 @@ export async function engineTranscribe(
   const body = new FormData();
   body.append("audio", new Blob([samples as Float32Array<ArrayBuffer>], { type: "application/octet-stream" }), "speech.f32");
   body.append("language", language);
+  body.append("gpu", gpu ? "true" : "false");
   body.append("job_id", jobId);
   const job = `${engine.url}/api/jobs/${jobId}`;
   const cancel = () => void fetch(`${job}/cancel`, { method: "POST", headers: engineHeaders(engine) }).catch(() => {});
@@ -461,7 +481,11 @@ export async function engineTranscribe(
   }, 700);
   try {
     const res = await fetch(`${engine.url}/api/speech/transcribe`, { method: "POST", body, headers: engineHeaders(engine), signal });
-    if (res.status === 409) throw new DOMException("Speech recognition cancelled", "AbortError");
+    if (res.status === 409) {
+      const detail = (await res.json().catch(() => null))?.detail;
+      if (detail?.code === "model_needed") throw new ModelNeededError(detail.message, detail.language);
+      throw new DOMException("Speech recognition cancelled", "AbortError");
+    }
     if (!res.ok) await throwApiError(res, "Speech recognition failed.");
     return (await res.json()) as { language: string; words: { start: number; end: number; text: string }[] };
   } finally {

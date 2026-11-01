@@ -26,6 +26,7 @@ import sys
 import threading
 import urllib.request
 from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -158,6 +159,131 @@ def ensure_model(model: SpeechModel, progress: Progress) -> Path:
             shutil.copyfile(raw / name, path / name)
         shutil.rmtree(raw, ignore_errors=True)
     (path / "ready").write_text("1")
+    return path
+
+
+# --- NVIDIA graphics cards ---------------------------------------------------
+#
+# CTranslate2's Windows build runs Whisper on an NVIDIA card (CUDA 12) once it
+# can load cuBLAS - and only cuBLAS: no cuDNN or CUDA runtime is needed
+# (tried). The two DLLs come from NVIDIA's own pinned PyPI package, downloaded
+# on request: they're 770 MB, too big for the installer. Only those two
+# members are read out of the 553 MB wheel, with HTTP range requests; each
+# one's CRC is checked as it's unpacked. Measured on a GTX 1650 (4 GB): a
+# 2-minute Sinhala test in 8 s, against 84 s on the laptop's 6-core CPU, with
+# the same transcript.
+
+_CUBLAS_WHEEL = (
+    "https://files.pythonhosted.org/packages/45/a1/a17fade6567c57452cfc8f967a40d1035bb9301db52f27808167fbb2be2f/"
+    "nvidia_cublas_cu12-12.9.1.4-py3-none-win_amd64.whl"
+)
+_CUBLAS_FILES = {"cublas64_12.dll": 78_836_264, "cublasLt64_12.dll": 474_117_864}  # compressed bytes
+GPU_DOWNLOAD_MB = round(sum(_CUBLAS_FILES.values()) / 1e6)
+
+# Set once a GPU run failed (an old driver, too little graphics memory): the
+# engine then stays on the CPU until it restarts.
+_gpu_failed = False
+
+
+def _cuda_dir() -> Path:
+    return models_dir() / "cuda"
+
+
+def gpu_status() -> dict:
+    """Whether this machine has an NVIDIA card CTranslate2 can use, and
+    whether the libraries for it are downloaded yet."""
+    available = False
+    if sys.platform == "win32" and not _gpu_failed:
+        try:
+            import ctranslate2
+
+            available = ctranslate2.get_cuda_device_count() > 0
+        except Exception:  # noqa: BLE001 - no driver, or no CUDA build
+            available = False
+    return {"available": available, "ready": (_cuda_dir() / "ready").is_file(), "sizeMb": GPU_DOWNLOAD_MB}
+
+
+def _http_range(url: str, start: int, end: int):
+    req = urllib.request.Request(url, headers={"Range": f"bytes={start}-{end}", "User-Agent": "WipeClip-desktop"})
+    return urllib.request.urlopen(req, timeout=60)
+
+
+def _zip_members(url: str) -> dict[str, tuple[int, int, int, int]]:
+    """The wheel's (zip's) members: name -> (local header offset, compressed
+    size, method, crc32), read from its central directory at the end."""
+    import struct
+
+    head = urllib.request.urlopen(urllib.request.Request(url, method="HEAD", headers={"User-Agent": "WipeClip-desktop"}), timeout=60)
+    size = int(head.headers["Content-Length"])
+    with _http_range(url, max(0, size - 65_536), size - 1) as res:
+        tail = res.read()
+    eocd = tail.rfind(b"PK\x05\x06")
+    if eocd < 0:
+        raise OSError("Not a zip file")
+    cd_size, cd_offset = struct.unpack_from("<II", tail, eocd + 12)
+    with _http_range(url, cd_offset, cd_offset + cd_size - 1) as res:
+        cd = res.read()
+    out = {}
+    at = 0
+    while at + 46 <= len(cd) and cd[at : at + 4] == b"PK\x01\x02":
+        method, _, _, crc, csize, _, n, e, c = struct.unpack_from("<HHHIIIHHH", cd, at + 10)
+        (offset,) = struct.unpack_from("<I", cd, at + 42)
+        name = cd[at + 46 : at + 46 + n].decode("utf-8")
+        out[name.rsplit("/", 1)[-1]] = (offset, csize, method, crc)
+        at += 46 + n + e + c
+    return out
+
+
+def _fetch_member(url: str, info: tuple[int, int, int, int], dest: Path, on_bytes: Callable[[int], None]) -> None:
+    """One zip member, streamed in a single range request and inflated as
+    it arrives."""
+    import struct
+    import zlib
+
+    offset, csize, method, crc = info
+    with _http_range(url, offset, offset + 29) as res:
+        n, e = struct.unpack_from("<HH", res.read(), 26)
+    start = offset + 30 + n + e
+    inflate = zlib.decompressobj(-15) if method == 8 else None
+    check = 0
+    part = dest.with_name(dest.name + ".part")
+    with _http_range(url, start, start + csize - 1) as res, open(part, "wb") as out:
+        while chunk := res.read(1 << 20):
+            on_bytes(len(chunk))
+            data = inflate.decompress(chunk) if inflate else chunk
+            check = zlib.crc32(data, check)
+            out.write(data)
+        if inflate:
+            data = inflate.flush()
+            check = zlib.crc32(data, check)
+            out.write(data)
+    if check != crc:
+        part.unlink(missing_ok=True)
+        raise OSError(f"{dest.name} arrived damaged")
+    os.replace(part, dest)
+
+
+def ensure_gpu(progress: Progress) -> Path:
+    """The folder with the cuBLAS DLLs, downloading them first if needed."""
+    path = _cuda_dir()
+    if not (path / "ready").is_file():
+        path.mkdir(parents=True, exist_ok=True)
+        members = _zip_members(_CUBLAS_WHEEL)
+        total = sum(_CUBLAS_FILES.values())
+        done = 0
+
+        def on_bytes(n: int) -> None:
+            nonlocal done
+            done += n
+            progress("download", min(1.0, done / total))
+
+        for name in _CUBLAS_FILES:
+            if not (path / name).is_file():
+                _fetch_member(_CUBLAS_WHEEL, members[name], path / name, on_bytes)
+        (path / "ready").write_text("1")
+    # CTranslate2 loads cuBLAS by name on its first GPU call, from PATH.
+    if str(path) not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = str(path) + os.pathsep + os.environ.get("PATH", "")
     return path
 
 
@@ -295,17 +421,33 @@ def _cpu_threads() -> int:
         return physical
 
 
-def _whisper(model: SpeechModel, progress: Progress):
+class ModelNeeded(Exception):
+    """The audio is in a language whose model isn't downloaded, and the
+    user hasn't agreed to download it ("auto" detecting Sinhala)."""
+
+    def __init__(self, language: str, model: SpeechModel) -> None:
+        super().__init__(language)
+        self.language = language
+        self.model = model
+
+
+def _whisper(model: SpeechModel, progress: Progress, gpu: bool):
     from faster_whisper import WhisperModel
 
+    device = "cuda" if gpu else "cpu"
     with _load_lock:
-        hit = _loaded.get(model.key)
+        hit = _loaded.get((model.key, device))
         if hit is None:
             path = ensure_model(model, progress)
             progress("prepare", 0.0)
             # One model in memory at a time (turbo alone is ~1 GB in int8).
             _loaded.clear()
-            hit = _loaded[model.key] = WhisperModel(str(path), device="cpu", compute_type="int8", cpu_threads=_cpu_threads())
+            if gpu:
+                # 8-bit weights, 16-bit math: what a GTX 1650 (compute 7.5) runs best.
+                hit = WhisperModel(str(path), device="cuda", compute_type="int8_float16")
+            else:
+                hit = WhisperModel(str(path), device="cpu", compute_type="int8", cpu_threads=_cpu_threads())
+            _loaded[(model.key, device)] = hit
         return hit
 
 
@@ -368,51 +510,164 @@ def drop_loops(words: list[dict]) -> list[dict]:
     return out
 
 
-def transcribe(audio: np.ndarray, language: str, progress: Progress) -> dict:
+# Whisper large-v3-turbo can't recognize Sinhala: on Sinhala speech it
+# guesses a neighbouring language with little confidence. Measured on three
+# clips each: Sinhala "ta" at 0.16-0.46; Tamil itself 0.69-0.85, Hindi
+# 0.92-0.96 (FLEURS). So a weak guess among these, averaged over up to three
+# clips, is taken for Sinhala. Kannada (0.27-0.58, also guessed "ta") falls
+# under it too; Whisper can't transcribe it either.
+_LIKE_SINHALA = {"ta", "kn", "te", "ml", "gu", "bo", "mr", "bn", "ne", "sa", "th", "hi", "si"}
+_SURE = 0.6
+
+
+def detect_language(model, audio: np.ndarray, clips: list[tuple[int, int]]) -> str:
+    """The language of up to the first three clips, by the general model's
+    averaged scores (fewer when it's sure), with Sinhala recognized as above."""
+    scores: dict[str, float] = {}
+    sample = clips[:3]
+    for k, (a, b) in enumerate(sample, 1):
+        _, _, probs = model.detect_language(audio=audio[a:b])
+        for code, p in probs:
+            scores[code] = scores.get(code, 0.0) + p
+        language, total = max(scores.items(), key=lambda kv: kv[1])
+        # A clear answer needs no more clips: each costs an encoder pass
+        # (16 s on a 6-core CPU).
+        if total / k >= 0.8:
+            break
+    p = total / k
+    if language in _LIKE_SINHALA and p < _SURE:
+        return "si"
+    return language
+
+
+def transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool = False) -> dict:
     """Word-timed transcript of 16 kHz mono float32 `audio`. `language` is
     a Whisper code or "auto" (detected by the general model; Sinhala then
-    switches to the Sinhala model). Returns {language, words: [{start, end,
-    text}]}, times in seconds within `audio`."""
+    switches to the Sinhala model, if it's downloaded - else ModelNeeded).
+    `gpu`: use the NVIDIA card, downloading its libraries if needed; any
+    failure there falls back to the CPU. Returns {language, words: [{start,
+    end, text}]}, times in seconds within `audio`."""
+    global _gpu_failed
+    use_gpu = gpu and gpu_status()["available"]
+    if use_gpu:
+        ensure_gpu(progress)
+    try:
+        return _transcribe(audio, language, progress, use_gpu)
+    except RuntimeError as exc:  # what CTranslate2 raises for CUDA errors
+        if not use_gpu:
+            raise
+        print(f"speech: the graphics card failed, using the CPU: {exc}", file=sys.stderr)
+        _gpu_failed = True
+        with _load_lock:
+            _loaded.clear()
+        return _transcribe(audio, language, progress, False)
+
+
+def _decode(model, audio: np.ndarray, language: str, clips: list[tuple[int, int]], batch: int):
+    """The clips' segments (a generator), decoded `batch` at a time.
+
+    Several clips side by side are about 15% faster than one by one on the
+    CPU, and each is decoded once. Text only, timed by aligning it to the
+    audio: the Sinhala model was fine-tuned without timestamp tokens and
+    decodes far worse when asked for them.
+
+    The encoder gets a window 1 s longer than the longest clip instead of
+    Whisper's padded 30 s - CTranslate2 takes the shorter input as is. With
+    the Sinhala model's 12 s clips, on the 2-minute test (i7-9750H, GTX
+    1650), it took 30 s instead of 84 s on the CPU and 7 s instead of 9 s on
+    the GPU, at the same accuracy (character error rate 4.4-4.6%) once
+    early-ended clips are decoded again (see unfinished). faster-whisper
+    pads to 30 s with its module-level pad_or_trim while preparing the
+    batch, before returning the generator, so it's swapped only for that
+    call (transcriptions run one at a time: main.py _speech_lock)."""
+    import faster_whisper.transcribe as fw
     from faster_whisper import BatchedInferencePipeline
 
+    longest = max(b - a for a, b in clips) / RATE
+    frames = min(3000, 100 * ceil(longest) + 100)  # 100 frames a second
+    full = fw.pad_or_trim
+    fw.pad_or_trim = lambda array, length=3000, **kw: full(array, frames, **kw)
+    try:
+        segments, _ = BatchedInferencePipeline(model).transcribe(
+            audio,
+            language=language,
+            task="transcribe",
+            clip_timestamps=[{"start": a / RATE, "end": b / RATE} for a, b in clips],
+            batch_size=batch,
+            beam_size=1,
+            word_timestamps=True,
+            without_timestamps=True,
+        )
+    finally:
+        fw.pad_or_trim = full
+    return segments
+
+
+def _transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool) -> dict:
     total = len(audio) / RATE
     if language == "auto":
         first = speech_clips(audio, _CLIP_SECONDS["general"] * RATE)
         if not first:
             return {"language": "en", "words": []}
-        general = _whisper(MODELS["general"], progress)
+        general = _whisper(MODELS["general"], progress, gpu)
         progress("transcribe", 0.0)
-        language, _, _ = general.detect_language(audio=audio[first[0][0] : first[0][1]])
+        language = detect_language(general, audio, first)
+        # Only the model the user agreed to (the general one, for "auto") is
+        # downloaded unasked; another is asked for first.
+        if model_for(language).key != "general" and not is_ready(model_for(language)):
+            raise ModelNeeded(language, model_for(language))
     spec = model_for(language)
     clips = speech_clips(audio, _CLIP_SECONDS[spec.key] * RATE)
     if not clips:
         return {"language": language, "words": []}
-    model = _whisper(spec, progress)
+    model = _whisper(spec, progress, gpu)
     progress("transcribe", 0.0)
-    # Several clips decoded side by side (about 15% faster than one by one
-    # on the CPU), each once. Text only, timed by aligning it to the audio:
-    # the Sinhala model was fine-tuned without timestamp tokens and decodes
-    # far worse when asked for them.
-    segments, _ = BatchedInferencePipeline(model).transcribe(
-        audio,
-        language=language,
-        task="transcribe",
-        clip_timestamps=[{"start": a / RATE, "end": b / RATE} for a, b in clips],
-        batch_size=_BATCH[spec.key],
-        beam_size=1,
-        word_timestamps=True,
-        without_timestamps=True,
-    )
+    batch = _BATCH[spec.key]
+    words = _words(_decode(model, audio, language, clips, batch), total, lambda t: progress("transcribe", min(0.95, t / total)))
+    # Greedy decoding sometimes ends a clip early (one of eleven in the
+    # 2-minute test: 6 of its 17 words, more often with the short encoder
+    # window). Speech left after a clip's last word is decoded again.
+    rest = unfinished(audio, clips, words)
+    if rest:
+        # Only confident words: what's left may be a breath or noise.
+        words += _words(_decode(model, audio, language, rest, batch), total, lambda t: None, min_probability=0.4)
+        words.sort(key=lambda w: w["start"])
+    progress("transcribe", 1.0)
+    return {"language": language, "words": drop_loops(words)}
+
+
+def _words(segments, total: float, on_time: Callable[[float], None], min_probability: float = 0.0) -> list[dict]:
     words = []
     for seg in segments:  # a generator: each batch is decoded as it's read
         for wd in seg.words or []:
             text = wd.word.strip()
-            if not text:
+            if not text or wd.probability < min_probability:
                 continue
             start = max(0.0, float(wd.start))
             end = min(total, float(wd.end), start + _max_word_seconds(text))
             if end <= start:
                 end = min(total, start + 0.1)
             words.append({"start": round(start, 3), "end": round(end, 3), "text": text})
-        progress("transcribe", min(1.0, seg.end / total) if total else 1.0)
-    return {"language": language, "words": drop_loops(words)}
+        on_time(seg.end)
+    return words
+
+
+_MIN_REST = int(1.5 * RATE)
+
+
+def _loud_seconds(a: np.ndarray) -> float:
+    return sum(_rms(a[i : i + _FRAME]) >= _SILENCE_RMS for i in range(0, len(a), _FRAME)) * _FRAME / RATE
+
+
+def unfinished(audio: np.ndarray, clips: list[tuple[int, int]], words: list[dict]) -> list[tuple[int, int]]:
+    """The part of each clip after its last recognized word, when it's at
+    least 1.5 s long with 1 s of sound in it (not just a word's tail before
+    a pause). Clips with no words at all are left out: that's sound Whisper
+    didn't take for speech (music, noise)."""
+    out = []
+    for a, b in clips:
+        ends = [w["end"] for w in words if a / RATE <= w["start"] < b / RATE]
+        start = max(a, int((max(ends) + 0.1) * RATE)) if ends else a
+        if ends and b - start >= _MIN_REST and _loud_seconds(audio[start:b]) >= 1.0:
+            out.append((start, b))
+    return out

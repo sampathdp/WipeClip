@@ -86,7 +86,7 @@ import {
   type TextStyle,
   type Transcript,
 } from "@/lib/editor/types";
-import { ApiError, cleanAudio, ContentBlockedError, probeVideo } from "@/lib/toolsApi";
+import { ApiError, cleanAudio, ContentBlockedError, ModelNeededError, probeVideo } from "@/lib/toolsApi";
 import type { RecordingBundle } from "@/lib/recorder/bundle";
 import { recordingToSources } from "@/lib/recorder/editorImport";
 import { planRecordingProject, type ImportedTrack } from "@/lib/recorder/importPlan";
@@ -106,7 +106,15 @@ import { useHighlights } from "./useHighlights";
 import { CREATOR_PRESETS, applyCreatorPreset, type CreatorPresetId } from "@/lib/editor/creatorPresets";
 import { DEFAULT_KEYSTROKES, keystrokeOverlays } from "@/lib/editor/keystrokes";
 import { captionCues, toPlainTranscript, toSrt, toVtt } from "@/lib/editor/transcript";
-import { buildSpeechMix, cancelSpeech, speechModel, speechModelCached, type SpeechModel } from "@/lib/editor/captions";
+import {
+  buildSpeechMix,
+  cancelSpeech,
+  saveCaptionLanguage,
+  savedCaptionLanguage,
+  speechModel,
+  speechModelCached,
+  type SpeechModel,
+} from "@/lib/editor/captions";
 import { ANALYSIS_RATE } from "@/lib/editor/audioAnalysis";
 import { renderProgramMix } from "@/lib/editor/programMix";
 import { LOUDNESS_TARGETS, measureLoudness, normalizationGain } from "@/lib/editor/loudness";
@@ -290,7 +298,8 @@ export default function VideoEditor({
   const [soloRaw, setSolo] = useState<ReadonlySet<string>>(() => new Set());
   const [cleaningTrack, setCleaningTrack] = useState<string | null>(null);
   const [measuring, setMeasuring] = useState(false);
-  const [captionOpts, setCaptionOpts] = useState<CaptionOptions>({ language: "auto", maxWords: 3, style: "bold", y: 0.82 });
+  const [captionOpts, setCaptionOpts] = useState<CaptionOptions>(() => ({ language: savedCaptionLanguage(), maxWords: 3, style: "bold", y: 0.82 }));
+  useEffect(() => saveCaptionLanguage(captionOpts.language), [captionOpts.language]);
   const [captioning, setCaptioning] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [signedInTier, setSignedInTier] = useState<Tier>("free");
@@ -1082,7 +1091,7 @@ export default function VideoEditor({
     const progress = ({ stage, value }: CaptionsProgress) =>
       setBusy(
         stage === "download"
-          ? `Downloading speech model (first time only)… ${Math.round(value * 100)}%`
+          ? `Downloading speech files (first time only)… ${Math.round(value * 100)}%`
           : stage === "prepare"
             ? "Preparing speech model…"
             : `Transcribing speech on your device… ${Math.round(value * 100)}%`
@@ -1092,7 +1101,15 @@ export default function VideoEditor({
     stopIfCancelled();
     if (!samples) return null;
     setBusy("Loading speech model…");
-    const res = await transcribe(samples, captionOpts.language, progress);
+    let res;
+    try {
+      res = await transcribe(samples, captionOpts.language, progress);
+    } catch (e) {
+      // "Auto" heard Sinhala, whose model isn't downloaded: pick the
+      // language so the panel offers that download (its own consent).
+      if (e instanceof ModelNeededError) setCaptionOpts((o) => ({ ...o, language: e.language }));
+      throw e;
+    }
     stopIfCancelled();
     return { language: res.language, words: res.words, total: lay.total };
   }, [lay, project, sources, captionOpts.language]);
@@ -1122,7 +1139,7 @@ export default function VideoEditor({
         return;
       }
       console.error("[captions]", e);
-      say("Captioning failed. Check your connection and try again.");
+      say(e instanceof ApiError ? e.message : "Captioning failed. Check your connection and try again.");
     } finally {
       setBusy(null);
       setCaptioning(false);
@@ -1146,7 +1163,7 @@ export default function VideoEditor({
         return;
       }
       console.error("[transcript]", e);
-      say("Transcribing failed. Check your connection and try again.");
+      say(e instanceof ApiError ? e.message : "Transcribing failed. Check your connection and try again.");
     } finally {
       setBusy(null);
       setCaptioning(false);

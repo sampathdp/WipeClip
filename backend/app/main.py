@@ -473,25 +473,30 @@ MAX_SPEECH_BYTES = 2 * 3600 * speech.RATE * 4
 def api_speech_model(language: str = "auto") -> dict:
     """Desktop engine only: whether the speech model for `language` is on
     this machine yet, and its download size, so the editor asks before the
-    first download (app/pipeline/speech.py)."""
+    first download (app/pipeline/speech.py). `gpu`: whether an NVIDIA card
+    can be used, and whether its libraries are downloaded yet."""
     if not LOCAL_MODE:
         raise HTTPException(status_code=404, detail="Not available here.")
     model = speech.model_for(language)
-    return {"ready": speech.is_ready(model), "sizeMb": model.size_mb}
+    return {"ready": speech.is_ready(model), "sizeMb": model.size_mb, "gpu": speech.gpu_status()}
 
 
 @app.post("/api/speech/transcribe")
 async def api_speech_transcribe(
     audio: UploadFile = File(...),
     language: str = Form("auto"),
+    gpu: bool = Form(False),
     job_id: Optional[str] = Form(None),
 ):
     """Desktop engine only: a word-timed transcript of `audio` (raw 16 kHz
     mono float32, little-endian - the editor's speech mix) with
     faster-whisper (app/pipeline/speech.py), downloading the model first if
-    needed. Progress and cancel under `job_id` (app/progress.py): phase
-    "download", "prepare" or "transcribe". Free and unmetered: it runs on
-    the user's own machine, and the audio never leaves it."""
+    needed. `gpu`: run on the NVIDIA card, downloading its libraries
+    first if needed. Progress and cancel under `job_id` (app/progress.py):
+    phase "download", "prepare" or "transcribe". 409 "model_needed" when
+    "auto" hears a language whose own model isn't downloaded (Sinhala).
+    Free and unmetered: it runs on the user's own machine, and the audio
+    never leaves it."""
     if not LOCAL_MODE:
         raise HTTPException(status_code=404, detail="Not available here.")
     if not re.fullmatch(r"auto|[a-z]{2,3}", language):
@@ -510,8 +515,18 @@ async def api_speech_transcribe(
 
     try:
         async with _speech_lock:
-            result = await asyncio.to_thread(speech.transcribe, samples, language, report)
+            result = await asyncio.to_thread(speech.transcribe, samples, language, report, gpu)
         return result
+    except speech.ModelNeeded as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "model_needed",
+                "language": exc.language,
+                "sizeMb": exc.model.size_mb,
+                "message": f"This sounds like Sinhala, which has its own speech model ({exc.model.size_mb} MB). Download it in the panel, then try again.",
+            },
+        ) from exc
     except progress.Cancelled as exc:
         raise HTTPException(status_code=409, detail={"code": "cancelled", "message": "Speech recognition cancelled."}) from exc
     except OSError as exc:  # urllib's errors are OSErrors too

@@ -26,25 +26,37 @@ Licences: the original Whisper models are Apache-2.0 (`openai/whisper-small`) an
 | Sinhala | [SinhaSpeech/whisper-small-sinhala-run12-best](https://huggingface.co/SinhaSpeech/whisper-small-sinhala-run12-best) (Apache-2.0; Whisper-small fine-tuned on Sinhala, 15.5% word error rate reported on its speaker-disjoint test set) | 970 MB | 250 MB |
 | Everything else | Whisper large-v3-turbo, CTranslate2 export (`dropbox-dash/faster-whisper-large-v3-turbo`, MIT) | 1.6 GB | 1.6 GB |
 
-The Sinhala model is only published as a Transformers checkpoint. `convert_whisper` turns it into a CTranslate2 model with int8 weights on the user's machine with numpy, because CTranslate2's own converter needs PyTorch. It mirrors that converter's `WhisperLoader`, and the tokenizer is whisper-small's (vocab, merges and added tokens checked identical). Converting takes about 10 s. "auto" detects the language with the general model and switches to the Sinhala model for Sinhala.
+The Sinhala model is only published as a Transformers checkpoint. `convert_whisper` turns it into a CTranslate2 model with int8 weights on the user's machine with numpy, because CTranslate2's own converter needs PyTorch. It mirrors that converter's `WhisperLoader`, and the tokenizer is whisper-small's (vocab, merges and added tokens checked identical). Converting takes about 10 s.
+
+**NVIDIA graphics cards** (Windows): a checkbox in the Captions and Transcript panels, off until the user ticks it.
+- **What it downloads:** CTranslate2 needs only cuBLAS (`cublas64_12.dll`, `cublasLt64_12.dll`) from NVIDIA's pinned PyPI wheel, not cuDNN (tried). Those two members are read out of the wheel with HTTP range requests: 553 MB instead of the whole wheel, CRC-checked, into `speech-models/cuda/`.
+- **Settings:** 8-bit weights with 16-bit math.
+- **Fallback:** any CUDA error (old driver, too little memory) moves that run to the CPU, and the engine stays on the CPU until it restarts.
+
+**"auto" and Sinhala:** large-v3-turbo can't recognize Sinhala. On the test it guessed Tamil at 0.16-0.46; real Tamil (FLEURS) scored 0.69-0.85 and Hindi 0.92-0.96. So a guess under 0.6 among the neighbouring languages, averaged over up to 3 clips (1 when it's sure), is taken for Sinhala (`detect_language`). If the Sinhala model isn't downloaded, the engine answers 409 `model_needed`. The editor then switches the language to Sinhala so the panel asks for that download. The chosen language is remembered, so later runs skip detection.
 
 **Decoding:**
-- **Clips:** the audio is cut at quiet points into clips (12 s for Sinhala, 28 s otherwise), decoded 8 or 4 at a time (`BatchedInferencePipeline`).
+- **Clips:** the audio is cut at quiet points into clips: 12 s for Sinhala, since that model was trained on short utterances, and 28 s otherwise. They're decoded 8 or 4 at a time (`BatchedInferencePipeline`).
+- **Short encoder window:** the encoder gets a window 1 s longer than the longest clip instead of a padded 30 s. CTranslate2 accepts it.
 - **Text only:** each clip is decoded as text alone, then timed by aligning it to the audio. The Sinhala model was fine-tuned without timestamp tokens.
+- **Early-ended clips:** greedy decoding sometimes ends a clip early. When a clip has 1.5 s or more after its last word, with 1 s of sound in it, that remainder is decoded again (`unfinished`), keeping only words at probability 0.4 or higher.
 - **Loops:** whatever a loop leaves behind is dropped.
 
-**Measured** on an i7-9750H (6 cores) with a 2-minute test file: 33 test-set utterances joined with 0.5 s pauses, so the speakers weren't in training. Word error rate is computed with punctuation stripped.
+**Measured** on an i7-9750H (6 cores) and a GTX 1650 (4 GB), with a 2-minute test file: 33 test-set utterances joined with 0.5 s pauses, so the speakers weren't in training. Punctuation is stripped. Character error rate is the fairer measure for Sinhala: most "word" errors are spacing ("බේරා ගනියිනෙ" for "බේරගනියිනෙ"). The model card reports 4.36%.
 
-| | Time | Word error rate |
-|---|---|---|
-| Stock Whisper (browser, 0.1.7) | 30+ min (user report) | mostly nonsense |
-| Engine, Sinhala model, 28 s clips, timestamps on | 316 s | 59% |
-| Engine, Sinhala model, 28 s clips, text only | 55 s | 49% (a quarter of the words missing) |
-| **Engine, Sinhala model, 12 s clips, batched (shipped)** | **84 s** | **26%** |
+| | Time | Word errors | Character errors |
+|---|---|---|---|
+| Stock Whisper (browser, 0.1.7) | 30+ min (user report) | mostly nonsense | |
+| Engine CPU, 28 s clips, timestamps on | 316 s | 59% | |
+| Engine CPU, 12 s clips, 30 s window (8aa763f) | 84 s | 26% | 4.6% |
+| **Engine CPU, short window + re-decoding (shipped)** | **30 s** | **27%** | **4.6%** |
+| Engine GPU, 30 s window | 9 s | 26% | 6.6% |
+| **Engine GPU, short window + re-decoding (shipped)** | **7 s** | **27%** | **4.4%** |
 
-- **Time per 30 s window:** each window costs the same encoder pass on the CPU however short it is: 3.2 s for whisper-small, 16 s for turbo. 6 threads were faster than 11 (hyperthreads hurt), so the engine uses the physical cores.
-- **English:** turbo wasn't measured on an English recording; expect about 16 s per 28 s of speech on this CPU.
-- **Not used:** the GPU. CTranslate2 on CUDA needs cuBLAS and cuDNN, about 1 GB more to ship.
+- **Beam search:** beam size 5 didn't help (GPU: 27% vs 26% word errors), so decoding stays greedy.
+- **CPU threads:** 6 threads were faster than 11 (hyperthreads hurt), so the engine uses the physical cores.
+- **Turbo (other languages):** about real time on this CPU (81 s of Hindi in 79 s). On the GPU, a minute of Tamil or Hindi takes 14 s, including detecting the language.
+- **Not measured:** English accuracy, and machines slower than this one. A 4-core CPU should take about 1.5 times as long.
 
 **Packaging:**
 - `faster-whisper==1.2.1` and `ctranslate2` added to `requirements-desktop.txt`.

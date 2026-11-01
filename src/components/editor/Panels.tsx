@@ -54,7 +54,7 @@ import { DEFAULT_MASK, MASK_LABELS } from "@/lib/editor/shapeMask";
 import { CAM_CORNER_LABELS, CAM_SHAPE_LABELS, DEFAULT_CAM_LAYOUT } from "@/lib/editor/webcamLayout";
 import { DEFAULT_CURVES, IDENTITY_CURVE, curveFn, isIdentityCurve } from "@/lib/editor/curves";
 import { MAX_RAMP_SPEED, MIN_RAMP_SPEED, RAMP_PRESETS, clipTimelineLength } from "@/lib/editor/speed";
-import { CAPTION_POSITIONS, CAPTION_STYLES, type CaptionStyleId } from "@/lib/editor/captions";
+import { CAPTION_POSITIONS, CAPTION_STYLES, setSpeechCudaWanted, speechCudaWanted, type CaptionStyleId } from "@/lib/editor/captions";
 import { SHAPE_LABELS } from "@/lib/editor/shapes";
 import { isPremiumEffect, isPremiumFilter } from "@/lib/entitlements";
 import GradeFilter from "./GradeFilter";
@@ -1006,6 +1006,32 @@ export function SpeechModelNotice({
   );
 }
 
+/** Desktop app with an NVIDIA card: whether speech recognition runs on it
+ * (captions.ts speechCudaWanted). Its libraries are a separate one-time
+ * download, so it's the user's choice, remembered on this device. */
+export function SpeechGpuChoice({ gpu, busy }: { gpu?: { available: boolean; ready: boolean; sizeMb: number } | null; busy: boolean }) {
+  const [on, setOn] = useState(speechCudaWanted);
+  if (!gpu?.available) return null;
+  return (
+    <label className="flex items-start gap-2 text-xs text-muted">
+      <input
+        type="checkbox"
+        className="mt-0.5 accent-[var(--accent)]"
+        checked={on}
+        disabled={busy}
+        onChange={(e) => {
+          setOn(e.target.checked);
+          setSpeechCudaWanted(e.target.checked);
+        }}
+      />
+      <span>
+        <span className="font-medium text-foreground">Use the NVIDIA graphics card</span> - about 10× faster
+        {gpu.ready ? "." : `. Needs a one-time ${gpu.sizeMb} MB download of NVIDIA's libraries.`}
+      </span>
+    </label>
+  );
+}
+
 export function CaptionsPanel({
   options,
   onOptions,
@@ -1027,7 +1053,7 @@ export function CaptionsPanel({
   /** null = still checking. When false, generating asks to download the model first. */
   modelCached?: boolean | null;
   /** The speech model this device will download (captions.ts speechModel). */
-  model?: { sizeMb: number; gpu: boolean; engine?: boolean; sinhala?: boolean } | null;
+  model?: { sizeMb: number; gpu: boolean; engine?: boolean; sinhala?: boolean; cuda?: { available: boolean; ready: boolean; sizeMb: number } } | null;
   /** Every caption is hidden (toggled off). */
   hidden?: boolean;
   onToggleHidden?: () => void;
@@ -1129,6 +1155,7 @@ export function CaptionsPanel({
             options={CAPTION_POSITIONS.map((p) => ({ value: p.y, label: p.label }))}
           />
         </div>
+        <SpeechGpuChoice gpu={model?.cuda} busy={busy} />
         {needsModel ? (
           <SpeechModelNotice model={model} busy={busy} onConsent={() => setConsent(true)} />
         ) : busy && onCancel ? (

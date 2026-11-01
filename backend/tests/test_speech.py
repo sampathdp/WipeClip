@@ -64,6 +64,47 @@ class LoopsTest(unittest.TestCase):
         self.assertEqual(speech.drop_loops(words), words)
 
 
+class UnfinishedTest(unittest.TestCase):
+    def test_speech_after_the_last_word_is_decoded_again(self) -> None:
+        audio = tone(12)
+        clips = [(0, 12 * RATE)]
+        words = [{"start": 0.2, "end": 0.6, "text": "a"}, {"start": 0.7, "end": 2.4, "text": "b"}]
+        rest = speech.unfinished(audio, clips, words)
+        self.assertEqual(len(rest), 1)
+        self.assertAlmostEqual(rest[0][0] / RATE, 2.5, places=2)
+        self.assertEqual(rest[0][1], 12 * RATE)
+
+    def test_finished_and_quiet_clips_are_left(self) -> None:
+        audio = np.concatenate([tone(5), silence(5)])
+        words = [{"start": 0.2, "end": 4.8, "text": "a"}]
+        self.assertEqual(speech.unfinished(audio, [(0, 10 * RATE)], words), [])  # only silence after
+        self.assertEqual(speech.unfinished(audio, [(0, 10 * RATE)], []), [])  # no words: not speech
+
+
+class LanguageTest(unittest.TestCase):
+    """Turbo can't tell Sinhala: it guesses Tamil and the like, unsure."""
+
+    @staticmethod
+    def model(*guesses):
+        calls = iter(guesses)
+        return mock.Mock(detect_language=lambda audio: (None, None, next(calls)))
+
+    def detect(self, *guesses) -> str:
+        clips = [(i * RATE, (i + 1) * RATE) for i in range(3)]
+        return speech.detect_language(self.model(*guesses), tone(3), clips)
+
+    def test_unsure_neighbour_is_sinhala(self) -> None:
+        self.assertEqual(self.detect([("ta", 0.16), ("bo", 0.12)], [("ta", 0.46)], [("ta", 0.31)]), "si")
+
+    def test_clear_tamil_and_hindi_stay(self) -> None:
+        self.assertEqual(self.detect([("ta", 0.85), ("th", 0.04)]), "ta")
+        self.assertEqual(self.detect([("ta", 0.69)], [("ta", 0.85)], [("ta", 0.69)]), "ta")
+        self.assertEqual(self.detect([("hi", 0.93)]), "hi")
+
+    def test_other_languages_are_never_sinhala(self) -> None:
+        self.assertEqual(self.detect([("en", 0.4)], [("en", 0.5)], [("en", 0.45)]), "en")
+
+
 class ModelsTest(unittest.TestCase):
     def test_sinhala_has_its_own_model(self) -> None:
         self.assertEqual(speech.model_for("si").key, "si")
@@ -94,8 +135,8 @@ class EndpointTest(unittest.TestCase):
         samples = tone(1)
         seen = {}
 
-        def fake(audio, language, progress):
-            seen["audio"], seen["language"] = audio, language
+        def fake(audio, language, progress, gpu):
+            seen["audio"], seen["language"], seen["gpu"] = audio, language, gpu
             progress("transcribe", 0.5)
             return {"language": language, "words": [{"start": 0.1, "end": 0.4, "text": "hello"}]}
 
@@ -103,12 +144,13 @@ class EndpointTest(unittest.TestCase):
             res = self.client.post(
                 "/api/speech/transcribe",
                 files={"audio": ("a.f32", samples.astype("<f4").tobytes())},
-                data={"language": "si", "job_id": "speech-test-0000000001"},
+                data={"language": "si", "gpu": "true", "job_id": "speech-test-0000000001"},
                 headers=self.headers,
             )
         self.assertEqual(res.status_code, 200, res.text)
         self.assertEqual(res.json()["words"][0]["text"], "hello")
         self.assertEqual(seen["language"], "si")
+        self.assertTrue(seen["gpu"])
         np.testing.assert_array_equal(seen["audio"], samples)
 
     def test_rejects_bad_input(self) -> None:
@@ -122,7 +164,7 @@ class EndpointTest(unittest.TestCase):
                     self.assertEqual(res.status_code, 400)
 
     def test_cancel_answers_409(self) -> None:
-        def cancelled(audio, language, progress):
+        def cancelled(audio, language, progress, gpu):
             main.progress.get("speech-test-0000000002").cancel.set()
             progress("transcribe", 0.1)
             return {}
@@ -137,9 +179,27 @@ class EndpointTest(unittest.TestCase):
         self.assertEqual(res.status_code, 409)
 
     def test_model_status(self) -> None:
-        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"WIPECLIP_MODELS_DIR": d}), mock.patch.object(main, "LOCAL_MODE", True):
+        gpu = {"available": True, "ready": False, "sizeMb": speech.GPU_DOWNLOAD_MB}
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.dict(os.environ, {"WIPECLIP_MODELS_DIR": d}),
+            mock.patch.object(main, "LOCAL_MODE", True),
+            mock.patch.object(speech, "gpu_status", lambda: gpu),
+        ):
             res = self.client.get("/api/speech/model?language=si", headers=self.headers)
-        self.assertEqual(res.json(), {"ready": False, "sizeMb": speech.MODELS["si"].size_mb})
+        self.assertEqual(res.json(), {"ready": False, "sizeMb": speech.MODELS["si"].size_mb, "gpu": gpu})
+
+    def test_model_needed_answers_409(self) -> None:
+        def needed(audio, language, progress, gpu):
+            raise speech.ModelNeeded("si", speech.MODELS["si"])
+
+        with mock.patch.object(main, "LOCAL_MODE", True), mock.patch.object(speech, "transcribe", needed):
+            res = self.client.post(
+                "/api/speech/transcribe", files={"audio": ("a.f32", tone(0.5).tobytes())}, data={"language": "auto"}, headers=self.headers
+            )
+        self.assertEqual(res.status_code, 409)
+        detail = res.json()["detail"]
+        self.assertEqual((detail["code"], detail["language"]), ("model_needed", "si"))
 
 
 if __name__ == "__main__":

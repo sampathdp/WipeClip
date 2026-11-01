@@ -4,7 +4,7 @@
  * (captions.worker.ts) - and turns the word timings into caption text layers.
  */
 import { memoryBudgetGb } from "@/lib/platform";
-import { engineSpeechModel, engineTranscribe } from "@/lib/toolsApi";
+import { engineSpeechModel, engineTranscribe, type EngineGpu } from "@/lib/toolsApi";
 import { DEFAULT_TEXT } from "./textRaster";
 import { newId, type Layout } from "./timeline";
 import type { AnimIn, AudioClip, MediaSource, Overlay, Project, TextStyle } from "./types";
@@ -211,6 +211,49 @@ export interface SpeechModel {
   engine?: boolean;
   /** The engine's Sinhala model. */
   sinhala?: boolean;
+  /** The engine's NVIDIA graphics card support. */
+  cuda?: EngineGpu;
+}
+
+/** The caption language last picked (or found: "auto" that heard Sinhala
+ * switches to it), so the next run skips detecting it again - on a CPU
+ * that's an encoder pass per clip. */
+const LANGUAGE_KEY = "wipeclip.captionLanguage";
+
+export function savedCaptionLanguage(): string {
+  try {
+    return (typeof localStorage !== "undefined" && localStorage.getItem(LANGUAGE_KEY)) || "auto";
+  } catch {
+    return "auto";
+  }
+}
+
+export function saveCaptionLanguage(language: string): void {
+  try {
+    localStorage.setItem(LANGUAGE_KEY, language);
+  } catch {
+    // Not remembered: "auto" next time.
+  }
+}
+
+/** Whether the user chose to run the engine's speech recognition on the
+ * NVIDIA card (its libraries are a separate download, so it's asked). */
+const CUDA_KEY = "wipeclip.speechCuda";
+
+export function speechCudaWanted(): boolean {
+  try {
+    return localStorage.getItem(CUDA_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setSpeechCudaWanted(on: boolean): void {
+  try {
+    localStorage.setItem(CUDA_KEY, on ? "1" : "0");
+  } catch {
+    // Not remembered: asked again next time.
+  }
 }
 
 /** The speech models, downloaded from Hugging Face on first use and kept in
@@ -251,7 +294,7 @@ function rememberSlowGpu(): void {
  * WebGPU adapter, small otherwise. */
 export async function speechModel(language = "auto"): Promise<SpeechModel> {
   const engine = await engineSpeechModel(language);
-  if (engine) return { id: `engine:${language}`, sizeMb: engine.sizeMb, gpu: false, engine: true, sinhala: language === "si" };
+  if (engine) return { id: `engine:${language}`, sizeMb: engine.sizeMb, gpu: false, engine: true, sinhala: language === "si", cuda: engine.gpu };
   return browserModel();
 }
 
@@ -618,7 +661,7 @@ export async function transcribe(
   const run = new AbortController();
   engineRun = run;
   try {
-    const res = await engineTranscribe(samples, language, (stage, value) => onProgress({ stage, value }), run.signal);
+    const res = await engineTranscribe(samples, language, speechCudaWanted(), (stage, value) => onProgress({ stage, value }), run.signal);
     if (res) return { language: res.language, words: res.words.filter((w) => audible(samples, w)) };
   } catch (err) {
     if (run.signal.aborted) throw new DOMException("Speech recognition cancelled", "AbortError");
