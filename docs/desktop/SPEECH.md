@@ -78,4 +78,5 @@ What the headless script checks:
 - **Overlapping speech:** Whisper writes one word stream; two people talking at once are merged, and their repeats can look like a repeat.
 - **Word timing accuracy:** depends on the model; whisper-small's word times are less tight than turbo's. Cuts land where the next word starts, so a slightly late start can clip a breath. "Preview the result" plays the edit before applying.
 - **Language detection:** auto-detect uses the first speech segment.
+- **Low-resource languages (Sinhala, and others with little training data):** Whisper is far less accurate in them, and more likely to get stuck in a loop ("ත්ත්ත්…" filling a whole caption). Each segment is now checked the way Whisper does it (zlib compression ratio over 2.4), retried with sampling at temperature 0.4 and then 0.8, and what's still looped is dropped (`captions.worker.ts`). This removes the junk, but it doesn't make the recognition itself accurate.
 - **Not measured:** transcription time on representative long recordings in this phase (needs the model on this machine).

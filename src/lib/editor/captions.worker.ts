@@ -165,6 +165,53 @@ function toWords(chunks: { text: string; timestamp: [number, number | null] }[],
   return words;
 }
 
+type AsrResult = { text?: string; chunks?: { text: string; timestamp: [number, number | null] }[] };
+
+/** How well the text compresses: Whisper's own check for a decoding stuck
+ * in a loop ("ත්ත්ත්ත්…", "the the the…"), which compresses far better
+ * than real speech. Same measure and threshold as Whisper (zlib, 2.4). */
+async function compressionRatio(text: string): Promise<number> {
+  const bytes = new TextEncoder().encode(text);
+  if (bytes.length < 60) return 1;
+  const packed = await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate"))).arrayBuffer();
+  return bytes.length / packed.byteLength;
+}
+const MAX_COMPRESSION_RATIO = 2.4;
+// Whisper retries a looping window with sampling at rising temperatures;
+// two steps keep the cost of a bad segment at three passes at most.
+const FALLBACK_TEMPERATURES = [0.4, 0.8];
+
+/** A word that is a short piece repeated over and over, or far too long
+ * for one word: what's left of a loop no retry got rid of. */
+const loopedWord = (text: string) => /(.{1,6}?)\1{5,}/u.test(text) || [...text].length > 40;
+
+/** Words with a loop's leftovers taken out: looped words, and the same word
+ * more than three times in a row. */
+function dropLoops(words: { start: number; end: number; text: string }[]) {
+  return words.filter((w, i) => {
+    if (loopedWord(w.text)) return false;
+    return !(i >= 3 && words[i - 1].text === w.text && words[i - 2].text === w.text && words[i - 3].text === w.text);
+  });
+}
+
+/** One segment, retried with sampling while the result looks like a loop
+ * (compressionRatio); the least repetitive try is kept. */
+async function transcribeSegment(samples: Float32Array, language: string) {
+  const options = { language, task: "transcribe", return_timestamps: "word" } as const;
+  let best = (await asr!(samples, options)) as AsrResult;
+  let bestRatio = await compressionRatio(best.text ?? "");
+  for (const temperature of FALLBACK_TEMPERATURES) {
+    if (bestRatio <= MAX_COMPRESSION_RATIO) break;
+    const res = (await asr!(samples, { ...options, do_sample: true, temperature })) as AsrResult;
+    const ratio = await compressionRatio(res.text ?? "");
+    if (ratio < bestRatio) {
+      best = res;
+      bestRatio = ratio;
+    }
+  }
+  return best;
+}
+
 self.onmessage = async (e: MessageEvent) => {
   const m = e.data;
   try {
@@ -183,12 +230,8 @@ self.onmessage = async (e: MessageEvent) => {
     } else if (m.type === "transcribe") {
       const samples: Float32Array = m.samples;
       const length = samples.length / 16000;
-      const res = (await asr!(samples, {
-        language: m.language,
-        task: "transcribe",
-        return_timestamps: "word",
-      })) as { chunks?: { text: string; timestamp: [number, number | null] }[] };
-      post({ type: "words", id: m.id, words: toWords(res.chunks ?? [], length) });
+      const res = await transcribeSegment(samples, m.language);
+      post({ type: "words", id: m.id, words: dropLoops(toWords(res.chunks ?? [], length)) });
     }
   } catch (err) {
     post({ type: "error", message: err instanceof Error ? err.message : String(err) });
