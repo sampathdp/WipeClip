@@ -3,6 +3,7 @@
 import { modKey, useShortcutKeys } from "@/lib/platform/keys";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import AppVersion from "@/components/AppVersion";
 import AuthStatus from "@/components/AuthStatus";
 import Logo from "@/components/Logo";
 import SignInModal from "@/components/SignInModal";
@@ -2499,6 +2500,11 @@ export default function VideoEditor({
                 </>
               )}
             </p>
+            {IS_DESKTOP && (
+              <p className="mt-1 text-center text-xs text-muted">
+                <AppVersion />
+              </p>
+            )}
           </div>
         </main>
       </div>

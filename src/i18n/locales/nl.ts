@@ -277,11 +277,11 @@ const nl: Dict = {
       included: "Inbegrepen",
       notIncluded: "Niet inbegrepen",
       trial: {
-        banner: "Elk nieuw account krijgt {days} dagen Pro: alle tools en exports tot 4K, zonder creditcard.",
-        active: "Je Pro-proefperiode loopt tot {date}.",
-        feature: "{days} dagen Pro-proefperiode voor elk nieuw account",
+        banner: "Elk nieuw account krijgt {days} dagen Pro in de desktop-app: alle bewerkingstools en exports tot 4K, zonder creditcard. De AI-tools op de website gebruiken nog steeds credits.",
+        active: "Je Pro-proefperiode in de desktop-app loopt tot {date}.",
+        feature: "{days} dagen Pro-proefperiode in de desktop-app voor elk nieuw account",
         rows: {
-          trial: "{days} dagen Pro-proefperiode voor nieuwe accounts",
+          trial: "{days} dagen Pro-proefperiode in de desktop-app voor nieuwe accounts",
           recorder: "Schermrecorder, focuszooms, ondertitels",
           powerTools: "Green screen, stabilisatie, stemeffecten, LUT's, curves",
           proTools: "Overvloeimodi, snelheidscurves, karaoketekst, maskers, eigen lettertypen, auto-ducking",
@@ -380,6 +380,13 @@ const nl: Dict = {
     videoLabel: "Voorbeeld van de video-editor",
   },
 
+  featureTour: {
+    badge: "Zie het in actie",
+    title: "Opnemen, afwerken, ",
+    titleHighlight: "publiceren",
+    intro: "Een korte rondleiding langs wat de recorder en editor voor je doen. Kies een functie of laat hem afspelen.",
+    seeAll: "Bekijk alle functies",
+  },
   desktopPromo: {
     badge: "Gratis voor Windows & Mac",
     title: "Neem het op en ",
@@ -888,7 +895,7 @@ const nl: Dict = {
     plan: "Abonnement",
     upgrade: "Upgrade voor meer credits en Pro-functies.",
     activeUntil: "Actief tot {date}",
-    trialUntil: "Gratis Pro-proefperiode tot {date}",
+    trialUntil: "Gratis Pro-proefperiode in de desktop-app tot {date}",
     active: "Actief",
     seePlans: "Abonnementen bekijken",
     managePlan: "Abonnement beheren",

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { checkForUpdate, installUpdate, openExternal, showDesktopError, SITE_ORIGIN, type AppUpdate } from "@/lib/platform";
+import { installUpdate, openExternal, showDesktopError, SITE_ORIGIN } from "@/lib/platform";
+import { getServerUpdateSnapshot, getUpdateSnapshot, startUpdateChecks, subscribeUpdates } from "@/lib/platform/updates";
 
 /** App-wide desktop glue around the editor:
  *  - Links: the app bundles only the editor, so any link to another page
@@ -164,44 +165,28 @@ async function finishSignIn(raw: string) {
   }
 }
 
-/** Versions the user chose "Later" for; not offered again until a newer one. */
+/** Versions the user chose "Later" for; not offered again until a newer one
+ * (or until they ask with "Check for updates"). */
 const SKIPPED_UPDATE_KEY = "wipeclip.skippedUpdate";
-const UPDATE_FIRST_CHECK_MS = 10_000;
-const UPDATE_CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
-/** Offers a new version from the release feed (src-tauri/src/updater.rs).
- * Nothing installs without a click; the project autosaves, so the restart
- * loses nothing. */
+/** Offers a new version from the release feed (src-tauri/src/updater.rs,
+ * polled by src/lib/platform/updates.ts). Nothing installs without a click;
+ * the project autosaves, so the restart loses nothing. */
 function UpdateBanner() {
-  const [update, setUpdate] = useState<AppUpdate | null>(null);
+  const { update: found, manual } = useSyncExternalStore(subscribeUpdates, getUpdateSnapshot, getServerUpdateSnapshot);
+  const [skipped, setSkipped] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(SKIPPED_UPDATE_KEY);
+    } catch {
+      return null; // storage unavailable (or prerender): just offer it
+    }
+  });
   const [progress, setProgress] = useState<number | "installing" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const check = () => {
-      checkForUpdate()
-        .then((found) => {
-          if (cancelled || !found) return;
-          let skipped: string | null = null;
-          try {
-            skipped = localStorage.getItem(SKIPPED_UPDATE_KEY);
-          } catch {
-            // storage unavailable: just offer it
-          }
-          if (skipped !== found.version) setUpdate(found);
-        })
-        .catch((err) => console.warn("[desktop] update check failed", err));
-    };
-    const first = setTimeout(check, UPDATE_FIRST_CHECK_MS);
-    const every = setInterval(check, UPDATE_CHECK_EVERY_MS);
-    return () => {
-      cancelled = true;
-      clearTimeout(first);
-      clearInterval(every);
-    };
-  }, []);
+  useEffect(() => startUpdateChecks(), []);
 
+  const update = found && (manual || skipped !== found.version) ? found : null;
   if (!update) return null;
 
   const install = () => {
@@ -218,7 +203,7 @@ function UpdateBanner() {
     } catch {
       // storage unavailable: hidden for this session only
     }
-    setUpdate(null);
+    setSkipped(update.version);
   };
 
   return (

@@ -277,11 +277,11 @@ const pl: Dict = {
       included: "W zestawie",
       notIncluded: "Brak",
       trial: {
-        banner: "Każde nowe konto dostaje {days} dni Pro: wszystkie narzędzia i eksport do 4K, bez karty.",
-        active: "Twój okres próbny Pro trwa do {date}.",
-        feature: "{days} dni próbnych Pro dla każdego nowego konta",
+        banner: "Każde nowe konto dostaje {days} dni Pro w aplikacji na komputer: wszystkie narzędzia do edycji i eksport do 4K, bez karty. Narzędzia AI na stronie nadal używają kredytów.",
+        active: "Twój okres próbny Pro w aplikacji na komputer trwa do {date}.",
+        feature: "{days} dni próbnych Pro w aplikacji na komputer dla każdego nowego konta",
         rows: {
-          trial: "Okres próbny Pro dla nowych kont (dni: {days})",
+          trial: "Okres próbny Pro w aplikacji na komputer dla nowych kont (dni: {days})",
           recorder: "Nagrywanie ekranu, zbliżenia fokusu, napisy",
           powerTools: "Green screen, stabilizacja, efekty głosu, LUT, krzywe",
           proTools: "Tryby mieszania, krzywe prędkości, tekst karaoke, maski, własne czcionki, automatyczne wyciszanie",
@@ -380,6 +380,13 @@ const pl: Dict = {
     videoLabel: "Podgląd edytora wideo",
   },
 
+  featureTour: {
+    badge: "Zobacz w akcji",
+    title: "Nagraj, dopracuj, ",
+    titleHighlight: "opublikuj",
+    intro: "Krótki przegląd tego, co nagrywarka i edytor robią za ciebie. Wybierz funkcję albo pozwól jej się odtwarzać.",
+    seeAll: "Zobacz wszystkie funkcje",
+  },
   desktopPromo: {
     badge: "Za darmo na Windows i Mac",
     title: "Nagraj, a potem ",
@@ -888,7 +895,7 @@ const pl: Dict = {
     plan: "Plan",
     upgrade: "Przejdź na płatny plan, aby mieć więcej kredytów i funkcje Pro.",
     activeUntil: "Aktywny do {date}",
-    trialUntil: "Darmowy okres próbny Pro do {date}",
+    trialUntil: "Darmowy okres próbny Pro w aplikacji na komputer do {date}",
     active: "Aktywny",
     seePlans: "Zobacz plany",
     managePlan: "Zarządzaj planem",

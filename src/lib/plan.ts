@@ -14,19 +14,26 @@ export function effectivePlan(profile: { plan: string; plan_expires_at: string |
   return profile.plan;
 }
 
-/** The tier the account can use right now: Pro during its 30-day trial
- * (src/lib/launch.ts), otherwise what it bought. Every feature gate reads
- * this; checkout and the admin panel read effectivePlan. */
+/** The tier the desktop app's editor can use right now: Pro during the
+ * account's 30-day trial (src/lib/launch.ts), otherwise what it bought.
+ * Only the app's requests get the trial (see isAppRequest); the website's
+ * tools, credits and history read effectivePlan. */
 export function accessPlan(profile: { plan: string; plan_expires_at: string | null; created_at: string | null }): string {
   return inTrial(profile.created_at) ? "pro" : effectivePlan(profile);
 }
 
-/** Single source of truth for "can this user use Pro features" - reads the
+/** The desktop app signs its API calls with a bearer token; the website
+ * uses the session cookie (getRequestAuth in src/lib/supabase/server.ts). */
+export function isAppRequest(request: Request): boolean {
+  return request.headers.get("authorization")?.startsWith("Bearer ") ?? false;
+}
+
+/** Single source of truth for "is this user on the Pro plan" - reads the
  * same `profiles` columns /api/credits already exposes. Callers can pass
  * either the RLS-scoped session client (for checking the caller's own plan)
- * or the service-role client.
+ * or the service-role client. A bought plan only: the trial is app-only.
  */
 export async function isProUser(supabase: SupabaseClient, userId: string): Promise<boolean> {
-  const { data } = await supabase.from("profiles").select("plan, plan_expires_at, created_at").eq("id", userId).single();
-  return data ? accessPlan(data) === "pro" : false;
+  const { data } = await supabase.from("profiles").select("plan, plan_expires_at").eq("id", userId).single();
+  return data ? effectivePlan(data) === "pro" : false;
 }

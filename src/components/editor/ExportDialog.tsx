@@ -15,6 +15,7 @@ import Dialog from "./Dialog";
 import { ExportIcon } from "./icons";
 import PremiumBadge from "./PremiumBadge";
 import ToolFeedback from "@/components/ToolFeedback";
+import ExportFeedbackGate, { exportFeedbackGiven } from "./ExportFeedbackGate";
 import { sourceName } from "@/lib/editor/sourceFile";
 
 const TOOL = "video_editor";
@@ -128,6 +129,8 @@ export default function ExportDialog({
     initialResult ? { blob: initialResult, url: URL.createObjectURL(initialResult) } : null
   );
   const [elapsed, setElapsed] = useState(0);
+  /** The feedback step: asked on every export until it has been sent once. */
+  const [askFeedback, setAskFeedback] = useState(false);
   /** Progress the local engine reports (desktop); null = unknown. */
   const [render, setRender] = useState<RenderProgress | null>(null);
   /** `elapsed` when rendering proper began, for the time-left estimate. */
@@ -144,6 +147,7 @@ export default function ExportDialog({
 
   const start = async () => {
     setState("rendering");
+    if (!exportFeedbackGiven()) setAskFeedback(true);
     setError(null);
     setRender(null);
     setRenderFrom(null);
@@ -370,7 +374,7 @@ export default function ExportDialog({
           ) : (
             <video src={result.url} controls playsInline className="max-h-[50dvh] w-full rounded-xl bg-black" />
           )}
-          {isSignedIn && IS_DESKTOP ? (
+          {askFeedback ? null : isSignedIn && IS_DESKTOP ? (
             <DesktopSaveButton blob={result.blob} filename={filename} />
           ) : isSignedIn ? (
             <a
@@ -390,11 +394,21 @@ export default function ExportDialog({
               Sign in to download
             </button>
           )}
-          <button type="button" onClick={() => setState("setup")} className="btn-secondary w-full rounded-full py-2.5 text-sm font-semibold">
-            Export again
-          </button>
-          <ToolFeedback tool={TOOL} className="" />
+          {!askFeedback && (
+            <>
+              <button type="button" onClick={() => setState("setup")} className="btn-secondary w-full rounded-full py-2.5 text-sm font-semibold">
+                Export again
+              </button>
+              {!exportFeedbackGiven() && <ToolFeedback tool={TOOL} className="" />}
+            </>
+          )}
         </div>
+      )}
+
+      {/* One spot for both states, so its skip countdown carries on from
+          rendering into done instead of starting over. */}
+      {askFeedback && (state === "rendering" || (state === "done" && result)) && (
+        <ExportFeedbackGate tool={TOOL} onDone={() => setAskFeedback(false)} />
       )}
 
       {state === "error" && error && (

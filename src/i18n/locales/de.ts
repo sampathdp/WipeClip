@@ -277,11 +277,11 @@ const de: Dict = {
       included: "Enthalten",
       notIncluded: "Nicht enthalten",
       trial: {
-        banner: "Jedes neue Konto erhält {days} Tage Pro: alle Werkzeuge und Exporte bis 4K, ohne Karte.",
-        active: "Deine Pro-Testphase läuft bis {date}.",
-        feature: "{days} Tage Pro-Testphase für jedes neue Konto",
+        banner: "Jedes neue Konto erhält {days} Tage Pro in der Desktop-App: alle Bearbeitungswerkzeuge und Exporte bis 4K, ohne Karte. Die KI-Werkzeuge der Website verwenden weiterhin Credits.",
+        active: "Deine Pro-Testphase in der Desktop-App läuft bis {date}.",
+        feature: "{days} Tage Pro-Testphase in der Desktop-App für jedes neue Konto",
         rows: {
-          trial: "{days} Tage Pro-Testphase für neue Konten",
+          trial: "{days} Tage Pro-Testphase in der Desktop-App für neue Konten",
           recorder: "Bildschirmrekorder, Fokus-Zooms, Untertitel",
           powerTools: "Greenscreen, Stabilisierung, Stimmeffekte, LUTs, Kurven",
           proTools: "Mischmodi, Geschwindigkeitskurven, Karaoke-Text, Masken, eigene Schriften, Auto-Ducking",
@@ -380,6 +380,13 @@ const de: Dict = {
     videoLabel: "Vorschau des Videoeditors",
   },
 
+  featureTour: {
+    badge: "So funktioniert's",
+    title: "Aufnehmen, verfeinern, ",
+    titleHighlight: "veröffentlichen",
+    intro: "Ein kurzer Rundgang durch das, was Rekorder und Editor für dich tun. Wähle eine Funktion oder lass ihn laufen.",
+    seeAll: "Alle Funktionen ansehen",
+  },
   desktopPromo: {
     badge: "Kostenlos für Windows & Mac",
     title: "Aufnehmen, dann ",
@@ -888,7 +895,7 @@ const de: Dict = {
     plan: "Plan",
     upgrade: "Upgrade für mehr Credits und Pro-Funktionen.",
     activeUntil: "Aktiv bis {date}",
-    trialUntil: "Kostenlose Pro-Testphase bis {date}",
+    trialUntil: "Kostenlose Pro-Testphase in der Desktop-App bis {date}",
     active: "Aktiv",
     seePlans: "Pläne ansehen",
     managePlan: "Plan verwalten",

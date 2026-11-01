@@ -44,6 +44,13 @@ const en = {
     videoLabel: "Video editor preview",
   },
 
+  featureTour: {
+    badge: "See it in action",
+    title: "Record, polish, ",
+    titleHighlight: "publish",
+    intro: "A quick tour of what the recorder and editor do for you. Pick a feature, or let it play.",
+    seeAll: "See every feature",
+  },
   desktopPromo: {
     badge: "Free for Windows & Mac",
     title: "Record it, then ",
@@ -552,7 +559,7 @@ const en = {
     plan: "Plan",
     upgrade: "Upgrade for more credits and Pro features.",
     activeUntil: "Active until {date}",
-    trialUntil: "Free Pro trial until {date}",
+    trialUntil: "Free Pro trial in the desktop app until {date}",
     active: "Active",
     seePlans: "See plans",
     managePlan: "Manage plan",

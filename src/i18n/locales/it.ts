@@ -277,11 +277,11 @@ const it: Dict = {
       included: "Incluso",
       notIncluded: "Non incluso",
       trial: {
-        banner: "Ogni nuovo account riceve {days} giorni di Pro: tutti gli strumenti ed esportazioni fino a 4K, senza carta.",
-        active: "La tua prova Pro dura fino al {date}.",
-        feature: "{days} giorni di prova Pro per ogni nuovo account",
+        banner: "Ogni nuovo account riceve {days} giorni di Pro nell'app desktop: tutti gli strumenti di montaggio ed esportazioni fino a 4K, senza carta. Gli strumenti IA del sito usano ancora i crediti.",
+        active: "La tua prova Pro nell'app desktop dura fino al {date}.",
+        feature: "{days} giorni di prova Pro nell'app desktop per ogni nuovo account",
         rows: {
-          trial: "{days} giorni di prova Pro per i nuovi account",
+          trial: "{days} giorni di prova Pro nell'app desktop per i nuovi account",
           recorder: "Registratore dello schermo, zoom di messa a fuoco, sottotitoli",
           powerTools: "Green screen, stabilizzazione, effetti voce, LUT, curve",
           proTools: "Metodi di fusione, curve di velocità, testo karaoke, maschere, font personalizzati, ducking automatico",
@@ -380,6 +380,13 @@ const it: Dict = {
     videoLabel: "Anteprima dell'editor video",
   },
 
+  featureTour: {
+    badge: "Guardalo in azione",
+    title: "Registra, rifinisci, ",
+    titleHighlight: "pubblica",
+    intro: "Un breve tour di ciò che il registratore e l'editor fanno per te. Scegli una funzione o lascialo scorrere.",
+    seeAll: "Vedi tutte le funzioni",
+  },
   desktopPromo: {
     badge: "Gratis per Windows e Mac",
     title: "Registralo, poi ",
@@ -888,7 +895,7 @@ const it: Dict = {
     plan: "Piano",
     upgrade: "Passa a un piano per più crediti e le funzioni Pro.",
     activeUntil: "Attivo fino al {date}",
-    trialUntil: "Prova Pro gratuita fino al {date}",
+    trialUntil: "Prova Pro gratuita nell'app desktop fino al {date}",
     active: "Attivo",
     seePlans: "Vedi i piani",
     managePlan: "Gestisci il piano",

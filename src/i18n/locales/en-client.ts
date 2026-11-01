@@ -279,11 +279,11 @@ const enClient = {
     included: "Included",
     notIncluded: "Not included",
     trial: {
-      banner: "Every new account gets {days} days of Pro: every tool and exports up to 4K, with no card needed.",
-      active: "Your Pro trial runs until {date}.",
-      feature: "{days}-day Pro trial for every new account",
+      banner: "Every new account gets {days} days of Pro in the desktop app: every editing tool and exports up to 4K, with no card needed. The website's AI tools still use credits.",
+      active: "Your Pro trial in the desktop app runs until {date}.",
+      feature: "{days}-day Pro trial in the desktop app for every new account",
       rows: {
-        trial: "{days}-day Pro trial for new accounts",
+        trial: "{days}-day Pro trial in the desktop app for new accounts",
         recorder: "Screen recorder, focus zooms, captions",
         powerTools: "Green screen, stabilization, voice effects, LUTs, curves",
         proTools: "Blend modes, speed curves, karaoke text, masks, custom fonts, auto-ducking",

@@ -277,11 +277,11 @@ const es: Dict = {
       included: "Incluido",
       notIncluded: "No incluido",
       trial: {
-        banner: "Cada cuenta nueva recibe {days} días de Pro: todas las herramientas y exportaciones hasta 4K, sin tarjeta.",
-        active: "Tu prueba de Pro dura hasta el {date}.",
-        feature: "{days} días de prueba de Pro para cada cuenta nueva",
+        banner: "Cada cuenta nueva recibe {days} días de Pro en la app de escritorio: todas las herramientas de edición y exportaciones hasta 4K, sin tarjeta. Las herramientas de IA de la web siguen usando créditos.",
+        active: "Tu prueba de Pro en la app de escritorio dura hasta el {date}.",
+        feature: "{days} días de prueba de Pro en la app de escritorio para cada cuenta nueva",
         rows: {
-          trial: "{days} días de prueba de Pro para cuentas nuevas",
+          trial: "{days} días de prueba de Pro en la app de escritorio para cuentas nuevas",
           recorder: "Grabador de pantalla, zooms de enfoque, subtítulos",
           powerTools: "Pantalla verde, estabilización, efectos de voz, LUT, curvas",
           proTools: "Modos de fusión, curvas de velocidad, texto karaoke, máscaras, fuentes propias, atenuación automática",
@@ -380,6 +380,13 @@ const es: Dict = {
     videoLabel: "Vista previa del editor de vídeo",
   },
 
+  featureTour: {
+    badge: "Míralo en acción",
+    title: "Graba, pule, ",
+    titleHighlight: "publica",
+    intro: "Un recorrido rápido por lo que el grabador y el editor hacen por ti. Elige una función o déjalo avanzar solo.",
+    seeAll: "Ver todas las funciones",
+  },
   desktopPromo: {
     badge: "Gratis para Windows y Mac",
     title: "Grábalo y ",
@@ -888,7 +895,7 @@ const es: Dict = {
     plan: "Plan",
     upgrade: "Mejora para tener más créditos y funciones Pro.",
     activeUntil: "Activo hasta el {date}",
-    trialUntil: "Prueba gratis de Pro hasta el {date}",
+    trialUntil: "Prueba gratis de Pro en la app de escritorio hasta el {date}",
     active: "Activo",
     seePlans: "Ver planes",
     managePlan: "Gestionar plan",

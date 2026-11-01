@@ -364,6 +364,30 @@ body {
   animation: focus-zoom 6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
 }
 
+/* Homepage feature tour (FeatureTour.tsx): the active tab's timer bar, and
+   each feature's mockup fading in */
+@keyframes tour-progress {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}
+@keyframes tour-fade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-tour-fade {
+  animation: tour-fade 400ms ease-out;
+}
+
 /* Animated gradient border used on featured cards */
 @keyframes border-spin {
   to {
@@ -391,6 +415,7 @@ body {
   }
   .animate-float-slow,
   .animate-focus-zoom,
+  .animate-tour-fade,
   .border-glow {
     animation: none;
   }

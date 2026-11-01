@@ -4,7 +4,7 @@ import { preflight, withCors } from "@/lib/cors";
 import { BACKEND_DISABLED, BACKEND_DISABLED_MESSAGE, type Resolution } from "@/lib/toolsApi";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { issueTicket, sha256Hex } from "@/lib/jobTicket";
-import { accessPlan } from "@/lib/plan";
+import { accessPlan, effectivePlan, isAppRequest } from "@/lib/plan";
 import {
   canExportAt,
   premiumFeaturesUsed,
@@ -58,7 +58,8 @@ async function handle(request: NextRequest) {
       return errorResponse("rate_limited", "Too many exports. Try again later.", 429);
     }
     const { data: profile } = await supabase.from("profiles").select("plan, plan_expires_at, created_at").eq("id", user.id).single();
-    tier = profile ? toTier(accessPlan(profile)) : "free";
+    // The trial counts in the desktop app only.
+    tier = profile ? toTier(isAppRequest(request) ? accessPlan(profile) : effectivePlan(profile)) : "free";
   }
   const limits = TIER_LIMITS[tier];
 

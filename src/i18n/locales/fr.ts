@@ -277,11 +277,11 @@ const fr: Dict = {
       included: "Inclus",
       notIncluded: "Non inclus",
       trial: {
-        banner: "Chaque nouveau compte reçoit {days} jours de Pro : tous les outils et des exports jusqu'en 4K, sans carte.",
-        active: "Votre essai Pro dure jusqu'au {date}.",
-        feature: "{days} jours d'essai Pro pour chaque nouveau compte",
+        banner: "Chaque nouveau compte reçoit {days} jours de Pro dans l'application de bureau : tous les outils de montage et des exports jusqu'en 4K, sans carte. Les outils IA du site utilisent toujours des crédits.",
+        active: "Votre essai Pro dans l'application de bureau dure jusqu'au {date}.",
+        feature: "{days} jours d'essai Pro dans l'application de bureau pour chaque nouveau compte",
         rows: {
-          trial: "{days} jours d'essai Pro pour les nouveaux comptes",
+          trial: "{days} jours d'essai Pro dans l'application de bureau pour les nouveaux comptes",
           recorder: "Enregistreur d'écran, zooms de focus, sous-titres",
           powerTools: "Fond vert, stabilisation, effets de voix, LUT, courbes",
           proTools: "Modes de fusion, courbes de vitesse, texte karaoké, masques, polices personnalisées, atténuation auto",
@@ -380,6 +380,13 @@ const fr: Dict = {
     videoLabel: "Aperçu de l'éditeur vidéo",
   },
 
+  featureTour: {
+    badge: "Voyez-le en action",
+    title: "Enregistrez, peaufinez, ",
+    titleHighlight: "publiez",
+    intro: "Un tour rapide de ce que l'enregistreur et l'éditeur font pour vous. Choisissez une fonction ou laissez défiler.",
+    seeAll: "Voir toutes les fonctions",
+  },
   desktopPromo: {
     badge: "Gratuit pour Windows et Mac",
     title: "Enregistrez, puis ",
@@ -888,7 +895,7 @@ const fr: Dict = {
     plan: "Offre",
     upgrade: "Passez à une offre payante pour plus de crédits et les fonctions Pro.",
     activeUntil: "Active jusqu'au {date}",
-    trialUntil: "Essai Pro gratuit jusqu'au {date}",
+    trialUntil: "Essai Pro gratuit dans l'application de bureau jusqu'au {date}",
     active: "Active",
     seePlans: "Voir les offres",
     managePlan: "Gérer l'offre",

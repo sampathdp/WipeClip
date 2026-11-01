@@ -1,5 +1,6 @@
 import Link from "next/link";
 import BeforeAfterDemo from "./BeforeAfterDemo";
+import DownloadCountBadge from "./DownloadCountBadge";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import { localeHref, type Lang } from "@/lib/i18n";
 import { getDict } from "@/i18n";
@@ -133,6 +134,10 @@ export default function Hero({ lang = "en" }: { lang?: Lang }) {
                   {t.photoTools}
                 </a>
               )}
+            </div>
+
+            <div className="mt-6 flex justify-center lg:justify-start">
+              <DownloadCountBadge />
             </div>
 
             {/* Trust Highlights */}

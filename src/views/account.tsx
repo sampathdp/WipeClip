@@ -7,7 +7,7 @@ import CopyReferralLink from "@/components/CopyReferralLink";
 import SignInClient from "@/app/sign-in/SignInClient";
 import PurchaseTracker from "@/app/welcome/PurchaseTracker";
 import { FREE_DAILY_CREDITS } from "@/lib/credits";
-import { accessPlan, effectivePlan, isProUser } from "@/lib/plan";
+import { effectivePlan, isProUser } from "@/lib/plan";
 import { inTrial, trialEndsAt } from "@/lib/launch";
 import { createClient, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
@@ -67,17 +67,14 @@ export async function ProfileView({ lang }: { lang: Lang }) {
     .single();
 
   const t = getDict(lang).profile;
-  const plan = profile ? accessPlan(profile) : "free";
-  // On the trial only when it's what gives the account Pro (not a bought pass).
-  const trial = !!profile && inTrial(profile.created_at) && effectivePlan(profile) !== "pro";
+  const plan = profile ? effectivePlan(profile) : "free";
+  // The app-only Pro trial, shown while the account hasn't bought a plan.
+  const trial = !!profile && plan === "free" && inTrial(profile.created_at);
   const free = profile?.free_credits ?? 0;
   const paid = profile?.paid_credits ?? 0;
   const total = free + paid;
-  const expires = trial
-    ? formatDate(trialEndsAt(profile?.created_at).toISOString(), lang)
-    : plan !== "free"
-      ? formatDate(profile?.plan_expires_at, lang)
-      : null;
+  const expires = plan !== "free" ? formatDate(profile?.plan_expires_at, lang) : null;
+  const trialEnds = trial ? formatDate(trialEndsAt(profile?.created_at).toISOString(), lang) : null;
   const provider = (user.app_metadata?.provider as string | undefined) ?? "email";
   const email = user.email ?? "";
   const initial = email.charAt(0).toUpperCase() || "?";
@@ -148,10 +145,10 @@ export async function ProfileView({ lang }: { lang: Lang }) {
               </h2>
               <p className="mt-2 font-display text-3xl font-extrabold text-foreground">{t.plans[plan] ?? plan}</p>
               <p className="mt-1 text-xs text-muted">
-                {plan === "free"
-                  ? t.upgrade
-                  : trial && expires
-                    ? fmt(t.trialUntil, { date: expires })
+                {trialEnds
+                  ? fmt(t.trialUntil, { date: trialEnds })
+                  : plan === "free"
+                    ? t.upgrade
                     : expires
                       ? fmt(t.activeUntil, { date: expires })
                       : t.active}

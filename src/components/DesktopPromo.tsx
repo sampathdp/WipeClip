@@ -1,5 +1,6 @@
 import Reveal from "./Reveal";
 import DownloadButtons from "./DownloadButtons";
+import DownloadCountBadge from "./DownloadCountBadge";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import type { Lang } from "@/lib/i18n";
 import { getDict } from "@/i18n";
@@ -38,8 +39,9 @@ export default function DesktopPromo({ lang = "en" }: { lang?: Lang }) {
                 </li>
               ))}
             </ul>
-            <div className="mt-8">
-              <DownloadButtons compact />
+            <div className="mt-8 space-y-4">
+              <DownloadCountBadge variant="stat" />
+              <DownloadButtons compact hideCount />
             </div>
           </div>
 

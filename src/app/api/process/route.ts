@@ -4,7 +4,7 @@ import { preflight, withCors } from "@/lib/cors";
 import { billedMinutes, formatCleanupLimit, MAX_CLEANUP_SECONDS, RESOLUTION_CREDIT_COST, videoCreditCost } from "@/lib/credits";
 import { TIER_LABELS, toTier } from "@/lib/entitlements";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
-import { accessPlan } from "@/lib/plan";
+import { effectivePlan } from "@/lib/plan";
 import { issueTicket } from "@/lib/jobTicket";
 import { BACKEND_DISABLED, BACKEND_DISABLED_MESSAGE, type Resolution } from "@/lib/toolsApi";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
@@ -107,8 +107,8 @@ async function handle(request: NextRequest) {
   }
   const cost = videoCreditCost(resolution as Resolution, duration);
 
-  const { data: profile } = await supabase.from("profiles").select("plan, plan_expires_at, created_at").eq("id", user.id).single();
-  const plan = profile ? accessPlan(profile) : "free";
+  const { data: profile } = await supabase.from("profiles").select("plan, plan_expires_at").eq("id", user.id).single();
+  const plan = profile ? effectivePlan(profile) : "free";
 
   // The desktop app's own engine: the user's machine does the work, so paid
   // plans run it without spending credits or a length limit. The ticket is
