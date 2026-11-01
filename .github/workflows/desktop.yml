@@ -2,21 +2,70 @@ name: Desktop
 
 # Builds the WipeClip desktop app (Tauri) on real Windows and macOS runners.
 # See docs/desktop/README.md. Started by hand (Actions > Desktop > Run
-# workflow) it uploads the installers as workflow artifacts. Pushing a tag
-# desktop-v<version> (npm run desktop:release -- <version>) runs it on its
-# own and, once every platform has built, *publishes* a release with the
-# signed installers and latest.json (the app's update feed) in the public
-# releases repo (RELEASES_REPO; this code repo can stay private): installed
-# apps offer the update and the website serves the download from then on,
-# with no manual step. See docs/desktop/RELEASE.md (Updates).
+# workflow) with "release" left at none, it uploads the installers as
+# workflow artifacts. With release set to patch, minor or major (run on
+# master), it first bumps the version and pushes the commit and tag
+# desktop-v<version> (desktop/scripts/release.mjs), then builds that tag and
+# publishes it. Pushing such a tag yourself (npm run desktop:release --
+# <version>) does the same. Once every platform has built, a release is
+# *published* with the signed installers and latest.json (the app's update
+# feed) in the public releases repo (RELEASES_REPO; this code repo can stay
+# private): installed apps offer the update and the website serves the
+# download from then on, with no manual step. See docs/desktop/RELEASE.md
+# (Updates).
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a new version (none = test build only, nothing published)"
+        type: choice
+        options: [none, patch, minor, major]
+        default: none
   push:
     tags: ["desktop-v*"]
 
+# One release at a time, so two runs can't claim the same version.
+concurrency:
+  group: desktop-${{ (github.event_name == 'push' || inputs.release != 'none') && 'release' || github.run_id }}
+
 jobs:
+  # The tag being released: the pushed tag, or one made here from the
+  # "release" input. Empty for a test build. A tag pushed with this job's
+  # token doesn't start another run, so this run builds it itself.
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'workflow_dispatch' && inputs.release != 'none'
+
+      - uses: actions/setup-node@v4
+        if: github.event_name == 'workflow_dispatch' && inputs.release != 'none'
+        with:
+          node-version: 22
+
+      - name: Bump version, commit and tag
+        if: github.event_name == 'workflow_dispatch' && inputs.release != 'none'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          node desktop/scripts/release.mjs "${{ inputs.release }}"
+
+      - id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.release }}" != "none" ]; then
+            echo "tag=desktop-v$(node -p 'require("./src-tauri/tauri.conf.json").version')" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -28,6 +77,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag || github.ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -120,7 +171,7 @@ jobs:
           NEXT_PUBLIC_TOOLS_API_URL: ${{ vars.NEXT_PUBLIC_TOOLS_API_URL }}
           NEXT_PUBLIC_DESKTOP_SITE_ORIGIN: ${{ vars.NEXT_PUBLIC_DESKTOP_SITE_ORIGIN || 'https://www.wipeclip.co' }}
           WIPECLIP_REQUIRE_ENGINE: "1"
-          WIPECLIP_REQUIRE_UPDATER: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && '1' || '' }}
+          WIPECLIP_REQUIRE_UPDATER: ${{ needs.version.outputs.tag != '' && '1' || '' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run desktop:build -- --bundles ${{ matrix.bundles }}
@@ -137,8 +188,8 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/desktop-v')
-    needs: build
+    if: needs.version.outputs.tag != ''
+    needs: [version, build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -146,8 +197,11 @@ jobs:
       # Public repo holding only installers and the update feed; must match
       # plugins.updater.endpoints in src-tauri/tauri.conf.json.
       RELEASES_REPO: sampathdp/wipeclip-releases
+      TAG: ${{ needs.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
 
       - uses: actions/setup-node@v4
         with:
@@ -158,7 +212,7 @@ jobs:
           path: artifacts
 
       - name: Release assets and update feed
-        run: node desktop/scripts/update-manifest.mjs artifacts release "${GITHUB_REF_NAME}" "${RELEASES_REPO}"
+        run: node desktop/scripts/update-manifest.mjs artifacts release "${TAG}" "${RELEASES_REPO}"
 
       # Published at once as the latest release: installed apps see it on
       # their next update check. Only reached when every platform built.
@@ -169,6 +223,6 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then echo "::error::RELEASES_TOKEN secret is missing - see docs/desktop/RELEASE.md (Updates)."; exit 1; fi
-          gh release create "${GITHUB_REF_NAME}" release/* --repo "${RELEASES_REPO}" --latest \
-            --title "WipeClip ${GITHUB_REF_NAME#desktop-v}" \
-            --notes "WipeClip ${GITHUB_REF_NAME#desktop-v} for Windows and macOS. Download the installer below, or let the app update itself."
+          gh release create "${TAG}" release/* --repo "${RELEASES_REPO}" --latest \
+            --title "WipeClip ${TAG#desktop-v}" \
+            --notes "WipeClip ${TAG#desktop-v} for Windows and macOS. Download the installer below, or let the app update itself."

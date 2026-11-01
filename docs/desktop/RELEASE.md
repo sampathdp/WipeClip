@@ -185,7 +185,9 @@ The app checks `https://github.com/sampathdp/wipeclip-releases/releases/latest/d
 
 Update bundles are signed with a minisign key, separate from code signing. The public key is in `tauri.conf.json` (`plugins.updater.pubkey`). The private key and its password were generated on the release maintainer's machine (`~/.tauri/wipeclip-updater.key`, `~/.tauri/wipeclip-updater.password`) and must exist **only** there, in a password manager backup, and as repository secrets `TAURI_SIGNING_PRIVATE_KEY` (the key file's contents) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. **If the key is lost, installed apps can never be updated again** - users would have to reinstall by hand.
 
-Releasing a version is one command, from a clean `master`:
+Releasing a version needs no local setup: on GitHub, **Actions > Desktop > Run workflow**, branch `master`, set **release** to `patch` (or `minor`, `major`) and run it. The workflow's `version` job runs `desktop/scripts/release.mjs` itself (commit and tag pushed as `github-actions[bot]`), then builds and publishes that tag in the same run, as in steps 2–3 below. Leave **release** at `none` for a test build that publishes nothing. If `master` is branch-protected, allow GitHub Actions to push to it, or the `version` job fails.
+
+Or, from a clean `master` on your machine:
 
 ```sh
 npm run desktop:release -- patch      # or minor, major, or an exact version like 0.2.0
