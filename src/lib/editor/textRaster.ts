@@ -113,13 +113,13 @@ export function rasterizeText(style: TextStyle): Promise<RasterSticker> {
   if (hit) return hit;
   const p = draw(style);
   cache.set(key, p);
-  // Keep the cache small - text is re-rasterized as the user types.
+  // Keep the cache small - text is re-rasterized as the user types. The
+  // evicted URL isn't revoked: the preview may still show it (a 2-minute
+  // video has well over 80 caption layers, which showed as broken images),
+  // and the preview's rasters keep the blob alive anyway.
   if (cache.size > 80) {
     const first = cache.keys().next().value;
-    if (first !== undefined) {
-      cache.get(first)?.then((r) => URL.revokeObjectURL(r.url)).catch(() => {});
-      cache.delete(first);
-    }
+    if (first !== undefined) cache.delete(first);
   }
   p.catch(() => cache.delete(key));
   return p;

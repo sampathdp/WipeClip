@@ -282,12 +282,15 @@ const SILENCE_RMS = 0.004; // segments quieter than this are skipped (Whisper in
 // over cores and memory bandwidth (6-core laptop, 2-minute clip: 1 worker
 // 50 s, 2 workers 37 s, 3 workers 46 s).
 const MAX_CPU_WORKERS = 2;
-// The first request on a WebGPU pool (a language check or one segment of up
-// to 28 s) takes ~2-10 s on a GPU worth using. An old integrated one (Intel
+// The first requests on a WebGPU pool (the language check, then the first
+// segment) take ~2-10 s on a GPU worth using. An old integrated one (Intel
 // UHD 630: 17% of a 2-minute clip after 8 minutes) is far slower than the
 // CPU path, and on Windows the browser can't be asked for the faster GPU in
-// a laptop (powerPreference is ignored), so past this the run moves to the CPU.
+// a laptop (powerPreference is ignored), so past this the run moves to the
+// CPU. A segment also has to transcribe faster than it plays: a GPU could
+// pass the short language check and then crawl through every segment.
 const GPU_FIRST_STEP_MS = 30_000;
+const GPU_MIN_BUDGET_MS = 10_000;
 
 class SlowGpuError extends Error {
   constructor() {
@@ -336,6 +339,16 @@ async function cpuWorkerCount(): Promise<number> {
   const cores = navigator.hardwareConcurrency || 2;
   const budgetGb = (await memoryBudgetGb()) ?? 2;
   return Math.max(1, Math.min(MAX_CPU_WORKERS, cores - 1, Math.floor(budgetGb / 1.5)));
+}
+
+/** WebAssembly threads per worker. Only a cross-origin isolated page can
+ * have more than one (the desktop app sends the headers for it): the
+ * physical cores, about half the logical ones, shared between the workers,
+ * at most 4 each (ONNX Runtime's own default cap). */
+function threadsPerWorker(workers: number): number {
+  if (typeof crossOriginIsolated === "undefined" || !crossOriginIsolated) return 1;
+  const cores = navigator.hardwareConcurrency || 2;
+  return Math.max(1, Math.min(4, Math.round(cores / 2 / workers)));
 }
 
 /** Every worker not yet terminated, including ones still loading the
@@ -401,10 +414,12 @@ async function getPool(onProgress: (p: CaptionsProgress) => void, forceCpu: bool
 
   let first = new ModelWorker();
   first.onProgress = onProgress;
+  const count = await cpuWorkerCount();
+  let threads = threadsPerWorker(count);
   let device: Device = "wasm";
   if (!forceCpu && (await speechModel()).gpu) {
     try {
-      ({ device } = await first.request<{ device: Device }>({ type: "init", device: "webgpu", model: GPU_MODEL.id }));
+      ({ device } = await first.request<{ device: Device }>({ type: "init", device: "webgpu", model: GPU_MODEL.id, threads }));
     } catch (err) {
       if (isAbort(err)) throw err;
       // A browser can list a GPU and still fail to use it (drivers,
@@ -416,16 +431,30 @@ async function getPool(onProgress: (p: CaptionsProgress) => void, forceCpu: bool
     }
   }
   const model = device === "webgpu" ? GPU_MODEL.id : CPU_MODEL.id;
-  if (device === "wasm") await first.request({ type: "init", device: "wasm", model });
+  if (device === "wasm") {
+    try {
+      await first.request({ type: "init", device: "wasm", model, threads });
+    } catch (err) {
+      if (isAbort(err) || threads === 1) throw err;
+      // Threads that fail to start leave ONNX Runtime in that worker
+      // unusable; a fresh worker with one thread still works.
+      console.warn("[captions] WebAssembly threads unavailable, using one per worker", err);
+      first.terminate();
+      first = new ModelWorker();
+      first.onProgress = onProgress;
+      threads = 1;
+      await first.request({ type: "init", device: "wasm", model, threads });
+    }
+  }
   first.onProgress = null;
   const workers = [first];
   // The decoder runs on the CPU either way, so both modes use the pool.
   {
-    const extra = Array.from({ length: (await cpuWorkerCount()) - 1 }, () => new ModelWorker());
+    const extra = Array.from({ length: count - 1 }, () => new ModelWorker());
     // Extra workers only add speed: one that fails to start is dropped.
     const started = await Promise.all(
       extra.map((w) =>
-        w.request({ type: "init", device, model }).then(
+        w.request({ type: "init", device, model, threads }).then(
           () => w,
           () => {
             w.terminate();
@@ -497,19 +526,27 @@ async function runOnPool(
   const segments = speechSegments(samples, Math.max(MIN_SEGMENT, Math.min(MAX_SEGMENT, perWorker)));
   onProgress({ stage: "transcribe", value: 0 });
 
-  // On WebGPU the run's first request is timed (GPU_FIRST_STEP_MS).
-  let timeFirst = device === "webgpu";
+  // On WebGPU every request is timed until a segment has come back
+  // (GPU_FIRST_STEP_MS): the language check, then each worker's first
+  // segment, which may take no longer than it plays.
+  let onTrial = device === "webgpu";
   const ask = <T>(w: ModelWorker, msg: Record<string, unknown>, transfer?: Transferable[]): Promise<T> => {
+    const audioMs = ((msg.samples as Float32Array | undefined)?.length ?? 0) / (RATE / 1000);
     const req = w.request<T>(msg, transfer);
-    if (!timeFirst) return req;
-    timeFirst = false;
+    if (!onTrial) return req;
+    const budget = msg.type === "transcribe" ? Math.min(GPU_FIRST_STEP_MS, Math.max(GPU_MIN_BUDGET_MS, audioMs)) : GPU_FIRST_STEP_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const slow = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new SlowGpuError()), GPU_FIRST_STEP_MS);
+      timer = setTimeout(() => reject(new SlowGpuError()), budget);
     });
     // The losing request is rejected when the pool is replaced; nothing waits on it.
     req.catch(() => {});
-    return Promise.race([req, slow]).finally(() => clearTimeout(timer));
+    return Promise.race([req, slow])
+      .then((m) => {
+        if (msg.type === "transcribe") onTrial = false;
+        return m;
+      })
+      .finally(() => clearTimeout(timer));
   };
 
   const lang =

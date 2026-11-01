@@ -100,12 +100,11 @@ export function rasterizeAnimatedText(o: Extract<Overlay, { kind: "text" }>, key
   if (hit) return hit;
   const p = drawSheet(o);
   cache.set(key, p);
+  // Not revoked on eviction: the preview may still show it (see
+  // textRaster.ts rasterizeText).
   if (cache.size > 30) {
     const first = cache.keys().next().value;
-    if (first !== undefined) {
-      cache.get(first)?.then((r) => URL.revokeObjectURL(r.url)).catch(() => {});
-      cache.delete(first);
-    }
+    if (first !== undefined) cache.delete(first);
   }
   p.catch(() => cache.delete(key));
   return p;

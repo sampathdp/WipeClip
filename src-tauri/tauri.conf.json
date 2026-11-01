@@ -14,6 +14,10 @@
     "windows": [],
     "security": {
       "capabilities": ["main", "mini"],
+      "headers": {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "credentialless"
+      },
       "assetProtocol": {
         "enable": true,
         "scope": []

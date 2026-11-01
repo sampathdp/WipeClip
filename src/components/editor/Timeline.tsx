@@ -93,6 +93,11 @@ export interface TimelineTrack {
   toggles?: TrackToggle[];
 }
 
+// Layer item widths in pixels (TrackRow).
+const MIN_ITEM_W = 4;
+const COMPACT_ITEM_W = 40;
+const TINY_ITEM_W = 16;
+
 /** Greedy lane packing so overlapping items stack instead of hiding each other. */
 function laneLayout(items: TrackItem[]) {
   const sorted = [...items].sort((a, b) => a.start - b.start);
@@ -695,72 +700,81 @@ const TrackRow = memo(function TrackRow({
           style={{ left: xOf(tk.t) }}
         />
       ))}
-      {track.items.map((it) => (
-        <div
-          key={it.id}
-          role="button"
-          tabIndex={0}
-          aria-label={`${track.label}: ${it.label}, ${formatTime(it.start, true)} to ${formatTime(it.end, true)}${it.locked ? ", locked" : ""}${it.hidden ? ", hidden" : ""}`}
-          aria-pressed={it.selected}
-          data-span={`${it.start} ${it.end}`}
-          className={`absolute flex items-center gap-1 overflow-hidden rounded-md border px-1.5 text-[10px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
-            it.selected ? "z-10 border-accent-2 ring-1 ring-accent-2 text-foreground" : `${track.tone} text-foreground`
-          } ${it.hidden ? "opacity-40" : ""} ${it.locked ? "cursor-not-allowed" : "cursor-grab"} data-live:brightness-125 data-live:saturate-150`}
-          style={{
-            left: xOf(it.start),
-            width: Math.max(10, (it.end - it.start) * scale),
-            top: 3 + lanes.lane[it.id] * LANE_H,
-            height: LANE_H - 6,
-          }}
-          onPointerDown={(e) => api.itemDown(e, track.key, it, "move")}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              api.select(it.sel);
-            }
-          }}
-        >
-          {it.wave && waveforms[it.wave.sourceId] && (
-            <WaveCanvas
-              wave={waveforms[it.wave.sourceId]}
-              offset={it.wave.offset}
-              duration={it.wave.duration}
-              gain={it.wave.gain}
-              width={Math.max(10, (it.end - it.start) * scale)}
-              x={xOf(it.start)}
-              view={view}
-              height={LANE_H - 8}
-              className="top-0 text-foreground/25"
-            />
-          )}
-          {it.thumb ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={it.thumb} alt="" className="h-4 w-4 shrink-0 object-contain" draggable={false} />
-          ) : (
-            it.glyph && <span className="relative shrink-0">{it.glyph}</span>
-          )}
-          <span className="relative truncate">{it.label}</span>
-          {it.locked && (
-            <span className="shrink-0" aria-hidden>
-              🔒
-            </span>
-          )}
-          {!it.locked && (
-            <>
-              <span
-                aria-hidden
-                className="absolute inset-y-0 left-0 w-2 cursor-ew-resize hover:bg-accent-2/60"
-                onPointerDown={(e) => api.itemDown(e, track.key, it, "start")}
+      {track.items.map((it) => {
+        // Short items (a caption is a second or two) get no icon and less
+        // padding, so back-to-back ones read as a row of text, not a pile
+        // of overlapping icons; the tiniest also drop their trim handles,
+        // which would cover the whole item (zoom in to trim those).
+        const w = Math.max(MIN_ITEM_W, (it.end - it.start) * scale);
+        const compact = w < COMPACT_ITEM_W;
+        const tiny = w < TINY_ITEM_W;
+        return (
+          <div
+            key={it.id}
+            role="button"
+            tabIndex={0}
+            aria-label={`${track.label}: ${it.label}, ${formatTime(it.start, true)} to ${formatTime(it.end, true)}${it.locked ? ", locked" : ""}${it.hidden ? ", hidden" : ""}`}
+            aria-pressed={it.selected}
+            data-span={`${it.start} ${it.end}`}
+            className={`absolute flex items-center gap-1 overflow-hidden border text-[10px] ${compact ? "rounded-sm px-0.5" : "rounded-md px-1.5"} font-semibold outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+              it.selected ? "z-10 border-accent-2 ring-1 ring-accent-2 text-foreground" : `${track.tone} text-foreground`
+            } ${it.hidden ? "opacity-40" : ""} ${it.locked ? "cursor-not-allowed" : "cursor-grab"} data-live:brightness-125 data-live:saturate-150`}
+            style={{
+              left: xOf(it.start),
+              width: w,
+              top: 3 + lanes.lane[it.id] * LANE_H,
+              height: LANE_H - 6,
+            }}
+            onPointerDown={(e) => api.itemDown(e, track.key, it, "move")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                api.select(it.sel);
+              }
+            }}
+          >
+            {it.wave && waveforms[it.wave.sourceId] && (
+              <WaveCanvas
+                wave={waveforms[it.wave.sourceId]}
+                offset={it.wave.offset}
+                duration={it.wave.duration}
+                gain={it.wave.gain}
+                width={w}
+                x={xOf(it.start)}
+                view={view}
+                height={LANE_H - 8}
+                className="top-0 text-foreground/25"
               />
-              <span
-                aria-hidden
-                className="absolute inset-y-0 right-0 w-2 cursor-ew-resize hover:bg-accent-2/60"
-                onPointerDown={(e) => api.itemDown(e, track.key, it, "end")}
-              />
-            </>
-          )}
-        </div>
-      ))}
+            )}
+            {compact ? null : it.thumb ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={it.thumb} alt="" className="h-4 w-4 shrink-0 object-contain" draggable={false} />
+            ) : (
+              it.glyph && <span className="relative shrink-0">{it.glyph}</span>
+            )}
+            {!tiny && <span className="relative truncate">{it.label}</span>}
+            {it.locked && !compact && (
+              <span className="shrink-0" aria-hidden>
+                🔒
+              </span>
+            )}
+            {!it.locked && !tiny && (
+              <>
+                <span
+                  aria-hidden
+                  className="absolute inset-y-0 left-0 w-2 cursor-ew-resize hover:bg-accent-2/60"
+                  onPointerDown={(e) => api.itemDown(e, track.key, it, "start")}
+                />
+                <span
+                  aria-hidden
+                  className="absolute inset-y-0 right-0 w-2 cursor-ew-resize hover:bg-accent-2/60"
+                  onPointerDown={(e) => api.itemDown(e, track.key, it, "end")}
+                />
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 });

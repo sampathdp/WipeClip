@@ -68,6 +68,8 @@ What the headless script checks:
 
 - **Suggestions:** an hour of transcript (7,746 words) takes 21 ms for the suggestions plus the no-speech check.
 - **Transcription:** not re-measured in this phase, because it needs the model download. The earlier measurements in `captions.ts`: large-v3-turbo on WebGPU transcribes 60 s in about 20 s; whisper-small on the CPU uses about 1.5 GB per worker.
+- **Threads (1 November 2026):** the desktop app now sends `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` (`tauri.conf.json` `app.security.headers`), so the page is cross-origin isolated and ONNX Runtime can use several WebAssembly threads per speech worker (`threadsPerWorker` in `captions.ts`: about the physical cores shared between the workers, at most 4 each). Before, every worker ran on one thread. If threads fail to start, the pool falls back to one thread per worker. The website and `next dev` don't send these headers and stay on one thread. WebKit (macOS) doesn't support `credentialless`, so macOS stays on one thread too. **Not measured yet** on a real recording.
+- **Slow GPU check:** the WebGPU trial now also times each worker's first segment, which must come back within its own length (at least 10 s, at most 30 s); before, only the language check was timed, so a GPU that passed it could still crawl through every segment.
 
 ## Limitations
 

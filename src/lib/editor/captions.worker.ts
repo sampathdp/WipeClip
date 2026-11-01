@@ -6,7 +6,8 @@
  * is how several cores get used. Model files are downloaded once and kept
  * in the browser's cache.
  *
- * In:  { type: "init", device: "webgpu" | "wasm", model }  "webgpu" = encoder on the GPU, decoder on the CPU
+ * In:  { type: "init", device: "webgpu" | "wasm", model, threads }  "webgpu" = encoder on the GPU, decoder on the CPU;
+ *                                                   threads = WebAssembly threads (only when cross-origin isolated)
  *      { type: "detect", samples }                  - 16 kHz mono, up to 30 s
  *      { type: "transcribe", id, samples, language } - one segment, up to 30 s
  *      { type: "nospeech", samples }                - 16 kHz mono, up to 30 s
@@ -168,6 +169,11 @@ self.onmessage = async (e: MessageEvent) => {
   const m = e.data;
   try {
     if (m.type === "init") {
+      // Several threads need SharedArrayBuffer, so a cross-origin isolated
+      // page (the desktop app); elsewhere ONNX Runtime stays on one.
+      const wasm = env.backends.onnx.wasm;
+      if (wasm && self.crossOriginIsolated && m.threads > 1) wasm.numThreads = m.threads;
+      else if (wasm) wasm.numThreads = 1;
       if (!asr) loadedOn = await load(m.device, m.model);
       post({ type: "ready", device: loadedOn });
     } else if (m.type === "detect") {
