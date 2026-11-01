@@ -219,10 +219,32 @@ const CPU_MODEL: SpeechModel = { id: "onnx-community/whisper-small_timestamped",
 
 let chosen: Promise<SpeechModel> | null = null;
 
+/** Set once a run found this device's GPU slower than the CPU path (see
+ * GPU_FIRST_STEP_MS), so later runs go straight to the CPU model. */
+const SLOW_GPU_KEY = "wipeclip.speechGpuSlow";
+
+function gpuKnownSlow(): boolean {
+  try {
+    return localStorage.getItem(SLOW_GPU_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function rememberSlowGpu(): void {
+  chosen = Promise.resolve(CPU_MODEL);
+  try {
+    localStorage.setItem(SLOW_GPU_KEY, "1");
+  } catch {
+    // Not remembered: the next run times the GPU again.
+  }
+}
+
 /** The model this device will use: turbo with a usable WebGPU adapter,
  * small otherwise. */
 export function speechModel(): Promise<SpeechModel> {
   chosen ??= (async () => {
+    if (gpuKnownSlow()) return CPU_MODEL;
     const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
     const adapter = await gpu?.requestAdapter().catch(() => null);
     return adapter ? GPU_MODEL : CPU_MODEL;
@@ -260,6 +282,18 @@ const SILENCE_RMS = 0.004; // segments quieter than this are skipped (Whisper in
 // over cores and memory bandwidth (6-core laptop, 2-minute clip: 1 worker
 // 50 s, 2 workers 37 s, 3 workers 46 s).
 const MAX_CPU_WORKERS = 2;
+// The first request on a WebGPU pool (a language check or one segment of up
+// to 28 s) takes ~2-10 s on a GPU worth using. An old integrated one (Intel
+// UHD 630: 17% of a 2-minute clip after 8 minutes) is far slower than the
+// CPU path, and on Windows the browser can't be asked for the faster GPU in
+// a laptop (powerPreference is ignored), so past this the run moves to the CPU.
+const GPU_FIRST_STEP_MS = 30_000;
+
+class SlowGpuError extends Error {
+  constructor() {
+    super("WebGPU is slower than the CPU on this device");
+  }
+}
 
 function rms(samples: Float32Array, from: number, to: number): number {
   let sum = 0;
@@ -456,16 +490,32 @@ async function runOnPool(
 ): Promise<{ language: string; words: CaptionWord[] }> {
   if (speechSegments(samples).length === 0) return { language: language === "auto" ? "en" : language, words: [] };
 
-  const { workers } = await getPool(onProgress, forceCpu);
+  const { device, workers } = await getPool(onProgress, forceCpu);
   // Short audio is split evenly across the workers instead of leaving some
   // idle (the cut lands up to SEARCH early, hence the half-SEARCH slack).
   const perWorker = Math.ceil(samples.length / workers.length) + SEARCH / 2;
   const segments = speechSegments(samples, Math.max(MIN_SEGMENT, Math.min(MAX_SEGMENT, perWorker)));
   onProgress({ stage: "transcribe", value: 0 });
+
+  // On WebGPU the run's first request is timed (GPU_FIRST_STEP_MS).
+  let timeFirst = device === "webgpu";
+  const ask = <T>(w: ModelWorker, msg: Record<string, unknown>, transfer?: Transferable[]): Promise<T> => {
+    const req = w.request<T>(msg, transfer);
+    if (!timeFirst) return req;
+    timeFirst = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const slow = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new SlowGpuError()), GPU_FIRST_STEP_MS);
+    });
+    // The losing request is rejected when the pool is replaced; nothing waits on it.
+    req.catch(() => {});
+    return Promise.race([req, slow]).finally(() => clearTimeout(timer));
+  };
+
   const lang =
     language !== "auto"
       ? language
-      : (await workers[0].request<{ language: string }>({ type: "detect", samples: samples.slice(...segments[0]) })).language;
+      : (await ask<{ language: string }>(workers[0], { type: "detect", samples: samples.slice(...segments[0]) })).language;
 
   // Each worker takes the next segment as soon as it's free.
   const results: CaptionWord[][] = new Array(segments.length);
@@ -477,7 +527,8 @@ async function runOnPool(
         const i = next++;
         const [s, t] = segments[i];
         const part = samples.slice(s, t);
-        const { words } = await w.request<{ words: CaptionWord[] }>(
+        const { words } = await ask<{ words: CaptionWord[] }>(
+          w,
           { type: "transcribe", id: i, samples: part, language: lang },
           [part.buffer]
         );
@@ -506,6 +557,7 @@ export async function transcribe(
   } catch (err) {
     if (isAbort(err) || pool?.device !== "webgpu") throw err;
     console.warn("[captions] WebGPU run failed, retrying on the CPU", err);
+    if (err instanceof SlowGpuError) rememberSlowGpu();
     return runOnPool(samples, language, onProgress, true);
   }
 }

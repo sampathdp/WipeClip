@@ -29,6 +29,16 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_log::{Target, TargetKind};
 
+/// WebView2's arguments (Windows; ignored elsewhere), the same for every
+/// window since windows sharing a data directory must match. wry's own
+/// defaults first: setting arguments replaces them. Then the laptop's
+/// dedicated GPU for WebGPU: on Windows the page's powerPreference is
+/// ignored, so a laptop with two GPUs ran speech recognition on the
+/// integrated one (Intel UHD 630: minutes per 30 s of audio, vs seconds on
+/// the GTX 1650 beside it).
+const BROWSER_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --force_high_performance_gpu";
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopCapabilities {
@@ -171,6 +181,7 @@ async fn recorder_mini(app: tauri::AppHandle, show: bool) -> Result<(), String> 
         .skip_taskbar(true)
         .focused(false)
         .visible(false)
+        .additional_browser_args(BROWSER_ARGS)
         .on_navigation(links::is_app_url)
         .build()
         .map_err(|e| e.to_string())?;
@@ -251,6 +262,7 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
         // Not supported (and not needed - pages capturing media aren't
         // frozen) on Windows.
         .background_throttling(BackgroundThrottlingPolicy::Disabled)
+        .additional_browser_args(BROWSER_ARGS)
         // The window only ever shows the bundled app. Anything else (a
         // stray link, a redirect) opens in the system browser instead, so
         // a remote page can never end up in a window with app permissions.
