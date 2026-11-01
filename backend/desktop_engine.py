@@ -128,10 +128,21 @@ def main() -> None:
 
     idle = _idle_exit_seconds()
     served = _IdleExit(app, idle) if idle > 0 else app
-    # ws="none": the engine serves no websockets, and uvicorn's default
-    # ("auto") imports the websockets package at startup, which the packaged
-    # build doesn't ship - the engine then crashed before answering anything.
-    uvicorn.run(served, host="127.0.0.1", port=port, log_level="warning", access_log=False, ws="none")
+    # Pure-Python parts only. uvicorn's "auto" defaults pick its optional
+    # speedups (websockets, httptools, uvloop) whenever they import, and in
+    # the packaged build they import as empty stubs: the engine crashed at
+    # startup (websockets) or on every request (httptools). The engine serves
+    # no websockets; h11 and asyncio are uvicorn's own required dependencies.
+    uvicorn.run(
+        served,
+        host="127.0.0.1",
+        port=port,
+        log_level="warning",
+        access_log=False,
+        ws="none",
+        http="h11",
+        loop="asyncio",
+    )
 
 
 if __name__ == "__main__":

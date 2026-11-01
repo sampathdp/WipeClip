@@ -61,7 +61,8 @@
       "webviewInstallMode": { "type": "downloadBootstrapper" },
       "nsis": {
         "installMode": "currentUser",
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "installerHooks": "windows/installer-hooks.nsh"
       }
     },
     "macOS": {
