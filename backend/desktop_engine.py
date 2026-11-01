@@ -128,7 +128,10 @@ def main() -> None:
 
     idle = _idle_exit_seconds()
     served = _IdleExit(app, idle) if idle > 0 else app
-    uvicorn.run(served, host="127.0.0.1", port=port, log_level="warning", access_log=False)
+    # ws="none": the engine serves no websockets, and uvicorn's default
+    # ("auto") imports the websockets package at startup, which the packaged
+    # build doesn't ship - the engine then crashed before answering anything.
+    uvicorn.run(served, host="127.0.0.1", port=port, log_level="warning", access_log=False, ws="none")
 
 
 if __name__ == "__main__":
