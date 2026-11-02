@@ -1,13 +1,18 @@
 {
-  "next": [
-    "English captions are far more accurate: quiet speech and the ends of long sentences were being missed.",
-    "New speech models for Kannada, Tamil, Telugu and Hindi, with several times fewer mistakes. Kannada and Telugu are now in the language list.",
-    "Detect automatically now tells Sinhala, Kannada, Tamil, Telugu and Hindi apart, and asks you to pick the language when it can't tell.",
-    "Captions are faster on computers without a supported graphics card.",
-    "Fixed captions sometimes repeating the same phrase over and over.",
-    "Speech model downloads now carry on where they stopped if the connection drops."
-  ],
+  "next": [],
   "releases": [
+    {
+      "version": "0.1.10",
+      "date": "2026-11-02",
+      "notes": [
+        "English captions are far more accurate: quiet speech and the ends of long sentences were being missed.",
+        "New speech models for Kannada, Tamil, Telugu and Hindi, with several times fewer mistakes. Kannada and Telugu are now in the language list.",
+        "Detect automatically now tells Sinhala, Kannada, Tamil, Telugu and Hindi apart, and asks you to pick the language when it can't tell.",
+        "Captions are faster on computers without a supported graphics card.",
+        "Fixed captions sometimes repeating the same phrase over and over.",
+        "Speech model downloads now carry on where they stopped if the connection drops."
+      ]
+    },
     {
       "version": "0.1.9",
       "date": "2026-11-02",
