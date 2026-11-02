@@ -16,6 +16,9 @@ export interface UpdateSnapshot {
   /** The last check was started from the footer link (not the background poll). */
   manual: boolean;
   error: string | null;
+  /** The "What's new" notes (DesktopShell) are open: after updating from
+   * `since`, or from the footer (since null: the latest releases). */
+  whatsNew: { since: string | null } | null;
 }
 
 const FIRST_CHECK_MS = 10_000;
@@ -25,7 +28,7 @@ const FOCUS_RECHECK_MS = 5 * 60 * 1000;
 /** Versions already announced with an OS notification. */
 const NOTIFIED_KEY = "wipeclip.notifiedUpdate";
 
-let snapshot: UpdateSnapshot = { version: null, status: "idle", update: null, manual: false, error: null };
+let snapshot: UpdateSnapshot = { version: null, status: "idle", update: null, manual: false, error: null, whatsNew: null };
 const listeners = new Set<() => void>();
 let lastCheck = 0;
 let inFlight: Promise<void> | null = null;
@@ -48,6 +51,15 @@ export function getUpdateSnapshot(): UpdateSnapshot {
 const SERVER_SNAPSHOT = snapshot;
 export function getServerUpdateSnapshot(): UpdateSnapshot {
   return SERVER_SNAPSHOT;
+}
+
+/** Opens the "What's new" notes: those since version `since`, or the latest. */
+export function showWhatsNew(since: string | null = null): void {
+  set({ whatsNew: { since } });
+}
+
+export function closeWhatsNew(): void {
+  set({ whatsNew: null });
 }
 
 function announce(update: AppUpdate) {

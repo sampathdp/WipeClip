@@ -187,14 +187,16 @@ Update bundles are signed with a minisign key, separate from code signing. The p
 
 Releasing a version needs no local setup: on GitHub, **Actions > Desktop > Run workflow**, branch `master`, set **release** to `patch` (or `minor`, `major`) and run it. The workflow's `version` job runs `desktop/scripts/release.mjs` itself (commit and tag pushed as `github-actions[bot]`), then builds and publishes that tag in the same run, as in steps 2–3 below. Leave **release** at `none` for a test build that publishes nothing. If `master` is branch-protected, allow GitHub Actions to push to it, or the `version` job fails.
 
+**Release notes.** Before releasing, add a line per user-visible change to `next` in `desktop/release-notes.json` and commit it - plain language, written for users (what changed for them, not how). The notes show in three places: the update banner's **What's new** (before updating, from `latest.json`), a **What's new** dialog shown once on the first launch after the app updates itself (every version since the one last run; the notes are bundled with the app), and the release page. The editor footer's **What's new** link reopens the latest ones any time. A fresh install shows nothing.
+
 Or, from a clean `master` on your machine:
 
 ```sh
 npm run desktop:release -- patch      # or minor, major, or an exact version like 0.2.0
 ```
 
-1. `desktop/scripts/release.mjs` sets the version in `package.json` (and its lock), `src-tauri/tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, commits, tags `desktop-v<version>` and pushes both.
-2. The tag push starts `desktop.yml`, which builds both platforms with the signing key; `desktop/scripts/update-manifest.mjs` checks that the tag matches the version, renames the assets and writes `latest.json`.
+1. `desktop/scripts/release.mjs` sets the version in `package.json` (and its lock), `src-tauri/tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, moves the `next` notes in `desktop/release-notes.json` under the new version (with today's date), commits, tags `desktop-v<version>` and pushes both. It refuses to release while `next` is empty.
+2. The tag push starts `desktop.yml`, which builds both platforms with the signing key; `desktop/scripts/update-manifest.mjs` checks that the tag matches the version, renames the assets and writes `latest.json` with the version's notes.
 3. When every platform has built, the release is **published** in the releases repo (Windows installer, macOS DMG and update tarball, fixed-name copies of both installers, `latest.json`) as the latest release. Installed apps show the update banner on their next check (launch, or every 6 hours), and the website's download buttons serve it. If any platform fails, nothing is published.
 
 There's no manual check before users get it, so try the build first when a change is risky: run the workflow by hand on `master` (Actions > Desktop > Run workflow) and install the artifact.

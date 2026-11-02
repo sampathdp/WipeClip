@@ -1,7 +1,9 @@
 // Releases a new desktop version in one command:
 //   npm run desktop:release -- 0.1.2      (or: patch | minor | major)
 // Sets the version everywhere the app reads it (package.json and its lock,
-// src-tauri/tauri.conf.json, Cargo.toml and Cargo.lock), commits, tags
+// src-tauri/tauri.conf.json, Cargo.toml and Cargo.lock), files the "next"
+// notes in desktop/release-notes.json under that version (the app shows them
+// as "What's new" after updating), commits, tags
 // desktop-v<version> and pushes both. The tag push starts the Desktop
 // workflow, which builds, signs and publishes the release - installed apps
 // then offer the update. See docs/desktop/RELEASE.md (Updates).
@@ -28,7 +30,13 @@ if (!/^\d+\.\d+\.\d+$/.test(next)) fail(`"${arg}" isn't a version like 1.2.3.`);
 const cmp = (a, b) => a.map((v, i) => v - b[i]).find((d) => d !== 0) ?? 0;
 if (cmp(next.split(".").map(Number), [ma, mi, pa]) <= 0) fail(`${next} must be higher than ${current}, or installed apps won't update to it.`);
 
-if (git("status", "--porcelain")) fail("Commit or stash your changes first - the release commit should only change the version.");
+if (git("status", "--porcelain")) fail("Commit or stash your changes first - the release commit should only change the version and notes.");
+
+const notesFile = path.join(root, "desktop", "release-notes.json");
+const notes = JSON.parse(readFileSync(notesFile, "utf8"));
+const pending = (notes.next ?? []).map((n) => String(n).trim()).filter(Boolean);
+if (!pending.length) fail(`Add what's new in this version to "next" in desktop/release-notes.json first (users see it after updating).`);
+if (notes.releases.some((r) => r.version === next)) fail(`desktop/release-notes.json already has notes for ${next}.`);
 const branch = git("rev-parse", "--abbrev-ref", "HEAD");
 if (branch !== "master") fail(`Release from master (you're on ${branch}).`);
 const tag = `desktop-v${next}`;
@@ -48,8 +56,10 @@ edit("package-lock.json", /("packages":\s*\{\s*"":\s*\{\s*"name":\s*"[^"]+",\s*"
 edit("src-tauri/tauri.conf.json", /("version":\s*")[^"]+(")/, `$1${next}$2`);
 edit("src-tauri/Cargo.toml", /^(version = ")[^"]+(")/m, `$1${next}$2`);
 edit("src-tauri/Cargo.lock", /(name = "wipeclip"\r?\nversion = ")[^"]+(")/, `$1${next}$2`);
+const date = new Date().toISOString().slice(0, 10);
+writeFileSync(notesFile, JSON.stringify({ next: [], releases: [{ version: next, date, notes: pending }, ...notes.releases] }, null, 2) + "\n");
 
-git("add", "package.json", "package-lock.json", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock");
+git("add", "package.json", "package-lock.json", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock", "desktop/release-notes.json");
 git("commit", "-m", `chore: release desktop ${next}`);
 git("tag", tag);
 git("push", "origin", branch);

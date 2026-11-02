@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useSyncExternalStore } from "react";
-import { checkUpdatesNow, getServerUpdateSnapshot, getUpdateSnapshot, startUpdateChecks, subscribeUpdates } from "@/lib/platform/updates";
+import { checkUpdatesNow, getServerUpdateSnapshot, getUpdateSnapshot, showWhatsNew, startUpdateChecks, subscribeUpdates } from "@/lib/platform/updates";
 
-/** Desktop footer: "Version 0.1.2 · Check for updates". The result of a
+/** Desktop footer: "Version 0.1.2 · What's new · Check for updates". The result of a
  * manual check shows inline; a found update also opens the banner at the top
  * (DesktopShell). */
 export default function AppVersion() {
@@ -19,6 +19,10 @@ export default function AppVersion() {
   return (
     <>
       {version ? `Version ${version}` : "Version"}
+      {" · "}
+      <button type="button" className="underline hover:text-foreground" onClick={() => showWhatsNew()}>
+        What&apos;s new
+      </button>
       {" · "}
       {status === "checking" && manual ? (
         <span>Checking…</span>

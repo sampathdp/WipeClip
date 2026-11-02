@@ -1025,8 +1025,8 @@ export function SpeechGpuChoice({ gpu, busy }: { gpu?: { available: boolean; rea
         }}
       />
       <span>
-        <span className="font-medium text-foreground">Use the NVIDIA graphics card</span> - about 10× faster
-        {gpu.ready ? "." : `. Needs a one-time ${gpu.sizeMb} MB download of NVIDIA's libraries.`}
+        <span className="font-medium text-foreground">Use the graphics card</span> - about 10× faster
+        {gpu.ready ? "." : `. Needs a one-time ${gpu.sizeMb} MB download of the card's libraries.`}
       </span>
     </label>
   );

@@ -1,0 +1,47 @@
+{
+  "next": [
+    "Captions are much faster in the desktop app: speech is now recognised on your computer by WipeClip's engine.",
+    "New Sinhala speech model for clearer, more accurate Sinhala captions.",
+    "Captions in seconds on supported graphics cards: turn it on in the Captions panel.",
+    "Auto language detection now recognises Sinhala and asks before downloading its model."
+  ],
+  "releases": [
+    {
+      "version": "0.1.7",
+      "date": "2026-11-01",
+      "notes": [
+        "Fixed Sinhala captions sometimes filling up with the same repeated characters."
+      ]
+    },
+    {
+      "version": "0.1.6",
+      "date": "2026-11-01",
+      "notes": [
+        "Fixed captions showing as broken images in long videos.",
+        "Faster speech recognition for captions.",
+        "Short captions no longer pile up on top of each other in the timeline."
+      ]
+    },
+    {
+      "version": "0.1.5",
+      "date": "2026-11-01",
+      "notes": [
+        "Fixed captions getting stuck on laptops with two graphics cards: the faster one is now used."
+      ]
+    },
+    {
+      "version": "0.1.4",
+      "date": "2026-11-01",
+      "notes": [
+        "Fixed the processing engine failing to start after updating from an older version."
+      ]
+    },
+    {
+      "version": "0.1.3",
+      "date": "2026-11-01",
+      "notes": [
+        "Fixed the processing engine failing to start on some computers."
+      ]
+    }
+  ]
+}

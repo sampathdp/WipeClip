@@ -212,7 +212,7 @@ jobs:
           path: artifacts
 
       - name: Release assets and update feed
-        run: node desktop/scripts/update-manifest.mjs artifacts release "${TAG}" "${RELEASES_REPO}"
+        run: node desktop/scripts/update-manifest.mjs artifacts release "${TAG}" "${RELEASES_REPO}" release-notes.md
 
       # Published at once as the latest release: installed apps see it on
       # their next update check. Only reached when every platform built.
@@ -225,4 +225,4 @@ jobs:
           if [ -z "$GH_TOKEN" ]; then echo "::error::RELEASES_TOKEN secret is missing - see docs/desktop/RELEASE.md (Updates)."; exit 1; fi
           gh release create "${TAG}" release/* --repo "${RELEASES_REPO}" --latest \
             --title "WipeClip ${TAG#desktop-v}" \
-            --notes "WipeClip ${TAG#desktop-v} for Windows and macOS. Download the installer below, or let the app update itself."
+            --notes-file release-notes.md
