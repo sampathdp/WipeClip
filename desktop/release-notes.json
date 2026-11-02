@@ -1,8 +1,13 @@
 {
-  "next": [
-    "Fixed captions saying there's no sound in videos opened from your computer, and missing audio waveforms on the timeline."
-  ],
+  "next": [],
   "releases": [
+    {
+      "version": "0.1.9",
+      "date": "2026-11-02",
+      "notes": [
+        "Fixed captions saying there's no sound in videos opened from your computer, and missing audio waveforms on the timeline."
+      ]
+    },
     {
       "version": "0.1.8",
       "date": "2026-11-02",
