@@ -93,6 +93,12 @@ body {
   width: 100%;
 }
 
+/* Thin, arrow-less scrollbars that follow the theme. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent;
+}
+
 ::selection {
   background: var(--accent);
   color: #ffffff;

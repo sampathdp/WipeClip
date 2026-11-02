@@ -29,6 +29,7 @@ import {
   type BlendMode,
   type CamLayout,
   type Canvas,
+  type CanvasAspect,
   type CanvasFrame,
   type Clip,
   type Crop,
@@ -59,7 +60,7 @@ import { SHAPE_LABELS } from "@/lib/editor/shapes";
 import { isPremiumEffect, isPremiumFilter } from "@/lib/entitlements";
 import GradeFilter from "./GradeFilter";
 import PremiumBadge from "./PremiumBadge";
-import { ActionButton, Field, PanelShell, SecondsInput, StickerLibrary } from "./Inspector";
+import { ActionButton, Field, PanelShell, SecondsInput, StickerLibrary, type ClipSection } from "./Inspector";
 import { TrashIcon } from "./icons";
 import { sourceName } from "@/lib/editor/sourceFile";
 
@@ -274,6 +275,7 @@ function CropSection({ crop, source, onChange, gesture }: { crop: Crop; source: 
 }
 
 export function ClipExtras({
+  section,
   clip,
   source,
   onChange,
@@ -284,6 +286,8 @@ export function ClipExtras({
   keys,
   attrs,
 }: {
+  /** Which tab of the clip panel to render. */
+  section: ClipSection;
   /** Copy this clip's look and settings / paste copied ones here or on every clip. */
   attrs: { onCopy: () => void; onPaste?: () => void; onPasteAll?: () => void };
   clip: Clip;
@@ -298,8 +302,49 @@ export function ClipExtras({
 }) {
   const frozen = clip.freeze !== null;
   const tooLongToReverse = clip.end - clip.start > MAX_REVERSE_SECONDS + 1e-6;
+  if (section === "basics") {
+    return (
+      <div className="space-y-2 border-t border-border pt-4">
+        <ActionButton onClick={onOpenLook}>Filters &amp; adjustments…</ActionButton>
+        <div className="flex flex-wrap gap-2">
+          <ActionButton onClick={attrs.onCopy} title="Copy this clip's filters, adjustments, LUT, curves, position, mask, speed and volume">
+            Copy settings
+          </ActionButton>
+          {attrs.onPaste && <ActionButton onClick={attrs.onPaste}>Paste</ActionButton>}
+          {attrs.onPasteAll && <ActionButton onClick={attrs.onPasteAll}>Paste to all clips</ActionButton>}
+        </div>
+      </div>
+    );
+  }
+  if (section === "frame") {
+    return (
+      <div className="space-y-5">
+        <ClipTransformFields clip={clip} onChange={onChange} gesture={gesture} keys={keys} />
+        <CropSection crop={clip.crop} source={source} onChange={(crop) => onChange({ crop })} gesture={gesture} />
+        <MaskSection mask={clip.mask} onChange={(mask) => onChange({ mask })} gesture={gesture} />
+        {!frozen && (
+          <div className="space-y-2">
+            <SectionTitle>
+              Stabilize
+              <ProTag />
+            </SectionTitle>
+            <label className="flex items-center justify-between text-xs font-medium text-foreground">
+              Smooth out camera shake
+              <input type="checkbox" checked={!!clip.stabilize} onChange={(e) => onChange({ stabilize: e.target.checked ? 50 : undefined })} />
+            </label>
+            {!!clip.stabilize && (
+              <>
+                <SliderField label="Strength" value={clip.stabilize} min={1} max={100} neutral={50} format={(v) => `${v}%`} onChange={(stabilize) => onChange({ stabilize })} gesture={gesture} />
+                <p className="text-[11px] text-muted">Applied when you export (the preview shows the original). Zooms in slightly to hide the moving edges.</p>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {!frozen && (
         <>
           <div>
@@ -320,14 +365,16 @@ export function ClipExtras({
             gesture={gesture}
           />
           {source.hasAudio && !clip.reverse && (
-            <ActionButton onClick={onExtractAudio} title="Move this clip's sound to its own audio track">
-              Extract audio
-            </ActionButton>
-          )}
-          {onCleanAudio && source.hasAudio && !clip.reverse && clip.freeze === null && (
-            <ActionButton onClick={onCleanAudio} title="Reduce background noise (fan, hum, hiss) and even out the loudness, on this computer">
-              Clean up audio
-            </ActionButton>
+            <div className="flex flex-wrap gap-2">
+              <ActionButton onClick={onExtractAudio} title="Move this clip's sound to its own audio track">
+                Extract audio
+              </ActionButton>
+              {onCleanAudio && (
+                <ActionButton onClick={onCleanAudio} title="Reduce background noise (fan, hum, hiss) and even out the loudness, on this computer">
+                  Clean up audio
+                </ActionButton>
+              )}
+            </div>
           )}
           <div>
             <SectionTitle>Reverse</SectionTitle>
@@ -348,35 +395,6 @@ export function ClipExtras({
           </div>
         </>
       )}
-      {!frozen && (
-        <div className="space-y-2">
-          <SectionTitle>
-            Stabilize
-            <ProTag />
-          </SectionTitle>
-          <label className="flex items-center justify-between text-xs font-medium text-foreground">
-            Smooth out camera shake
-            <input type="checkbox" checked={!!clip.stabilize} onChange={(e) => onChange({ stabilize: e.target.checked ? 50 : undefined })} />
-          </label>
-          {!!clip.stabilize && (
-            <>
-              <SliderField label="Strength" value={clip.stabilize} min={1} max={100} neutral={50} format={(v) => `${v}%`} onChange={(stabilize) => onChange({ stabilize })} gesture={gesture} />
-              <p className="text-[11px] text-muted">Applied when you export (the preview shows the original). Zooms in slightly to hide the moving edges.</p>
-            </>
-          )}
-        </div>
-      )}
-      <CropSection crop={clip.crop} source={source} onChange={(crop) => onChange({ crop })} gesture={gesture} />
-      <ClipTransformFields clip={clip} onChange={onChange} gesture={gesture} keys={keys} />
-      <MaskSection mask={clip.mask} onChange={(mask) => onChange({ mask })} gesture={gesture} />
-      <ActionButton onClick={onOpenLook}>Filters &amp; adjustments…</ActionButton>
-      <div className="flex flex-wrap gap-2 border-t border-border pt-4">
-        <ActionButton onClick={attrs.onCopy} title="Copy this clip's filters, adjustments, LUT, curves, position, mask, speed and volume">
-          Copy attributes
-        </ActionButton>
-        {attrs.onPaste && <ActionButton onClick={attrs.onPaste}>Paste attributes</ActionButton>}
-        {attrs.onPasteAll && <ActionButton onClick={attrs.onPasteAll}>Paste to all clips</ActionButton>}
-      </div>
     </div>
   );
 }
@@ -621,33 +639,48 @@ export function LookPanel({
               ))}
             </defs>
           </svg>
-          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Filter">
-            {FILTER_ORDER.map((f) => (
-              <button
-                key={f}
-                type="button"
-                role="radio"
-                aria-checked={look.filter === f}
-                onClick={() => onChange({ ...look, filter: f, intensity: look.filter === f ? look.intensity : 70 })}
-                className={`relative overflow-hidden rounded-xl border text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
-                  look.filter === f ? "border-accent-2 ring-1 ring-accent-2" : "border-border hover:border-accent/50"
-                }`}
-              >
-                {thumb ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={thumb} alt="" className="aspect-video w-full object-cover" style={{ filter: `url(#swatch-${f})` }} />
-                ) : (
-                  <div className="aspect-video w-full bg-gradient-to-br from-accent to-accent-2" style={{ filter: `url(#swatch-${f})` }} />
-                )}
-                <span className="block px-1 py-1.5 text-foreground">{FILTERS[f].label}</span>
-                {premiumLocked && isPremiumFilter(f) && <PremiumBadge />}
-              </button>
-            ))}
+          <div className="grid grid-cols-2 gap-2.5" role="radiogroup" aria-label="Filter">
+            {FILTER_ORDER.map((f) => {
+              const on = look.filter === f;
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  title={FILTERS[f].label}
+                  onClick={() => onChange({ ...look, filter: f, intensity: on ? look.intensity : 70 })}
+                  className={`group relative aspect-[4/3] overflow-hidden rounded-xl bg-surface outline-none transition focus-visible:ring-2 focus-visible:ring-accent-2 ${
+                    on ? "ring-2 ring-accent-2 ring-offset-2 ring-offset-background" : "ring-1 ring-border hover:ring-accent/60"
+                  }`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={thumb ?? SWATCH_SCENE}
+                    alt=""
+                    draggable={false}
+                    className="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                    style={{ filter: `url(#swatch-${f})` }}
+                  />
+                  <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2 pb-1.5 pt-5 text-left text-[11px] font-semibold leading-tight text-white">
+                    <span className="block truncate">{FILTERS[f].label}</span>
+                  </span>
+                  {on && (
+                    <span className="absolute left-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-accent-2 text-white shadow" aria-hidden>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M5 12.5l4.5 4.5L19 7.5" />
+                      </svg>
+                    </span>
+                  )}
+                  {premiumLocked && isPremiumFilter(f) && <PremiumBadge className="absolute right-1.5 top-1.5" />}
+                </button>
+              );
+            })}
           </div>
           {premiumLocked && isPremiumFilter(look.filter) && <PremiumNote />}
           {look.filter !== "original" && (
-            <div className="mt-4">
-              <SliderField label="Intensity" value={look.intensity} min={0} max={100} neutral={100} format={(v) => `${v}%`} onChange={(intensity) => onChange({ ...look, intensity })} gesture={gesture} />
+            <div className="mt-4 rounded-xl border border-border bg-surface/60 p-3">
+              <SliderField label={`${FILTERS[look.filter].label} intensity`} value={look.intensity} min={0} max={100} neutral={100} format={(v) => `${v}%`} onChange={(intensity) => onChange({ ...look, intensity })} gesture={gesture} />
             </div>
           )}
           <LutSection look={look} onChange={onChange} onImport={onImportLut} gesture={gesture} />
@@ -670,11 +703,30 @@ export function LookPanel({
           <ActionButton onClick={() => onChange({ ...look, adjust: NEUTRAL_ADJUST, curves: undefined })}>Reset all</ActionButton>
         </div>
       )}
-      <div className="mt-5 border-t border-border pt-4">
-        <ActionButton onClick={onApplyAll}>Apply to all clips</ActionButton>
-        <p className="mt-2 text-[11px] text-muted">Changes apply to the selected clip (or the clip under the playhead).</p>
+      <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
+        <p className="text-[11px] leading-snug text-muted">Applies to {clipLabel}. Use the same look everywhere?</p>
+        <ActionButton onClick={onApplyAll} tone="accent">
+          Apply to all
+        </ActionButton>
       </div>
     </PanelShell>
+  );
+}
+
+/** Stand-in frame for filter swatches before the clip's thumbnail loads:
+ * sky, sun, hills and earth, so each filter's change in color is visible. */
+const SWATCH_SCENE = `data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4f9fe0"/><stop offset=".65" stop-color="#f6c27a"/><stop offset="1" stop-color="#f08a5d"/></linearGradient></defs><rect width="160" height="120" fill="url(#s)"/><circle cx="112" cy="58" r="15" fill="#ffe08a"/><path d="M0 78L38 50l30 22 28-18 64 30v36H0z" fill="#3d5a99"/><path d="M0 92q40-16 80-4t80-6v38H0z" fill="#3f9b5a"/><path d="M0 106q50-10 100 0t60-2v16H0z" fill="#7a4b2f"/></svg>`,
+)}`;
+
+function LutIcon() {
+  return (
+    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-rose-400 via-amber-300 to-sky-400 text-black/70" aria-hidden>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+        <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" />
+        <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" />
+      </svg>
+    </span>
   );
 }
 
@@ -699,23 +751,33 @@ function LutSection({ look, onChange, onImport, gesture }: { look: Look; onChang
         }}
       />
       {lut ? (
-        <>
-          <p className="truncate text-xs font-semibold text-foreground" title={lut.name}>
-            {lut.name}
-          </p>
-          <SliderField label="LUT strength" value={lut.intensity} min={0} max={100} neutral={100} format={(v) => `${v}%`} onChange={(intensity) => onChange({ ...look, lut: { ...lut, intensity } })} gesture={gesture} />
+        <div className="space-y-3 rounded-xl border border-border bg-surface/60 p-3">
+          <div className="flex items-center gap-2">
+            <LutIcon />
+            <p className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground" title={lut.name}>
+              {lut.name}
+            </p>
+          </div>
+          <SliderField label="Strength" value={lut.intensity} min={0} max={100} neutral={100} format={(v) => `${v}%`} onChange={(intensity) => onChange({ ...look, lut: { ...lut, intensity } })} gesture={gesture} />
           <div className="flex gap-2">
             <ActionButton onClick={() => input.current?.click()}>Replace…</ActionButton>
             <ActionButton onClick={() => onChange({ ...look, lut: null })} tone="danger">
               Remove
             </ActionButton>
           </div>
-        </>
+        </div>
       ) : (
-        <>
-          <ActionButton onClick={() => input.current?.click()}>Import a LUT (.cube)…</ActionButton>
-          <p className="text-[11px] text-muted">A 3D color LUT from a camera maker or color tool. It runs before the filter and adjustments.</p>
-        </>
+        <button
+          type="button"
+          onClick={() => input.current?.click()}
+          className="flex w-full items-center gap-3 rounded-xl border border-dashed border-border p-3 text-left transition hover:border-accent/60 hover:bg-accent/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+        >
+          <LutIcon />
+          <span className="min-w-0">
+            <span className="block text-xs font-semibold text-foreground">Import a .cube LUT</span>
+            <span className="mt-0.5 block text-[11px] leading-snug text-muted">Applied before the filter and adjustments.</span>
+          </span>
+        </button>
       )}
     </div>
   );
@@ -2188,6 +2250,18 @@ export function EffectPanel({
 
 // --- Canvas --------------------------------------------------------------------
 
+/** A small rectangle in the canvas shape ("original" draws a dashed frame). */
+function AspectShape({ aspect, active }: { aspect: CanvasAspect; active: boolean }) {
+  const [w, h] = aspect === "original" ? [36, 24] : aspect.split(":").map(Number);
+  const s = 28 / Math.max(w, h);
+  return (
+    <span
+      className={`block rounded-[3px] border-2 ${active ? "border-accent-2" : "border-current"} ${aspect === "original" ? "border-dashed" : ""}`}
+      style={{ width: Math.round(w * s), height: Math.round(h * s) }}
+    />
+  );
+}
+
 export function CanvasPanel({
   canvas,
   onChange,
@@ -2208,43 +2282,54 @@ export function CanvasPanel({
   const bg = canvas.background;
   return (
     <PanelShell title="Canvas" onClose={onClose}>
+      <SectionTitle>Size</SectionTitle>
+      <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Canvas size">
+        {CANVAS_PRESETS.map((p) => {
+          const on = canvas.aspect === p.aspect;
+          return (
+            <button
+              key={p.aspect}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              title={p.hint}
+              onClick={() => onChange({ ...canvas, aspect: p.aspect })}
+              className={`flex flex-col items-center gap-1.5 rounded-xl border px-1 pb-2 pt-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+                on ? "border-accent-2 bg-accent-2/10 text-foreground" : "border-border bg-surface text-muted hover:border-accent/50 hover:text-foreground"
+              }`}
+            >
+              <span className="grid h-8 w-10 place-items-center">
+                <AspectShape aspect={p.aspect} active={on} />
+              </span>
+              <span className="text-xs font-semibold">{p.label}</span>
+            </button>
+          );
+        })}
+      </div>
       {onPreset && (
-        <>
-          <SectionTitle>Made for</SectionTitle>
-          <div className="mb-1 grid grid-cols-2 gap-2">
+        <details className="group mt-4 rounded-xl border border-border">
+          <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2.5 text-xs font-semibold text-foreground [&::-webkit-details-marker]:hidden">
+            Quick setups
+            <span className="text-muted transition group-open:rotate-180" aria-hidden>
+              ▾
+            </span>
+          </summary>
+          <div className="space-y-1 px-1.5 pb-1.5">
             {CREATOR_PRESETS.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 onClick={() => onPreset(p.id)}
-                className="rounded-xl border border-border bg-surface px-3 py-2 text-left transition hover:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+                className="block w-full rounded-lg px-2 py-1.5 text-left transition hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
               >
-                <span className="block text-sm font-semibold text-foreground">{p.label}</span>
+                <span className="block text-xs font-semibold text-foreground">{p.label}</span>
                 <span className="block text-[11px] text-muted">{p.hint}</span>
               </button>
             ))}
+            <p className="px-2 pb-1 pt-1 text-[11px] text-muted">Sets size, fit and background in one step.</p>
           </div>
-          <p className="mb-4 text-[11px] text-muted">Sets the options below (one undo step); change any of them afterwards.</p>
-        </>
+        </details>
       )}
-      <SectionTitle>Size</SectionTitle>
-      <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Canvas size">
-        {CANVAS_PRESETS.map((p) => (
-          <button
-            key={p.aspect}
-            type="button"
-            role="radio"
-            aria-checked={canvas.aspect === p.aspect}
-            onClick={() => onChange({ ...canvas, aspect: p.aspect })}
-            className={`rounded-xl border px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
-              canvas.aspect === p.aspect ? "border-accent-2 bg-accent-2/10" : "border-border bg-surface hover:border-accent/50"
-            }`}
-          >
-            <span className="block text-sm font-semibold text-foreground">{p.label}</span>
-            <span className="block text-[11px] text-muted">{p.hint}</span>
-          </button>
-        ))}
-      </div>
 
       <SectionTitle>
         <span className="mt-5 block">Video in canvas</span>

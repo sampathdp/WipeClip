@@ -104,6 +104,35 @@ export function ActionButton({
   );
 }
 
+export type ClipSection = "basics" | "speed" | "frame";
+const CLIP_TABS: { id: ClipSection; label: string }[] = [
+  { id: "basics", label: "Basics" },
+  { id: "speed", label: "Speed & sound" },
+  { id: "frame", label: "Frame" },
+];
+
+/** Segmented tabs inside a panel; the tabs share the width. */
+export function PanelTabs<T extends string>({ tabs, value, onChange, label }: { tabs: { id: T; label: string }[]; value: T; onChange: (id: T) => void; label: string }) {
+  return (
+    <div role="tablist" aria-label={label} className="mb-4 flex gap-0.5 rounded-lg border border-border bg-surface-2/70 p-0.5">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={value === t.id}
+          onClick={() => onChange(t.id)}
+          className={`min-w-0 flex-1 truncate rounded-md px-1.5 py-1.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+            value === t.id ? "bg-surface-3 text-foreground shadow-sm ring-1 ring-border" : "text-muted hover:text-foreground"
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ClipPanel({
   laid,
   count,
@@ -128,9 +157,10 @@ export function ClipPanel({
   onMove: (dir: -1 | 1) => void;
   onAiCleanup: () => void;
   onClose: () => void;
-  /** Speed, volume, transform and look sections (see Panels.tsx). */
-  extra?: ReactNode;
+  /** The rest of each tab: speed and sound, framing, look (see ClipExtras in Panels.tsx). */
+  extra?: (section: ClipSection) => ReactNode;
 }) {
+  const [tab, setTab] = useState<ClipSection>("basics");
   const { clip, index } = laid;
   const canTrimHere = playheadSourceTime !== null;
   const p = playheadSourceTime ?? 0;
@@ -145,109 +175,112 @@ export function ClipPanel({
   const trimEnd = clip.reverse
     ? { patch: { start: p }, blocked: clip.end - p < MIN_CLIP_SECONDS }
     : { patch: { end: p }, blocked: p - clip.start < MIN_CLIP_SECONDS };
+  // A freeze frame has no speed or sound.
+  const tabs = frozen ? CLIP_TABS.filter((t) => t.id !== "speed") : CLIP_TABS;
+  const current = tabs.some((t) => t.id === tab) ? tab : "basics";
   return (
     <PanelShell
       title={`Clip ${index + 1}${frozen ? " · Freeze frame" : source.kind === "cleaned" ? " · AI cleaned" : ""}`}
       onClose={onClose}
     >
-      <div className="space-y-4">
-        {frozen ? (
-          <>
-            <Field label="Hold for (seconds)">
-              <SecondsInput
-                value={clip.end - clip.start}
-                min={MIN_CLIP_SECONDS}
-                max={MAX_FREEZE_SECONDS}
-                onCommit={(hold) => onChange({ start: 0, end: hold })}
-              />
-            </Field>
-            <p className="text-xs text-muted">
-              Holds the frame at {formatTime(clip.freeze!, true)} of the video. Drag the clip&apos;s edges on the timeline to change how long.
-            </p>
-          </>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Starts at">
+      <PanelTabs label="Clip settings" tabs={tabs} value={current} onChange={setTab} />
+      {current !== "basics" ? (
+        extra?.(current)
+      ) : (
+        <div className="space-y-4">
+          {frozen ? (
+            <>
+              <Field label="Hold for (seconds)">
                 <SecondsInput
-                  value={clip.start}
-                  min={Math.max(0, clip.end - cap)}
-                  max={clip.end - MIN_CLIP_SECONDS}
-                  onCommit={(start) => onChange({ start })}
+                  value={clip.end - clip.start}
+                  min={MIN_CLIP_SECONDS}
+                  max={MAX_FREEZE_SECONDS}
+                  onCommit={(hold) => onChange({ start: 0, end: hold })}
                 />
               </Field>
-              <Field label="Ends at">
-                <SecondsInput
-                  value={clip.end}
-                  min={clip.start + MIN_CLIP_SECONDS}
-                  max={Math.min(source.duration, clip.start + cap)}
-                  onCommit={(end) => onChange({ end })}
-                />
-              </Field>
-            </div>
-            <p className="text-xs text-muted">
-              Plays {formatTime(clip.end - clip.start, true)} of the {source.kind === "cleaned" ? "cleaned segment" : "original video"}
-              {clip.reverse ? ", backwards" : ""}. Drag the clip&apos;s edges on the timeline to trim.
-            </p>
-
-            <div>
-              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Trim</p>
-              <div className="grid grid-cols-2 gap-2">
-                <ActionButton
-                  disabled={!canTrimHere || trimStart.blocked}
-                  onClick={() => onChange(trimStart.patch)}
-                  title="Remove everything in this clip before the playhead"
-                >
-                  Trim start here
-                </ActionButton>
-                <ActionButton
-                  disabled={!canTrimHere || trimEnd.blocked}
-                  onClick={() => onChange(trimEnd.patch)}
-                  title="Remove everything in this clip after the playhead"
-                >
-                  Trim end here
+              <p className="text-xs text-muted">
+                Holds the frame at {formatTime(clip.freeze!, true)} of the video. Drag the clip&apos;s edges on the timeline to change how long.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Starts at">
+                  <SecondsInput
+                    value={clip.start}
+                    min={Math.max(0, clip.end - cap)}
+                    max={clip.end - MIN_CLIP_SECONDS}
+                    onCommit={(start) => onChange({ start })}
+                  />
+                </Field>
+                <Field label="Ends at">
+                  <SecondsInput
+                    value={clip.end}
+                    min={clip.start + MIN_CLIP_SECONDS}
+                    max={Math.min(source.duration, clip.start + cap)}
+                    onCommit={(end) => onChange({ end })}
+                  />
+                </Field>
+              </div>
+              <p className="text-xs text-muted">
+                Plays {formatTime(clip.end - clip.start, true)}
+                {clip.reverse ? ", backwards" : ""}. Or drag the clip&apos;s edges on the timeline.
+              </p>
+  
+              <div>
+                <div className="grid grid-cols-2 gap-2">
+                  <ActionButton
+                    disabled={!canTrimHere || trimStart.blocked}
+                    onClick={() => onChange(trimStart.patch)}
+                    title="Remove everything in this clip before the playhead"
+                  >
+                    Trim start here
+                  </ActionButton>
+                  <ActionButton
+                    disabled={!canTrimHere || trimEnd.blocked}
+                    onClick={() => onChange(trimEnd.patch)}
+                    title="Remove everything in this clip after the playhead"
+                  >
+                    Trim end here
+                  </ActionButton>
+                </div>
+                {!canTrimHere && <p className="mt-1.5 text-[11px] text-muted">Move the playhead into this clip to trim or split at it.</p>}
+              </div>
+            </>
+          )}
+  
+          <div className="grid grid-cols-2 gap-2 border-t border-border pt-4">
+            <ActionButton onClick={onSplit} disabled={!canTrimHere}>
+              <SplitIcon width={14} height={14} /> Split
+            </ActionButton>
+            <ActionButton onClick={onDelete} disabled={count <= 1} tone="danger" title={count <= 1 ? "A project needs at least one clip" : undefined}>
+              <TrashIcon width={14} height={14} /> Delete
+            </ActionButton>
+            <ActionButton onClick={() => onMove(-1)} disabled={index === 0}>
+              <ChevronLeftIcon width={14} height={14} /> Move earlier
+            </ActionButton>
+            <ActionButton onClick={() => onMove(1)} disabled={index === count - 1}>
+              Move later <ChevronRightIcon width={14} height={14} />
+            </ActionButton>
+          </div>
+  
+          {extra?.("basics")}
+  
+          {AI_CLEANUP_ENABLED && !frozen && (
+            <div className="rounded-xl border border-accent/25 bg-accent/5 p-3">
+              <p className="text-xs font-semibold text-foreground">AI Cleanup</p>
+              <p className="mt-1 text-xs text-muted">
+                Remove an unwanted object from just this clip. The cleaned result replaces the clip (undo brings the original back).
+              </p>
+              <div className="mt-2.5">
+                <ActionButton onClick={onAiCleanup} tone="accent">
+                  <SparkleIcon width={14} height={14} /> Clean up this clip
                 </ActionButton>
               </div>
-              {!canTrimHere && <p className="mt-1.5 text-[11px] text-muted">Move the playhead into this clip to trim at it.</p>}
             </div>
-          </>
-        )}
-
-        <div className="grid grid-cols-2 gap-2">
-          <ActionButton onClick={onSplit} disabled={!canTrimHere}>
-            <SplitIcon width={14} height={14} /> Split
-          </ActionButton>
-          <ActionButton onClick={onDelete} disabled={count <= 1} tone="danger" title={count <= 1 ? "A project needs at least one clip" : undefined}>
-            <TrashIcon width={14} height={14} /> Delete
-          </ActionButton>
-          <ActionButton onClick={() => onMove(-1)} disabled={index === 0}>
-            <ChevronLeftIcon width={14} height={14} /> Move earlier
-          </ActionButton>
-          <ActionButton onClick={() => onMove(1)} disabled={index === count - 1}>
-            Move later <ChevronRightIcon width={14} height={14} />
-          </ActionButton>
+          )}
         </div>
-
-        {extra}
-
-        {AI_CLEANUP_ENABLED && !frozen && (
-          <div className="rounded-xl border border-accent/25 bg-accent/5 p-3">
-            <p className="text-xs font-semibold text-foreground">AI Cleanup</p>
-            <p className="mt-1 text-xs text-muted">
-              Remove an unwanted object from just this clip. The cleaned result replaces the clip (undo brings the original back).
-            </p>
-            <div className="mt-2.5">
-              <ActionButton onClick={onAiCleanup} tone="accent">
-                <SparkleIcon width={14} height={14} /> Clean up this clip
-              </ActionButton>
-            </div>
-          </div>
-        )}
-
-        <p className="text-[11px] leading-relaxed text-muted">
-          Tip: to cut out a section, split at its start and end, then delete the middle clip. The rest joins up automatically.
-        </p>
-      </div>
+      )}
     </PanelShell>
   );
 }

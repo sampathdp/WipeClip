@@ -138,7 +138,7 @@ import { TIER_LIMITS, toTier, type Tier } from "@/lib/entitlements";
 import AiCleanupDialog from "./AiCleanupDialog";
 import ExportDialog from "./ExportDialog";
 import BatchExportDialog, { type BatchFormat, type BatchItem } from "./BatchExportDialog";
-import { ActionButton, ClipPanel, PanelShell, TransitionPanel } from "./Inspector";
+import { ActionButton, ClipPanel, PanelShell, TransitionPanel, type ClipSection } from "./Inspector";
 import OverlayLayer from "./OverlayLayer";
 import RecentProjects from "./RecentProjects";
 import TranscriptPanel from "./TranscriptPanel";
@@ -218,9 +218,8 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const EMPTY: Project = { clips: [], overlays: [], audio: [], effects: [], canvas: DEFAULT_CANVAS };
 const RATES = [0.5, 1, 1.5, 2];
 
-type Tool = "text" | "captions" | "transcript" | "elements" | "audio" | "effects" | "filters" | "adjust" | "canvas" | "layers" | "focus" | "tutorial" | "highlights";
-/** "transition" isn't a tool panel: it selects the cut nearest the playhead. */
-type GroupTab = { id: Tool | "transition"; label: string; hint: string };
+type Tool = "text" | "captions" | "transcript" | "elements" | "audio" | "effects" | "filters" | "adjust" | "transition" | "canvas" | "layers" | "focus" | "tutorial" | "highlights";
+type GroupTab = { id: Tool; label: string; hint: string };
 /** The left rail: each button opens a group, whose tools show as tabs on
  * top of its panel. */
 const TOOL_GROUPS: { id: string; label: string; icon: (p: React.SVGProps<SVGSVGElement>) => React.ReactNode; tabs: GroupTab[] }[] = [
@@ -267,7 +266,7 @@ const TOOL_GROUPS: { id: string; label: string; icon: (p: React.SVGProps<SVGSVGE
     ],
   },
 ];
-const WIDE = "(min-width: 1280px)"; // Tailwind xl
+const DESKTOP = "(min-width: 1024px)"; // Tailwind lg
 const groupOf = (t: Tool | null) => (t ? TOOL_GROUPS.find((g) => g.tabs.some((x) => x.id === t)) : undefined);
 type Dialogs =
   | { kind: "cleanup"; clipId: string; frameTime: number }
@@ -841,19 +840,21 @@ export default function VideoEditor({
   const selectedTransition =
     selection?.kind === "transition" ? lay.clips.findIndex((c) => c.clip.id === selection.clipId) : -1;
 
-  // Wide screens show the tool panel and the selection's properties side by
-  // side; narrow ones share one panel, so selecting something replaces the tool.
-  const [wide, setWide] = useState(false);
+  // One side panel (beside the rail on desktop, below the timeline on
+  // mobile) shows whatever was opened last: a tool from the rail, or the
+  // properties of what's selected. Selecting something closes the tool,
+  // except that picking another clip keeps Filters/Adjust open on it.
+  const [desktop, setDesktop] = useState(false);
   useEffect(() => {
-    const mq = window.matchMedia(WIDE);
-    const update = () => setWide(mq.matches);
+    const mq = window.matchMedia(DESKTOP);
+    const update = () => setDesktop(mq.matches);
     update();
     mq.addEventListener("change", update);
     return () => mq.removeEventListener("change", update);
   }, []);
 
   const select = useCallback((s: Selection) => {
-    if (!window.matchMedia(WIDE).matches) setTool(null);
+    setTool((t) => ((t === "filters" || t === "adjust") && s?.kind === "clip" ? t : null));
     setSelection(s);
   }, []);
 
@@ -2129,8 +2130,9 @@ export default function VideoEditor({
     for (let i = 0; i < lay.clips.length - 1; i++) {
       if (Math.abs(clipVisualSpan(lay, i).to - t) < Math.abs(clipVisualSpan(lay, best).to - t)) best = i;
     }
-    select({ kind: "transition", clipId: lay.clips[best].clip.id });
-  }, [lay, clock, say, select]);
+    setSelection({ kind: "transition", clipId: lay.clips[best].clip.id });
+    setTool("transition");
+  }, [lay, clock, say]);
 
   const openTrim = useCallback(() => {
     const idx = selectedClip ? selectedClip.index : clipIndexAtPlayhead();
@@ -2869,6 +2871,17 @@ export default function VideoEditor({
         onClose={() => setTool(null)}
       />
     );
+  } else if (tool === "transition" && selectedTransition >= 0 && selectedTransition < lay.clips.length - 1) {
+    const laid = lay.clips[selectedTransition];
+    toolPanel = (
+      <TransitionPanel
+        laid={laid}
+        next={lay.clips[selectedTransition + 1]}
+        onChange={(transition) => apply((p) => updateClip(p, laid.clip.id, { transition }))}
+        onClose={() => setTool(null)}
+        premiumLocked={premiumLocked}
+      />
+    );
   } else if (tool === "highlights") {
     toolPanel = <HighlightsPanel {...highlights} onClose={() => setTool(null)} />;
   } else if (tool === "tutorial") {
@@ -2951,8 +2964,9 @@ export default function VideoEditor({
         onMove={moveSelected}
         onAiCleanup={openCleanup}
         onClose={() => setSelection(null)}
-        extra={
+        extra={(section) => (
           <ClipExtras
+            section={section}
             clip={selectedClip.clip}
             source={src}
             onChange={change}
@@ -2975,10 +2989,10 @@ export default function VideoEditor({
                 : undefined,
             }}
           />
-        }
+        )}
       />
     );
-  } else if (selectedTransition >= 0 && selectedTransition < lay.clips.length - 1) {
+  } else if (selectedTransition >= 0 && selectedTransition < lay.clips.length - 1 && tool !== "transition") {
     const laid = lay.clips[selectedTransition];
     selPanel = (
       <TransitionPanel
@@ -3192,22 +3206,25 @@ export default function VideoEditor({
   const toolArea = toolPanel && activeGroup && (
     <div className="flex h-full min-h-0 flex-col">
       {tabsOf(activeGroup).length > 1 && (
-        <div role="tablist" aria-label={activeGroup.label} className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-3 py-2">
-          {tabsOf(activeGroup).map((x) => (
-            <button
-              key={x.id}
-              type="button"
-              role="tab"
-              aria-selected={tool === x.id}
-              title={x.hint}
-              onClick={() => openTab(x.id)}
-              className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
-                tool === x.id ? "bg-foreground text-background" : "text-muted hover:bg-surface-3 hover:text-foreground"
-              }`}
-            >
-              {x.label}
-            </button>
-          ))}
+        // Segmented control: tabs share the width, so the strip never scrolls.
+        <div className="shrink-0 border-b border-border px-3 py-2">
+          <div role="tablist" aria-label={activeGroup.label} className="flex gap-0.5 rounded-lg border border-border bg-surface-2/70 p-0.5">
+            {tabsOf(activeGroup).map((x) => (
+              <button
+                key={x.id}
+                type="button"
+                role="tab"
+                aria-selected={tool === x.id}
+                title={x.hint}
+                onClick={() => openTab(x.id)}
+                className={`min-w-0 flex-1 truncate rounded-md px-1.5 py-1.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+                  tool === x.id ? "bg-surface-3 text-foreground shadow-sm ring-1 ring-border" : "text-muted hover:text-foreground"
+                }`}
+              >
+                {x.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
       <div className="min-h-0 flex-1">{toolPanel}</div>
@@ -3240,9 +3257,9 @@ export default function VideoEditor({
       {header}
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <div className="hidden lg:flex">{rail}</div>
-        {wide && toolArea && (
-          <aside className="w-72 shrink-0 overflow-hidden border-r border-border bg-surface/50" aria-label="Tool">
-            <PremiumLocked.Provider value={premiumLocked}>{toolArea}</PremiumLocked.Provider>
+        {desktop && (toolArea || selPanel) && (
+          <aside className="w-80 shrink-0 overflow-hidden border-r border-border bg-surface/50" aria-label={toolArea ? "Tool" : "Properties"}>
+            <PremiumLocked.Provider value={premiumLocked}>{toolArea || selPanel}</PremiumLocked.Provider>
           </aside>
         )}
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -3341,9 +3358,11 @@ export default function VideoEditor({
           </div>
         </main>
 
-        <aside className="border-t border-border bg-surface/50 lg:w-80 lg:shrink-0 lg:overflow-hidden lg:border-l lg:border-t-0" aria-label="Properties">
-          <PremiumLocked.Provider value={premiumLocked}>{wide ? selPanel : (toolArea || selPanel)}</PremiumLocked.Provider>
-        </aside>
+        {!desktop && (
+          <aside className="border-t border-border bg-surface/50" aria-label={toolArea ? "Tool" : "Properties"}>
+            <PremiumLocked.Provider value={premiumLocked}>{toolArea || selPanel}</PremiumLocked.Provider>
+          </aside>
+        )}
       </div>
 
       {(toast || busy) && (
@@ -3627,7 +3646,7 @@ function ClipPanelLive({
   onMove: (dir: -1 | 1) => void;
   onAiCleanup: () => void;
   onClose: () => void;
-  extra: React.ReactNode;
+  extra: (section: ClipSection) => React.ReactNode;
 }) {
   const t = useClockTime(clock);
   const loc = locate(lay, t);
