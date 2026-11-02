@@ -49,11 +49,15 @@ export default function AuthStatus() {
       setEmail(user?.email ?? null);
       if (!user) return;
       await claimReferralIfAny();
-      const res = await apiFetch("/api/credits");
-      if (res.ok) {
-        const data = await res.json();
-        setCredits(data.total);
-        setPlan(data.plan ?? null);
+      try {
+        const res = await apiFetch("/api/credits");
+        if (res.ok) {
+          const data = await res.json();
+          setCredits(data.total);
+          setPlan(data.plan ?? null);
+        }
+      } catch {
+        // Offline or the site is unreachable - keep the last known balance.
       }
     };
     load();
