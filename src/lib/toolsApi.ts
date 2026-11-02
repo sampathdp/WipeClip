@@ -428,7 +428,7 @@ export interface EngineGpu {
   sizeMb: number;
 }
 
-/** "auto" heard a language whose own model isn't downloaded (Sinhala). */
+/** "auto" heard a language whose own model isn't downloaded (Sinhala, Tamil, ...). */
 export class ModelNeededError extends ApiError {
   constructor(
     message: string,
@@ -440,13 +440,14 @@ export class ModelNeededError extends ApiError {
 
 /** Desktop app: the engine's speech model for `language` ("auto" or a
  * Whisper code; backend/app/pipeline/speech.py): whether it's downloaded
- * yet, its size, and the graphics card support. Null without an engine
+ * yet, its size, the graphics card support, and whether it's a model of
+ * the language's own (Sinhala, Tamil, ...) rather than the general one. Null without an engine
  * (the website), or when it can't start - captions then run in the browser. */
-export async function engineSpeechModel(language: string): Promise<{ ready: boolean; sizeMb: number; gpu: EngineGpu } | null> {
+export async function engineSpeechModel(language: string): Promise<{ ready: boolean; sizeMb: number; gpu: EngineGpu; own?: boolean } | null> {
   const engine = await optionalEngine().catch(() => null);
   if (!engine) return null;
   const res = await fetch(`${engine.url}/api/speech/model?language=${encodeURIComponent(language)}`, { headers: engineHeaders(engine) }).catch(() => null);
-  return res?.ok ? ((await res.json()) as { ready: boolean; sizeMb: number; gpu: EngineGpu }) : null;
+  return res?.ok ? ((await res.json()) as { ready: boolean; sizeMb: number; gpu: EngineGpu; own?: boolean }) : null;
 }
 
 /** Desktop app: a word-timed transcript of 16 kHz mono `samples`, made by

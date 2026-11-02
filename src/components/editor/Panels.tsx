@@ -945,6 +945,8 @@ export const CAPTION_LANGUAGES: { code: string; label: string }[] = [
   { code: "si", label: "Sinhala" },
   { code: "ta", label: "Tamil" },
   { code: "hi", label: "Hindi" },
+  { code: "kn", label: "Kannada" },
+  { code: "te", label: "Telugu" },
   { code: "es", label: "Spanish" },
   { code: "fr", label: "French" },
   { code: "de", label: "German" },
@@ -982,7 +984,7 @@ export function SpeechModelNotice({
   busy,
   onConsent,
 }: {
-  model?: { sizeMb: number; gpu: boolean; engine?: boolean; sinhala?: boolean } | null;
+  model?: { sizeMb: number; gpu: boolean; engine?: boolean; language?: string } | null;
   busy: boolean;
   onConsent: () => void;
 }) {
@@ -990,8 +992,8 @@ export function SpeechModelNotice({
     <div className="space-y-2 rounded-xl border border-border bg-surface-2/60 p-3 text-xs text-muted">
       <p className="font-semibold text-foreground">Speech model needed (one time)</p>
       <p>
-        {model?.sinhala
-          ? `Sinhala speech model, about ${model.sizeMb} MB to download, prepared once on this computer (about 250 MB kept). Transcribing uses the processor and around 1 GB of memory.`
+        {model?.language
+          ? `${CAPTION_LANGUAGES.find((l) => l.code === model.language)?.label ?? "Language"} speech model, about ${model.sizeMb} MB to download, prepared once on this computer (about 250 MB kept). Transcribing uses the processor and around 1 GB of memory.`
           : model?.engine
             ? `High-accuracy speech model, about ${model.sizeMb} MB, downloaded once and kept on this computer. Transcribing uses the processor and around 2 GB of memory.`
             : model?.gpu
@@ -1053,7 +1055,7 @@ export function CaptionsPanel({
   /** null = still checking. When false, generating asks to download the model first. */
   modelCached?: boolean | null;
   /** The speech model this device will download (captions.ts speechModel). */
-  model?: { sizeMb: number; gpu: boolean; engine?: boolean; sinhala?: boolean; cuda?: { available: boolean; ready: boolean; sizeMb: number } } | null;
+  model?: { sizeMb: number; gpu: boolean; engine?: boolean; language?: string; cuda?: { available: boolean; ready: boolean; sizeMb: number } } | null;
   /** Every caption is hidden (toggled off). */
   hidden?: boolean;
   onToggleHidden?: () => void;

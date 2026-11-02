@@ -474,11 +474,12 @@ def api_speech_model(language: str = "auto") -> dict:
     """Desktop engine only: whether the speech model for `language` is on
     this machine yet, and its download size, so the editor asks before the
     first download (app/pipeline/speech.py). `gpu`: whether an NVIDIA card
-    can be used, and whether its libraries are downloaded yet."""
+    can be used, and whether its libraries are downloaded yet. `own`: a
+    model of the language's own (Sinhala, Tamil, ...), not the general one."""
     if not LOCAL_MODE:
         raise HTTPException(status_code=404, detail="Not available here.")
     model = speech.model_for(language)
-    return {"ready": speech.is_ready(model), "sizeMb": model.size_mb, "gpu": speech.gpu_status()}
+    return {"ready": speech.is_ready(model), "sizeMb": model.size_mb, "gpu": speech.gpu_status(), "own": model.key != "general"}
 
 
 @app.post("/api/speech/transcribe")
@@ -494,7 +495,7 @@ async def api_speech_transcribe(
     needed. `gpu`: run on the NVIDIA card, downloading its libraries
     first if needed. Progress and cancel under `job_id` (app/progress.py):
     phase "download", "prepare" or "transcribe". 409 "model_needed" when
-    "auto" hears a language whose own model isn't downloaded (Sinhala).
+    "auto" hears a language whose own model isn't downloaded (Sinhala, Tamil, ...).
     Free and unmetered: it runs on the user's own machine, and the audio
     never leaves it."""
     if not LOCAL_MODE:
@@ -524,7 +525,15 @@ async def api_speech_transcribe(
                 "code": "model_needed",
                 "language": exc.language,
                 "sizeMb": exc.model.size_mb,
-                "message": f"This sounds like Sinhala, which has its own speech model ({exc.model.size_mb} MB). Download it in the panel, then try again.",
+                "message": f"This sounds like {speech.LANGUAGE_NAMES.get(exc.language, exc.language)}, which has its own, more accurate speech model ({exc.model.size_mb} MB). Download it in the panel, then try again.",
+            },
+        ) from exc
+    except speech.LanguageUnclear as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "language_unclear",
+                "message": "Couldn't tell which language this is. Pick it in the Language list, then try again.",
             },
         ) from exc
     except progress.Cancelled as exc:

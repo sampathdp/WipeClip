@@ -188,14 +188,11 @@ import {
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import Timeline, { type ItemMode, type TimelineTrack, type TrackToggle } from "./Timeline";
 import {
-  AdjustIcon,
   CanvasIcon,
-  EffectIcon,
   ElementsIcon,
   ExportIcon,
   FilterIcon,
   FullscreenIcon,
-  LayersIcon,
   MusicIcon,
   MuteIcon,
   PauseIcon,
@@ -204,15 +201,13 @@ import {
   SparkleIcon,
   SplitIcon,
   FreezeIcon,
+  MoreIcon,
   TextIcon,
-  CaptionsIcon,
-  TransitionIcon,
   TrashIcon,
   TrimIcon,
   UndoIcon,
   UploadIcon,
   VolumeIcon,
-  ZoomInIcon,
 } from "./icons";
 
 const TOOL = "video_editor";
@@ -223,6 +218,56 @@ const EMPTY: Project = { clips: [], overlays: [], audio: [], effects: [], canvas
 const RATES = [0.5, 1, 1.5, 2];
 
 type Tool = "text" | "captions" | "transcript" | "elements" | "audio" | "effects" | "filters" | "adjust" | "canvas" | "layers" | "focus" | "tutorial" | "highlights";
+/** "transition" isn't a tool panel: it selects the cut nearest the playhead. */
+type GroupTab = { id: Tool | "transition"; label: string; hint: string };
+/** The left rail: each button opens a group, whose tools show as tabs on
+ * top of its panel. */
+const TOOL_GROUPS: { id: string; label: string; icon: (p: React.SVGProps<SVGSVGElement>) => React.ReactNode; tabs: GroupTab[] }[] = [
+  {
+    id: "text",
+    label: "Text",
+    icon: TextIcon,
+    tabs: [
+      { id: "text", label: "Text", hint: "Add text (T)" },
+      { id: "captions", label: "Captions", hint: "Auto captions from speech" },
+      { id: "transcript", label: "Transcript", hint: "Edit by text: delete words to cut them out" },
+    ],
+  },
+  { id: "audio", label: "Audio", icon: MusicIcon, tabs: [{ id: "audio", label: "Audio", hint: "Music, voiceover and mix" }] },
+  {
+    id: "elements",
+    label: "Elements",
+    icon: ElementsIcon,
+    tabs: [
+      { id: "elements", label: "Add", hint: "Stickers, shapes, images and videos" },
+      { id: "layers", label: "Layers", hint: "Layer order, hide and lock" },
+    ],
+  },
+  {
+    id: "look",
+    label: "Look",
+    icon: FilterIcon,
+    tabs: [
+      { id: "filters", label: "Filters", hint: "Filters for the selected clip" },
+      { id: "adjust", label: "Adjust", hint: "Color and light for the selected clip" },
+      { id: "effects", label: "Effects", hint: "Timed effects" },
+      { id: "transition", label: "Transition", hint: "Transition between clips" },
+    ],
+  },
+  { id: "canvas", label: "Canvas", icon: CanvasIcon, tabs: [{ id: "canvas", label: "Canvas", hint: "Canvas size and background" }] },
+  {
+    id: "smart",
+    label: "Smart",
+    icon: SparkleIcon,
+    tabs: [
+      { id: "focus", label: "Focus", hint: "Automatic zoom, click highlights and cursor" },
+      { id: "highlights", label: "Highlights", hint: "Suggest moments worth their own clip" },
+      { id: "tutorial", label: "Tutorial", hint: "Pauses, chapters, shortcuts, privacy masks, retakes" },
+    ],
+  },
+];
+const WIDE = "(min-width: 1280px)"; // Tailwind xl
+const groupOf = (t: Tool | null) => (t ? TOOL_GROUPS.find((g) => g.tabs.some((x) => x.id === t)) : undefined);
 type Dialogs =
   | { kind: "cleanup"; clipId: string; frameTime: number }
   /** `clip`: export a copy holding only part of the timeline (a highlight). */
@@ -795,8 +840,19 @@ export default function VideoEditor({
   const selectedTransition =
     selection?.kind === "transition" ? lay.clips.findIndex((c) => c.clip.id === selection.clipId) : -1;
 
+  // Wide screens show the tool panel and the selection's properties side by
+  // side; narrow ones share one panel, so selecting something replaces the tool.
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(WIDE);
+    const update = () => setWide(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
   const select = useCallback((s: Selection) => {
-    setTool(null);
+    if (!window.matchMedia(WIDE).matches) setTool(null);
     setSelection(s);
   }, []);
 
@@ -1105,7 +1161,7 @@ export default function VideoEditor({
     try {
       res = await transcribe(samples, captionOpts.language, progress);
     } catch (e) {
-      // "Auto" heard Sinhala, whose model isn't downloaded: pick the
+      // "Auto" heard a language whose own model isn't downloaded: pick the
       // language so the panel offers that download (its own consent).
       if (e instanceof ModelNeededError) setCaptionOpts((o) => ({ ...o, language: e.language }));
       throw e;
@@ -1640,6 +1696,28 @@ export default function VideoEditor({
     [apply]
   );
 
+  /** Row-header delete: removes every item on a track (one undo step).
+   * Locked layers stay. */
+  const onTrackDelete = useCallback(
+    (track: string) => {
+      const mine = (o: Overlay) => (track === "text" ? o.kind === "text" : o.kind !== "text");
+      const layers = track === "text" || track === "elements";
+      const kept = layers ? project.overlays.filter((o) => mine(o) && o.locked).length : 0;
+      apply((p) => {
+        if (layers) return { ...p, overlays: p.overlays.filter((o) => !mine(o) || o.locked) };
+        if (track === "audio") return { ...p, audio: [] };
+        if (track === "effects") return { ...p, effects: [] };
+        if (track === "zoom") return { ...p, zooms: [] };
+        if (track === "chapters") return { ...p, chapters: [] };
+        if (track === "privacy") return { ...p, masks: [] };
+        return p;
+      });
+      setSelection(null);
+      say(`Track deleted${kept ? `; ${kept} locked layer${kept === 1 ? "" : "s"} kept` : ""}. Undo with ${modKey()}+Z.`);
+    },
+    [apply, say, project.overlays]
+  );
+
   const onItemChange = useCallback(
     (track: string, id: string, mode: ItemMode, start: number, end: number) => {
       if (track === "audio") {
@@ -1778,7 +1856,7 @@ export default function VideoEditor({
       if (to !== t) clock.set(Math.min(to, lay.total));
     });
   }, [playing, skipRanges, clock, lay.total]);
-  // Per language: the desktop engine has its own model for Sinhala, so a
+  // Per language: the desktop engine has models of their own for some, so a
   // check for another language reads as "still checking".
   const [modelCheck, setModelCheck] = useState<{ language: string; cached: boolean } | null>(null);
   const modelCached = modelCheck?.language === captionOpts.language ? modelCheck.cached : null;
@@ -2166,49 +2244,40 @@ export default function VideoEditor({
             <ToolButton label={`Redo (${keys.mod}+Shift+Z)`} onClick={redo} disabled={!canRedo}>
               <RedoIcon />
             </ToolButton>
-            <button
-              type="button"
-              onClick={saveProjectFile}
-              title="Save this project, with its videos, as one .wipeclip file"
-              className="hidden rounded-full px-3 py-2 text-xs font-semibold text-muted hover:text-foreground sm:inline"
-            >
-              Save file
-            </button>
-            <button
-              type="button"
-              onClick={closeProject}
-              title="Back to your projects. This one is saved."
-              className="hidden rounded-full px-3 py-2 text-xs font-semibold text-muted hover:text-foreground sm:inline"
-            >
-              Projects
-            </button>
           </>
         )}
-        {onRecord && (
-          <button
-            type="button"
-            onClick={() => {
-              setPlaying(false);
-              onRecord();
-            }}
-            className="inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold text-muted hover:text-foreground"
-          >
-            <span className="h-2 w-2 rounded-full bg-rose-500" aria-hidden /> Record
-          </button>
-        )}
-        {onImageTools && (
-          <button
-            type="button"
-            onClick={() => {
-              setPlaying(false);
-              onImageTools();
-            }}
-            className="hidden rounded-full px-3 py-2 text-xs font-semibold text-muted hover:text-foreground sm:inline"
-          >
-            Image tools
-          </button>
-        )}
-        <ThemeToggle />
+        <MoreMenu
+          items={[
+            ...(phase === "edit"
+              ? [
+                  { label: "Projects", hint: "Back to your projects. This one is saved.", onClick: closeProject },
+                  { label: "Save file", hint: "Save this project, with its videos, as one .wipeclip file", onClick: saveProjectFile },
+                ]
+              : []),
+            ...(onRecord
+              ? [
+                  {
+                    label: "Record screen",
+                    onClick: () => {
+                      setPlaying(false);
+                      onRecord();
+                    },
+                  },
+                ]
+              : []),
+            ...(onImageTools
+              ? [
+                  {
+                    label: "Image tools",
+                    onClick: () => {
+                      setPlaying(false);
+                      onImageTools();
+                    },
+                  },
+                ]
+              : []),
+          ]}
+        />
         <div className="hidden sm:block">
           <AuthStatus />
         </div>
@@ -2238,6 +2307,7 @@ export default function VideoEditor({
       label: "Text",
       tone: "border-sky-500/40 bg-sky-500/20",
       toggles: layerToggles(layers),
+      deletable: true,
       items: layers.map((o) => ({
         id: o.id,
         start: o.start,
@@ -2258,6 +2328,7 @@ export default function VideoEditor({
       label: "Elements",
       tone: "border-accent/40 bg-accent/20",
       toggles: layerToggles(layers),
+      deletable: true,
       items: layers.map((o) => {
         const def = o.kind === "sticker" ? getStickerDef(o.stickerId) : undefined;
         return {
@@ -2289,6 +2360,7 @@ export default function VideoEditor({
       label: "Audio",
       tone: "border-emerald-500/40 bg-emerald-500/20",
       toggles: [{ kind: "mute", on: project.audio.length > 0 && project.audio.every((a) => a.muted) }],
+      deletable: true,
       // Music beats: markers the clips and layers snap to.
       ticks: project.audio.flatMap((a) =>
         (a.beats?.times ?? [])
@@ -2333,6 +2405,7 @@ export default function VideoEditor({
       key: "zoom",
       label: "Zoom",
       tone: "border-violet-500/40 bg-violet-500/20",
+      deletable: true,
       items: zooms.flatMap((z) =>
         zoomSpans(layClips, z).map((sp) => ({
           id: `${z.id}#${sp.clipIndex}`,
@@ -2353,6 +2426,7 @@ export default function VideoEditor({
       key: "effects",
       label: "Effects",
       tone: "border-amber-500/40 bg-amber-500/20",
+      deletable: true,
       items: project.effects.map((e) => ({
         id: e.id,
         start: e.start,
@@ -2534,9 +2608,9 @@ export default function VideoEditor({
 
   // --- panel (right side / bottom sheet on mobile) -------------------------------
   const lookClip = selectedClip?.clip;
-  let panel: React.ReactNode;
+  let toolPanel: React.ReactNode = null;
   if ((tool === "filters" || tool === "adjust") && lookClip) {
-    panel = (
+    toolPanel = (
       <LookPanel
         mode={tool}
         look={lookClip.look}
@@ -2554,9 +2628,9 @@ export default function VideoEditor({
       />
     );
   } else if (tool === "text") {
-    panel = <TextAddPanel onAdd={addText} onClose={() => setTool(null)} />;
+    toolPanel = <TextAddPanel onAdd={addText} onClose={() => setTool(null)} />;
   } else if (tool === "elements") {
-    panel = (
+    toolPanel = (
       <ElementsPanel
         onAddSticker={addSticker}
         onUploadImage={(f) => void uploadImage(f)}
@@ -2565,7 +2639,7 @@ export default function VideoEditor({
       />
     );
   } else if (tool === "audio") {
-    panel = (
+    toolPanel = (
       <AudioAddPanel
         mixer={
           <MixerPanel
@@ -2602,9 +2676,9 @@ export default function VideoEditor({
       />
     );
   } else if (tool === "effects") {
-    panel = <EffectsAddPanel onAdd={addEffect} onClose={() => setTool(null)} premiumLocked={premiumLocked} />;
+    toolPanel = <EffectsAddPanel onAdd={addEffect} onClose={() => setTool(null)} premiumLocked={premiumLocked} />;
   } else if (tool === "canvas") {
-    panel = (
+    toolPanel = (
       <CanvasPanel
         canvas={project.canvas}
         onChange={(canvas) => apply((p) => ({ ...p, canvas }))}
@@ -2615,7 +2689,7 @@ export default function VideoEditor({
       />
     );
   } else if (tool === "transcript") {
-    panel = (
+    toolPanel = (
       <TranscriptPanel
         transcript={project.transcript}
         current={transcriptCurrent(project.transcript, lay)}
@@ -2635,7 +2709,7 @@ export default function VideoEditor({
       />
     );
   } else if (tool === "captions") {
-    panel = (
+    toolPanel = (
       <CaptionsPanel
         options={captionOpts}
         onOptions={setCaptionOpts}
@@ -2662,7 +2736,7 @@ export default function VideoEditor({
       />
     );
   } else if (tool === "focus") {
-    panel = (
+    toolPanel = (
       <FocusPanel
         available={!!recSource}
         unavailableReason={
@@ -2699,7 +2773,7 @@ export default function VideoEditor({
       />
     );
   } else if (tool === "layers") {
-    panel = (
+    toolPanel = (
       <LayersPanel
         overlays={project.overlays}
         selectedId={selectedOverlay?.id ?? null}
@@ -2716,11 +2790,16 @@ export default function VideoEditor({
       />
     );
   } else if (tool === "highlights") {
-    panel = <HighlightsPanel {...highlights} onClose={() => setTool(null)} />;
-  } else if (tool === "tutorial" || selection?.kind === "chapter") {
-    panel = <TutorialPanel {...tutorial.panelProps} />;
+    toolPanel = <HighlightsPanel {...highlights} onClose={() => setTool(null)} />;
+  } else if (tool === "tutorial") {
+    toolPanel = <TutorialPanel {...tutorial.panelProps} />;
+  }
+
+  let selPanel: React.ReactNode;
+  if (selection?.kind === "chapter" && tool !== "tutorial") {
+    selPanel = <TutorialPanel {...tutorial.panelProps} />;
   } else if (selectedMask) {
-    panel = (
+    selPanel = (
       <MaskPanel
         mask={selectedMask}
         total={lay.total}
@@ -2747,7 +2826,7 @@ export default function VideoEditor({
       />
     );
   } else if (selectedZoom) {
-    panel = (
+    selPanel = (
       <ZoomPanel
         zoom={selectedZoom}
         timelineStart={zoomSpans(lay.clips, selectedZoom)[0]?.start ?? null}
@@ -2780,7 +2859,7 @@ export default function VideoEditor({
         const keyTime = clipKeys(laidClip).keyTime(clock.get());
         return updateClip(p, laidClip.clip.id, animateClipPatch(laidClip.clip, patch, keyTime));
       });
-    panel = (
+    selPanel = (
       <ClipPanelLive
         clock={clock}
         lay={lay}
@@ -2821,7 +2900,7 @@ export default function VideoEditor({
     );
   } else if (selectedTransition >= 0 && selectedTransition < lay.clips.length - 1) {
     const laid = lay.clips[selectedTransition];
-    panel = (
+    selPanel = (
       <TransitionPanel
         laid={laid}
         next={lay.clips[selectedTransition + 1]}
@@ -2831,7 +2910,7 @@ export default function VideoEditor({
       />
     );
   } else if (selectedOverlay) {
-    panel = (
+    selPanel = (
       <OverlayPanel
         overlay={selectedOverlay}
         total={lay.total}
@@ -2863,7 +2942,7 @@ export default function VideoEditor({
       />
     );
   } else if (selectedAudio) {
-    panel = (
+    selPanel = (
       <AudioPanel
         key={selectedAudio.id}
         clip={selectedAudio}
@@ -2884,7 +2963,7 @@ export default function VideoEditor({
       />
     );
   } else if (selectedEffect) {
-    panel = (
+    selPanel = (
       <EffectPanel
         effect={selectedEffect}
         total={lay.total}
@@ -2897,7 +2976,7 @@ export default function VideoEditor({
       />
     );
   } else {
-    panel = (
+    selPanel = (
       <PanelShell title="Project">
         <dl className="grid grid-cols-2 gap-3 text-xs">
           <Stat label="Length" value={formatTime(lay.total, true)} />
@@ -2961,6 +3040,7 @@ export default function VideoEditor({
             key: "chapters",
             label: "Chapters",
             tone: "border-sky-500/40 bg-sky-500/10",
+            deletable: true,
             items: chapterList.map((c, i) => ({
               id: c.id,
               start: c.t,
@@ -2979,6 +3059,7 @@ export default function VideoEditor({
             key: "privacy",
             label: "Privacy",
             tone: "border-amber-500/40 bg-amber-500/20",
+            deletable: true,
             items: masks.map((m) => ({
               id: m.id,
               start: m.start,
@@ -2995,16 +3076,95 @@ export default function VideoEditor({
   ];
 
   const cleanupClip = dialog?.kind === "cleanup" ? project.clips.find((c) => c.id === dialog.clipId) : undefined;
-  const toolBtn = (t: Tool, label: string, icon: React.ReactNode, title: string) => (
-    <ToolButton label={title} onClick={() => (t === "filters" || t === "adjust" ? openLook(t) : setTool((cur) => (cur === t ? null : t)))} text={label} active={tool === t}>
-      {icon}
-    </ToolButton>
+  const openTab = (t: GroupTab["id"]) => {
+    if (t === "transition") openTransition();
+    else if (t === "filters" || t === "adjust") openLook(t);
+    else setTool(t);
+  };
+  const tabsOf = (g: (typeof TOOL_GROUPS)[number]) => g.tabs.filter((x) => x.id !== "focus" || IS_DESKTOP || zooms.length > 0);
+  const activeGroup = groupOf(tool);
+  const rail = (
+    <nav
+      aria-label="Editing tools"
+      className="flex shrink-0 gap-1 overflow-x-auto border-y border-border bg-surface/60 px-2 py-1.5 lg:flex-col lg:overflow-visible lg:border-y-0 lg:border-r lg:px-1.5 lg:py-2"
+    >
+      {TOOL_GROUPS.map((g) => {
+        const active = activeGroup?.id === g.id;
+        const Icon = g.icon;
+        return (
+          <button
+            key={g.id}
+            type="button"
+            aria-pressed={active}
+            title={g.tabs.map((x) => x.label).join(", ")}
+            onClick={() => (active ? setTool(null) : openTab(tabsOf(g)[0].id))}
+            className={`flex min-w-14 shrink-0 flex-col items-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 lg:w-16 lg:py-2 ${
+              active ? "bg-accent/15 text-accent dark:text-accent-light" : "text-muted hover:bg-surface-3 hover:text-foreground"
+            }`}
+          >
+            <Icon width={20} height={20} />
+            {g.label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+  const toolArea = toolPanel && activeGroup && (
+    <div className="flex h-full min-h-0 flex-col">
+      {tabsOf(activeGroup).length > 1 && (
+        <div role="tablist" aria-label={activeGroup.label} className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-3 py-2">
+          {tabsOf(activeGroup).map((x) => (
+            <button
+              key={x.id}
+              type="button"
+              role="tab"
+              aria-selected={tool === x.id}
+              title={x.hint}
+              onClick={() => openTab(x.id)}
+              className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+                tool === x.id ? "bg-foreground text-background" : "text-muted hover:bg-surface-3 hover:text-foreground"
+              }`}
+            >
+              {x.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="min-h-0 flex-1">{toolPanel}</div>
+    </div>
+  );
+  const editActions = (
+    <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto" role="toolbar" aria-label="Clip actions">
+      <ToolButton label="Split at playhead (S)" onClick={split} text="Split">
+        <SplitIcon width={16} height={16} />
+      </ToolButton>
+      <ToolButton label="Freeze the frame at the playhead (F)" onClick={freezeFrame} text="Freeze">
+        <FreezeIcon width={16} height={16} />
+      </ToolButton>
+      <ToolButton label="Trim the clip at the playhead" onClick={openTrim} text="Trim">
+        <TrimIcon width={16} height={16} />
+      </ToolButton>
+      <ToolButton label="Delete selection (Delete)" onClick={deleteSelection} text="Delete">
+        <TrashIcon width={16} height={16} />
+      </ToolButton>
+      {AI_CLEANUP_ENABLED && (
+        <ToolButton label="AI Cleanup on the selected clip" onClick={openCleanup} text="AI Cleanup" accent>
+          <SparkleIcon width={16} height={16} />
+        </ToolButton>
+      )}
+    </div>
   );
 
   return (
     <div className="flex min-h-dvh flex-col bg-background lg:h-dvh">
       {header}
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <div className="hidden lg:flex">{rail}</div>
+        {wide && toolArea && (
+          <aside className="w-72 shrink-0 overflow-hidden border-r border-border bg-surface/50" aria-label="Tool">
+            <PremiumLocked.Provider value={premiumLocked}>{toolArea}</PremiumLocked.Provider>
+          </aside>
+        )}
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="h-[42dvh] min-h-[200px] p-3 lg:h-auto lg:min-h-0 lg:flex-1">
             <PreviewPlayer
@@ -3075,49 +3235,7 @@ export default function VideoEditor({
             onFullscreen={toggleFullscreen}
           />
 
-          <div
-            className="flex items-center gap-1 overflow-x-auto border-y border-border bg-surface/60 px-2 py-1.5 sm:gap-1.5 sm:px-3"
-            role="toolbar"
-            aria-label="Editing tools"
-          >
-            <ToolButton label="Split at playhead (S)" onClick={split} text="Split">
-              <SplitIcon />
-            </ToolButton>
-            <ToolButton label="Freeze the frame at the playhead (F)" onClick={freezeFrame} text="Freeze">
-              <FreezeIcon />
-            </ToolButton>
-            <ToolButton label="Trim the clip at the playhead" onClick={openTrim} text="Trim">
-              <TrimIcon />
-            </ToolButton>
-            <ToolButton label="Delete selection (Delete)" onClick={deleteSelection} text="Delete">
-              <TrashIcon />
-            </ToolButton>
-            <span className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden />
-            {toolBtn("text", "Text", <TextIcon />, "Add text (T)")}
-            {toolBtn("captions", "Captions", <CaptionsIcon />, "Auto captions from speech")}
-            {toolBtn("transcript", "Transcript", <TextIcon />, "Edit by text: delete words to cut them out")}
-            {toolBtn("audio", "Audio", <MusicIcon />, "Music and audio")}
-            {toolBtn("elements", "Elements", <ElementsIcon />, "Stickers and images")}
-            {toolBtn("effects", "Effects", <EffectIcon />, "Timed effects")}
-            {toolBtn("filters", "Filters", <FilterIcon />, "Filters for the selected clip")}
-            {toolBtn("adjust", "Adjust", <AdjustIcon />, "Adjust color and light")}
-            <ToolButton label="Transition between clips" onClick={openTransition} text="Transition">
-              <TransitionIcon />
-            </ToolButton>
-            {(IS_DESKTOP || zooms.length > 0) && toolBtn("focus", "Focus", <ZoomInIcon />, "Automatic zoom, click highlights and cursor")}
-            {toolBtn("highlights", "Highlights", <SparkleIcon />, "Suggest moments worth their own clip")}
-            {toolBtn("tutorial", "Tutorial", <SparkleIcon />, "Review pauses, chapters, shortcuts, privacy masks, annotations, retakes")}
-            {toolBtn("canvas", "Canvas", <CanvasIcon />, "Canvas size and background")}
-            {toolBtn("layers", "Layers", <LayersIcon />, "Layer order, hide and lock")}
-            {AI_CLEANUP_ENABLED && (
-              <>
-                <span className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden />
-                <ToolButton label="AI Cleanup on the selected clip" onClick={openCleanup} text="AI Cleanup" accent>
-                  <SparkleIcon />
-                </ToolButton>
-              </>
-            )}
-          </div>
+          <div className="lg:hidden">{rail}</div>
 
           <div className="max-h-[40dvh] overflow-y-auto p-2 sm:p-3 lg:max-h-[38dvh]">
             <Timeline
@@ -3135,14 +3253,16 @@ export default function VideoEditor({
               onItemChange={onItemChange}
               onMoveClip={(from, to) => apply((p) => moveClip(p, from, to))}
               onTrackToggle={onTrackToggle}
+              onTrackDelete={onTrackDelete}
+              actions={editActions}
               onGestureStart={beginGesture}
               onGestureEnd={endGesture}
             />
           </div>
         </main>
 
-        <aside className="border-t border-border bg-surface/50 lg:w-80 lg:shrink-0 lg:overflow-hidden lg:border-l lg:border-t-0 xl:w-96" aria-label="Properties">
-          <PremiumLocked.Provider value={premiumLocked}>{panel}</PremiumLocked.Provider>
+        <aside className="border-t border-border bg-surface/50 lg:w-80 lg:shrink-0 lg:overflow-hidden lg:border-l lg:border-t-0" aria-label="Properties">
+          <PremiumLocked.Provider value={premiumLocked}>{wide ? selPanel : (toolArea || selPanel)}</PremiumLocked.Provider>
         </aside>
       </div>
 
@@ -3248,6 +3368,60 @@ function ToolButton({
       {text && <span className="hidden sm:inline">{text}</span>}
       {text && <span className="sr-only sm:hidden">{text}</span>}
     </button>
+  );
+}
+
+/** Header overflow menu: project and app actions that don't need to be
+ * one click away, plus the theme switch. */
+function MoreMenu({ items }: { items: { label: string; hint?: string; onClick: () => void }[] }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <ToolButton label="More" onClick={() => setOpen((v) => !v)} active={open}>
+        <MoreIcon />
+      </ToolButton>
+      {open && (
+        <div role="menu" className="absolute right-0 top-11 z-[60] w-56 rounded-2xl border border-border bg-background/95 p-2 shadow-2xl backdrop-blur-xl">
+          {items.map((it) => (
+            <button
+              key={it.label}
+              role="menuitem"
+              type="button"
+              title={it.hint}
+              onClick={() => {
+                setOpen(false);
+                it.onClick();
+              }}
+              className="flex w-full rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+            >
+              {it.label}
+            </button>
+          ))}
+          <div className={`flex items-center justify-between px-3 py-1 text-sm text-foreground ${items.length ? "mt-1 border-t border-border pt-2" : ""}`}>
+            Theme
+            <ThemeToggle />
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

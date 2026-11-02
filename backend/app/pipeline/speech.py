@@ -3,15 +3,19 @@ the engine on the user's own machine with faster-whisper (CTranslate2, MIT).
 Native code on every core is several times faster than the editor's
 in-browser Whisper (captions.worker.ts), which the website still uses.
 
-Two models, downloaded from Hugging Face on first use (after the editor asks)
+Models, downloaded from Hugging Face on first use (after the editor asks)
 and kept in WIPECLIP_MODELS_DIR:
 
-- general: Whisper large-v3-turbo (MIT), for every language but Sinhala.
+- general: Whisper large-v3-turbo (MIT), for most languages.
 - si: SinhaSpeech's Whisper-small fine-tuned on Sinhala (Apache-2.0; 15.5%
   word error rate on its speaker-disjoint test set, where stock Whisper mostly
-  produces nonsense or loops). It's published as a Transformers checkpoint,
-  so it's converted to CTranslate2 here, with numpy only (convert_whisper):
-  the converter CTranslate2 ships needs PyTorch, far too big to bundle.
+  produces nonsense or loops).
+- kn, ta, te, hi: IIT Madras SPRING Lab's Whisper-small fine-tuned per
+  language (Apache-2.0); a third to a fifth of turbo's character errors.
+
+The small ones are published as Transformers checkpoints, so they're
+converted to CTranslate2 here, with numpy only (convert_whisper): the
+converter CTranslate2 ships needs PyTorch, far too big to bundle.
 
 Audio never leaves the machine; only the model files are downloaded.
 """
@@ -24,6 +28,7 @@ import re
 import shutil
 import sys
 import threading
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from math import ceil
@@ -60,6 +65,34 @@ _SINHALA = ("SinhaSpeech/whisper-small-sinhala-run12-best", "96eac6280bc937432db
 # tokens compared), which only publishes tokenizer.json in the base repo.
 _SMALL = ("openai/whisper-small", "973afd24965f72e36ca33b3055d56a652f456b4d")
 
+# Whisper-small fine-tuned per Indian language by IIT Madras's SPRING Lab
+# (Apache-2.0; trained on public Indian speech corpora and FLEURS train).
+# On FLEURS test sentences these beat large-v3-turbo by far: see SPEECH.md.
+_VISTAAR = {
+    "kn": ("vasista22/whisper-kannada-small", "6f8e7b770513d941e4713b20adde26af32b2970b"),
+    "ta": ("vasista22/whisper-tamil-small", "ac0d71cd70d4c66aec7126996cd9e56e97e698b7"),
+    "hi": ("vasista22/whisper-hindi-small", "fb4a24afc20c42906deed31c3689e4be31da41fe"),
+    "te": ("vasista22/whisper-telugu-small", "717212f9c4c16a78a86ddcb98f93c7f73ef8a5cc"),
+}
+
+
+def _vistaar(language: str, repo: str, revision: str) -> SpeechModel:
+    # Published with an older tokenizer layout and a generation config
+    # without languages or alignment heads: whisper-small's are used (the
+    # same tokens, by id).
+    return SpeechModel(
+        language,
+        (
+            Download(repo, revision, "pytorch_model.bin", 967_099_139),
+            Download(repo, revision, "config.json", 1_300),
+            Download(repo, revision, "preprocessor_config.json", 185_000),
+            Download(*_SMALL, "generation_config.json", 4_000),
+            Download(*_SMALL, "tokenizer.json", 2_500_000),
+        ),
+        converted=True,
+    )
+
+
 MODELS = {
     "general": SpeechModel(
         "general",
@@ -83,11 +116,14 @@ MODELS = {
         ),
         converted=True,
     ),
+    **{lang: _vistaar(lang, *repo) for lang, repo in _VISTAAR.items()},
 }
+
+LANGUAGE_NAMES = {"si": "Sinhala", "kn": "Kannada", "ta": "Tamil", "hi": "Hindi", "te": "Telugu"}
 
 
 def model_for(language: str) -> SpeechModel:
-    return MODELS["si" if language == "si" else "general"]
+    return MODELS.get(language) or MODELS["general"]
 
 
 def models_dir() -> Path:
@@ -118,14 +154,39 @@ Progress = Callable[[str, float], None]  # (stage, 0..1); raises to cancel
 
 
 def _fetch(d: Download, dest: Path, on_bytes: Callable[[int], None]) -> None:
+    """One file, carried on from an earlier interrupted download's .part.
+    A connection that drops can end the response early without an error
+    (seen with a 1 GB model), so the length is checked, and a short read
+    is carried on a few times before giving up."""
     url = f"https://huggingface.co/{d.repo}/resolve/{d.revision}/{d.name}"
     part = dest.with_name(dest.name + ".part")
-    req = urllib.request.Request(url, headers={"User-Agent": "WipeClip-desktop"})
-    with urllib.request.urlopen(req, timeout=60) as res, open(part, "wb") as out:
-        while chunk := res.read(1 << 20):
-            out.write(chunk)
-            on_bytes(len(chunk))
-    os.replace(part, dest)
+    have = part.stat().st_size if part.is_file() else 0
+    if have:
+        on_bytes(have)
+    for _ in range(5):
+        headers = {"User-Agent": "WipeClip-desktop"}
+        if have:
+            headers["Range"] = f"bytes={have}-"
+        try:
+            res = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 416:  # 416: the .part is already whole
+                raise
+            os.replace(part, dest)
+            return
+        with res:
+            if res.status == 200 and have:  # the server ignored the range: start over
+                have = 0
+            total = res.headers.get("Content-Range", "").rpartition("/")[2] or res.headers.get("Content-Length")
+            with open(part, "ab" if have else "wb") as out:
+                while chunk := res.read(1 << 20):
+                    out.write(chunk)
+                    have += len(chunk)
+                    on_bytes(len(chunk))
+        if total is None or have >= int(total):
+            os.replace(part, dest)
+            return
+    raise OSError(f"The download of {d.name} keeps breaking off. Check your connection and try again.")
 
 
 def ensure_model(model: SpeechModel, progress: Progress) -> Path:
@@ -305,17 +366,59 @@ def _load_safetensors(path: Path) -> dict[str, np.ndarray]:
     return out
 
 
+def _load_pytorch(path: Path) -> dict[str, np.ndarray]:
+    """Every tensor of a PyTorch checkpoint (pytorch_model.bin), without
+    PyTorch. It's a zip with a pickle that names each tensor's storage; the
+    pickle is read with only the few constructors a state dict uses
+    allowed, so it can't run anything else."""
+    import collections
+    import pickle
+    import zipfile
+
+    dtypes = {"FloatStorage": "<f4", "HalfStorage": "<f2", "LongStorage": "<i8", "IntStorage": "<i4", "BoolStorage": "?"}
+    archive = zipfile.ZipFile(path)
+    root = next(n for n in archive.namelist() if n.endswith("data.pkl"))[: -len("data.pkl")]
+
+    def tensor(storage, offset, size, stride, *_):
+        item = storage.itemsize
+        view = np.lib.stride_tricks.as_strided(storage[offset:], tuple(size), tuple(s * item for s in stride))
+        return np.ascontiguousarray(view)
+
+    class Unpickler(pickle.Unpickler):
+        def find_class(self, module, name):
+            if (module, name) == ("torch._utils", "_rebuild_tensor_v2"):
+                return tensor
+            if (module, name) == ("collections", "OrderedDict"):
+                return collections.OrderedDict
+            if module == "torch" and name in dtypes:
+                return dtypes[name]
+            raise pickle.UnpicklingError(f"{module}.{name} isn't allowed in a checkpoint")
+
+        def persistent_load(self, pid):
+            _, dtype, key, _, numel = pid
+            # Writable: quantizing scales the weights in place.
+            return np.frombuffer(bytearray(archive.read(f"{root}data/{key}")), dtype=dtype, count=numel)
+
+    with archive, archive.open(root + "data.pkl") as f:  # closed, or Windows can't delete it after
+        state = Unpickler(f).load()
+    return {k: v.astype(np.float32) if v.dtype == np.float16 else v for k, v in state.items()}
+
+
 def convert_whisper(src: Path, out: Path) -> None:
-    """A Transformers Whisper checkpoint (model.safetensors, config.json,
-    generation_config.json, tokenizer.json) as a CTranslate2 model with int8
-    weights: the same layout CTranslate2's own converter writes
-    (ctranslate2/converters/transformers.py WhisperLoader), without PyTorch."""
+    """A Transformers Whisper checkpoint (model.safetensors or
+    pytorch_model.bin, config.json, generation_config.json, tokenizer.json)
+    as a CTranslate2 model with int8 weights: the same layout CTranslate2's
+    own converter writes (ctranslate2/converters/transformers.py
+    WhisperLoader), without PyTorch."""
     from ctranslate2.converters.utils import fuse_linear
     from ctranslate2.specs import common_spec, whisper_spec
 
     cfg = json.loads((src / "config.json").read_text(encoding="utf-8"))
     gen = json.loads((src / "generation_config.json").read_text(encoding="utf-8"))
-    w = _load_safetensors(src / "model.safetensors")
+    if (src / "model.safetensors").is_file():
+        w = _load_safetensors(src / "model.safetensors")
+    else:
+        w = _load_pytorch(src / "pytorch_model.bin")
     p = "model."
     if not any(k.startswith(p) for k in w):
         p = ""
@@ -457,21 +560,53 @@ def _max_word_seconds(text: str) -> float:
     return max(1.2, 0.15 * len(text))
 
 
-# Clip length per model. The Sinhala model was fine-tuned on short
-# utterances: on 28 s clips it left out a quarter of the words (2-minute
-# test, word error rate 49%), on 12 s clips 26%. Turbo keeps full windows:
-# each window costs the same encoder pass however short it is (on an
-# i7-9750H's CPU, 16 s for turbo, 3 s for whisper-small).
-_CLIP_SECONDS = {"general": 28, "si": 12}
-_BATCH = {"general": 4, "si": 8}
+# Clips of at most 12 s, for every model. The small fine-tuned ones were
+# trained on short utterances (the Sinhala one left out a quarter of the
+# words on 28 s clips). Turbo, decoding text without timestamps, often stops
+# early in a long clip: on 40 English test sentences it left out 21% of the
+# words on 28 s clips (word error rate 26%), 2% on 12 s clips (7%), and Hindi
+# and Tamil did best at 12 s too. With the short encoder window (_decode) the
+# shorter clips cost no more time.
+_CLIP_SECONDS = 12
+_BATCH = {"general": 4}  # the small models: 8
 _SEARCH = 6 * RATE  # look this far back from a clip's end for a quiet spot
 _FRAME = RATE // 10  # 100 ms loudness frames
-_SILENCE_RMS = 0.004  # clips quieter than this are skipped (Whisper invents text in silence)
+_SILENCE_RMS = 0.004  # clips quieter than this are skipped (Whisper invents text in silence)...
+# ...unless they're quiet speech: a peak this loud, well above the clip's own
+# background. Some recordings are that quiet (an English test set had
+# sentences peaking at 0.0007); skipping them lost a third of the words.
+_QUIET_PEAK = 0.0003
+_CONTRAST = 8
 _LOOP = re.compile(r"(.{1,6}?)\1{5,}")
 
 
 def _rms(a: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(a, dtype=np.float64)))) if len(a) else 0.0
+
+
+def _frame_levels(a: np.ndarray) -> np.ndarray:
+    """RMS of each 100 ms frame (the last one may be shorter)."""
+    if not len(a):
+        return np.zeros(0)
+    pad = -len(a) % _FRAME
+    sq = np.square(np.pad(a, (0, pad)), dtype=np.float64).reshape(-1, _FRAME).sum(1)
+    sizes = np.full(len(sq), _FRAME)
+    sizes[-1] -= pad
+    return np.sqrt(sq / sizes)
+
+
+def _sound_level(a: np.ndarray) -> float | None:
+    """The loudness a frame of `a` needs to count as sound, or None when `a`
+    is silence or a steady hum."""
+    levels = _frame_levels(a)
+    if not len(levels):
+        return None
+    if _rms(a) >= _SILENCE_RMS:
+        return _SILENCE_RMS
+    peak = float(levels.max())
+    if peak >= _QUIET_PEAK and peak >= _CONTRAST * float(np.percentile(levels, 10)):
+        return peak / _CONTRAST
+    return None
 
 
 def speech_clips(audio: np.ndarray, length: int) -> list[tuple[int, int]]:
@@ -488,7 +623,7 @@ def speech_clips(audio: np.ndarray, length: int) -> list[tuple[int, int]]:
             frames = range(end - _FRAME, max(start, end - _SEARCH) - 1, -_FRAME)
             best = min(frames, key=lambda at: _rms(audio[at : at + _FRAME]), default=end - _FRAME // 2)
             end = best + _FRAME // 2
-        if _rms(audio[start:end]) >= _SILENCE_RMS:
+        if _sound_level(audio[start:end]) is not None:
             out.append((start, end))
         start = end
     return out
@@ -497,47 +632,87 @@ def speech_clips(audio: np.ndarray, length: int) -> list[tuple[int, int]]:
 def drop_loops(words: list[dict]) -> list[dict]:
     """What's left of a decoding stuck in a loop, taken out: words that are
     a short piece repeated over and over or far too long for one word, and
-    the same word more than three times in a row (the same rules as
-    captions.worker.ts). Batched decoding has no per-clip retry; its length
-    cap keeps a loop from costing much time, and this removes the text."""
-    out = []
-    for i, w in enumerate(words):
+    the same word, or phrase of up to four words, more than three times in a
+    row (kept three times). Loops are caught earlier by their compression
+    ratio (_words); this is what gets past that."""
+    out: list[dict] = []
+    for w in words:
         if _LOOP.search(w["text"]) or len(w["text"]) > 40:
             continue
-        if i >= 3 and all(words[i - k]["text"] == w["text"] for k in (1, 2, 3)):
-            continue
         out.append(w)
+        for n in range(1, 5):
+            if len(out) >= 4 * n and all(
+                out[-1 - i]["text"].lower() == out[-1 - i - k * n]["text"].lower() for i in range(n) for k in (1, 2, 3)
+            ):
+                del out[-n:]
+                break
     return out
 
 
-# Whisper large-v3-turbo can't recognize Sinhala: on Sinhala speech it
-# guesses a neighbouring language with little confidence. Measured on three
-# clips each: Sinhala "ta" at 0.16-0.46; Tamil itself 0.69-0.85, Hindi
-# 0.92-0.96 (FLEURS). So a weak guess among these, averaged over up to three
-# clips, is taken for Sinhala. Kannada (0.27-0.58, also guessed "ta") falls
-# under it too; Whisper can't transcribe it either.
-_LIKE_SINHALA = {"ta", "kn", "te", "ml", "gu", "bo", "mr", "bn", "ne", "sa", "th", "hi", "si"}
+# Whisper large-v3-turbo can't recognize Sinhala, and can't tell Kannada or
+# Telugu from Tamil: on all of them it guesses Tamil, mostly unsure (0.24-0.42
+# averaged over three clips) but not always (0.89 on one Sinhala clip). So a
+# guess among these languages, or any unsure guess, is settled by the
+# languages' own models: each is far more confident on its own language than
+# any other model is. Average log-probability per token, 12 s clips:
+# Sinhala model on Sinhala (a test set and a news report) -0.013 and -0.024,
+# on Kannada -0.049; Kannada model on Kannada -0.014; Telugu on Telugu
+# -0.014; Hindi on Hindi -0.033; Tamil on Tamil -0.047 (turbo is sure of
+# Tamil itself). Every other pairing -0.049 or lower.
+_LIKE_INDIC = {"ta", "kn", "te", "ml", "gu", "bo", "mr", "bn", "ne", "sa", "th", "hi", "si"}
 _SURE = 0.6
+_OWN_LOGPROB = -0.035
 
 
-def detect_language(model, audio: np.ndarray, clips: list[tuple[int, int]]) -> str:
-    """The language of up to the first three clips, by the general model's
-    averaged scores (fewer when it's sure), with Sinhala recognized as above."""
+class LanguageUnclear(Exception):
+    """Speech in a language that can't be told apart (see above) without
+    the models to check it with."""
+
+
+def language_scores(model, audio: np.ndarray, clips: list[tuple[int, int]]) -> list[tuple[str, float]]:
+    """The general model's language scores, averaged over up to the first
+    three clips (fewer when it's sure), best first."""
     scores: dict[str, float] = {}
-    sample = clips[:3]
-    for k, (a, b) in enumerate(sample, 1):
+    for k, (a, b) in enumerate(clips[:3], 1):
         _, _, probs = model.detect_language(audio=audio[a:b])
         for code, p in probs:
             scores[code] = scores.get(code, 0.0) + p
-        language, total = max(scores.items(), key=lambda kv: kv[1])
-        # A clear answer needs no more clips: each costs an encoder pass
-        # (16 s on a 6-core CPU).
-        if total / k >= 0.8:
+        # A clear answer needs no more clips: each costs an encoder pass.
+        if max(scores.values()) / k >= 0.8:
             break
-    p = total / k
-    if language in _LIKE_SINHALA and p < _SURE:
-        return "si"
-    return language
+    return sorted(((code, p / k) for code, p in scores.items()), key=lambda kv: -kv[1])
+
+
+def _confidence(model, audio: np.ndarray, clips: list[tuple[int, int]], language: str) -> float:
+    """Average log-probability per token of decoding the clips in `language`."""
+    found = [seg.avg_logprob for seg in _decode(model, audio, language, clips, len(clips), words=False)]
+    return float(np.mean(found)) if found else -10.0
+
+
+def detect_language(audio: np.ndarray, clips: list[tuple[int, int]], progress: Progress, gpu: bool) -> str:
+    """The language of the speech in `clips`: the general model's guess,
+    checked as above with the language models that are downloaded."""
+    ranked = language_scores(_whisper(MODELS["general"], progress, gpu), audio, clips)
+    language, p = ranked[0]
+    if language not in _LIKE_INDIC and p >= _SURE:
+        return language
+    # Sinhala first (turbo never names it), then by turbo's scores; the
+    # first confident one is it - no other model came near that on another
+    # language. Each check loads a model and decodes two clips (on a 6-core
+    # CPU about 8 s).
+    rank = {code: i for i, (code, _) in enumerate(ranked)}
+    own = sorted(
+        (key for key, model in MODELS.items() if key != "general" and is_ready(model)),
+        key=lambda key: (key != "si", rank.get(key, len(rank))),
+    )
+    for key in own:
+        if _confidence(_whisper(MODELS[key], progress, gpu), audio, clips[:2], key) >= _OWN_LOGPROB:
+            return key
+    if p >= _SURE:
+        return language
+    if "si" not in own and language in _LIKE_INDIC:
+        return "si"  # the likeliest; the editor asks for the Sinhala model, then it's checked
+    raise LanguageUnclear(language)
 
 
 def transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool = False) -> dict:
@@ -563,8 +738,9 @@ def transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool =
         return _transcribe(audio, language, progress, False)
 
 
-def _decode(model, audio: np.ndarray, language: str, clips: list[tuple[int, int]], batch: int):
-    """The clips' segments (a generator), decoded `batch` at a time.
+def _decode(model, audio: np.ndarray, language: str, clips: list[tuple[int, int]], batch: int, words: bool = True):
+    """The clips' segments (a generator), decoded `batch` at a time, with
+    word timings unless `words` is false.
 
     Several clips side by side are about 15% faster than one by one on the
     CPU, and each is decoded once. Text only, timed by aligning it to the
@@ -595,7 +771,7 @@ def _decode(model, audio: np.ndarray, language: str, clips: list[tuple[int, int]
             clip_timestamps=[{"start": a / RATE, "end": b / RATE} for a, b in clips],
             batch_size=batch,
             beam_size=1,
-            word_timestamps=True,
+            word_timestamps=words,
             without_timestamps=True,
         )
     finally:
@@ -606,39 +782,77 @@ def _decode(model, audio: np.ndarray, language: str, clips: list[tuple[int, int]
 def _transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool) -> dict:
     total = len(audio) / RATE
     if language == "auto":
-        first = speech_clips(audio, _CLIP_SECONDS["general"] * RATE)
+        first = speech_clips(audio, _CLIP_SECONDS * RATE)
         if not first:
             return {"language": "en", "words": []}
-        general = _whisper(MODELS["general"], progress, gpu)
         progress("transcribe", 0.0)
-        language = detect_language(general, audio, first)
+        language = detect_language(audio, first, progress, gpu)
         # Only the model the user agreed to (the general one, for "auto") is
-        # downloaded unasked; another is asked for first.
+        # downloaded unasked; a language's own model is asked for first.
         if model_for(language).key != "general" and not is_ready(model_for(language)):
             raise ModelNeeded(language, model_for(language))
     spec = model_for(language)
-    clips = speech_clips(audio, _CLIP_SECONDS[spec.key] * RATE)
+    clips = speech_clips(audio, _CLIP_SECONDS * RATE)
     if not clips:
         return {"language": language, "words": []}
     model = _whisper(spec, progress, gpu)
     progress("transcribe", 0.0)
-    batch = _BATCH[spec.key]
-    words = _words(_decode(model, audio, language, clips, batch), total, lambda t: progress("transcribe", min(0.95, t / total)))
+    batch = _BATCH.get(spec.key, 8)
+    looped: list[tuple[int, int]] = []
+    words = _words(_decode(model, audio, language, clips, batch), total, lambda t: progress("transcribe", min(0.95, t / total)), looped=looped)
+    words += _retry(model, audio, language, looped, total)
     # Greedy decoding sometimes ends a clip early (one of eleven in the
     # 2-minute test: 6 of its 17 words, more often with the short encoder
     # window). Speech left after a clip's last word is decoded again.
     rest = unfinished(audio, clips, words)
     if rest:
         # Only confident words: what's left may be a breath or noise.
-        words += _words(_decode(model, audio, language, rest, batch), total, lambda t: None, min_probability=0.4)
-        words.sort(key=lambda w: w["start"])
+        looped = []
+        words += _words(_decode(model, audio, language, rest, batch), total, lambda t: None, min_probability=0.4, looped=looped)
+        words += _retry(model, audio, language, looped, total, min_probability=0.4)
+    words.sort(key=lambda w: w["start"])
     progress("transcribe", 1.0)
     return {"language": language, "words": drop_loops(words)}
 
 
-def _words(segments, total: float, on_time: Callable[[float], None], min_probability: float = 0.0) -> list[dict]:
+# Whisper's own sign of a decoding stuck in a loop: its text compresses
+# this much (zlib). Seen on a 5 s English clip: "For example," 75 times.
+_LOOP_RATIO = 2.4
+
+
+def _retry(model, audio: np.ndarray, language: str, clips: list[tuple[int, int]], total: float, min_probability: float = 0.0) -> list[dict]:
+    """Clips whose greedy decoding looped, decoded again one at a time with
+    Whisper's fallback: sampling at rising temperatures until the text
+    stops looping. What still loops is left out."""
+    words = []
+    for a, b in clips:
+        segments, _ = model.transcribe(
+            audio[a:b],
+            language=language,
+            beam_size=1,
+            temperature=[0.2, 0.4, 0.6, 0.8],
+            compression_ratio_threshold=_LOOP_RATIO,
+            condition_on_previous_text=False,
+            without_timestamps=True,
+            word_timestamps=True,
+        )
+        for w in _words(segments, total - a / RATE, lambda t: None, min_probability, looped=[]):
+            words.append({**w, "start": round(w["start"] + a / RATE, 3), "end": round(w["end"] + a / RATE, 3)})
+    return words
+
+
+def _words(
+    segments, total: float, on_time: Callable[[float], None], min_probability: float = 0.0, looped: Optional[list] = None
+) -> list[dict]:
+    """The segments' words, clamped to the audio. A segment stuck in a loop
+    is left out, and its time range added to `looped`."""
     words = []
     for seg in segments:  # a generator: each batch is decoded as it's read
+        if seg.compression_ratio > _LOOP_RATIO:
+            if looped is not None:
+                looped.append((int(seg.start * RATE), int(seg.end * RATE)))
+            on_time(seg.end)
+            continue
         for wd in seg.words or []:
             text = wd.word.strip()
             if not text or wd.probability < min_probability:
@@ -652,22 +866,29 @@ def _words(segments, total: float, on_time: Callable[[float], None], min_probabi
     return words
 
 
-_MIN_REST = int(1.5 * RATE)
+# Shorter remainders were mostly a pause and the start of the next sentence,
+# which the small fine-tuned models fill with stock phrases: on 30 Kannada
+# test sentences re-decoding from 1.5 s took the character error rate from
+# 9.7% to 21.7%; from 3 s it's 6.8%, and Sinhala keeps its gain (12.1% to 4.4%).
+_MIN_REST = 3 * RATE
 
 
-def _loud_seconds(a: np.ndarray) -> float:
-    return sum(_rms(a[i : i + _FRAME]) >= _SILENCE_RMS for i in range(0, len(a), _FRAME)) * _FRAME / RATE
+def _loud_seconds(a: np.ndarray, level: float) -> float:
+    return float(np.count_nonzero(_frame_levels(a) >= level)) * _FRAME / RATE
 
 
 def unfinished(audio: np.ndarray, clips: list[tuple[int, int]], words: list[dict]) -> list[tuple[int, int]]:
     """The part of each clip after its last recognized word, when it's at
-    least 1.5 s long with 1 s of sound in it (not just a word's tail before
+    least 3 s long with 1 s of sound in it (not just a word's tail before
     a pause). Clips with no words at all are left out: that's sound Whisper
     didn't take for speech (music, noise)."""
     out = []
     for a, b in clips:
         ends = [w["end"] for w in words if a / RATE <= w["start"] < b / RATE]
         start = max(a, int((max(ends) + 0.1) * RATE)) if ends else a
-        if ends and b - start >= _MIN_REST and _loud_seconds(audio[start:b]) >= 1.0:
+        if not ends or b - start < _MIN_REST:
+            continue
+        level = _sound_level(audio[a:b])  # as loud as the clip's own speech
+        if level is not None and _loud_seconds(audio[start:b], level) >= 1.0:
             out.append((start, b))
     return out

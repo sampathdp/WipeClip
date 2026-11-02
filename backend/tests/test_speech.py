@@ -52,11 +52,133 @@ class ClipsTest(unittest.TestCase):
         self.assertTrue(clips and clips[0][0] >= 10 * RATE)
 
 
+    def test_quiet_speech_is_kept_and_a_steady_hum_skipped(self) -> None:
+        # Sentences peaking around 0.0007 RMS, as quiet as some real recordings.
+        audio = np.concatenate([tone(4, 0.001), silence(1), tone(4, 0.001)])
+        self.assertEqual(speech.speech_clips(audio, 12 * RATE), [(0, len(audio))])
+        self.assertEqual(speech.speech_clips(tone(10, 0.002), 12 * RATE), [])
+
+
+class CheckpointTest(unittest.TestCase):
+    """pytorch_model.bin read without PyTorch, and only tensors."""
+
+    @staticmethod
+    def write(path: str, payload) -> None:
+        import pickle
+        import sys
+        import types
+        import zipfile
+
+        storages = {}
+
+        class Storage:
+            def __init__(self, key, array):
+                self.key, self.array = key, array
+
+        def rebuild(*args):
+            raise AssertionError
+
+        rebuild.__module__, rebuild.__qualname__ = "torch._utils", "_rebuild_tensor_v2"
+
+        class FloatStorage:
+            pass
+
+        FloatStorage.__module__, FloatStorage.__qualname__ = "torch", "FloatStorage"
+        fake_torch = types.ModuleType("torch")
+        fake_torch.FloatStorage = FloatStorage
+        fake_utils = types.ModuleType("torch._utils")
+        fake_utils._rebuild_tensor_v2 = rebuild
+
+        class Tensor:
+            def __init__(self, array):
+                self.storage = Storage(str(len(storages)), array)
+                storages[self.storage.key] = array
+
+            def __reduce__(self):
+                a = self.storage.array
+                return rebuild, (self.storage, 0, a.shape, tuple(st // 4 for st in a.strides), False, {})
+
+        class Pickler(pickle.Pickler):
+            def persistent_id(self, obj):
+                if isinstance(obj, Storage):
+                    return ("storage", FloatStorage, obj.key, "cpu", obj.array.size)
+                return None
+
+        import io
+
+        buf = io.BytesIO()
+        with mock.patch.dict(sys.modules, {"torch": fake_torch, "torch._utils": fake_utils}):
+            Pickler(buf, protocol=2).dump(payload(Tensor))
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr("archive/data.pkl", buf.getvalue())
+            for key, array in storages.items():
+                z.writestr(f"archive/data/{key}", array.astype("<f4").tobytes())
+
+    def test_reads_the_tensors(self) -> None:
+        import collections
+
+        a = np.arange(6, dtype=np.float32).reshape(2, 3)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "pytorch_model.bin")
+            self.write(path, lambda T: collections.OrderedDict(w=T(a), b=T(np.ones(3, np.float32))))
+            out = speech._load_pytorch(speech.Path(path))
+        np.testing.assert_array_equal(out["w"], a)
+        np.testing.assert_array_equal(out["b"], np.ones(3))
+        out["w"] *= 2  # writable: quantizing scales in place
+
+    def test_refuses_anything_else(self) -> None:
+        import pickle
+
+        class Evil:
+            def __reduce__(self):
+                return (os.getcwd, ())
+
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "pytorch_model.bin")
+            self.write(path, lambda T: {"w": Evil()})
+            with self.assertRaises(pickle.UnpicklingError):
+                speech._load_pytorch(speech.Path(path))
+
+
+class FetchTest(unittest.TestCase):
+    def test_a_download_that_breaks_off_is_carried_on(self) -> None:
+        import io
+
+        body = bytes(range(256)) * 40
+        seen = []
+
+        class Response(io.BytesIO):
+            def __init__(self, data, status, headers):
+                super().__init__(data)
+                self.status, self.headers = status, headers
+
+        def urlopen(req, timeout):
+            rng = req.headers.get("Range")
+            seen.append(rng)
+            if rng is None:  # breaks off after 1000 bytes, without an error
+                return Response(body[:1000], 200, {"Content-Length": str(len(body))})
+            start = int(rng.split("=")[1].rstrip("-"))
+            return Response(body[start:], 206, {"Content-Range": f"bytes {start}-{len(body) - 1}/{len(body)}"})
+
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(speech.urllib.request, "urlopen", urlopen):
+            dest = speech.Path(d) / "model.bin"
+            got = []
+            speech._fetch(speech.Download("r", "v", "model.bin", len(body)), dest, got.append)
+            self.assertEqual(dest.read_bytes(), body)
+        self.assertEqual(seen, [None, "bytes=1000-"])
+        self.assertEqual(sum(got), len(body))
+
+
 class LoopsTest(unittest.TestCase):
     def test_drops_what_a_loop_leaves(self) -> None:
         w = lambda text: {"start": 0.0, "end": 0.1, "text": text}  # noqa: E731
         words = [w("පාඨක"), w("ඵ" + "ත්" * 40), w("the"), w("the"), w("the"), w("the"), w("the"), w("කට්ටිය")]
         self.assertEqual([x["text"] for x in speech.drop_loops(words)], ["පාඨක", "the", "the", "the", "කට්ටිය"])
+
+    def test_drops_a_looped_phrase(self) -> None:
+        w = lambda text: {"start": 0.0, "end": 0.1, "text": text}  # noqa: E731
+        words = [w("so")] + [w(t) for _ in range(20) for t in ("For", "example,")] + [w("done")]
+        self.assertEqual([x["text"] for x in speech.drop_loops(words)], ["so"] + ["For", "example,"] * 3 + ["done"])
 
     def test_keeps_real_speech(self) -> None:
         text = "අ.ඩො.බි. 3කට අධික වත්කම් භාවිතය අවහිර කරයි very very good".split()
@@ -82,33 +204,48 @@ class UnfinishedTest(unittest.TestCase):
 
 
 class LanguageTest(unittest.TestCase):
-    """Turbo can't tell Sinhala: it guesses Tamil and the like, unsure."""
+    """Turbo can't tell Sinhala, Kannada or Telugu from Tamil; the
+    languages' own models, where downloaded, settle it."""
 
-    @staticmethod
-    def model(*guesses):
+    def detect(self, guesses, ready=("si",), own=None) -> str:
         calls = iter(guesses)
-        return mock.Mock(detect_language=lambda audio: (None, None, next(calls)))
-
-    def detect(self, *guesses) -> str:
+        general = mock.Mock(detect_language=lambda audio: (None, None, next(calls)))
+        own = own or {}
         clips = [(i * RATE, (i + 1) * RATE) for i in range(3)]
-        return speech.detect_language(self.model(*guesses), tone(3), clips)
+        with (
+            mock.patch.object(speech, "_whisper", lambda model, progress, gpu: general if model.key == "general" else model.key),
+            mock.patch.object(speech, "is_ready", lambda model: model.key in ready),
+            mock.patch.object(speech, "_confidence", lambda model, audio, clips, language: own.get(model, -0.2)),
+        ):
+            return speech.detect_language(tone(3), clips, lambda *a: None, False)
 
-    def test_unsure_neighbour_is_sinhala(self) -> None:
-        self.assertEqual(self.detect([("ta", 0.16), ("bo", 0.12)], [("ta", 0.46)], [("ta", 0.31)]), "si")
+    def test_clear_languages_skip_the_checks(self) -> None:
+        self.assertEqual(self.detect([[("en", 0.9)]], own={"si": -0.01}), "en")
 
-    def test_clear_tamil_and_hindi_stay(self) -> None:
-        self.assertEqual(self.detect([("ta", 0.85), ("th", 0.04)]), "ta")
-        self.assertEqual(self.detect([("ta", 0.69)], [("ta", 0.85)], [("ta", 0.69)]), "ta")
-        self.assertEqual(self.detect([("hi", 0.93)]), "hi")
+    def test_the_most_confident_language_model_wins(self) -> None:
+        unsure = [[("ta", 0.39)], [("ta", 0.4)], [("ta", 0.38)]]
+        self.assertEqual(self.detect(unsure, ready=("si", "kn", "te"), own={"si": -0.049, "kn": -0.014, "te": -0.07}), "kn")
+        self.assertEqual(self.detect(unsure, ready=("si", "kn"), own={"si": -0.024, "kn": -0.11}), "si")
+        # Even when turbo is sure of its (wrong) guess.
+        self.assertEqual(self.detect([[("ta", 0.89)]], own={"si": -0.02}), "si")
 
-    def test_other_languages_are_never_sinhala(self) -> None:
-        self.assertEqual(self.detect([("en", 0.4)], [("en", 0.5)], [("en", 0.45)]), "en")
+    def test_no_confident_model_keeps_a_sure_guess(self) -> None:
+        self.assertEqual(self.detect([[("ta", 0.87)]], ready=("si", "ta"), own={"si": -0.09, "ta": -0.047}), "ta")
+        self.assertEqual(self.detect([[("hi", 0.93)]], ready=()), "hi")
+
+    def test_unsure_without_the_sinhala_model_asks_for_it(self) -> None:
+        self.assertEqual(self.detect([[("ta", 0.3)], [("ta", 0.4)], [("ta", 0.3)]], ready=()), "si")
+
+    def test_unsure_and_unchecked_is_unclear(self) -> None:
+        with self.assertRaises(speech.LanguageUnclear):
+            self.detect([[("ta", 0.3)], [("ta", 0.4)], [("ta", 0.3)]], ready=("si",), own={"si": -0.049})
 
 
 class ModelsTest(unittest.TestCase):
-    def test_sinhala_has_its_own_model(self) -> None:
-        self.assertEqual(speech.model_for("si").key, "si")
-        for lang in ("en", "ta", "auto"):
+    def test_some_languages_have_their_own_model(self) -> None:
+        for lang in ("si", "kn", "ta", "te", "hi"):
+            self.assertEqual(speech.model_for(lang).key, lang)
+        for lang in ("en", "ml", "auto"):
             self.assertEqual(speech.model_for(lang).key, "general")
 
     def test_ready_only_after_the_marker(self) -> None:
@@ -187,7 +324,7 @@ class EndpointTest(unittest.TestCase):
             mock.patch.object(speech, "gpu_status", lambda: gpu),
         ):
             res = self.client.get("/api/speech/model?language=si", headers=self.headers)
-        self.assertEqual(res.json(), {"ready": False, "sizeMb": speech.MODELS["si"].size_mb, "gpu": gpu})
+        self.assertEqual(res.json(), {"ready": False, "sizeMb": speech.MODELS["si"].size_mb, "gpu": gpu, "own": True})
 
     def test_model_needed_answers_409(self) -> None:
         def needed(audio, language, progress, gpu):

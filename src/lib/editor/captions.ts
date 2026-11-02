@@ -132,12 +132,9 @@ async function isSpeechTrack(buf: AudioBuffer, a: AudioClip, probe?: SpeechProbe
   return speechVerdict(signal, windows.length ? await probe(windows) : null);
 }
 
-/** Whether no 100 ms frame of `samples` reaches speech loudness. */
+/** Whether `samples` has no sound loud enough for speech (soundLevel). */
 function isSilent(samples: Float32Array): boolean {
-  for (let at = 0; at < samples.length; at += FRAME) {
-    if (rms(samples, at, Math.min(samples.length, at + FRAME)) >= SILENCE_RMS) return false;
-  }
-  return true;
+  return soundLevel(frameLevels(samples), 0, Math.ceil(samples.length / FRAME)) === null;
 }
 
 /** The clips' sound plus the `speech` audio tracks, mixed. */
@@ -209,8 +206,8 @@ export interface SpeechModel {
   gpu: boolean;
   /** Run by the desktop app's engine (backend/app/pipeline/speech.py). */
   engine?: boolean;
-  /** The engine's Sinhala model. */
-  sinhala?: boolean;
+  /** The engine's model of this language's own (its code): Sinhala, Tamil, ... */
+  language?: string;
   /** The engine's NVIDIA graphics card support. */
   cuda?: EngineGpu;
 }
@@ -290,11 +287,11 @@ function rememberSlowGpu(): void {
 }
 
 /** The model this device will use for `language`: the desktop engine's
- * (its Sinhala model for Sinhala), else in the browser turbo with a usable
+ * (a language's own model where it has one), else in the browser turbo with a usable
  * WebGPU adapter, small otherwise. */
 export async function speechModel(language = "auto"): Promise<SpeechModel> {
   const engine = await engineSpeechModel(language);
-  if (engine) return { id: `engine:${language}`, sizeMb: engine.sizeMb, gpu: false, engine: true, sinhala: language === "si", cuda: engine.gpu };
+  if (engine) return { id: `engine:${language}`, sizeMb: engine.sizeMb, gpu: false, engine: true, language: engine.own ? language : undefined, cuda: engine.gpu };
   return browserModel();
 }
 
@@ -335,7 +332,13 @@ const MAX_SEGMENT = 28 * RATE; // Whisper's window is 30 s; leave room so no wor
 const MIN_SEGMENT = 10 * RATE;
 const SEARCH = 6 * RATE; // look this far back from a segment's end for a quiet spot to cut at
 const FRAME = RATE / 10; // 100 ms loudness frames
-const SILENCE_RMS = 0.004; // segments quieter than this are skipped (Whisper invents text in silence)
+const SILENCE_RMS = 0.004; // segments quieter than this are skipped (Whisper invents text in silence)...
+// ...unless they're quiet speech: a peak this loud, well above the segment's
+// own background. Some recordings are that quiet (an English test set had
+// sentences peaking at 0.0007); skipping them lost a third of the words.
+// The same rule as the engine (backend/app/pipeline/speech.py _sound_level).
+const QUIET_PEAK = 0.0003;
+const CONTRAST = 8;
 // More than two was measured slower, not faster: the workers then fight
 // over cores and memory bandwidth (6-core laptop, 2-minute clip: 1 worker
 // 50 s, 2 workers 37 s, 3 workers 46 s).
@@ -362,6 +365,35 @@ function rms(samples: Float32Array, from: number, to: number): number {
   return Math.sqrt(sum / Math.max(1, to - from));
 }
 
+const frameCache = new WeakMap<Float32Array, Float32Array>();
+
+/** RMS of each 100 ms frame of `samples`, computed once per array. */
+function frameLevels(samples: Float32Array): Float32Array {
+  let out = frameCache.get(samples);
+  if (!out) {
+    out = new Float32Array(Math.ceil(samples.length / FRAME));
+    for (let i = 0; i < out.length; i++) out[i] = rms(samples, i * FRAME, Math.min(samples.length, (i + 1) * FRAME));
+    frameCache.set(samples, out);
+  }
+  return out;
+}
+
+/** The loudness a frame in frames [from, to) needs to count as sound, or
+ * null when that stretch is silence or a steady hum. */
+function soundLevel(frames: Float32Array, from: number, to: number): number | null {
+  const part = frames.subarray(Math.max(0, from), Math.min(frames.length, to));
+  if (part.length === 0) return null;
+  let sq = 0;
+  let peak = 0;
+  for (const v of part) {
+    sq += v * v;
+    peak = Math.max(peak, v);
+  }
+  if (Math.sqrt(sq / part.length) >= SILENCE_RMS) return SILENCE_RMS;
+  const floor = Float32Array.from(part).sort()[Math.floor(0.1 * (part.length - 1))];
+  return peak >= QUIET_PEAK && peak >= CONTRAST * floor ? peak / CONTRAST : null;
+}
+
 /** Splits audio into segments of at most `length` samples, cut at the
  * quietest 100 ms near each segment's end so words aren't split. Silent
  * segments are dropped. */
@@ -384,7 +416,7 @@ function speechSegments(samples: Float32Array, length = MAX_SEGMENT): [number, n
       }
       end = best;
     }
-    if (rms(samples, start, end) >= SILENCE_RMS) out.push([start, end]);
+    if (soundLevel(frameLevels(samples), Math.floor(start / FRAME), Math.ceil(end / FRAME)) !== null) out.push([start, end]);
     start = end;
   }
   return out;
@@ -570,11 +602,14 @@ const round = (t: number) => Math.round(t * 1000) / 1000;
 
 /** Whether there's sound around a word. Whisper invents words over silence
  * ("Thank you." at the end of a segment); a real word is never silent
- * (the margin covers timings that land a little early or late). */
+ * (the margin covers timings that land a little early or late). Sound is
+ * judged against the 12 s around it, so a quiet recording's words stay. */
 function audible(samples: Float32Array, w: CaptionWord): boolean {
   const from = Math.max(0, Math.floor((w.start - 0.15) * RATE));
   const to = Math.min(samples.length, Math.ceil((w.end + 0.15) * RATE));
-  return to > from && rms(samples, from, to) >= SILENCE_RMS;
+  const mid = Math.floor(((w.start + w.end) / 2) * (RATE / FRAME));
+  const level = soundLevel(frameLevels(samples), mid - 60, mid + 60);
+  return to > from && level !== null && rms(samples, from, to) >= level;
 }
 
 async function runOnPool(

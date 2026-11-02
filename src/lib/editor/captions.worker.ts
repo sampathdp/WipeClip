@@ -21,7 +21,7 @@
 import { env, pipeline, Tensor, type AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers";
 
 const LANGUAGES = [
-  "en", "es", "fr", "de", "it", "pt", "nl", "ru", "uk", "pl", "tr", "ar", "hi", "si", "ta",
+  "en", "es", "fr", "de", "it", "pt", "nl", "ru", "uk", "pl", "tr", "ar", "hi", "kn", "te", "si", "ta",
   "bn", "ur", "id", "ms", "th", "vi", "zh", "ja", "ko",
 ];
 
