@@ -1,5 +1,7 @@
 {
-  "next": [],
+  "next": [
+    "Fixed captions saying there's no sound in videos opened from your computer, and missing audio waveforms on the timeline."
+  ],
   "releases": [
     {
       "version": "0.1.8",
