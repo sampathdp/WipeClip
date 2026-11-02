@@ -1,5 +1,11 @@
 {
-  "next": [],
+  "next": [
+    "A simpler editor: tools and the settings for what you select now open in one panel beside the menu, so the video preview gets more room.",
+    "Clip settings are split into Basics, Speed & sound and Frame tabs instead of one long list.",
+    "Filters show a clearer preview of each look, and Canvas sizes show their shape.",
+    "Transitions open in their own tab like Filters and Adjust, and the tab bars no longer need scrolling.",
+    "The account menu keeps working when you're offline."
+  ],
   "releases": [
     {
       "version": "0.1.11",
