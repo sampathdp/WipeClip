@@ -1,5 +1,7 @@
 {
-  "next": [],
+  "next": [
+    "New: Translate voice to English. In the Transcript panel, Sinhala, Tamil, Hindi, Kannada or Telugu speech is said again in English in the speaker's own voice, over the video's own music and sounds. It lands as new audio tracks you can undo."
+  ],
   "releases": [
     {
       "version": "0.1.10",
