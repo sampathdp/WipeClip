@@ -40,8 +40,13 @@ export async function buildSpeechAudio(
 }
 
 export interface SpeechMix {
-  /** null when nothing on the timeline has (decodable) sound. */
+  /** null when nothing on the timeline has (decodable) sound. The first
+   * channel when more were asked for. */
   samples: Float32Array | null;
+  /** Every channel (`channels` of them), or null like `samples`. */
+  channels: Float32Array[] | null;
+  /** The audio tracks mixed in as speech (ids). */
+  tracks: string[];
   /** Clipping found in each source at its own rate, in timeline time
    * (audioAnalysis.ts clippedSpans). Only when `withClipping` was asked. */
   clipping: AudioSpan[];
@@ -55,14 +60,16 @@ export type SpeechProbe = (windows: Float32Array[]) => Promise<number[] | null>;
 
 /** buildSpeechAudio plus what the review needs: per-source clipping and
  * the sources that couldn't be decoded. `signal` stops before the
- * (slow) mixing step. */
+ * (slow) mixing step. `rate` and `channels`: the mix's format (16 kHz mono
+ * unless asked; voice translation takes 44.1 kHz stereo). */
 export async function buildSpeechMix(
   lay: Layout,
   project: Project,
   sources: Record<string, MediaSource>,
-  opts: { withClipping?: boolean; signal?: AbortSignal; probe?: SpeechProbe } = {}
+  opts: { withClipping?: boolean; signal?: AbortSignal; probe?: SpeechProbe; rate?: number; channels?: number } = {}
 ): Promise<SpeechMix> {
-  if (lay.total <= 0) return { samples: null, clipping: [], skipped: [] };
+  if (lay.total <= 0) return { samples: null, channels: null, tracks: [], clipping: [], skipped: [] };
+  const rate = opts.rate ?? RATE;
   const skipped: string[] = [];
   const decoded = new Map<string, Promise<AudioBuffer | null>>();
   const decode = (src: MediaSource) => {
@@ -74,7 +81,7 @@ export async function buildSpeechMix(
           ? Promise.resolve(null)
           : sourceFile(src)
               .then((f) => f.arrayBuffer())
-              .then((bytes) => new OfflineAudioContext(1, 1, RATE).decodeAudioData(bytes))
+              .then((bytes) => new OfflineAudioContext(1, 1, rate).decodeAudioData(bytes))
               .catch(() => null);
       decoded.set(src.id, p);
     }
@@ -103,12 +110,14 @@ export async function buildSpeechMix(
     abort();
   }
 
-  const first = await mixSpeech(lay, project, sources, opts, decode, abort, speech);
+  const format = { ...opts, rate, channels: opts.channels ?? 1 };
+  const first = await mixSpeech(lay, project, sources, format, decode, abort, speech);
   // A track taken for music is still the only voice when nothing else is
   // audible (a silent screen capture with a voiceover): use it then.
-  if (undecided.length === 0 || (first.samples && !isSilent(first.samples))) return { ...first, skipped };
-  const second = await mixSpeech(lay, project, sources, opts, decode, abort, new Set([...speech, ...undecided]));
-  return { ...(second.samples ? second : first), skipped };
+  if (undecided.length === 0 || (first.samples && !isSilent(first.samples))) return { ...first, tracks: [...speech], skipped };
+  const all = new Set([...speech, ...undecided]);
+  const second = await mixSpeech(lay, project, sources, format, decode, abort, all);
+  return second.samples ? { ...second, tracks: [...all], skipped } : { ...first, tracks: [...speech], skipped };
 }
 
 /** Whether an uploaded track's part on the timeline is speech: the
@@ -142,13 +151,13 @@ async function mixSpeech(
   lay: Layout,
   project: Project,
   sources: Record<string, MediaSource>,
-  opts: { withClipping?: boolean },
+  opts: { withClipping?: boolean; rate: number; channels: number },
   decode: (src: MediaSource) => Promise<AudioBuffer | null>,
   abort: () => void,
   speech: Set<string>
-): Promise<SpeechMix> {
+): Promise<Omit<SpeechMix, "tracks">> {
   const clipping: AudioSpan[] = [];
-  const ctx = new OfflineAudioContext(1, Math.ceil(lay.total * RATE), RATE);
+  const ctx = new OfflineAudioContext(opts.channels, Math.ceil(lay.total * opts.rate), opts.rate);
 
   let scheduled = 0;
   const play = (buf: AudioBuffer, when: number, offset: number, duration: number, rate: number, gain: number) => {
@@ -193,10 +202,11 @@ async function mixSpeech(
     abort();
     if (buf) play(buf, a.start, a.offset, a.duration, 1, Math.min(1, a.volume));
   }
-  if (scheduled === 0) return { samples: null, clipping, skipped: [] };
+  if (scheduled === 0) return { samples: null, channels: null, clipping, skipped: [] };
   const mixed = await ctx.startRendering();
   abort();
-  return { samples: mixed.getChannelData(0), clipping, skipped: [] };
+  const channels = Array.from({ length: mixed.numberOfChannels }, (_, c) => mixed.getChannelData(c));
+  return { samples: channels[0], channels, clipping, skipped: [] };
 }
 
 export interface SpeechModel {

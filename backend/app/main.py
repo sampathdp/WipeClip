@@ -54,6 +54,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import io
 import json
 import math
 import os
@@ -61,6 +62,7 @@ import re
 import tempfile
 import time
 import traceback
+import wave
 from pathlib import Path
 from typing import Optional
 
@@ -109,7 +111,7 @@ from app.config import (
     RESOLUTION_HEIGHTS,
     SHARPEN_AMOUNT_PRESETS,
 )
-from app.pipeline import activity, audio_clean, encoders, io_utils, moderation, speech
+from app.pipeline import activity, audio_clean, dub, encoders, io_utils, moderation, speech
 from app.pipeline import editor as editor_pipeline
 from app.pipeline import video as video_pipeline
 from app.queue import get_queue
@@ -546,6 +548,83 @@ async def api_speech_transcribe(
         ) from exc
     finally:
         progress.finish(job_id)
+
+
+# Longest video whose voice is translated in one go: 30 minutes of 44.1 kHz
+# stereo float32 is about 640 MB in memory.
+MAX_DUB_SECONDS = 30 * 60
+
+
+@app.get("/api/dub/models")
+def api_dub_models() -> dict:
+    """Desktop engine only: whether the voice translation models are on this
+    machine yet (app/pipeline/dub.py), and what's left to download."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    return dub.models_status()
+
+
+@app.post("/api/dub/render")
+async def api_dub_render(
+    audio: UploadFile = File(...),
+    sentences: str = Form(...),
+    job_id: Optional[str] = Form(None),
+):
+    """Desktop engine only: the speech in `audio` (raw 44.1 kHz stereo
+    float32, interleaved - the editor's mix of the timeline's speech) said
+    again in English in the speaker's voice (app/pipeline/dub.py).
+    `sentences`: JSON [{start, end, text}], the source sentences' times and
+    their English text. Answers a 16-bit WAV with three channels: the English
+    voice, then the background in stereo. Downloads the models first if
+    needed. Progress and cancel under `job_id`: phase "download",
+    "separate", "voice" or "speak". Runs on the user's own machine; nothing
+    is uploaded."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    try:
+        parsed = json.loads(sentences)
+        items = [{"start": float(x["start"]), "end": float(x["end"]), "text": str(x["text"])[:2000]} for x in parsed]
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid sentences") from exc
+    limit = MAX_DUB_SECONDS * dub.RATE * 2 * 4
+    raw = await audio.read(limit + 1)
+    if not raw or len(raw) % 8 or len(raw) > limit:
+        raise HTTPException(status_code=400, detail="Invalid audio")
+    mix = np.frombuffer(raw, dtype="<f4").reshape(-1, 2).T
+    total = mix.shape[1] / dub.RATE
+    items = [x for x in items if x["text"].strip() and math.isfinite(x["start"]) and math.isfinite(x["end"]) and 0 <= x["start"] < x["end"] <= total + 1]
+    if not items:
+        raise HTTPException(status_code=400, detail="Nothing to say")
+    items.sort(key=lambda x: x["start"])
+
+    job = progress.start(job_id)
+
+    def report(stage: str, value: float) -> None:
+        if job:
+            job.check()
+            job.phase, job.done, job.total = stage, value, 1.0
+
+    try:
+        async with _speech_lock:
+            english, background = await asyncio.to_thread(dub.render, mix, items, report)
+    except progress.Cancelled as exc:
+        raise HTTPException(status_code=409, detail={"code": "cancelled", "message": "Voice translation cancelled."}) from exc
+    except OSError as exc:
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "model_download", "message": "The voice models couldn't be downloaded. Check your connection and try again."},
+        ) from exc
+    finally:
+        progress.finish(job_id)
+    pcm = (np.clip(np.vstack([english[None], background]).T, -1, 1) * 32767).astype("<i2")
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(3)
+        w.setsampwidth(2)
+        w.setframerate(dub.RATE)
+        w.writeframes(pcm.tobytes())
+    return Response(content=buf.getvalue(), media_type="audio/wav")
 
 
 @app.post("/api/video/probe")

@@ -191,3 +191,10 @@ export const ElementsIcon = (p: P) => (
     <path d="M7 21l4-7 4 7zM14 14h7v7h-7z" />
   </svg>
 );
+export const MoreIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <circle cx="5" cy="12" r="1.5" fill="currentColor" />
+    <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+    <circle cx="19" cy="12" r="1.5" fill="currentColor" />
+  </svg>
+);

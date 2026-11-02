@@ -24,6 +24,7 @@ export default function TranscriptPanel({
   modelCached,
   model,
   onDelete,
+  dub,
   onClose,
 }: {
   transcript: Transcript | undefined;
@@ -40,6 +41,10 @@ export default function TranscriptPanel({
   modelCached: boolean | null;
   model: { sizeMb: number; gpu: boolean; engine?: boolean; language?: string; cuda?: { available: boolean; ready: boolean; sizeMb: number } } | null;
   onDelete: (indices: number[]) => void;
+  /** Voice translation to English (desktop, a supported language); null to
+   * leave it out. `models`: whether its models are downloaded (null = still
+   * checking). */
+  dub: { models: { ready: boolean; sizeMb: number } | null; busy: boolean; onStart: () => void; onCancel: () => void } | null;
   onClose: () => void;
 }) {
   const words = useMemo(() => (current ? (transcript?.words ?? []) : []), [current, transcript]);
@@ -50,6 +55,7 @@ export default function TranscriptPanel({
   const focus = sel?.words === words ? sel.focus : null;
   const t = useClockTime(clock);
   const [consent, setConsent] = useState(false);
+  const [dubConsent, setDubConsent] = useState(false);
   const transcribeButton = (label: string) => (
     <>
       <SpeechGpuChoice gpu={model?.cuda} busy={busy} />
@@ -132,8 +138,53 @@ export default function TranscriptPanel({
             Each cut is one undo step.{hasCaptions ? " Captions are rebuilt from the transcript after a cut, so edits made to caption text are replaced." : ""}
           </p>
           {transcribeButton("Transcribe again")}
+          {dub && words.length > 0 && <DubSection dub={dub} busy={busy} consent={dubConsent} onConsent={() => setDubConsent(true)} />}
         </div>
       )}
     </PanelShell>
+  );
+}
+
+/** "Translate voice to English": asks before the first download of the
+ * voice models, then runs (lib/editor/dub.ts). */
+function DubSection({
+  dub,
+  busy,
+  consent,
+  onConsent,
+}: {
+  dub: NonNullable<Parameters<typeof TranscriptPanel>[0]["dub"]>;
+  busy: boolean;
+  consent: boolean;
+  onConsent: () => void;
+}) {
+  const needsModels = dub.models !== null && !dub.models.ready;
+  return (
+    <div className="space-y-2 border-t border-border pt-3">
+      <p className="text-sm font-semibold text-foreground">Translate voice to English</p>
+      <p className="text-[11px] text-muted">
+        The speech is said again in English in the speaker&apos;s own voice, over the video&apos;s own music and sounds. It lands as two new audio tracks and the
+        original speech is muted; undo to go back. Only the transcript&apos;s text is sent to WipeClip to translate; the audio and the voice stay on this
+        computer. Use it only with voices you have the right to use.
+      </p>
+      {dub.busy ? (
+        <ActionButton onClick={dub.onCancel}>Cancel translation</ActionButton>
+      ) : needsModels && !consent ? (
+        <div className="space-y-2 rounded-xl border border-border bg-surface-2/60 p-3 text-xs text-muted">
+          <p className="font-semibold text-foreground">Voice models needed (one time)</p>
+          <p>
+            About {dub.models?.sizeMb} MB, downloaded once and kept on this computer. Translating takes a few minutes per minute of video on the processor and
+            around 3 GB of memory.
+          </p>
+          <ActionButton tone="accent" onClick={onConsent} disabled={busy}>
+            Download voice models ({dub.models?.sizeMb} MB)
+          </ActionButton>
+        </div>
+      ) : (
+        <ActionButton tone="accent" onClick={dub.onStart} disabled={busy || dub.models === null}>
+          Translate voice to English
+        </ActionButton>
+      )}
+    </div>
   );
 }

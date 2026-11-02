@@ -34,6 +34,8 @@ hiddenimports += collect_submodules("uvicorn")
 # Speech recognition (app/pipeline/speech.py): imported lazily, and
 # ctranslate2's converter specs are loaded by name.
 hiddenimports += collect_submodules("faster_whisper") + collect_submodules("ctranslate2")
+# Voice translation (app/pipeline/dub.py): onnxruntime runs its models.
+hiddenimports += ["onnxruntime", "tokenizers"]
 
 a = Analysis(
     ["desktop_engine.py"],
@@ -45,7 +47,7 @@ a = Analysis(
     # decode files; the engine hands it samples, so a stub stands in.
     runtime_hooks=["pyi_rth_av_stub.py"],
     # Cloud-server-only modules; app/ imports them lazily and only when configured.
-    excludes=["redis", "rq", "google", "sentry_sdk", "rembg", "onnxruntime", "hypercorn", "a2wsgi", "boto3", "tkinter", "av", "torch", "transformers", "hf_xet"],
+    excludes=["redis", "rq", "google", "sentry_sdk", "rembg", "hypercorn", "a2wsgi", "boto3", "tkinter", "av", "torch", "transformers", "hf_xet"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

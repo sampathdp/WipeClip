@@ -86,7 +86,8 @@ import {
   type TextStyle,
   type Transcript,
 } from "@/lib/editor/types";
-import { ApiError, cleanAudio, ContentBlockedError, ModelNeededError, probeVideo } from "@/lib/toolsApi";
+import { ApiError, cleanAudio, ContentBlockedError, engineDubModels, ModelNeededError, probeVideo } from "@/lib/toolsApi";
+import { DUB_FROM, dubTimeline, type DubProgress } from "@/lib/editor/dub";
 import type { RecordingBundle } from "@/lib/recorder/bundle";
 import { recordingToSources } from "@/lib/recorder/editorImport";
 import { planRecordingProject, type ImportedTrack } from "@/lib/recorder/importPlan";
@@ -1225,6 +1226,80 @@ export default function VideoEditor({
       setCaptioning(false);
     }
   }, [transcribeTimeline, apply, say]);
+
+  // --- voice translation (desktop): the speech said again in English in
+  // the speaker's voice (lib/editor/dub.ts). Lands as two audio tracks, the
+  // English voice and the background, with the original speech muted - one
+  // undo step.
+  const [dubbing, setDubbing] = useState(false);
+  const [dubModels, setDubModels] = useState<{ ready: boolean; sizeMb: number } | null>(null);
+  const dubAbort = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (tool !== "transcript" || !IS_DESKTOP) return;
+    let cancelled = false;
+    void engineDubModels().then((m) => !cancelled && setDubModels(m));
+    return () => {
+      cancelled = true;
+    };
+  }, [tool, dubbing]);
+  const runDub = useCallback(async () => {
+    const transcript = project.transcript;
+    if (!transcript || !transcriptCurrent(transcript, lay)) return;
+    setPlaying(false);
+    setDubbing(true);
+    const abort = new AbortController();
+    dubAbort.current = abort;
+    const label = (p: DubProgress) => {
+      const pct = "value" in p ? ` ${Math.round(p.value * 100)}%` : "";
+      switch (p.stage) {
+        case "translate":
+          return "Translating the transcript…";
+        case "mix":
+          return "Preparing audio…";
+        case "download":
+          return `Downloading voice files (first time only)…${pct}`;
+        case "separate":
+          return `Separating the voice from the background…${pct}`;
+        case "voice":
+          return "Learning the speaker's voice…";
+        case "speak":
+          return `Speaking in English…${pct}`;
+      }
+    };
+    try {
+      const res = await dubTimeline(lay, project, sources, transcript.words, transcript.language, (p) => setBusy(label(p)), abort.signal);
+      const track = (file: File, label: string): { src: MediaSource; clip: AudioClip } => {
+        const src: MediaSource = { id: newId("snd"), kind: "audio", file, url: URL.createObjectURL(file), duration: lay.total, width: 0, height: 0, fps: 0, hasAudio: true };
+        const clip: AudioClip = { id: newId("aud"), sourceId: src.id, label, start: 0, offset: 0, duration: lay.total, volume: 1, fadeIn: 0, fadeOut: 0, muted: false };
+        return { src, clip };
+      };
+      const background = track(res.background, "Background (voice removed)");
+      const voice = { ...track(res.voice, "English voice") };
+      voice.clip.captions = "speech";
+      background.clip.captions = "music";
+      addSource(background.src);
+      addSource(voice.src);
+      const muted = new Set(res.tracks);
+      apply((p) => ({
+        ...p,
+        clips: p.clips.map((c) => (c.freeze === null && !c.reverse && c.volume > 0 && sources[c.sourceId]?.hasAudio ? { ...c, volume: 0 } : c)),
+        audio: [...p.audio.map((a) => (muted.has(a.id) ? { ...a, muted: true } : a)), background.clip, voice.clip],
+      }));
+      setSelection({ kind: "audio", id: voice.clip.id });
+      say("Added the English voice and the background as audio tracks; the original speech is muted. Undo to go back.");
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") {
+        say("Voice translation cancelled. Nothing was changed.");
+        return;
+      }
+      console.error("[dub]", e);
+      say(e instanceof ApiError ? e.message : "Voice translation failed. Check your connection and try again.");
+    } finally {
+      dubAbort.current = null;
+      setBusy(null);
+      setDubbing(false);
+    }
+  }, [project, lay, sources, addSource, apply, say]);
 
   /** Cuts the transcript words `indices` out of the video (one undo step);
    * captions, if any, are rebuilt from the words that are left. */
@@ -2705,6 +2780,11 @@ export default function VideoEditor({
         modelCached={modelCached}
         model={captionModel}
         onDelete={cutByWords}
+        dub={
+          IS_DESKTOP && project.transcript && DUB_FROM.has(project.transcript.language)
+            ? { models: dubModels, busy: dubbing, onStart: () => void runDub(), onCancel: () => dubAbort.current?.abort() }
+            : null
+        }
         onClose={() => setTool(null)}
       />
     );

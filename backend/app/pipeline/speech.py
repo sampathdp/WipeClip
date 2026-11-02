@@ -207,7 +207,8 @@ def ensure_model(model: SpeechModel, progress: Progress) -> Path:
         progress("download", min(1.0, done / total))
 
     for f in model.files:
-        dest = raw / f.name
+        dest = raw / f.name  # may be in a subfolder ("onnx/...")
+        dest.parent.mkdir(parents=True, exist_ok=True)
         if dest.is_file():  # kept from an earlier, interrupted run
             on_bytes(f.size)
             continue

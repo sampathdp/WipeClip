@@ -495,6 +495,65 @@ export async function engineTranscribe(
   }
 }
 
+/** Desktop app: whether the engine's voice translation models are
+ * downloaded (backend/app/pipeline/dub.py), and what's left to download.
+ * Null without an engine (the website). */
+export async function engineDubModels(): Promise<{ ready: boolean; sizeMb: number } | null> {
+  const engine = await optionalEngine().catch(() => null);
+  if (!engine) return null;
+  const res = await fetch(`${engine.url}/api/dub/models`, { headers: engineHeaders(engine) }).catch(() => null);
+  return res?.ok ? ((await res.json()) as { ready: boolean; sizeMb: number }) : null;
+}
+
+export type DubStage = "download" | "separate" | "voice" | "speak";
+
+/** Desktop app: the speech in `channels` (44.1 kHz stereo, timeline time)
+ * said again in English in the speaker's voice, by the engine. `sentences`:
+ * each source sentence's times and its English text. Resolves to a WAV
+ * with three channels - the English voice, then the background in stereo.
+ * `signal` stops it in the engine too. */
+export async function engineDub(
+  channels: Float32Array[],
+  sentences: { start: number; end: number; text: string }[],
+  onProgress: (stage: DubStage, value: number) => void,
+  signal?: AbortSignal
+): Promise<Blob> {
+  const engine = await localEngine();
+  if (!engine) throw new EngineUnavailableError();
+  const n = channels[0].length;
+  const interleaved = new Float32Array(n * 2);
+  const [left, right] = [channels[0], channels[1] ?? channels[0]];
+  for (let i = 0; i < n; i++) {
+    interleaved[2 * i] = left[i];
+    interleaved[2 * i + 1] = right[i];
+  }
+  const jobId = crypto.randomUUID();
+  const body = new FormData();
+  body.append("audio", new Blob([interleaved], { type: "application/octet-stream" }), "mix.f32");
+  body.append("sentences", JSON.stringify(sentences));
+  body.append("job_id", jobId);
+  const job = `${engine.url}/api/jobs/${jobId}`;
+  const cancel = () => void fetch(`${job}/cancel`, { method: "POST", headers: engineHeaders(engine) }).catch(() => {});
+  signal?.addEventListener("abort", cancel, { once: true });
+  const poll = setInterval(() => {
+    void fetch(job, { headers: engineHeaders(engine) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p: { phase: string; progress: number | null } | null) => {
+        if (p && ["download", "separate", "voice", "speak"].includes(p.phase)) onProgress(p.phase as DubStage, p.progress ?? 0);
+      })
+      .catch(() => {});
+  }, 700);
+  try {
+    const res = await fetch(`${engine.url}/api/dub/render`, { method: "POST", body, headers: engineHeaders(engine), signal });
+    if (res.status === 409) throw new DOMException("Voice translation cancelled", "AbortError");
+    if (!res.ok) await throwApiError(res, "Voice translation failed.");
+    return await res.blob();
+  } finally {
+    clearInterval(poll);
+    signal?.removeEventListener("abort", cancel);
+  }
+}
+
 /** The engine for optional measurements: null when there's none or it
  * couldn't start (the analysis then goes without the picture). */
 async function optionalEngine(): Promise<LocalEngine | null> {

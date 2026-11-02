@@ -17,7 +17,7 @@ import { ZoomInIcon, ZoomOutIcon } from "./icons";
 import { effectiveSpeed } from "@/lib/editor/speed";
 
 const PAD = 16; // px before t=0 so the first trim handle is reachable
-const GUTTER = 100; // sticky label column on the left of every row
+const GUTTER = 120; // sticky label column on the left of every row
 const CLIP_H = 64;
 const LANE_H = 30;
 const TICK_STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
@@ -91,6 +91,8 @@ export interface TimelineTrack {
    * ones (music beats) are also snap targets. */
   ticks?: { t: number; className: string; title?: string; snap?: boolean }[];
   toggles?: TrackToggle[];
+  /** Shows a delete-track button in the row header (onTrackDelete). */
+  deletable?: boolean;
 }
 
 // Layer item widths in pixels (TrackRow).
@@ -131,6 +133,10 @@ interface Props {
   onItemChange: (track: string, id: string, mode: ItemMode, start: number, end: number) => void;
   onMoveClip: (from: number, to: number) => void;
   onTrackToggle?: (track: string, kind: TrackToggle["kind"]) => void;
+  /** Removes every item on a track. */
+  onTrackDelete?: (track: string) => void;
+  /** Edit buttons shown in the header row in place of the time readout. */
+  actions?: React.ReactNode;
   onGestureStart: () => void;
   onGestureEnd: () => void;
 }
@@ -280,6 +286,7 @@ export default function Timeline(props: Props) {
     },
     select: (s: Selection) => props.onSelect(s),
     toggle: (track: string, kind: TrackToggle["kind"]) => props.onTrackToggle?.(track, kind),
+    remove: (track: string) => props.onTrackDelete?.(track),
   };
   const handlers = useRef(rowHandlers);
   useLayoutEffect(() => {
@@ -291,6 +298,7 @@ export default function Timeline(props: Props) {
       itemDown: (e, track, it, mode) => handlers.current.itemDown(e, track, it, mode),
       select: (s) => handlers.current.select(s),
       toggle: (track, kind) => handlers.current.toggle(track, kind),
+      remove: (track) => handlers.current.remove(track),
     }),
     []
   );
@@ -410,10 +418,12 @@ export default function Timeline(props: Props) {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between px-1 text-xs text-muted">
-        <span className="font-mono">
-          <TimeReadout clock={clock} /> / {formatTime(lay.total, true)}
-        </span>
+      <div className="flex items-center justify-between gap-2 px-1 text-xs text-muted">
+        {props.actions ?? (
+          <span className="font-mono">
+            <TimeReadout clock={clock} /> / {formatTime(lay.total, true)}
+          </span>
+        )}
         <div className="flex items-center gap-1">
           <IconButton
             label={snapOn ? "Snapping on (hold Alt to bypass)" : "Snapping off"}
@@ -665,6 +675,7 @@ interface RowApi {
   itemDown: (e: React.PointerEvent, track: string, it: TrackItem, mode: ItemMode) => void;
   select: (s: Selection) => void;
   toggle: (track: string, kind: TrackToggle["kind"]) => void;
+  remove: (track: string) => void;
 }
 
 /** One layer track. Memoized: dragging an item on one track doesn't
@@ -690,6 +701,17 @@ const TrackRow = memo(function TrackRow({
         {track.toggles?.map((tg) => (
           <TrackToggleButton key={tg.kind} toggle={tg} track={track.label} onClick={() => api.toggle(track.key, tg.kind)} />
         ))}
+        {track.deletable && (
+          <button
+            type="button"
+            title={`Delete all ${track.label.toLowerCase()}`}
+            aria-label={`Delete all ${track.label.toLowerCase()}`}
+            onClick={() => api.remove(track.key)}
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[11px] leading-none text-muted opacity-70 hover:bg-red-500/15 hover:text-red-400 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+          >
+            ✕
+          </button>
+        )}
       </RowGutter>
       {track.ticks?.map((tk, i) => (
         <span

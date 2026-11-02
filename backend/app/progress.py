@@ -27,6 +27,7 @@ class Cancelled(Exception):
 class JobProgress:
     # Exports: "checking" (reading, screening files) | "rendering".
     # Speech recognition: "download" | "prepare" | "transcribe".
+    # Voice translation: "download" | "separate" | "voice" | "speak".
     phase: str = "checking"
     done: float = 0.0  # seconds of output rendered (speech: a fraction)
     total: float = 0.0  # seconds of output (speech: 1)
