@@ -52,10 +52,50 @@ export async function diskMediaUrl(path: string): Promise<string> {
   return convertFileSrc(path);
 }
 
+/** Bytes asked for per request; the asset protocol answers at most about
+ * 1 MB of a range, and the loop takes whatever comes. */
+const RANGE_BYTES = 8 * 1024 * 1024;
+const RETRY_MS = [300, 1000, 3000];
+
 /** A disk file's contents as a File. Reads it whole (the browser may keep
- * a large one in its own temporary storage rather than memory). */
+ * a large one in its own temporary storage rather than memory).
+ *
+ * In range requests, the way the video player reads it: whole-file
+ * requests to the asset protocol fail ("Failed to fetch" after a 200)
+ * when two run at once - the waveform and captions reading the same video -
+ * and keep failing for a few seconds after, so captions said the video had
+ * no sound. Range requests didn't fail, even three readers at once (WebView2,
+ * Windows 11). A failed range is tried again a few times. */
 export async function readDiskFile(media: DiskMedia): Promise<File> {
-  const res = await fetch(await diskMediaUrl(media.path));
-  if (!res.ok) throw new Error(`"${media.name}" can't be read. It may have been moved or deleted.`);
-  return new File([await res.blob()], media.name, { type: media.type });
+  const url = await diskMediaUrl(media.path);
+  const unreadable = () => new Error(`"${media.name}" can't be read. It may have been moved or deleted.`);
+  const parts: Blob[] = [];
+  let at = 0;
+  let total = Infinity;
+  while (at < total) {
+    const { status, part, range } = await readRange(url, at, unreadable);
+    if (status === 200) return new File([part], media.name, { type: media.type }); // the whole file after all
+    total = Number(/\/(\d+)$/.exec(range ?? "")?.[1] ?? at + part.size);
+    if (part.size === 0) throw unreadable();
+    parts.push(part);
+    at += part.size;
+  }
+  return new File(parts, media.name, { type: media.type });
+}
+
+/** One range, fetched and read, tried again after a failure. */
+async function readRange(url: string, at: number, unreadable: () => Error): Promise<{ status: number; part: Blob; range: string | null }> {
+  for (let attempt = 0; ; attempt++) {
+    let status = 0;
+    try {
+      const res = await fetch(url, { headers: { Range: `bytes=${at}-${at + RANGE_BYTES - 1}` } });
+      status = res.status;
+      if (res.ok) return { status, part: await res.blob(), range: res.headers.get("content-range") };
+    } catch {
+      // Failed to fetch, or the body broke off: try again.
+    }
+    // Not allowed or gone: trying again won't help.
+    if (status === 403 || status === 404 || attempt >= RETRY_MS.length) throw unreadable();
+    await new Promise((r) => setTimeout(r, RETRY_MS[attempt]));
+  }
 }
