@@ -1,9 +1,14 @@
 {
-  "next": [
-    "Fixed exports with captions or long text failing with \"An image has an unsupported size\".",
-    "Long recordings with many cuts can now be exported (up to 1000 clips)."
-  ],
+  "next": [],
   "releases": [
+    {
+      "version": "0.1.16",
+      "date": "2026-11-03",
+      "notes": [
+        "Fixed exports with captions or long text failing with \"An image has an unsupported size\".",
+        "Long recordings with many cuts can now be exported (up to 1000 clips)."
+      ]
+    },
     {
       "version": "0.1.15",
       "date": "2026-11-03",
