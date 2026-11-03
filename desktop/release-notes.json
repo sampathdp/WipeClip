@@ -1,5 +1,7 @@
 {
-  "next": [],
+  "next": [
+    "Fixed every export failing with \"Export failed\" since the app started using a newer video engine."
+  ],
   "releases": [
     {
       "version": "0.1.13",
