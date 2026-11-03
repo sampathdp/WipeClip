@@ -1,9 +1,14 @@
 {
-  "next": [
-    "Fixed exports with many captions failing with \"Too many layers\": long captioned videos now export.",
-    "Fixed exports with captions or stickers coming out in the wrong colours in some players."
-  ],
+  "next": [],
   "releases": [
+    {
+      "version": "0.1.15",
+      "date": "2026-11-03",
+      "notes": [
+        "Fixed exports with many captions failing with \"Too many layers\": long captioned videos now export.",
+        "Fixed exports with captions or stickers coming out in the wrong colours in some players."
+      ]
+    },
     {
       "version": "0.1.14",
       "date": "2026-11-03",
