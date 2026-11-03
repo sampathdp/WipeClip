@@ -1,8 +1,13 @@
 {
-  "next": [
-    "Fixed every export failing with \"Export failed\" since the app started using a newer video engine."
-  ],
+  "next": [],
   "releases": [
+    {
+      "version": "0.1.14",
+      "date": "2026-11-03",
+      "notes": [
+        "Fixed every export failing with \"Export failed\" since the app started using a newer video engine."
+      ]
+    },
     {
       "version": "0.1.13",
       "date": "2026-11-03",
