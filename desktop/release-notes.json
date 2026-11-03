@@ -1,5 +1,12 @@
 {
-  "next": [],
+  "next": [
+    "Fixed exports failing after translating the voice of a video longer than about five minutes.",
+    "When an export fails, it now says why.",
+    "Open, edit and export videos of any length. Exports are no longer stopped after 20 minutes, and a finished export is saved straight from disk, so long videos no longer run out of memory.",
+    "Captions, voice translation, loudness and timeline waveforms now work on long videos and large files, and start faster.",
+    "Exporting the same videos again is quicker: they are checked once, not on every export.",
+    "The free plan exports videos up to 10 minutes; paid plans export any length."
+  ],
   "releases": [
     {
       "version": "0.1.12",
