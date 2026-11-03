@@ -97,7 +97,7 @@ export async function exportProject(
     }
     const key = rasterKey(o);
     const raster = await loadRaster(o, sources);
-    if (!imageIndex.has(key)) imageIndex.set(key, imageBlobs.push(raster.blob) - 1);
+    if (!imageIndex.has(key)) imageIndex.set(key, imageBlobs.push(await fitForExport(raster.blob)) - 1);
     overlayPayload.push({
       image: imageIndex.get(key)!,
       start: round(o.start),
@@ -259,7 +259,7 @@ export async function exportProject(
     sourceIds.map((id) => sourceInput(sources[id])),
     imageBlobs,
     audioIds.map((id) => sourceInput(sources[id])),
-    bgSource?.file ?? null,
+    bgSource?.file ? new File([await fitForExport(bgSource.file)], bgSource.file.name) : null,
     resolution,
     signal,
     onProgress,
@@ -301,6 +301,34 @@ function planHints(o: Overlay) {
 
 function blendKey(o: Overlay): { blend?: string } {
   return o.blend && o.blend !== "normal" ? { blend: o.blend } : {};
+}
+
+/** Largest image side the export takes (EDITOR_MAX_STICKER_DIMENSION in
+ * backend/app/config.py), the same cap as animated text's sheets (textAnim.ts). */
+const EXPORT_IMAGE_MAX = 2048;
+
+/** `blob`, scaled down to fit EXPORT_IMAGE_MAX if it's larger. Caption and
+ * text lines are drawn at a 160 px font, so a long line is 2000-3500 px wide
+ * and the export refused it ("An image has an unsupported size"); the layer
+ * is drawn at most canvas-wide anyway. Same proportions, so it is placed and
+ * sized exactly as before (overlayWidth). */
+async function fitForExport(blob: Blob): Promise<Blob> {
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const f = EXPORT_IMAGE_MAX / Math.max(bitmap.width, bitmap.height);
+    if (f >= 1) return blob;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(2, Math.round(bitmap.width * f));
+    canvas.height = Math.max(2, Math.round(bitmap.height * f));
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    return await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not prepare an image for export"))), "image/png")
+    );
+  } finally {
+    bitmap.close();
+  }
 }
 
 function round(n: number) {
