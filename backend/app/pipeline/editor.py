@@ -50,6 +50,7 @@ client.
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 import os
@@ -590,6 +591,28 @@ def timeline_duration(plan: ExportPlan) -> float:
 
 def _num(value: float) -> str:
     return f"{value:.6f}".rstrip("0").rstrip(".") or "0"
+
+
+_FFMPEG_MAJOR = re.compile(r"ffmpeg version n?(\d+)\.")
+
+
+@functools.lru_cache(maxsize=1)
+def _ffmpeg_major() -> int:
+    """The ffmpeg binary's major version; 0 if it can't be told (a git build)."""
+    try:
+        out = subprocess.run([get_ffmpeg_path(), "-hide_banner", "-version"], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    m = _FFMPEG_MAJOR.search(out)
+    return int(m.group(1)) if m else 0
+
+
+def _graph_args(script: str) -> list[str]:
+    """Reads the filter graph from the file `script`. ffmpeg 7 added
+    `-/filter_complex <file>` and ffmpeg 8 removed the old
+    `-filter_complex_script`, which failed every desktop export once the
+    bundled ffmpeg became 9.0. Older builds (a system ffmpeg) keep the old one."""
+    return ["-/filter_complex", script] if _ffmpeg_major() >= 7 else ["-filter_complex_script", script]
 
 
 def _even(v: float) -> int:
@@ -1534,7 +1557,7 @@ def build_segment_args(plan: ExportPlan, indexes: list[int], output_path: str, t
     script = os.path.join(tmp, f"segment{n}.txt")
     with open(script, "w", encoding="utf-8") as f:
         f.write(";\n".join(graph))
-    args = ["-y", "-hide_banner", *inputs.args, "-filter_complex_script", script, "-map", "[sv]"]
+    args = ["-y", "-hide_banner", *inputs.args, *_graph_args(script), "-map", "[sv]"]
     if plan.with_audio:
         args += ["-map", f"[{a_acc}]", "-c:a", "pcm_s16le"]
     return args + [
@@ -1645,14 +1668,14 @@ def build_export_args(
         f.write(";\n".join(graph))
 
     if plan.output_format == "gif":
-        return ["-y", "-hide_banner", *inputs.args, "-filter_complex_script", script, "-map", "[outv]", "-loop", "0", "-t", _num(total), output_path]
+        return ["-y", "-hide_banner", *inputs.args, *_graph_args(script), "-map", "[outv]", "-loop", "0", "-t", _num(total), output_path]
     if plan.output_format == "audio":
         return [
-            "-y", "-hide_banner", *inputs.args, "-filter_complex_script", script,
+            "-y", "-hide_banner", *inputs.args, *_graph_args(script),
             "-map", f"[{a_acc}]", "-c:a", "aac", "-b:a", plan.audio_bitrate, "-t", _num(total), output_path,
         ]  # fmt: skip
 
-    args = ["-y", "-hide_banner", *inputs.args, "-filter_complex_script", script, "-map", "[outv]"]
+    args = ["-y", "-hide_banner", *inputs.args, *_graph_args(script), "-map", "[outv]"]
     if plan.with_audio:
         args += ["-map", f"[{a_acc}]", "-c:a", "aac", "-b:a", plan.audio_bitrate]
     args += [

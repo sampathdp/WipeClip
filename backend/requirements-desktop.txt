@@ -11,7 +11,11 @@ python-multipart>=0.0.9
 opencv-contrib-python-headless>=4.9.0
 numpy>=1.26.0
 Pillow>=10.2.0
-imageio-ffmpeg>=0.5.1
+# Pinned: it bundles the ffmpeg binary the engine runs. A release once picked
+# up a new ffmpeg (9.0) that dropped an option the export used, and every
+# export failed. Change it on purpose and run the backend tests with
+# IMAGEIO_FFMPEG_EXE pointing at its binary.
+imageio-ffmpeg==0.8.0
 # Speech recognition for captions (app/pipeline/speech.py). Pinned: speech.py
 # relies on its batched pipeline's clip handling. It also pulls in av, which
 # desktop.spec leaves out (only used for decoding files, which the engine
