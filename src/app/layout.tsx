@@ -33,7 +33,7 @@ export const metadata: Metadata = {
   },
   // Kept under ~160 characters so search results show it whole.
   description:
-    "WipeClip is a free video editor and screen recorder for Windows and Mac. Record your screen, cut pauses, add zooms, captions, text and music, then export.",
+    "Free video editor and screen recorder for Windows and Mac. Auto captions in 6 languages, voice translation to English, auto zooms and full-quality export.",
   keywords: [
     "video editor for windows",
     "video editor for mac",
@@ -44,6 +44,14 @@ export const metadata: Metadata = {
     "add stickers to video",
     "video filters online",
     ...(AI_CLEANUP_ENABLED ? ["remove object from video"] : ["add captions to video"]),
+    "auto captions",
+    "sinhala subtitles",
+    "tamil subtitles",
+    "hindi subtitles",
+    "kannada subtitles",
+    "telugu subtitles",
+    "translate video to english",
+    "ai voice translation",
     "wipeclip",
   ],
   authors: [{ name: "WipeClip.co" }],
@@ -60,7 +68,7 @@ export const metadata: Metadata = {
     description:
       AI_CLEANUP_ENABLED
         ? "Record your screen, trim, cut, add transitions, text, stickers and filters on Windows and Mac. Free forever, with AI tools to clean up your footage."
-        : "Record your screen, trim, cut, add transitions, text, stickers and filters on Windows and Mac. Free forever, with AI auto captions.",
+        : "Record, trim, cut and caption on Windows and Mac. Free forever, with captions in 6 languages and voice translation to English in your own voice.",
     locale: "en_US",
     // Same English pages, offered to UK, Irish and EU visitors too.
     alternateLocale: ["en_GB", "en_IE", "en_DE", "en_FR", "en_NL"],
@@ -79,7 +87,7 @@ export const metadata: Metadata = {
     description:
       AI_CLEANUP_ENABLED
         ? "Record your screen, trim, cut, add transitions, text, stickers and filters on Windows and Mac. Free forever, with AI tools to clean up your footage."
-        : "Record your screen, trim, cut, add transitions, text, stickers and filters on Windows and Mac. Free forever, with AI auto captions.",
+        : "Record, trim, cut and caption on Windows and Mac. Free forever, with captions in 6 languages and voice translation to English in your own voice.",
     images: ["/opengraph-image"],
   },
   robots: {

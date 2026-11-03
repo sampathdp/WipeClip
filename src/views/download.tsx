@@ -78,6 +78,8 @@ const FEATURE_LIST = [
   "Click highlights and smooth cursor",
   "Pause, dead time and retake detection",
   "On-device captions with SRT and WebVTT export",
+  "Captions in English, Sinhala, Tamil, Hindi, Kannada and Telugu",
+  "Voice translation to English in the speaker's own voice",
   "Privacy blur and pixelate masks",
   "Keyboard shortcut indicators",
   "Chapters and annotations",

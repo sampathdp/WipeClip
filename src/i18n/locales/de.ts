@@ -363,13 +363,14 @@ const de: Dict = {
     freeTools: "Gratis-Tools:",
     allTools: "Alle Tools",
     guides: "Ratgeber",
+    whatsNew: "Neuigkeiten",
     disclaimer:
       "Nur für Inhalte, die du selbst erstellt hast oder bearbeiten darfst. Es ist verboten, mit WipeClip.co Urheber- oder andere Rechte Dritter zu verletzen. Nicht mit Videoplattformen oder KI-Modellanbietern verbunden. Bitte lies unsere {terms}.",
     termsLink: "Nutzungsbedingungen",
   },
 
   hero: {
-    badge: "KI-Untertitel automatisch",
+    badge: "Neu: Sprachübersetzung mit deiner eigenen Stimme",
     h1: ["Desktop-", "Videoeditor ", "für Creator"],
     intro:
       "Clips schneiden, kürzen und anordnen, Übergänge, Text, Sticker, Filter und Musik hinzufügen und im Quer-, Hoch- oder Quadratformat exportieren. Kostenlos für Windows und Mac, mit integriertem Bildschirmrekorder. Automatische Untertitel und Bild-in-Bild inklusive.",
@@ -378,6 +379,39 @@ const de: Dict = {
     trust: ["Dauerhaft kostenloser Plan", "Ohne Konto starten", "Windows & Mac"],
     marquee: ["MP4", "MOV", "WEBM", "SCHNEIDEN · KÜRZEN · ÜBERGÄNGE", "AUTO-UNTERTITEL", "BILD-IN-BILD", "TEXT · STICKER · MUSIK", "FILTER", "QUER · HOCH · QUADRAT"],
     videoLabel: "Vorschau des Videoeditors",
+  },
+
+  whatsNew: {
+    badge: "Neu",
+    title: "Große Updates, ",
+    titleHighlight: "frisch gelandet",
+    intro: "Das neueste Desktop-Update spricht dein Video noch einmal auf Englisch, erstellt Untertitel in sechs Sprachen mit deutlich weniger Fehlern und gibt dem Editor ein aufgeräumteres Layout. Kostenlos für Windows und Mac.",
+    strip: ["Sprachübersetzung", "Singhalesisch", "Tamil", "Hindi", "Kannada", "Telugu", "Untertitel auf dem Gerät", "Aufgeräumter Editor"],
+    voice: {
+      eyebrow: "Neu · Sprachübersetzung",
+      title: ["Deine Stimme,", "jetzt auf Englisch."],
+      desc: "Gesprochenes Singhalesisch, Tamil, Hindi, Kannada oder Telugu wird auf Englisch neu gesprochen, mit der eigenen Stimme der sprechenden Person und über der Musik und den Geräuschen des Videos. Das Ergebnis landet als neue Audiospuren, die du rückgängig machen kannst.",
+      from: "Originalton",
+      to: "Englisch · gleiche Stimme",
+    },
+    captions: {
+      eyebrow: "Untertitel",
+      title: "6 Sprachen, viel weniger Fehler",
+      desc: "Neue Sprachmodelle für Singhalesisch, Tamil, Hindi, Kannada und Telugu, deutlich genaueres Englisch und eine Spracherkennung, die sie auseinanderhält.",
+    },
+    speed: {
+      eyebrow: "Auf deinem Computer",
+      title: "Untertitel in Sekunden",
+      desc: "Sprache wird von WipeClips eigener Engine auf deinem Computer erkannt. Mit einer unterstützten Grafikkarte ist ein Video in Sekunden untertitelt.",
+    },
+    editor: {
+      eyebrow: "Editor",
+      title: "Ein Panel. Mehr Platz für dein Video.",
+      desc: "Werkzeuge und Clip-Einstellungen öffnen sich jetzt in einem Seitenpanel mit Tabs, damit die Vorschau mehr Platz bekommt.",
+      tabs: ["Basis", "Tempo & Ton", "Rahmen"],
+    },
+    download: "Neueste Version holen",
+    changelog: "Alle Updates ansehen",
   },
 
   featureTour: {

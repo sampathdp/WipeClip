@@ -363,13 +363,14 @@ const nl: Dict = {
     freeTools: "Gratis tools:",
     allTools: "Alle tools",
     guides: "Gidsen",
+    whatsNew: "Wat is er nieuw",
     disclaimer:
       "Alleen voor inhoud die je zelf hebt gemaakt of mag bewerken. Het is verboden WipeClip.co te gebruiken om iemands auteursrecht of andere rechten te schenden. Niet verbonden aan enig videoplatform of aanbieder van AI-modellen. Lees onze {terms}.",
     termsLink: "Servicevoorwaarden",
   },
 
   hero: {
-    badge: "Automatische AI-ondertitels",
+    badge: "Nieuw: spraakvertaling met je eigen stem",
     h1: ["De desktop-", "video-editor ", "voor makers"],
     intro:
       "Knip, kort in en orden clips, voeg overgangen, tekst, stickers, filters en muziek toe en exporteer liggend, staand of vierkant. Gratis voor Windows en Mac, met ingebouwde schermrecorder. Automatische ondertitels en beeld-in-beeld inbegrepen.",
@@ -378,6 +379,39 @@ const nl: Dict = {
     trust: ["Altijd gratis abonnement", "Geen account nodig om te starten", "Windows & Mac"],
     marquee: ["MP4", "MOV", "WEBM", "KNIPPEN · INKORTEN · OVERGANGEN", "AUTOMATISCHE ONDERTITELS", "BEELD-IN-BEELD", "TEKST · STICKERS · MUZIEK", "FILTERS", "LIGGEND · STAAND · VIERKANT"],
     videoLabel: "Voorbeeld van de video-editor",
+  },
+
+  whatsNew: {
+    badge: "Nieuw",
+    title: "Grote updates, ",
+    titleHighlight: "net binnen",
+    intro: "De nieuwste desktopupdate spreekt je video opnieuw in het Engels uit, ondertitelt zes talen met veel minder fouten en geeft de editor een overzichtelijkere indeling. Gratis voor Windows en Mac.",
+    strip: ["Spraakvertaling", "Singalees", "Tamil", "Hindi", "Kannada", "Telugu", "Ondertitels op je apparaat", "Overzichtelijke editor"],
+    voice: {
+      eyebrow: "Nieuw · Spraakvertaling",
+      title: ["Jouw stem,", "nu in het Engels."],
+      desc: "Gesproken Singalees, Tamil, Hindi, Kannada of Telugu wordt opnieuw in het Engels uitgesproken met de eigen stem van de spreker, over de muziek en geluiden van de video. Het komt binnen als nieuwe audiosporen die je ongedaan kunt maken.",
+      from: "Originele spraak",
+      to: "Engels · dezelfde stem",
+    },
+    captions: {
+      eyebrow: "Ondertitels",
+      title: "6 talen, veel minder fouten",
+      desc: "Nieuwe spraakmodellen voor Singalees, Tamil, Hindi, Kannada en Telugu, veel nauwkeuriger Engels en taaldetectie die ze uit elkaar houdt.",
+    },
+    speed: {
+      eyebrow: "Op je computer",
+      title: "Ondertitels in seconden",
+      desc: "Spraak wordt herkend door WipeClips eigen engine op je computer. Met een ondersteunde videokaart is een video in seconden ondertiteld.",
+    },
+    editor: {
+      eyebrow: "Editor",
+      title: "Eén paneel. Meer ruimte voor je video.",
+      desc: "Tools en clipinstellingen openen nu in één zijpaneel met tabbladen, zodat de preview meer ruimte krijgt.",
+      tabs: ["Basis", "Snelheid & geluid", "Kader"],
+    },
+    download: "Haal de nieuwste versie",
+    changelog: "Bekijk alle updates",
   },
 
   featureTour: {

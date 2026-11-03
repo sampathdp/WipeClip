@@ -1,6 +1,7 @@
 import { SITE_URL, SUPPORT_EMAIL } from "@/lib/seo";
 import { PLANS } from "@/lib/credits";
 import { DESKTOP_DOWNLOADS } from "@/lib/download";
+import { LATEST_RELEASE } from "@/lib/releases";
 
 export const dynamic = "force-static";
 
@@ -19,6 +20,9 @@ export function GET() {
 
 Key facts:
 
+- Latest version: ${LATEST_RELEASE.version} (${LATEST_RELEASE.date}).
+- Captions: generated on the user's computer in English, Sinhala, Tamil, Hindi, Kannada and Telugu, with automatic language detection; exports .srt and .vtt.
+- Voice translation: Sinhala, Tamil, Hindi, Kannada or Telugu speech is said again in English in the speaker's own voice, over the video's original music and sounds.
 - Runs on: ${DESKTOP_DOWNLOADS.map((d) => `${d.label} (${d.requirements})`).join(", ")}.
 - Price: free to download, record and edit, with 2 free credits a day. Optional one-time passes, no subscription and no automatic renewal: ${passes}. Passes add premium transitions, filters and effects, exports up to 4K and more credits. 14-day refunds.
 - Privacy: recordings and projects stay on the user's computer; files uploaded for processing are deleted after the result is returned and are never used to train models.
@@ -31,6 +35,7 @@ Key facts:
 ${page("/download", "Download the app", "features, system requirements and installers for Windows and macOS")}
 ${page("/pricing", "Pricing", "free plan, one-time passes and what each includes")}
 ${page("/about", "About", "what WipeClip is, who makes it and how files are handled")}
+${page("/whats-new", "What's new", "release notes for every desktop app version")}
 
 ## Free tools
 

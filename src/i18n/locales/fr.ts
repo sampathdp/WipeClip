@@ -363,13 +363,14 @@ const fr: Dict = {
     freeTools: "Outils gratuits :",
     allTools: "Tous les outils",
     guides: "Guides",
+    whatsNew: "Nouveautés",
     disclaimer:
       "Uniquement pour le contenu que vous avez créé ou que vous avez le droit de modifier. Il est interdit d'utiliser WipeClip.co pour porter atteinte aux droits d'auteur ou autres droits de quiconque. Sans lien avec une plateforme vidéo ou un fournisseur de modèles d'IA. Veuillez consulter nos {terms}.",
     termsLink: "Conditions d'utilisation",
   },
 
   hero: {
-    badge: "Sous-titres automatiques par IA",
+    badge: "Nouveau : traduction vocale avec votre propre voix",
     h1: ["L'éditeur vidéo ", "de bureau ", "pour créateurs"],
     intro:
       "Coupez et organisez vos clips, ajoutez transitions, texte, stickers, filtres et musique, puis exportez en paysage, vertical ou carré. Gratuit pour Windows et Mac, avec un enregistreur d'écran intégré. Sous-titres automatiques et image dans l'image inclus.",
@@ -378,6 +379,39 @@ const fr: Dict = {
     trust: ["Offre gratuite pour toujours", "Sans compte pour commencer", "Windows et Mac"],
     marquee: ["MP4", "MOV", "WEBM", "COUPER · DIVISER · TRANSITIONS", "SOUS-TITRES AUTO", "IMAGE DANS L'IMAGE", "TEXTE · STICKERS · MUSIQUE", "FILTRES", "PAYSAGE · VERTICAL · CARRÉ"],
     videoLabel: "Aperçu de l'éditeur vidéo",
+  },
+
+  whatsNew: {
+    badge: "Nouveau",
+    title: "De grosses nouveautés, ",
+    titleHighlight: "tout juste arrivées",
+    intro: "La dernière mise à jour de l'application redit votre vidéo en anglais, sous-titre six langues avec beaucoup moins d'erreurs et offre à l'éditeur une mise en page plus claire. Gratuit sur Windows et Mac.",
+    strip: ["Traduction vocale", "Cingalais", "Tamoul", "Hindi", "Kannada", "Télougou", "Sous-titres sur l'appareil", "Éditeur épuré"],
+    voice: {
+      eyebrow: "Nouveau · Traduction vocale",
+      title: ["Votre voix,", "désormais en anglais."],
+      desc: "La parole en cingalais, tamoul, hindi, kannada ou télougou est redite en anglais avec la propre voix de la personne qui parle, par-dessus la musique et les sons de la vidéo. Le résultat arrive sous forme de nouvelles pistes audio que vous pouvez annuler.",
+      from: "Voix d'origine",
+      to: "Anglais · même voix",
+    },
+    captions: {
+      eyebrow: "Sous-titres",
+      title: "6 langues, bien moins d'erreurs",
+      desc: "De nouveaux modèles vocaux pour le cingalais, le tamoul, le hindi, le kannada et le télougou, un anglais bien plus précis et une détection de langue qui les distingue.",
+    },
+    speed: {
+      eyebrow: "Sur votre ordinateur",
+      title: "Des sous-titres en quelques secondes",
+      desc: "La parole est reconnue par le moteur de WipeClip sur votre ordinateur. Avec une carte graphique compatible, une vidéo est sous-titrée en quelques secondes.",
+    },
+    editor: {
+      eyebrow: "Éditeur",
+      title: "Un seul panneau. Plus de place pour votre vidéo.",
+      desc: "Les outils et les réglages des clips s'ouvrent désormais dans un seul panneau latéral organisé en onglets, pour laisser plus de place à l'aperçu.",
+      tabs: ["Base", "Vitesse & son", "Cadre"],
+    },
+    download: "Obtenir la dernière version",
+    changelog: "Voir toutes les mises à jour",
   },
 
   featureTour: {

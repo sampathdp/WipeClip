@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PLANS } from "./credits";
 import { LANG_INFO, languageAlternates, localeHref, type Lang } from "./i18n";
+import { LATEST_RELEASE } from "./releases";
 
 export const SITE_URL = "https://www.wipeclip.co";
 export const SITE_NAME = "WipeClip.co";
@@ -20,6 +21,9 @@ export function softwareAppJsonLd(extra: Record<string, unknown> = {}) {
     applicationSubCategory: "Video editor and screen recorder",
     operatingSystem: "Windows 10, Windows 11, macOS 11+",
     isAccessibleForFree: true,
+    softwareVersion: LATEST_RELEASE.version,
+    dateModified: LATEST_RELEASE.date,
+    releaseNotes: `${SITE_URL}/whats-new`,
     offers: {
       "@type": "AggregateOffer",
       priceCurrency: "USD",

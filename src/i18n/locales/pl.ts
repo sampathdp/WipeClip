@@ -363,13 +363,14 @@ const pl: Dict = {
     freeTools: "Darmowe narzędzia:",
     allTools: "Wszystkie narzędzia",
     guides: "Poradniki",
+    whatsNew: "Co nowego",
     disclaimer:
       "Tylko dla treści, które stworzyłeś lub masz prawo edytować. Używanie WipeClip.co do naruszania czyichkolwiek praw autorskich lub innych praw jest zabronione. Nie jesteśmy powiązani z żadną platformą wideo ani dostawcą modeli AI. Zapoznaj się z naszym {terms}.",
     termsLink: "Regulaminem",
   },
 
   hero: {
-    badge: "Automatyczne napisy AI",
+    badge: "Nowość: tłumaczenie mowy Twoim własnym głosem",
     h1: ["Edytor wideo ", "na komputer ", "dla twórców"],
     intro:
       "Przycinaj, tnij i układaj klipy, dodawaj przejścia, tekst, naklejki, filtry i muzykę, a potem eksportuj w poziomie, pionie lub kwadracie. Za darmo na Windows i Mac, z wbudowanym rejestratorem ekranu. Automatyczne napisy i obraz w obrazie w zestawie.",
@@ -378,6 +379,39 @@ const pl: Dict = {
     trust: ["Plan darmowy na zawsze", "Bez konta na start", "Windows i Mac"],
     marquee: ["MP4", "MOV", "WEBM", "PRZYCINANIE · CIĘCIE · PRZEJŚCIA", "AUTOMATYCZNE NAPISY", "OBRAZ W OBRAZIE", "TEKST · NAKLEJKI · MUZYKA", "FILTRY", "POZIOMO · PIONOWO · KWADRAT"],
     videoLabel: "Podgląd edytora wideo",
+  },
+
+  whatsNew: {
+    badge: "Nowość",
+    title: "Duże aktualizacje, ",
+    titleHighlight: "właśnie wylądowały",
+    intro: "Najnowsza aktualizacja aplikacji mówi Twoje wideo jeszcze raz po angielsku, tworzy napisy w sześciu językach ze znacznie mniejszą liczbą błędów i daje edytorowi bardziej przejrzysty układ. Za darmo na Windows i Mac.",
+    strip: ["Tłumaczenie mowy", "Syngaleski", "Tamilski", "Hindi", "Kannada", "Telugu", "Napisy na urządzeniu", "Przejrzysty edytor"],
+    voice: {
+      eyebrow: "Nowość · Tłumaczenie mowy",
+      title: ["Twój głos,", "teraz po angielsku."],
+      desc: "Mowa po syngalesku, tamilsku, w hindi, kannada lub telugu jest wypowiadana ponownie po angielsku głosem osoby mówiącej, na tle muzyki i dźwięków z wideo. Trafia na nowe ścieżki audio, które możesz cofnąć.",
+      from: "Oryginalna mowa",
+      to: "Angielski · ten sam głos",
+    },
+    captions: {
+      eyebrow: "Napisy",
+      title: "6 języków, dużo mniej błędów",
+      desc: "Nowe modele mowy dla syngaleskiego, tamilskiego, hindi, kannada i telugu, znacznie dokładniejszy angielski i wykrywanie języka, które je rozróżnia.",
+    },
+    speed: {
+      eyebrow: "Na Twoim komputerze",
+      title: "Napisy w kilka sekund",
+      desc: "Mowę rozpoznaje własny silnik WipeClip na Twoim komputerze. Z obsługiwaną kartą graficzną wideo ma napisy w kilka sekund.",
+    },
+    editor: {
+      eyebrow: "Edytor",
+      title: "Jeden panel. Więcej miejsca na wideo.",
+      desc: "Narzędzia i ustawienia klipów otwierają się teraz w jednym panelu bocznym z kartami, więc podgląd ma więcej miejsca.",
+      tabs: ["Podstawy", "Szybkość i dźwięk", "Kadr"],
+    },
+    download: "Pobierz najnowszą wersję",
+    changelog: "Zobacz wszystkie aktualizacje",
   },
 
   featureTour: {

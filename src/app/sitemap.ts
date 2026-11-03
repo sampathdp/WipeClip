@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/seo";
+import { LATEST_RELEASE } from "@/lib/releases";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import { languageAlternates, localeHref, LOCALES } from "@/lib/i18n";
 
@@ -17,7 +18,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const entries: MetadataRoute.Sitemap = [
     {
       url: siteUrl,
-      lastModified: "2026-10-21",
+      lastModified: "2026-11-03",
       changeFrequency: "weekly",
       priority: 1,
     },
@@ -35,9 +36,15 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
     {
       url: `${siteUrl}/download`,
-      lastModified: "2026-10-21",
+      lastModified: "2026-11-03",
       changeFrequency: "weekly",
       priority: 0.9,
+    },
+    {
+      url: `${siteUrl}/whats-new`,
+      lastModified: LATEST_RELEASE.date,
+      changeFrequency: "weekly",
+      priority: 0.7,
     },
     {
       url: `${siteUrl}/tools`,

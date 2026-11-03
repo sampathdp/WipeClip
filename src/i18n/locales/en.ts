@@ -12,7 +12,7 @@ const en = {
     home: {
       title: "Video Editor & Screen Recorder for Windows and Mac",
       description:
-        "WipeClip is a free video editor and screen recorder for Windows and Mac. Record your screen, cut pauses, add zooms, captions, text and music, then export.",
+        "Free video editor and screen recorder for Windows and Mac. Auto captions in 6 languages, voice translation to English, auto zooms and full-quality export.",
     },
   },
 
@@ -27,13 +27,14 @@ const en = {
     freeTools: "Free tools:",
     allTools: "All tools",
     guides: "Guides",
+    whatsNew: "What's new",
     disclaimer:
       "For content you created or have the rights to edit only. Using WipeClip.co to infringe anyone's copyright or other rights is prohibited. Not affiliated with any third-party video platform or AI model provider. Please review our {terms}.",
     termsLink: "Terms of Service",
   },
 
   hero: {
-    badge: "AI Auto Captions",
+    badge: "New: voice translation in your own voice",
     h1: ["Desktop Video ", "Editor ", "for Creators"],
     intro:
       "Trim, cut and arrange clips, add transitions, text, stickers, filters and music, then export in landscape, vertical or square. Free for Windows and Mac, with a built-in screen recorder. Auto captions and picture-in-picture included.",
@@ -42,6 +43,39 @@ const en = {
     trust: ["Free forever plan", "No account to start", "Windows & Mac"],
     marquee: ["MP4", "MOV", "WEBM", "TRIM · CUT · TRANSITIONS", "AUTO CAPTIONS", "PICTURE-IN-PICTURE", "TEXT · STICKERS · MUSIC", "FILTERS", "LANDSCAPE · VERTICAL · SQUARE"],
     videoLabel: "Video editor preview",
+  },
+
+  whatsNew: {
+    badge: "New",
+    title: "Big updates, ",
+    titleHighlight: "just landed",
+    intro: "The latest desktop update says your video again in English, captions six languages with far fewer mistakes and gives the editor a cleaner layout. Free on Windows and Mac.",
+    strip: ["Voice translation", "Sinhala", "Tamil", "Hindi", "Kannada", "Telugu", "On-device captions", "Cleaner editor"],
+    voice: {
+      eyebrow: "New · Voice translation",
+      title: ["Your voice,", "now in English."],
+      desc: "Sinhala, Tamil, Hindi, Kannada or Telugu speech is said again in English in the speaker's own voice, over the video's own music and sounds. It lands as new audio tracks you can undo.",
+      from: "Original speech",
+      to: "English · same voice",
+    },
+    captions: {
+      eyebrow: "Captions",
+      title: "6 languages, far fewer mistakes",
+      desc: "New speech models for Sinhala, Tamil, Hindi, Kannada and Telugu, much more accurate English, and language detection that tells them apart.",
+    },
+    speed: {
+      eyebrow: "On your computer",
+      title: "Captions in seconds",
+      desc: "Speech is recognised by WipeClip's own engine on your computer. On a supported graphics card, a video is captioned in seconds.",
+    },
+    editor: {
+      eyebrow: "Editor",
+      title: "One panel. More room for your video.",
+      desc: "Tools and clip settings now open in one side panel, split into tabs, so the preview gets more space.",
+      tabs: ["Basics", "Speed & sound", "Frame"],
+    },
+    download: "Get the latest version",
+    changelog: "See every update",
   },
 
   featureTour: {

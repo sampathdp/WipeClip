@@ -363,13 +363,14 @@ const es: Dict = {
     freeTools: "Herramientas gratis:",
     allTools: "Todas las herramientas",
     guides: "Guías",
+    whatsNew: "Novedades",
     disclaimer:
       "Solo para contenido que has creado o que tienes derecho a editar. Está prohibido usar WipeClip.co para infringir los derechos de autor u otros derechos de nadie. Sin relación con ninguna plataforma de vídeo ni proveedor de modelos de IA. Consulta nuestros {terms}.",
     termsLink: "Términos del servicio",
   },
 
   hero: {
-    badge: "Subtítulos automáticos con IA",
+    badge: "Nuevo: traducción de voz con tu propia voz",
     h1: ["El editor de vídeo ", "de escritorio ", "para creadores"],
     intro:
       "Recorta, corta y ordena clips, añade transiciones, texto, stickers, filtros y música, y exporta en horizontal, vertical o cuadrado. Gratis para Windows y Mac, con grabador de pantalla integrado. Subtítulos automáticos e imagen en imagen incluidos.",
@@ -378,6 +379,39 @@ const es: Dict = {
     trust: ["Plan gratis para siempre", "Sin cuenta para empezar", "Windows y Mac"],
     marquee: ["MP4", "MOV", "WEBM", "RECORTAR · CORTAR · TRANSICIONES", "SUBTÍTULOS AUTOMÁTICOS", "IMAGEN EN IMAGEN", "TEXTO · STICKERS · MÚSICA", "FILTROS", "HORIZONTAL · VERTICAL · CUADRADO"],
     videoLabel: "Vista previa del editor de vídeo",
+  },
+
+  whatsNew: {
+    badge: "Nuevo",
+    title: "Grandes novedades, ",
+    titleHighlight: "recién llegadas",
+    intro: "La última actualización de la app vuelve a decir tu vídeo en inglés, subtitula seis idiomas con muchos menos errores y le da al editor un diseño más limpio. Gratis para Windows y Mac.",
+    strip: ["Traducción de voz", "Cingalés", "Tamil", "Hindi", "Canarés", "Telugu", "Subtítulos en el equipo", "Editor más limpio"],
+    voice: {
+      eyebrow: "Nuevo · Traducción de voz",
+      title: ["Tu voz,", "ahora en inglés."],
+      desc: "El habla en cingalés, tamil, hindi, canarés o telugu se vuelve a decir en inglés con la propia voz de quien habla, sobre la música y los sonidos del vídeo. Llega como nuevas pistas de audio que puedes deshacer.",
+      from: "Voz original",
+      to: "Inglés · misma voz",
+    },
+    captions: {
+      eyebrow: "Subtítulos",
+      title: "6 idiomas, muchos menos errores",
+      desc: "Nuevos modelos de voz para cingalés, tamil, hindi, canarés y telugu, un inglés mucho más preciso y una detección de idioma que los distingue.",
+    },
+    speed: {
+      eyebrow: "En tu ordenador",
+      title: "Subtítulos en segundos",
+      desc: "El motor propio de WipeClip reconoce el habla en tu ordenador. Con una tarjeta gráfica compatible, un vídeo queda subtitulado en segundos.",
+    },
+    editor: {
+      eyebrow: "Editor",
+      title: "Un panel. Más espacio para tu vídeo.",
+      desc: "Las herramientas y los ajustes de los clips se abren ahora en un único panel lateral con pestañas, para que la vista previa tenga más espacio.",
+      tabs: ["Básico", "Velocidad y sonido", "Marco"],
+    },
+    download: "Consigue la última versión",
+    changelog: "Ver todas las novedades",
   },
 
   featureTour: {

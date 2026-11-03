@@ -81,16 +81,29 @@ export default function Hero({ lang = "en" }: { lang?: Lang }) {
         <div className="grid gap-16 lg:grid-cols-12 lg:items-center lg:gap-8">
           {/* Left: Hero Text - asymmetric 5/12 */}
           <div className="mx-auto max-w-xl text-center lg:col-span-5 lg:mx-0 lg:max-w-none lg:text-left">
-            {/* Sticker-style AI Pill */}
-            <div className="mb-7 inline-flex -rotate-1 items-center gap-2 rounded-full border border-cyan-500/30 bg-surface-2/90 py-1.5 pl-2.5 pr-4 text-xs font-semibold text-cyan-700 shadow-[0_0_25px_rgba(34,211,238,0.25)] backdrop-blur-xl">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" className="shrink-0 text-cyan-600">
-                <path
-                  d="M12 2l1.8 5.6L19 9l-5.2 1.6L12 16l-1.8-5.4L5 9l5.2-1.4L12 2z"
-                  fill="currentColor"
-                />
-              </svg>
-              <span className="tracking-wide">{AI_CLEANUP_ENABLED ? "AI Motion-Aware Inpainting" : t.badge}</span>
-            </div>
+            {/* Sticker-style pill: the AI tag, or a link to the newest features */}
+            {AI_CLEANUP_ENABLED ? (
+              <div className="mb-7 inline-flex -rotate-1 items-center gap-2 rounded-full border border-cyan-500/30 bg-surface-2/90 py-1.5 pl-2.5 pr-4 text-xs font-semibold text-cyan-700 shadow-[0_0_25px_rgba(34,211,238,0.25)] backdrop-blur-xl">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" className="shrink-0 text-cyan-600">
+                  <path
+                    d="M12 2l1.8 5.6L19 9l-5.2 1.6L12 16l-1.8-5.4L5 9l5.2-1.4L12 2z"
+                    fill="currentColor"
+                  />
+                </svg>
+                <span className="tracking-wide">AI Motion-Aware Inpainting</span>
+              </div>
+            ) : (
+              <a
+                href="#new"
+                className="group mb-7 inline-flex -rotate-1 items-center gap-2 rounded-full border border-rose-500/30 bg-surface-2/90 py-1 pl-1 pr-4 text-xs font-semibold text-foreground shadow-[0_0_25px_rgba(244,63,94,0.25)] backdrop-blur-xl transition-transform hover:rotate-0 hover:scale-[1.03]"
+              >
+                <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-white">
+                  {getDict(lang).whatsNew.badge}
+                </span>
+                <span className="tracking-wide">{t.badge}</span>
+                <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
+              </a>
+            )}
 
             {/* Core Headline - stacked, oversized, mixed weight */}
             <h1 className="font-display text-6xl tracking-tighter leading-[0.92] text-foreground sm:text-7xl lg:text-6xl xl:text-7xl">
