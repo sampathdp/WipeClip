@@ -1,5 +1,8 @@
 {
-  "next": [],
+  "next": [
+    "Fixed exports with captions or long text failing with \"An image has an unsupported size\".",
+    "Long recordings with many cuts can now be exported (up to 1000 clips)."
+  ],
   "releases": [
     {
       "version": "0.1.15",
