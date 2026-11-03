@@ -141,6 +141,25 @@ export async function saveExportFile(blob: Blob, suggestedName: string, kind: "v
   return { status: "saved", path };
 }
 
+/** Desktop: a finished export the engine left on disk (toolsApi
+ * RenderedFile). Played and saved from there, so a long video never has to
+ * fit in the page's memory. */
+export async function renderedExportUrl(path: string): Promise<string> {
+  await invoke("show_rendered_export", { path });
+  const { diskMediaUrl } = await import("./media");
+  return diskMediaUrl(path);
+}
+
+export async function saveRenderedExport(path: string, suggestedName: string): Promise<SaveResult> {
+  const token = await invoke<string | null>("choose_export_path", { suggestedName, kind: "video" });
+  if (!token) return { status: "cancelled" };
+  return { status: "saved", path: await invoke<string>("save_rendered_export", { token, path }) };
+}
+
+export function discardRenderedExport(path: string): void {
+  void invoke("discard_rendered_export", { path }).catch(() => {});
+}
+
 /** Where a batch of exports goes: desktop, a folder the user picks once
  * (null if cancelled); website, the browser's downloads ("downloads"). */
 export async function chooseExportFolder(): Promise<string | null> {

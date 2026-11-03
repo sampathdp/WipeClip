@@ -10,13 +10,13 @@
  */
 import { ANALYSIS_RATE } from "./audioAnalysis";
 import { clipMixVolume, playedSourceId, trackGainAt } from "./mix";
-import { sourceFile, sourceName, sourceSize } from "./sourceFile";
+import { sourceName } from "./sourceFile";
+import { decodeSourceAudio } from "./sourceAudio";
 import { RAMP_SEGMENTS, activeRamp, rampSegments } from "./speed";
 import type { Layout } from "./timeline";
 import type { MediaSource, Project } from "./types";
 
 const RATE = ANALYSIS_RATE;
-const MAX_DECODE_BYTES = 400 * 1024 * 1024; // decodeAudioData holds the whole file
 const CURVE_RATE = 50; // gain automation points per second
 
 export interface ProgramMix {
@@ -38,13 +38,7 @@ export async function renderProgramMix(lay: Layout, project: Project, sources: R
         skipped.add(name);
         return null;
       };
-      p =
-        sourceSize(src) > MAX_DECODE_BYTES
-          ? Promise.resolve(skip())
-          : sourceFile(src)
-              .then((f) => f.arrayBuffer())
-              .then((bytes) => new OfflineAudioContext(1, 1, RATE).decodeAudioData(bytes))
-              .catch(skip);
+      p = decodeSourceAudio(src, RATE).then((buf) => (buf && buf !== "too_large" ? buf : skip()));
       decoded.set(src.id, p);
     }
     return p;

@@ -86,6 +86,7 @@ export default function BatchExportDialog({
           setNotes((prev) => [...prev, x]);
         }
         const blob = await exportProject(project, sources, originalId, resolution, ctrl.signal);
+        if (!(blob instanceof Blob)) throw new Error("Export failed.");
         const res = await saveExportInFolder(folder, blob, item.fileName);
         if (res.status === "saved") {
           saved++;

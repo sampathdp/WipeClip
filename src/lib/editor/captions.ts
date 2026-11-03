@@ -9,12 +9,12 @@ import { DEFAULT_TEXT } from "./textRaster";
 import { newId, type Layout } from "./timeline";
 import type { AnimIn, AudioClip, MediaSource, Overlay, Project, TextStyle } from "./types";
 import { clippedSpans, type AudioSpan } from "./audioAnalysis";
-import { sourceFile, sourceName, sourceSize } from "./sourceFile";
+import { sourceName } from "./sourceFile";
+import { decodeSourceAudio } from "./sourceAudio";
 import { RAMP_SEGMENTS, activeRamp, rampSegments } from "./speed";
 import { detectSpeech, probeWindows, speechVerdict } from "./speechDetect";
 
 const RATE = 16000; // what Whisper works at
-const MAX_DECODE_BYTES = 400 * 1024 * 1024; // decodeAudioData holds the whole file
 
 export interface CaptionWord {
   start: number;
@@ -75,14 +75,11 @@ export async function buildSpeechMix(
   const decode = (src: MediaSource) => {
     let p = decoded.get(src.id);
     if (!p) {
-      if (sourceSize(src) > MAX_DECODE_BYTES) skipped.push(sourceName(src) || "a large file");
-      p =
-        sourceSize(src) > MAX_DECODE_BYTES
-          ? Promise.resolve(null)
-          : sourceFile(src)
-              .then((f) => f.arrayBuffer())
-              .then((bytes) => new OfflineAudioContext(1, 1, rate).decodeAudioData(bytes))
-              .catch(() => null);
+      p = decodeSourceAudio(src, rate, opts.channels === 2 ? 2 : 1).then((buf) => {
+        if (buf !== "too_large") return buf;
+        skipped.push(sourceName(src) || "a large file");
+        return null;
+      });
       decoded.set(src.id, p);
     }
     return p;

@@ -95,6 +95,10 @@ pub async fn local_engine(app: AppHandle, state: State<'_, EngineState>) -> Resu
     if let Ok(dir) = app.path().app_local_data_dir() {
         command.env("WIPECLIP_MODELS_DIR", dir.join("speech-models"));
     }
+    // Finished exports stay on disk there (export.rs rendered_dir).
+    if let Some(dir) = crate::export::rendered_dir(&app) {
+        command.env("WIPECLIP_EXPORTS_DIR", dir);
+    }
     let started = tauri::async_runtime::spawn_blocking(move || start(&mut command))
         .await
         .map_err(|e| e.to_string())??;

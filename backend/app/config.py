@@ -290,6 +290,10 @@ EDITOR_MAX_TRANSITION_SECONDS: float = 2.0
 EDITOR_MAX_FPS: float = 60.0
 EDITOR_MAX_AUDIO: int = 12  # audio clips (and uploaded audio files) per export
 EDITOR_MAX_AUDIO_BYTES: int = 50 * 1024 * 1024
+# The desktop engine takes audio the app made itself on the user's machine:
+# voice translation's full-length WAVs (44.1 kHz stereo, about 10 MB a
+# minute) passed the cloud cap above at five minutes and failed the export.
+EDITOR_MAX_LOCAL_AUDIO_BYTES: int = MAX_VIDEO_UPLOAD_BYTES
 EDITOR_MAX_EFFECTS: int = 30
 # Keyframes per clip or layer, and how far (seconds) their times may reach.
 EDITOR_MAX_KEYFRAMES: int = 100

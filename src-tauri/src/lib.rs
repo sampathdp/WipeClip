@@ -350,6 +350,9 @@ pub fn run() {
             export::export_path_in,
             export::write_export,
             export::reveal_export,
+            export::show_rendered_export,
+            export::save_rendered_export,
+            export::discard_rendered_export,
             export::save_text_file,
             secure_storage::secure_storage_get,
             secure_storage::secure_storage_set,
@@ -410,6 +413,7 @@ pub fn run() {
                 }
             }
             create_main_window(app)?;
+            export::clear_rendered(app.handle());
             // Launched by double-clicking a project file (Windows/Linux).
             if let Ok(cwd) = std::env::current_dir() {
                 let args: Vec<String> = std::env::args().collect();

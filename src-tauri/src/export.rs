@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use tauri::ipc::{InvokeBody, Request};
-use tauri::State;
+use tauri::{Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -217,10 +217,93 @@ pub async fn save_text_file(app: tauri::AppHandle, suggested_name: String, conte
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
-pub(crate) fn write_atomically(target: &Path, bytes: &[u8]) -> io::Result<()> {
+/// Where the engine leaves finished exports (WIPECLIP_EXPORTS_DIR, see
+/// engine.rs): a long video then never passes through the page's memory.
+/// `save_rendered_export` copies one to where the user saves it, and the
+/// page discards it when the export dialog closes; anything left over is
+/// removed when the app starts.
+pub(crate) fn rendered_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path().app_local_data_dir().ok().map(|d| d.join("exports"))
+}
+
+/// Leftovers from a previous run (the app quit before the dialog closed).
+pub(crate) fn clear_rendered(app: &tauri::AppHandle) {
+    let Some(dir) = rendered_dir(app) else { return };
+    let Ok(entries) = fs::read_dir(&dir) else { return };
+    for entry in entries.flatten() {
+        let _ = fs::remove_file(entry.path());
+    }
+}
+
+/// `path` if it's a file directly in rendered_dir; the page can't name any
+/// other file.
+fn rendered_file(app: &tauri::AppHandle, path: &str) -> Result<PathBuf, String> {
+    let dir = rendered_dir(app).and_then(|d| fs::canonicalize(d).ok()).ok_or("Unknown file.")?;
+    let file = fs::canonicalize(path).map_err(|_| "That export is no longer there. Export it again.".to_string())?;
+    if file.parent() != Some(dir.as_path()) || !file.is_file() {
+        return Err("Unknown file.".into());
+    }
+    Ok(file)
+}
+
+/// Lets the page play a finished export from the engine's folder.
+#[tauri::command]
+pub fn show_rendered_export(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    rendered_file(&app, &path)?;
+    app.asset_protocol_scope().allow_file(&path).map_err(|e| e.to_string())
+}
+
+/// Copies a finished export to the location chosen with `choose_export_path`.
+#[tauri::command]
+pub async fn save_rendered_export(app: tauri::AppHandle, state: State<'_, ExportState>, token: String, path: String) -> Result<String, String> {
+    let source = rendered_file(&app, &path)?;
+    let target = state.pending.lock().unwrap().remove(&token).ok_or("That save location has expired. Choose it again.")?;
+    let to = target.clone();
+    let copied = tauri::async_runtime::spawn_blocking(move || copy_atomically(&to, &source))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| {
+            log::error!("export save to {} failed: {e}", crate::media::log_name(&target));
+            friendly_io_error(&e)
+        })?;
+    log::info!("export saved: {} ({copied} bytes)", crate::media::log_name(&target));
+    state.saved.lock().unwrap().insert(target.clone());
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Deletes a finished export the page no longer needs.
+#[tauri::command]
+pub fn discard_rendered_export(app: tauri::AppHandle, path: String) {
+    if let Ok(file) = rendered_file(&app, &path) {
+        let _ = fs::remove_file(file);
+    }
+}
+
+/// A temporary name beside `target`, for writing it atomically.
+fn partial_path(target: &Path) -> io::Result<PathBuf> {
     let dir = target.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no parent folder"))?;
     let name = target.file_name().unwrap_or_default().to_string_lossy();
-    let temp = dir.join(format!(".{name}.{}.partial", uuid::Uuid::new_v4().simple()));
+    Ok(dir.join(format!(".{name}.{}.partial", uuid::Uuid::new_v4().simple())))
+}
+
+/// `write_atomically` for a file already on disk: copied beside the target,
+/// flushed, then renamed into place.
+pub(crate) fn copy_atomically(target: &Path, source: &Path) -> io::Result<u64> {
+    let temp = partial_path(target)?;
+    let result = (|| {
+        let copied = fs::copy(source, &temp)?;
+        fs::OpenOptions::new().write(true).open(&temp)?.sync_all()?;
+        fs::rename(&temp, target)?;
+        Ok(copied)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
+pub(crate) fn write_atomically(target: &Path, bytes: &[u8]) -> io::Result<()> {
+    let temp = partial_path(target)?;
     let result = (|| {
         let mut file = File::create(&temp)?;
         file.write_all(bytes)?;
@@ -304,6 +387,14 @@ mod tests {
 
         let missing = dir.join("missing-folder").join("out.mp4");
         assert!(write_atomically(&missing, b"x").is_err());
+
+        let source = dir.join("rendered.mp4");
+        fs::write(&source, b"rendered").unwrap();
+        assert_eq!(copy_atomically(&target, &source).unwrap(), 8);
+        assert_eq!(fs::read(&target).unwrap(), b"rendered");
+        assert!(source.exists(), "the rendered file is left for the page to discard");
+        assert!(copy_atomically(&missing, &source).is_err());
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 2, "no temp file left behind");
         fs::remove_dir_all(&dir).unwrap();
     }
 }

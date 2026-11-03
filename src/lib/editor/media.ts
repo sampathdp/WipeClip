@@ -158,14 +158,19 @@ export async function generateWaveform(file: File, signal: AbortSignal): Promise
         peaks[i] = max;
       }
     }
-    let loudest = 0;
-    for (const p of peaks) if (p > loudest) loudest = p;
-    if (loudest < 1e-4) return null; // silent track - nothing to draw
-    for (let i = 0; i < count; i++) peaks[i] /= loudest;
-    return { rate: audio.sampleRate / block, peaks };
+    return normalizedWaveform(peaks, audio.sampleRate / block);
   } catch {
     return null;
   }
+}
+
+/** Peaks scaled to the loudest one; null for a silent track (nothing to draw). */
+export function normalizedWaveform(peaks: Float32Array, rate: number): Waveform | null {
+  let loudest = 0;
+  for (const p of peaks) if (p > loudest) loudest = p;
+  if (loudest < 1e-4) return null;
+  for (let i = 0; i < peaks.length; i++) peaks[i] /= loudest;
+  return { rate, peaks };
 }
 
 /** Duration of an audio (or video) file's audio, via an <audio> element.

@@ -52,6 +52,7 @@ Environment variables:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import hmac
 import io
@@ -59,9 +60,12 @@ import json
 import math
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 import time
 import traceback
+import uuid
 import wave
 from pathlib import Path
 from typing import Optional
@@ -81,6 +85,7 @@ from app.config import (
     EDITOR_COMPACT_CRF,
     EDITOR_MAX_AUDIO,
     EDITOR_MAX_AUDIO_BYTES,
+    EDITOR_MAX_LOCAL_AUDIO_BYTES,
     EDITOR_MAX_CAMERA_ROWS,
     EDITOR_MAX_CLIPS,
     EDITOR_MAX_EFFECTS,
@@ -186,6 +191,35 @@ def _assert_internal_caller(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Direct calls to this endpoint aren't permitted.")
 
 
+# Desktop engine: what an export found out about a video on this machine,
+# keyed by (path, size, modified time). Probing, the full decode check and the
+# content screening take seconds on a long video and were redone on every
+# export of the same, unchanged file.
+_local_checks: dict[tuple[str, int, int], editor_pipeline.MediaInfo] = {}
+_LOCAL_CHECKS_MAX = 64
+
+
+def _checked_local_video(path: str) -> editor_pipeline.MediaInfo:
+    """Probes, decode-checks and screens a video named by path (desktop
+    engine), once per version of the file. Raises ValueError if it can't be
+    read and HTTPException if screening refuses it."""
+    st = os.stat(path)
+    key = (path, st.st_size, st.st_mtime_ns)
+    cached = _local_checks.get(key)
+    if cached is not None:
+        return dataclasses.replace(cached)
+    info = editor_pipeline.probe_media(path)
+    # OpenCV's read also proves frames actually decode (probe_media only
+    # parses container metadata) - catches truncated files.
+    cv_info, _ = video_pipeline.probe_video(path)
+    info.duration = max(info.duration, cv_info.duration)
+    _assert_video_safe(path)
+    if len(_local_checks) >= _LOCAL_CHECKS_MAX:
+        _local_checks.clear()
+    _local_checks[key] = dataclasses.replace(info)
+    return info
+
+
 def _assert_video_safe(path: str) -> None:
     """Screens the video at `path` for explicit content; see
     app/pipeline/moderation.py for what this does and doesn't cover.
@@ -273,6 +307,19 @@ def _stream_result(path: str, media_type: str) -> FileResponse:
     os.close(fd)
     os.replace(path, kept)
     return FileResponse(kept, media_type=media_type, background=BackgroundTask(os.remove, kept))
+
+
+def _kept_result(path: str, media_type: str) -> dict:
+    """Desktop engine: moves a finished export into WIPECLIP_EXPORTS_DIR
+    (set by the app, which copies it to where the user saves it and deletes
+    it afterwards) and names it, instead of sending the bytes."""
+    folder = os.environ.get("WIPECLIP_EXPORTS_DIR")
+    if not folder:
+        raise HTTPException(status_code=400, detail="This engine has no folder for finished exports.")
+    os.makedirs(folder, exist_ok=True)
+    kept = os.path.join(folder, f"{uuid.uuid4().hex}{Path(path).suffix}")
+    shutil.move(path, kept)
+    return {"path": kept, "size": os.path.getsize(kept), "type": media_type}
 
 
 @app.get("/api/jobs/{job_id}")
@@ -404,7 +451,9 @@ async def api_audio_clean(
     """
     if not LOCAL_MODE:
         raise HTTPException(status_code=404, detail="Not available here.")
-    if end <= start or end - start > MAX_VIDEO_DURATION_SECONDS + 1:
+    # No length cap: ffmpeg streams the range, and the noise floor is read
+    # from at most two minutes of it (audio_clean._ANALYZE_SECONDS).
+    if end <= start:
         raise HTTPException(status_code=400, detail="Invalid range")
     with tempfile.TemporaryDirectory() as tmp:
         in_path = await _receive_video(file, None, tmp, path=path, suffixes=_VIDEO_SUFFIXES | _AUDIO_SUFFIXES)
@@ -417,6 +466,77 @@ async def api_audio_clean(
                 status_code=400, detail="This audio couldn't be cleaned up. The file may have no sound, or a format that can't be read."
             ) from exc
         return _stream_result(out_path, "audio/mp4")
+
+
+_DECODE_RATES = {8000, 16000, 22050, 24000, 44100, 48000}
+# Waveform: peaks per second, from audio decoded at this rate (media.ts).
+_PEAKS_PER_SECOND = 50
+_PEAKS_RATE = 8000
+
+
+@app.post("/api/audio/decode")
+async def api_audio_decode(path: str = Form(...), rate: int = Form(16000), channels: int = Form(1)):
+    """Desktop engine only: a file's whole sound as raw 32-bit float PCM
+    (interleaved, 1 or 2 `channels`, at `rate`), decoded by ffmpeg straight
+    from disk. The editor's captions, voice translation and loudness read the
+    whole file into the page and decoded it there before, which skipped
+    files over 400 MB (any long video)."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    if rate not in _DECODE_RATES or channels not in (1, 2):
+        raise HTTPException(status_code=400, detail="Invalid format")
+    src = _local_file(path, _AUDIO_SUFFIXES | _VIDEO_SUFFIXES)
+    fd, out = tempfile.mkstemp(suffix=".f32")
+    os.close(fd)
+    try:
+        await video_pipeline._run_ffmpeg(["-y", "-i", src, "-vn", "-ac", str(channels), "-ar", str(rate), "-f", "f32le", out])
+    except RuntimeError as exc:
+        os.remove(out)
+        raise HTTPException(status_code=400, detail="This file's sound couldn't be read.") from exc
+    return FileResponse(out, media_type="application/octet-stream", background=BackgroundTask(os.remove, out))
+
+
+def _audio_peaks(path: str) -> np.ndarray:
+    """The loudest sample in each 1/_PEAKS_PER_SECOND s of a file's sound,
+    decoded as a stream so a long file is never held in memory whole."""
+    block = _PEAKS_RATE // _PEAKS_PER_SECOND
+    proc = subprocess.Popen(
+        [video_pipeline.get_ffmpeg_path(), "-loglevel", "error", "-i", path, "-vn", "-ac", "1", "-ar", str(_PEAKS_RATE), "-f", "f32le", "-"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+    )
+    assert proc.stdout is not None
+    parts: list[np.ndarray] = []
+    pending = b""
+    step = block * 4  # bytes per peak
+    while chunk := proc.stdout.read(step * 4096):
+        data = pending + chunk
+        whole = len(data) // step * step
+        pending = data[whole:]
+        if whole:
+            parts.append(np.abs(np.frombuffer(data[:whole], np.float32)).reshape(-1, block).max(axis=1))
+    tail = len(pending) // 4 * 4
+    if tail:
+        parts.append(np.abs(np.frombuffer(pending[:tail], np.float32)).max(keepdims=True))
+    if proc.wait() != 0 and not parts:
+        raise ValueError("no sound")
+    return np.concatenate(parts).astype(np.float32) if parts else np.zeros(0, np.float32)
+
+
+@app.post("/api/audio/peaks")
+async def api_audio_peaks(path: str = Form(...)):
+    """Desktop engine only: the timeline waveform of a file on this machine,
+    as float32 peaks (_PEAKS_PER_SECOND a second, not normalized). The page
+    used to read and decode the whole file for it, and drew none over 400 MB."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    src = _local_file(path, _AUDIO_SUFFIXES | _VIDEO_SUFFIXES)
+    try:
+        peaks = await asyncio.to_thread(_audio_peaks, src)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="This file's sound couldn't be read.") from exc
+    return Response(peaks.tobytes(), media_type="application/octet-stream")
 
 
 MAX_ACTIVITY_RANGES = 50
@@ -654,13 +774,22 @@ async def api_video_probe(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        if info.duration > MAX_VIDEO_DURATION_SECONDS:
+        # The desktop engine opens videos of any length; the export's plan
+        # decides how long an edit may be (api_video_export).
+        if info.duration > MAX_VIDEO_DURATION_SECONDS and not LOCAL_MODE:
             raise HTTPException(
                 status_code=400,
                 detail=f"Video too long ({info.duration:.0f}s); max supported is {MAX_VIDEO_DURATION_SECONDS:.0f}s",
             )
 
-        _assert_video_safe(in_path)
+        if LOCAL_MODE and path:
+            # Also remembered for the export, so it isn't screened again.
+            try:
+                _checked_local_video(in_path)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        else:
+            _assert_video_safe(in_path)
 
         # Only the editor reads this (to show "no audio" and to know whether
         # a silent track needs synthesizing on export); best-effort so a
@@ -1231,6 +1360,7 @@ async def api_video_export(
     source_paths: Optional[str] = Form(None),
     audio_paths: Optional[str] = Form(None),
     job_id: Optional[str] = Form(None),
+    keep_output: bool = Form(False),
 ):
     """Renders a browser-editor project (see app/pipeline/editor.py) into
     one MP4. `sources[0]` is the original upload and sets the frame rate and
@@ -1243,6 +1373,13 @@ async def api_video_export(
 
     With a `job_id` (see app/progress.py) the caller can watch the render's
     progress at /api/jobs/{job_id} and cancel it there.
+
+    Desktop engine with `keep_output`: the file stays on disk in
+    WIPECLIP_EXPORTS_DIR and the answer is JSON {path, size, type}, so a long
+    export never has to pass through the app's memory (the app copies it to
+    where the user saves it). Length: the ticket's `maxSeconds` (the plan's
+    limit; null = none) on the desktop engine, MAX_VIDEO_DURATION_SECONDS on
+    the cloud backend.
 
     Nothing the client says about a file is trusted: every video and audio
     file is re-probed (videos are moderation-screened too), every image is
@@ -1262,6 +1399,13 @@ async def api_video_export(
     if resolution not in RESOLUTION_HEIGHTS:
         raise HTTPException(status_code=403, detail="Invalid job ticket.")
     branding, compact = bool(job.get("branding")), bool(job.get("compact"))
+    if LOCAL_MODE:
+        # The plan's limit; a ticket from before plans set one keeps the old cap.
+        raw_max = job.get("maxSeconds", MAX_VIDEO_DURATION_SECONDS)
+        max_seconds: Optional[float] = None if raw_max is None else float(raw_max)
+    else:
+        max_seconds = MAX_VIDEO_DURATION_SECONDS
+        keep_output = False
     await tickets.claim(ticket)
     # Each source/audio is ("upload", UploadFile) or ("path", str).
     src_plan = _local_paths(source_paths, "source_paths")
@@ -1361,19 +1505,24 @@ async def api_video_export(
                     suffix = Path(item.filename or "").suffix.lower()
                     path = os.path.join(tmp, f"source{i}{suffix if suffix in _VIDEO_SUFFIXES else '.mp4'}")
                     total_bytes += _save_upload(item, path, MAX_VIDEO_UPLOAD_BYTES)
-                    if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES:
+                    if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES and not LOCAL_MODE:
                         raise HTTPException(status_code=400, detail="Project files are too large to export together")
                 try:
-                    info = editor_pipeline.probe_media(path)
-                    # OpenCV's read also proves frames actually decode (probe_media
-                    # only parses container metadata) - catches truncated files.
-                    cv_info, _ = video_pipeline.probe_video(path)
+                    if kind == "path":
+                        info = _checked_local_video(path)
+                    else:
+                        info = editor_pipeline.probe_media(path)
+                        # OpenCV's read also proves frames actually decode (probe_media
+                        # only parses container metadata) - catches truncated files.
+                        cv_info, _ = video_pipeline.probe_video(path)
+                        info.duration = max(info.duration, cv_info.duration)
                 except ValueError as exc:
                     raise HTTPException(status_code=400, detail="One of the videos could not be read") from exc
-                info.duration = max(info.duration, cv_info.duration)
-                if info.duration > MAX_VIDEO_DURATION_SECONDS + 1:
+                # A long source is fine on the desktop: only the edit's length counts there.
+                if info.duration > MAX_VIDEO_DURATION_SECONDS + 1 and not LOCAL_MODE:
                     raise HTTPException(status_code=400, detail="Video too long")
-                _assert_video_safe(path)
+                if kind != "path":
+                    _assert_video_safe(path)
                 source_paths.append(path)
                 if job:
                     job.check()
@@ -1389,8 +1538,8 @@ async def api_video_export(
                 else:
                     suffix = Path(item.filename or "").suffix.lower()
                     path = os.path.join(tmp, f"audio{i}{suffix if suffix in _AUDIO_SUFFIXES else '.bin'}")
-                    total_bytes += _save_upload(item, path, EDITOR_MAX_AUDIO_BYTES)
-                    if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES:
+                    total_bytes += _save_upload(item, path, EDITOR_MAX_LOCAL_AUDIO_BYTES if LOCAL_MODE else EDITOR_MAX_AUDIO_BYTES)
+                    if total_bytes > EDITOR_MAX_TOTAL_UPLOAD_BYTES and not LOCAL_MODE:
                         raise HTTPException(status_code=400, detail="Project files are too large to export together")
                 try:
                     audio_durations.append(editor_pipeline.probe_audio(path))
@@ -1512,8 +1661,17 @@ async def api_video_export(
                 plan.audio_bitrate = EDITOR_COMPACT_AUDIO_BITRATE
             editor_pipeline.quantize_plan(plan)
             total = editor_pipeline.timeline_duration(plan)
-            if total > MAX_VIDEO_DURATION_SECONDS:
-                raise HTTPException(status_code=400, detail="The edited video is too long to export")
+            if max_seconds is not None and total > max_seconds + 0.5:
+                if not LOCAL_MODE:
+                    raise HTTPException(status_code=400, detail="The edited video is too long to export")
+                minutes = int(max_seconds // 60)
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "plan_required",
+                        "message": f"The free plan exports videos up to {minutes} minutes. Upgrade to any paid plan to export longer videos, or trim this one.",
+                    },
+                )
             for m in spec.masks:
                 planned = _mask_plan(m, total)
                 if planned:
@@ -1636,6 +1794,8 @@ async def api_video_export(
                     },
                 ) from exc
 
+            if keep_output:
+                return _kept_result(out_path, out_type)
             return _stream_result(out_path, out_type)
     except progress.Cancelled as exc:
         raise HTTPException(status_code=409, detail={"code": "cancelled", "message": "Export cancelled."}) from exc

@@ -119,8 +119,9 @@ async function handle(request: NextRequest) {
     branding: limits.exportBranding,
     compact: limits.compactExport,
     projectHash: sha256Hex(projectJson),
-    // The desktop app renders on its own engine; same plan rules either way.
-    ...(body.local === true ? { local: true } : {}),
+    // The desktop app renders on its own engine.
+    // Same plan rules either way, plus the plan's export length there.
+    ...(body.local === true ? { local: true, maxSeconds: limits.maxExportSeconds } : {}),
   });
   return NextResponse.json({ ticket, resolution });
 }

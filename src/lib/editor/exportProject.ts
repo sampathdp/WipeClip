@@ -1,4 +1,4 @@
-import { exportEditorProject, type RenderProgress, type Resolution } from "@/lib/toolsApi";
+import { exportEditorProject, type RenderedFile, type RenderProgress, type Resolution } from "@/lib/toolsApi";
 import { loadRaster, rasterKey } from "./rasters";
 import { overlayWidth } from "./textRaster";
 import { canvasSize, layout, videoBox } from "./timeline";
@@ -50,8 +50,10 @@ export async function exportProject(
   resolution: Resolution,
   signal?: AbortSignal,
   onProgress?: (p: RenderProgress) => void,
-  output: ExportOutput = DEFAULT_OUTPUT
-): Promise<Blob> {
+  output: ExportOutput = DEFAULT_OUTPUT,
+  /** Desktop: leave the result on disk (a RenderedFile). */
+  keep = false
+): Promise<Blob | RenderedFile> {
   const original = sources[originalId];
   const canvas = canvasSize(project.canvas.aspect, original.width, original.height);
 
@@ -260,7 +262,8 @@ export async function exportProject(
     bgSource?.file ?? null,
     resolution,
     signal,
-    onProgress
+    onProgress,
+    keep
   );
 }
 

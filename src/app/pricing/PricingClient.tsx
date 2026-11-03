@@ -192,6 +192,15 @@ function comparison(t: PricingMessages): { label: string; values: Record<Tier, s
     },
   },
   {
+    label: r.exportLength,
+    values: Object.fromEntries(
+      TIER_ORDER.map((tier) => {
+        const max = TIER_LIMITS[tier].maxExportSeconds;
+        return [tier, max === null ? r.noLimit : fmt(r.upToMinutes, { n: Math.round(max / 60) })];
+      }),
+    ) as Record<Tier, string>,
+  },
+  {
     label: r.credits,
     values: {
       free: fmt(r.perDay, { n: FREE_DAILY_CREDITS }),

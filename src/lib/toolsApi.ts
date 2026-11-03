@@ -332,6 +332,13 @@ export async function processVideo(
  * src/lib/editor/exportProject.ts for how the payload is assembled and
  * backend/app/main.py's api_video_export for how it's validated.
  */
+/** A finished export the desktop engine left on disk (`keep` below). */
+export interface RenderedFile {
+  path: string;
+  size: number;
+  type: string;
+}
+
 export async function exportEditorProject(
   project: unknown,
   sources: MediaInput[],
@@ -340,8 +347,11 @@ export async function exportEditorProject(
   background: File | null,
   resolution: Resolution,
   signal?: AbortSignal,
-  onProgress?: (p: RenderProgress) => void
-): Promise<Blob> {
+  onProgress?: (p: RenderProgress) => void,
+  /** Desktop engine: leave the result on disk instead of sending it back,
+   * so a long export never has to fit in memory. */
+  keep = false
+): Promise<Blob | RenderedFile> {
   const projectJson = JSON.stringify(project);
   const exportFailed = "Export failed. Your original video is safe. Please try exporting again.";
   // Desktop app: rendered on this machine (same plan rules, from the ticket).
@@ -386,9 +396,10 @@ export async function exportEditorProject(
       .catch(() => {});
   }, 700);
   try {
+    if (keep) body.append("keep_output", "true");
     const res = await fetch(`${engine.url}/api/video/export`, { method: "POST", body, headers: engineHeaders(engine), signal });
     if (!res.ok) await throwApiError(res, exportFailed);
-    return await res.blob();
+    return keep ? ((await res.json()) as RenderedFile) : await res.blob();
   } finally {
     clearInterval(poll);
     signal?.removeEventListener("abort", cancel);
@@ -436,6 +447,49 @@ export class ModelNeededError extends ApiError {
   ) {
     super(message, "model_needed");
   }
+}
+
+/** Desktop app: the sound of a file on this machine, decoded by the engine
+ * straight from disk (backend/app/main.py api_audio_decode), so the page
+ * never reads the whole file and long videos aren't skipped. Null without an
+ * engine, or when the file has no sound it can read. */
+export async function engineAudio(path: string, rate: number, channels: 1 | 2): Promise<AudioBuffer | null> {
+  const engine = await optionalEngine().catch(() => null);
+  if (!engine) return null;
+  const body = new FormData();
+  body.append("path", path);
+  body.append("rate", String(rate));
+  body.append("channels", String(channels));
+  const res = await fetch(`${engine.url}/api/audio/decode`, { method: "POST", body, headers: engineHeaders(engine) }).catch(() => null);
+  if (!res?.ok) return null;
+  const data = new Float32Array(await res.arrayBuffer());
+  const length = Math.floor(data.length / channels);
+  if (length === 0) return null;
+  const buf = new AudioBuffer({ length, numberOfChannels: channels, sampleRate: rate });
+  if (channels === 1) {
+    buf.copyToChannel(data, 0);
+  } else {
+    const left = buf.getChannelData(0);
+    const right = buf.getChannelData(1);
+    for (let i = 0; i < length; i++) {
+      left[i] = data[2 * i];
+      right[i] = data[2 * i + 1];
+    }
+  }
+  return buf;
+}
+
+/** Desktop app: a file's waveform peaks (50 a second, not normalized),
+ * measured by the engine as it decodes, never the whole file in memory.
+ * Null without an engine or sound. */
+export async function enginePeaks(path: string, signal?: AbortSignal): Promise<{ rate: number; peaks: Float32Array } | null> {
+  const engine = await optionalEngine().catch(() => null);
+  if (!engine) return null;
+  const body = new FormData();
+  body.append("path", path);
+  const res = await fetch(`${engine.url}/api/audio/peaks`, { method: "POST", body, headers: engineHeaders(engine), signal }).catch(() => null);
+  if (!res?.ok) return null;
+  return { rate: 50, peaks: new Float32Array(await res.arrayBuffer()) };
 }
 
 /** Desktop app: the engine's speech model for `language` ("auto" or a

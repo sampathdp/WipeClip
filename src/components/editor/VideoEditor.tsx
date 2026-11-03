@@ -16,6 +16,7 @@ import { useProjectHistory } from "@/lib/editor/history";
 import {
   generateThumbnails,
   generateWaveform,
+  normalizedWaveform,
   MAX_WAVE_FILE_BYTES,
   loadAudioMeta,
   loadVideoMeta,
@@ -86,7 +87,7 @@ import {
   type TextStyle,
   type Transcript,
 } from "@/lib/editor/types";
-import { ApiError, cleanAudio, ContentBlockedError, engineDubModels, ModelNeededError, probeVideo } from "@/lib/toolsApi";
+import { ApiError, cleanAudio, ContentBlockedError, engineDubModels, enginePeaks, ModelNeededError, probeVideo } from "@/lib/toolsApi";
 import { DUB_FROM, dubTimeline, type DubProgress } from "@/lib/editor/dub";
 import type { RecordingBundle } from "@/lib/recorder/bundle";
 import { recordingToSources } from "@/lib/recorder/editorImport";
@@ -503,6 +504,16 @@ export default function VideoEditor({
       thumbJobs.current.set(key, controller);
       waveQueue.current = waveQueue.current.then(async () => {
         if (controller.signal.aborted) return;
+        // Desktop: measured by the engine from disk, any length, without
+        // reading the file into the page.
+        if (src.disk) {
+          const measured = await enginePeaks(src.disk.path, controller.signal).catch(() => null);
+          if (measured) {
+            const wave = normalizedWaveform(measured.peaks, measured.rate);
+            if (wave && !controller.signal.aborted) setWaves((w) => ({ ...w, [src.id]: wave }));
+            return;
+          }
+        }
         // A disk source over the limit isn't read at all just to be skipped.
         if (sourceSize(src) > MAX_WAVE_FILE_BYTES) return;
         const file = await sourceFile(src).catch(() => null);
@@ -2592,7 +2603,7 @@ export default function VideoEditor({
                       </span>
                       <span className="text-base font-semibold text-foreground">Drop a video here, or click to browse</span>
                       <span className="mt-1 text-xs text-muted sm:text-sm">
-                        {IS_DESKTOP ? "MP4, MOV, WebM · any size, edited where it is · exports up to 10 minutes" : "MP4, MOV, WebM · up to 300MB · up to 10 minutes"}
+                        {IS_DESKTOP ? "MP4, MOV, WebM · any size and length, edited where it is · free plan exports up to 10 minutes" : "MP4, MOV, WebM · up to 300MB · up to 10 minutes"}
                       </span>
                     </button>
                     <p className="mt-2 text-center text-xs text-muted">

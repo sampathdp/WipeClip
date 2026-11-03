@@ -24,6 +24,8 @@ export interface ExportTicket {
   projectHash: string;
   /** For the desktop app's own engine; the cloud backend refuses it. */
   local?: boolean;
+  /** Desktop engine: the plan's longest export in seconds (null = no limit). */
+  maxSeconds?: number | null;
 }
 
 export interface ProcessTicket {

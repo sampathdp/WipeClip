@@ -9,8 +9,18 @@ import { DEFAULT_OUTPUT, exportProject, OUTPUT_EXT, type ExportOutput } from "@/
 import { saveLastExport } from "@/lib/editor/projectStore";
 import { canvasSize, formatTime } from "@/lib/editor/timeline";
 import type { MediaSource, Project } from "@/lib/editor/types";
-import { ContentBlockedError, PlanRequiredError, type RenderProgress, type Resolution } from "@/lib/toolsApi";
-import { EngineUnavailableError, IS_DESKTOP, notifyIfAway, revealExport, saveExportFile } from "@/lib/platform";
+import { ApiError, ContentBlockedError, PlanRequiredError, type RenderedFile, type RenderProgress, type Resolution } from "@/lib/toolsApi";
+import {
+  discardRenderedExport,
+  EngineUnavailableError,
+  IS_DESKTOP,
+  notifyIfAway,
+  renderedExportUrl,
+  revealExport,
+  saveExportFile,
+  saveRenderedExport,
+  type SaveResult,
+} from "@/lib/platform";
 import Dialog from "./Dialog";
 import { ExportIcon } from "./icons";
 import PremiumBadge from "./PremiumBadge";
@@ -123,9 +133,14 @@ export default function ExportDialog({
   const premium = limits.premiumEffects
     ? []
     : premiumFeaturesUsed({ ...project, format: output.format, quality: output.quality, fps: output.fps ?? undefined, fpsChosen: output.fps !== null });
+  // The plan's export length in the desktop app; the website's cloud render
+  // is capped at 10 minutes for everyone (MAX_VIDEO_DURATION_SECONDS).
+  const maxSeconds = IS_DESKTOP ? limits.maxExportSeconds : 10 * 60;
+  const tooLong = maxSeconds !== null && total > maxSeconds + 0.5;
   const [state, setState] = useState<"setup" | "rendering" | "done" | "error">(initialResult ? "done" : "setup");
   const [error, setError] = useState<{ message: string; upgrade?: boolean } | null>(null);
-  const [result, setResult] = useState<{ blob: Blob; url: string } | null>(() =>
+  // A blob in memory, or (desktop, signed in) a file the engine left on disk.
+  const [result, setResult] = useState<{ blob: Blob; url: string } | { file: RenderedFile; url: string } | null>(() =>
     initialResult ? { blob: initialResult, url: URL.createObjectURL(initialResult) } : null
   );
   const [elapsed, setElapsed] = useState(0);
@@ -141,7 +156,8 @@ export default function ExportDialog({
   useEffect(() => () => abortRef.current?.abort(), []);
   useEffect(() => {
     return () => {
-      if (result) URL.revokeObjectURL(result.url);
+      if (result && "blob" in result) URL.revokeObjectURL(result.url);
+      else if (result) discardRenderedExport(result.file.path);
     };
   }, [result]);
 
@@ -156,10 +172,12 @@ export default function ExportDialog({
     const timer = setInterval(() => setElapsed(Date.now() - started), 500);
     const controller = new AbortController();
     abortRef.current = controller;
-    const hardStop = setTimeout(() => controller.abort(), 20 * 60 * 1000);
+    // The website's cloud render has a time limit; the desktop engine renders
+    // as long as the video needs (Cancel still stops it).
+    const hardStop = IS_DESKTOP ? undefined : setTimeout(() => controller.abort(), 20 * 60 * 1000);
     trackEvent("processing_started", { tool: TOOL, resolution });
     try {
-      const blob = await exportProject(
+      const out = await exportProject(
         project,
         sources,
         originalId,
@@ -169,15 +187,18 @@ export default function ExportDialog({
           setRender(p);
           if (p.phase === "rendering") setRenderFrom((from) => from ?? Date.now() - started);
         },
-        output
+        output,
+        // Kept on disk, so a long export never has to fit in memory. Signed
+        // out it stays a blob, which saveLastExport keeps across the sign-in.
+        IS_DESKTOP && isSignedIn
       );
-      setResult({ blob, url: URL.createObjectURL(blob) });
+      setResult(out instanceof Blob ? { blob: out, url: URL.createObjectURL(out) } : { file: out, url: await renderedExportUrl(out.path) });
       setState("done");
       void notifyIfAway("Export finished", `"${filename}" is ready to save in WipeClip.`);
       trackEvent("processing_completed", { tool: TOOL, resolution });
       // Survives a sign-in redirect, so an anonymous export isn't lost
       // (and re-rendered) just to download it.
-      if (!isSignedIn) void saveLastExport(blob);
+      if (!isSignedIn && out instanceof Blob) void saveLastExport(out);
     } catch (e) {
       if (cancelledRef.current) {
         setState("setup");
@@ -194,13 +215,13 @@ export default function ExportDialog({
       } else if (e instanceof TypeError) {
         setError({ message: "Network problem during export. Check your connection and try again. Your project is safe." });
       } else {
+        // The server and engine word their refusals for people (e.g. "An audio
+        // file could not be read"), so show them: a bare "Export failed" left
+        // users and support with nothing to go on.
         const msg = e instanceof Error ? e.message : "";
-        setError({
-          message:
-            /limit|sign in|too long|too large|upgrade/i.test(msg) && msg.length < 160
-              ? msg
-              : "Export failed. Your original video is safe. Please try exporting again.",
-        });
+        const fallback = "Export failed. Your original video is safe. Please try exporting again.";
+        const shown = (e instanceof ApiError || /limit|sign in|too long|too large|upgrade/i.test(msg)) && !!msg && msg.length < 200;
+        setError({ message: shown ? msg : fallback });
       }
       setState("error");
       trackEvent("processing_failed", { tool: TOOL, error_category: "export_error" });
@@ -307,12 +328,29 @@ export default function ExportDialog({
               <p className="mt-2 text-muted">Any paid plan (from Lite, {PLANS.lite.priceLabel} for 30 days) exports them. Or swap them for free ones.</p>
             </div>
           )}
-          {premium.length > 0 ? (
+          {tooLong && (
+            <div className="rounded-xl border border-amber-400/50 bg-amber-400/10 p-3 text-xs">
+              <p className="flex items-center gap-1.5 font-semibold text-foreground">
+                {IS_DESKTOP && <PremiumBadge className="shrink-0" />} This video is {clock(total * 1000)} long
+              </p>
+              <p className="mt-2 text-muted">
+                {IS_DESKTOP
+                  ? `The free plan exports videos up to ${Math.round(maxSeconds / 60)} minutes. Any paid plan (from Lite, ${PLANS.lite.priceLabel} for 30 days) exports any length. Or trim it.`
+                  : `Exports on the website are up to ${Math.round(maxSeconds / 60)} minutes. Trim it, or use the free desktop app, where paid plans export any length.`}
+              </p>
+            </div>
+          )}
+          {premium.length > 0 || (tooLong && IS_DESKTOP) ? (
             <Link href="/pricing" className="btn-primary flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold">
               See plans
             </Link>
           ) : (
-            <button type="button" onClick={start} className="btn-primary flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold">
+            <button
+              type="button"
+              onClick={start}
+              disabled={tooLong}
+              className="btn-primary flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold disabled:opacity-50"
+            >
               <ExportIcon width={16} height={16} /> Export
             </button>
           )}
@@ -375,7 +413,9 @@ export default function ExportDialog({
             <video src={result.url} controls playsInline className="max-h-[50dvh] w-full rounded-xl bg-black" />
           )}
           {askFeedback ? null : isSignedIn && IS_DESKTOP ? (
-            <DesktopSaveButton blob={result.blob} filename={filename} />
+            <DesktopSaveButton
+              save={() => ("blob" in result ? saveExportFile(result.blob, filename) : saveRenderedExport(result.file.path, filename))}
+            />
           ) : isSignedIn ? (
             <a
               href={result.url}
@@ -438,7 +478,7 @@ export default function ExportDialog({
 
 /** Desktop app: "Save MP4" opens the OS save dialog instead of a browser
  * download (see saveExportFile in src/lib/platform). */
-function DesktopSaveButton({ blob, filename }: { blob: Blob; filename: string }) {
+function DesktopSaveButton({ save: saveFile }: { save: () => Promise<SaveResult> }) {
   const [state, setState] = useState<{ kind: "idle" | "saving" } | { kind: "saved"; path: string } | { kind: "error"; message: string }>({
     kind: "idle",
   });
@@ -447,7 +487,7 @@ function DesktopSaveButton({ blob, filename }: { blob: Blob; filename: string })
     setState({ kind: "saving" });
     trackEvent("download_clicked", { tool: TOOL });
     try {
-      const res = await saveExportFile(blob, filename);
+      const res = await saveFile();
       setState(res.status === "saved" ? { kind: "saved", path: res.path } : { kind: "idle" });
     } catch (e) {
       console.error("[editor] save failed", e);
