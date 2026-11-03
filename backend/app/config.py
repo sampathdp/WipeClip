@@ -283,7 +283,11 @@ RESOLUTION_HEIGHTS: dict[str, int] = {"720p": 720, "1080p": 1080, "4k": 2160}
 EDITOR_MAX_TOTAL_UPLOAD_BYTES: int = 2 * MAX_VIDEO_UPLOAD_BYTES
 EDITOR_MAX_SOURCES: int = 16
 EDITOR_MAX_CLIPS: int = 200
-EDITOR_MAX_STICKERS: int = 60  # overlay layers: stickers + text + images
+# Overlay layers: stickers, text and images; captions add one per line, so
+# a long captioned video has hundreds. The desktop engine takes up to 900
+# (the upload parser's limit is 1000 files per request, sources included);
+# the cloud keeps 60.
+EDITOR_MAX_STICKERS: int = 900 if LOCAL_MODE else 60
 EDITOR_MAX_STICKER_BYTES: int = 4 * 1024 * 1024
 EDITOR_MAX_STICKER_DIMENSION: int = 2048
 EDITOR_MAX_TRANSITION_SECONDS: float = 2.0

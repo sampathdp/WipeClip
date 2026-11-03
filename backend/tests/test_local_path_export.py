@@ -123,6 +123,34 @@ class LocalPathExportTest(unittest.TestCase):
             )
         self.assertEqual(res.status_code, 200, res.text[:300])
 
+    def test_layers_keep_standard_colour_range(self) -> None:
+        # ffmpeg 9 tagged exports with a text layer as full range with an RGB
+        # matrix, which players that trust the tag show in the wrong colours.
+        png = os.path.join(self.dir.name, "layer.png")
+        subprocess.run([get_ffmpeg_path(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=white:s=200x40,format=rgba", "-frames:v", "1", png], check=True)
+        proj = project(2) | {"overlays": [{"image": 0, "start": 0.2, "end": 1.8, "x": 0.5, "y": 0.8, "width": 0.4, "rotation": 0, "opacity": 1, "animIn": "none", "animOut": "none"}]}
+        with open(png, "rb") as f:
+            res = self.export({"source_paths": json.dumps([self.on_disk, self.on_disk])}, [("overlays", ("layer.png", f, "image/png"))], proj)
+        self.assertEqual(res.status_code, 200, res.text[:300])
+        out = os.path.join(self.dir.name, "layered.mp4")
+        with open(out, "wb") as f:
+            f.write(res.content)
+        info = subprocess.run([get_ffmpeg_path(), "-hide_banner", "-i", out], capture_output=True, text=True).stderr
+        video = next(line for line in info.splitlines() if "Video:" in line)
+        self.assertIn("yuv420p(progressive)", video)
+
+    def test_project_sent_as_a_file(self) -> None:
+        # Over the upload parser's 1 MB cap on form fields, which a long
+        # project can pass; as a file part it has no such cap.
+        proj = project(2) | {"padding": "x" * (1100 * 1024)}
+        text = json.dumps(proj)
+        job = {"projectHash": hashlib.sha256(text.encode()).hexdigest(), "resolution": "720p", "branding": False, "compact": False}
+        data = {"ticket": "t", "source_paths": json.dumps([self.on_disk, self.on_disk])}
+        with mock.patch.object(main.tickets, "verify", return_value=job):
+            res = self.client.post("/api/video/export", data=data, files=[("project_file", ("project.json", text.encode(), "application/json"))])
+            self.assertEqual(res.status_code, 200, res.text[:300])
+            self.assertEqual(self.client.post("/api/video/export", data=data).status_code, 400)
+
     def test_plan_length_from_the_ticket(self) -> None:
         paths = {"source_paths": json.dumps([self.on_disk, self.on_disk])}
         # Free plan: 1 s allowed, the 2 s edit is refused with an upgrade.

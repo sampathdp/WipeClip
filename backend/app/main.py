@@ -1352,7 +1352,11 @@ def _branding_overlay(tmp: str) -> tuple[str, int, int]:
 @app.post("/api/video/export")
 async def api_video_export(
     ticket: str = Form(...),
-    project: str = Form(...),
+    project: Optional[str] = Form(None),
+    # The same JSON as a file: form fields are capped at 1 MB by the upload
+    # parser, which a long project (captions, cursor rows) can pass. The
+    # desktop app sends it this way.
+    project_file: Optional[UploadFile] = File(None),
     sources: list[UploadFile] = File(default=[]),
     overlays: list[UploadFile] = File(default=[]),
     audios: list[UploadFile] = File(default=[]),
@@ -1393,6 +1397,13 @@ async def api_video_export(
     EDITOR_COMPACT_CRF).
     """
     job = tickets.verify(ticket, "export")
+    if project is None:
+        if project_file is None:
+            raise HTTPException(status_code=400, detail="Invalid project data")
+        try:
+            project = project_file.file.read().decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Invalid project data") from exc
     if hashlib.sha256(project.encode()).hexdigest() != job.get("projectHash"):
         raise HTTPException(status_code=403, detail="Invalid job ticket.")
     resolution = job.get("resolution")
@@ -1425,8 +1436,13 @@ async def api_video_export(
     audio_items = merge(aud_plan, audios)
     if not source_items or len(source_items) > EDITOR_MAX_SOURCES:
         raise HTTPException(status_code=400, detail="Invalid number of source videos")
-    if len(overlays) > EDITOR_MAX_STICKERS or len(audio_items) > EDITOR_MAX_AUDIO:
-        raise HTTPException(status_code=400, detail="Too many layers")
+    if len(overlays) > EDITOR_MAX_STICKERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"This project has {len(overlays)} text, caption and image layers; up to {EDITOR_MAX_STICKERS} can be exported together. Export it in parts, or remove some.",
+        )
+    if len(audio_items) > EDITOR_MAX_AUDIO:
+        raise HTTPException(status_code=400, detail=f"Up to {EDITOR_MAX_AUDIO} audio tracks can be exported together.")
 
     try:
         spec = _EditorProject.model_validate(json.loads(project))

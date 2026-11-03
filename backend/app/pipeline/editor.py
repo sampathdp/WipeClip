@@ -1326,10 +1326,10 @@ _BACK_OUT = "(1+2.70158*pow({p}-1,3)+1.70158*pow({p}-1,2))"
 
 
 def _overlay_filters(
-    o: PlanOverlay, input_idx: int, n: int, plan: ExportPlan, base_label: str, mask_idx: int | None = None
+    o: PlanOverlay, src: str, n: int, plan: ExportPlan, base_label: str, mask_idx: int | None = None
 ) -> tuple[str, str]:
-    """Filter chain for one overlay input plus the overlay onto
-    `base_label`; returns (chain, output label). Same geometry and
+    """Filter chain for one overlay (the pad `src`, e.g. "[3:v:0]") plus the
+    overlay onto `base_label`; returns (chain, output label). Same geometry and
     animation curves as stickerFrame() in src/lib/editor/timeline.ts."""
     W, H = plan.width, plan.height
     target_w = max(2, round(o.width * W))
@@ -1421,7 +1421,7 @@ def _overlay_filters(
     if mask_idx is not None:
         # Shape mask, in the layer's own frame: its alpha times the mask.
         head = (
-            f"[{input_idx}:v:0]{','.join(parts[:sized])}[olp{n}];"
+            f"{src}{','.join(parts[:sized])}[olp{n}];"
             f"[{mask_idx}:v]setpts=PTS-STARTPTS+{s}/TB,scale={target_w}:{target_h}:flags=bicubic,format=gray[olm{n}];"
             f"[olp{n}]split[olq{n}][olr{n}];[olq{n}]alphaextract[ola{n}];"
             f"[ola{n}][olm{n}]blend=all_mode=multiply[olb{n}];[olr{n}][olb{n}]alphamerge"
@@ -1429,7 +1429,7 @@ def _overlay_filters(
         rest = parts[sized:]
         source = head + ("," + ",".join(rest) if rest else "")
     else:
-        source = f"[{input_idx}:v:0]{','.join(parts)}"
+        source = f"{src}{','.join(parts)}"
     place = f"overlay=x='{x_expr}-overlay_w/2':y='{y_expr}-overlay_h/2':enable='between(t,{s},{_num(o.end)})':eval=frame"
     if o.blend != "normal":
         # Layer on a neutral full canvas (see BLEND_MODES), blended in RGB -
@@ -1613,15 +1613,22 @@ def build_export_args(
         if o.video:
             # Just the layer's range of its video; shifted into place in
             # _overlay_filters, and gone after its end (eof_action=pass).
-            idx = inputs.add("-ss", _num(o.offset), "-t", _num(o.end - o.start), "-i", o.image_path)
+            src = f"[{inputs.add('-ss', _num(o.offset), '-t', _num(o.end - o.start), '-i', o.image_path)}:v:0]"
         else:
             # Looped still for the layer's own length, shifted into place in
             # _overlay_filters. Looping it from t=0 instead made ffmpeg decode
             # and queue every frame before the layer appears: about 470 MB
-            # per text layer on a 1080p timeline (measured).
-            idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end - o.start + 0.1), "-i", o.image_path)
+            # per text layer on a 1080p timeline (measured). Read inside the
+            # graph rather than as an -i input: one input per caption line
+            # overflowed Windows' 32,767-character command line on long videos.
+            frames = max(1, math.ceil((o.end - o.start + 0.1) * fps))
+            graph.append(
+                f"movie=filename='{_filter_path(o.image_path)}',loop=loop={frames - 1}:size=1:start=0,"
+                f"setpts=N/({_num(fps)}*TB)[oli{n}]"
+            )
+            src = f"[oli{n}]"
         mask_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end - o.start + 0.1), "-i", o.mask_path) if o.mask_path else None
-        chain, v_acc = _overlay_filters(o, idx, n, plan, v_acc, mask_idx)
+        chain, v_acc = _overlay_filters(o, src, n, plan, v_acc, mask_idx)
         graph.append(chain)
     if plan.output_format == "gif":
         # A shared palette from the whole clip, at GIF size and frame rate.
@@ -1632,7 +1639,11 @@ def build_export_args(
     elif plan.output_format == "audio":
         graph.append(f"[{v_acc}]nullsink")
     else:
-        graph.append(f"[{v_acc}]format=yuv420p[outv]")
+        # Standard-range YUV with no colour tags, as players expect. ffmpeg 9
+        # carried a text or sticker layer's full range and RGB ("gbr") matrix
+        # tag through to the file, which players that trust it show in the
+        # wrong colours.
+        graph.append(f"[{v_acc}]scale=out_range=tv,format=yuv420p,setparams=range=tv:colorspace=unknown:color_primaries=unknown:color_trc=unknown[outv]")
 
     if plan.with_audio and plan.audio:
         mix_inputs = [f"[{a_acc}]"]

@@ -360,7 +360,10 @@ export async function exportEditorProject(
   const body = new FormData();
   body.append("ticket", ticket);
   // Byte-for-byte the string the ticket was issued for (it carries its hash).
-  body.append("project", projectJson);
+  // The engine takes it as a file: form fields are capped at 1 MB there,
+  // which a long project (captions, cursor rows) can pass.
+  if (engine) body.append("project_file", new Blob([projectJson], { type: "application/json" }), "project.json");
+  else body.append("project", projectJson);
   // The local engine reads disk files by path (source_paths/audio_paths,
   // in order, null = the next uploaded file); the cloud gets every file.
   const files = async (field: string, list: MediaInput[]) => {
