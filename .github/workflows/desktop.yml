@@ -1,13 +1,13 @@
 name: Desktop
 
-# Builds the WipeClip desktop app (Tauri) on real Windows and macOS runners.
+# Builds the WipeClip desktop app (Tauri) on a real Windows runner (macOS is off).
 # See docs/desktop/README.md. Started by hand (Actions > Desktop > Run
 # workflow) with "release" left at none, it uploads the installers as
 # workflow artifacts. With release set to patch, minor or major (run on
 # master), it first bumps the version and pushes the commit and tag
 # desktop-v<version> (desktop/scripts/release.mjs), then builds that tag and
 # publishes it. Pushing such a tag yourself (npm run desktop:release --
-# <version>) does the same. Once every platform has built, a release is
+# <version>) does the same. Once built, a release is
 # *published* with the signed installers and latest.json (the app's update
 # feed) in the public releases repo (RELEASES_REPO; this code repo can stay
 # private): installed apps offer the update and the website serves the
@@ -178,7 +178,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run desktop:build -- --bundles ${{ matrix.bundles }}
 
+      # Test builds (no tag): the installer as a workflow artifact to
+      # download. Kept a day so old installers don't fill the storage quota.
       - uses: actions/upload-artifact@v4
+        if: needs.version.outputs.tag == ''
         with:
           name: wipeclip-${{ runner.os }}
           path: |
@@ -188,49 +191,35 @@ jobs:
             src-tauri/target/release/bundle/macos/*.app.tar.gz
             src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
           if-no-files-found: error
-          # Only a hand-off to the release job (which publishes them to the
-          # releases repo) or a test build to download: kept a day, not the
-          # default 90, so old installers don't fill the storage quota.
           retention-days: 1
-          # Installers are already compressed.
           compression-level: 0
 
-  release:
-    if: needs.version.outputs.tag != ''
-    needs: [version, build]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      # Public repo holding only installers and the update feed; must match
-      # plugins.updater.endpoints in src-tauri/tauri.conf.json.
-      RELEASES_REPO: sampathdp/wipeclip-releases
-      TAG: ${{ needs.version.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.version.outputs.tag }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Release assets and update feed
-        run: node desktop/scripts/update-manifest.mjs artifacts release "${TAG}" "${RELEASES_REPO}" release-notes.md
-
-      # Published at once as the latest release: installed apps see it on
-      # their next update check. Only reached when every platform built.
+      # Releases (a tag): published straight from this job to the releases
+      # repo, with no workflow artifacts in between - the account's artifact
+      # storage is too small for installers. Windows is the only platform
+      # built; with macOS back on, its job needs to publish into the same
+      # release (or bring back a separate release job).
       # RELEASES_TOKEN: a fine-grained token with Contents read/write on the
       # releases repo only (this job's own token can't write to another repo).
+      - name: Release assets and update feed
+        if: needs.version.outputs.tag != ''
+        shell: bash
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          RELEASES_REPO: sampathdp/wipeclip-releases
+        run: node desktop/scripts/update-manifest.mjs src-tauri/target/release/bundle release "${TAG}" "${RELEASES_REPO}" release-notes.md
+
+      # Published at once as the latest release: installed apps see it on
+      # their next update check.
       - name: Publish release
+        if: needs.version.outputs.tag != ''
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+          # Public repo holding only installers and the update feed; must match
+          # plugins.updater.endpoints in src-tauri/tauri.conf.json.
+          RELEASES_REPO: sampathdp/wipeclip-releases
         run: |
           if [ -z "$GH_TOKEN" ]; then echo "::error::RELEASES_TOKEN secret is missing - see docs/desktop/RELEASE.md (Updates)."; exit 1; fi
-          gh release create "${TAG}" release/* --repo "${RELEASES_REPO}" --latest \
-            --title "WipeClip ${TAG#desktop-v}" \
-            --notes-file release-notes.md
+          gh release create "${TAG}" release/* --repo "${RELEASES_REPO}" --latest             --title "WipeClip ${TAG#desktop-v}"             --notes-file release-notes.md
