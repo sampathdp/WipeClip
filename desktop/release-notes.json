@@ -1,5 +1,10 @@
 {
-  "next": [],
+  "next": [
+    "Edit captions by hand: fix the text and timing of every caption in one list, join or delete captions, and find and replace a word in all of them at once.",
+    "Style captions your way: font, weight, capitals, italic, text and outline colors, outline thickness, shadow, a background box, size and alignment, with a live preview.",
+    "More accurate captions: list names and special words before generating so they are spelled right, and turn on Best accuracy for fewer wrong words.",
+    "Longer captions now break at natural pauses."
+  ],
   "releases": [
     {
       "version": "0.1.16",
