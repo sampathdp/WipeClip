@@ -1,14 +1,19 @@
 {
-  "next": [
-    "Smarter automatic zoom: clicks a few seconds apart stay in one zoom, and the camera pans between areas instead of zooming out and back in.",
-    "Typing gets one steady zoom that frames the whole line, even for long texts and when you press shortcuts while typing.",
-    "Choose the recording type - Tutorial, Demo or Gaming - for zooms that suit it.",
-    "Smoother, more natural zoom motion for new zooms.",
-    "The drawn cursor and click highlights now grow with the zoom, in the preview and the exported video. You can also match the cursor to its size on your screen.",
-    "Fixed the cursor running slightly ahead of the picture while the camera moved in the preview.",
-    "Twelve new transitions between clips, including soft sweeps, radial, diagonal and shape transitions."
-  ],
+  "next": [],
   "releases": [
+    {
+      "version": "0.1.18",
+      "date": "2026-11-05",
+      "notes": [
+        "Smarter automatic zoom: clicks a few seconds apart stay in one zoom, and the camera pans between areas instead of zooming out and back in.",
+        "Typing gets one steady zoom that frames the whole line, even for long texts and when you press shortcuts while typing.",
+        "Choose the recording type - Tutorial, Demo or Gaming - for zooms that suit it.",
+        "Smoother, more natural zoom motion for new zooms.",
+        "The drawn cursor and click highlights now grow with the zoom, in the preview and the exported video. You can also match the cursor to its size on your screen.",
+        "Fixed the cursor running slightly ahead of the picture while the camera moved in the preview.",
+        "Twelve new transitions between clips, including soft sweeps, radial, diagonal and shape transitions."
+      ]
+    },
     {
       "version": "0.1.17",
       "date": "2026-11-05",
