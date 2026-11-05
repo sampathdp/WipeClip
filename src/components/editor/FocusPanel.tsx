@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { FOCUS_PRESETS, type FocusPreset, type FocusSettings } from "@/lib/editor/focus";
+import { DEFAULT_SESSION, FOCUS_PRESETS, FOCUS_PROFILES, focusSettings, type FocusPreset, type FocusProfile, type FocusSettings } from "@/lib/editor/focus";
 import { formatTime } from "@/lib/editor/timeline";
 import { MAX_INTENSITY, MIN_INTENSITY } from "@/lib/editor/focusPrefs";
 import { DEFAULT_POINTER, type CameraZoom, type FocusPrefs, type PointerStyle, type ZoomEase } from "@/lib/editor/types";
@@ -39,7 +39,7 @@ function Color({ label, value, onChange }: { label: string; value: string; onCha
   );
 }
 
-const EASE_LABELS: Record<ZoomEase, string> = { smooth: "Smooth", gentle: "Gentle", linear: "Linear" };
+const EASE_LABELS: Record<ZoomEase, string> = { natural: "Natural", smooth: "Smooth", gentle: "Gentle", linear: "Linear" };
 
 function EaseSelect({ value, onChange }: { value: ZoomEase; onChange: (v: ZoomEase) => void }) {
   return (
@@ -66,6 +66,7 @@ export function FocusPanel({
   unavailableReason,
   clickCount,
   cursorAllowed,
+  nativeCursorSize,
   zooms,
   pointer,
   analysis,
@@ -91,6 +92,9 @@ export function FocusPanel({
   unavailableReason: string;
   clickCount: number;
   cursorAllowed: boolean;
+  /** The recording's own cursor height (fraction of its frame height,
+   * from the display's DPI), or null when the display is unknown. */
+  nativeCursorSize: number | null;
   zooms: CameraZoom[];
   pointer: PointerStyle | null;
   analysis: AnalysisState | null;
@@ -115,7 +119,8 @@ export function FocusPanel({
   gesture: Gesture;
 }) {
   const [preset, setPreset] = useState<FocusPreset>("balanced");
-  const [settings, setSettings] = useState<FocusSettings>(FOCUS_PRESETS.balanced);
+  const [profile, setProfile] = useState<FocusProfile>("tutorial");
+  const [settings, setSettings] = useState<FocusSettings>(() => focusSettings("balanced", "tutorial"));
   const [custom, setCustom] = useState(false);
   const set = (patch: Partial<FocusSettings>) => setSettings((s) => ({ ...s, ...patch }));
   const noGesture: Gesture = { onGestureStart: () => {}, onGestureEnd: () => {} };
@@ -134,6 +139,27 @@ export function FocusPanel({
             Suggests zooms from the {clickCount} recorded click{clickCount === 1 ? "" : "s"}, where the pointer settled, scrolling and markers. Not every click
             zooms. Suggestions are ordinary zooms you can change or delete; re-analyzing replaces only the ones you haven&apos;t edited.
           </p>
+          <p className="mb-1 text-[11px] font-medium text-muted">Recording type</p>
+          <div className="mb-1 grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Recording type">
+            {(Object.keys(FOCUS_PROFILES) as FocusProfile[]).map((p) => (
+              <button
+                key={p}
+                type="button"
+                role="radio"
+                aria-checked={profile === p}
+                title={FOCUS_PROFILES[p].hint}
+                onClick={() => {
+                  setProfile(p);
+                  setSettings(focusSettings(preset, p));
+                }}
+                className={`rounded-lg border px-2 py-1.5 text-xs font-semibold ${profile === p ? "border-accent-2 bg-accent-2/10 text-foreground" : "border-border text-muted hover:text-foreground"}`}
+              >
+                {FOCUS_PROFILES[p].label}
+              </button>
+            ))}
+          </div>
+          <p className="mb-3 text-[11px] text-muted">{FOCUS_PROFILES[profile].hint}.</p>
+          <p className="mb-1 text-[11px] font-medium text-muted">Strength</p>
           <div className="mb-3 grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Zoom preset">
             {(Object.keys(FOCUS_PRESETS) as FocusPreset[]).map((p) => (
               <button
@@ -143,7 +169,7 @@ export function FocusPanel({
                 aria-checked={preset === p}
                 onClick={() => {
                   setPreset(p);
-                  setSettings(FOCUS_PRESETS[p]);
+                  setSettings(focusSettings(p, profile));
                 }}
                 className={`rounded-lg border px-2 py-1.5 text-xs font-semibold capitalize ${preset === p ? "border-accent-2 bg-accent-2/10 text-foreground" : "border-border text-muted hover:text-foreground"}`}
               >
@@ -172,9 +198,34 @@ export function FocusPanel({
                 gesture={noGesture}
               />
               <SliderField label="Zooms per minute (max)" value={settings.maxPerMinute} min={1} max={20} step={1} onChange={(v) => set({ maxPerMinute: v })} gesture={noGesture} />
+              <SliderField
+                label="Stay zoomed between actions"
+                value={settings.sessionGap ?? DEFAULT_SESSION.sessionGap}
+                min={0}
+                max={10}
+                step={0.5}
+                format={(v) => (v === 0 ? "Off" : `up to ${v.toFixed(1)} s`)}
+                onChange={(v) => set({ sessionGap: v, cooldown: Math.max(v, settings.cooldown ?? DEFAULT_SESSION.cooldown) })}
+                gesture={noGesture}
+              />
+              <SliderField
+                label="Rest between zooms (min)"
+                value={settings.cooldown ?? DEFAULT_SESSION.cooldown}
+                min={0}
+                max={12}
+                step={0.5}
+                format={(v) => (v === 0 ? "Off" : `${v.toFixed(1)} s`)}
+                onChange={(v) => set({ cooldown: v, sessionGap: Math.min(v, settings.sessionGap ?? DEFAULT_SESSION.sessionGap) })}
+                gesture={noGesture}
+              />
+              <p className="-mt-2 text-[11px] text-muted">
+                Actions a short pause apart stay in one zoom (the camera pans between areas instead of zooming out and back in). A shorter rest than the minimum
+                keeps only the more important zoom.
+              </p>
               <Check label="Use scrolling" checked={settings.includeScroll} onChange={(v) => set({ includeScroll: v })} />
               <Check label="Always zoom at markers" checked={settings.useMarkers} onChange={(v) => set({ useMarkers: v })} />
               <Check label="Zoom in on typing" checked={settings.includeTyping} onChange={(v) => set({ includeTyping: v })} />
+              <Check label="Use shortcuts" checked={settings.includeShortcuts !== false} onChange={(v) => set({ includeShortcuts: v })} />
               <Check label="Follow the action (pan instead of zooming out)" checked={settings.follow} onChange={(v) => set({ follow: v })} />
             </div>
           )}
@@ -338,11 +389,44 @@ export function FocusPanel({
             />
             {pointer?.cursor && cursorAllowed && (
               <>
-                <SliderField label="Cursor size" value={style.cursorSize} min={0.02} max={0.1} step={0.0025} format={(v) => `${Math.round(v * 1000) / 10}%`} onChange={(v) => setStyle({ cursorSize: v })} gesture={gesture} />
+                <SliderField
+                  label={style.sizeBase === "recording" ? "Cursor size (of the recording)" : "Cursor size"}
+                  value={style.cursorSize}
+                  min={0.01}
+                  max={0.1}
+                  step={0.0025}
+                  format={(v) => `${Math.round(v * 1000) / 10}%`}
+                  onChange={(v) => setStyle({ cursorSize: v })}
+                  gesture={gesture}
+                />
+                {nativeCursorSize !== null && (
+                  <ActionButton
+                    onClick={() => setStyle({ cursorSize: nativeCursorSize, sizeBase: "recording" })}
+                    title="The size the system pointer had on the recorded display, whatever its resolution and scaling"
+                  >
+                    Match recording size
+                  </ActionButton>
+                )}
+                {style.sizeBase === "recording" && (
+                  <Check
+                    label="Size relative to the recording"
+                    checked
+                    onChange={() => setStyle({ sizeBase: "canvas" })}
+                    hint="The cursor keeps its size next to the recorded screen whatever the canvas shape. Untick to size it by the canvas instead."
+                  />
+                )}
                 <Color label="Cursor color" value={style.cursorColor} onChange={(v) => setStyle({ cursorColor: v })} />
                 <SliderField label="Smoothing" value={style.smoothing} min={0} max={1} step={0.05} format={(v) => (v === 0 ? "Off" : `${Math.round(v * 100)}%`)} onChange={(v) => setStyle({ smoothing: v })} gesture={gesture} />
                 <p className="text-[11px] text-muted">Clicks always stay exactly where they happened.</p>
               </>
+            )}
+            {((pointer?.cursor && cursorAllowed) || pointer?.clicks) && (
+              <Check
+                label="Grow with the zoom"
+                checked={style.scaleWithZoom !== false}
+                onChange={(v) => setStyle({ scaleWithZoom: v })}
+                hint="The cursor and click rings are magnified with the screen, so they keep their size next to what they point at."
+              />
             )}
           </div>
         </>

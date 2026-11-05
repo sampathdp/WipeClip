@@ -69,7 +69,7 @@ export function drawScene(c: HTMLCanvasElement, scene: PointerScene, style: Poin
   ctx.clearRect(0, 0, w, h);
   if (!style) return;
   for (const r of scene.rings) drawRing(ctx, r.cx * w, r.cy * h, r.r * h, ringColor(style, r.button), r.alpha);
-  if (scene.cursor) drawCursor(ctx, scene.cursor.x * w, scene.cursor.y * h, style.cursorSize * h, style.cursorColor);
+  if (scene.cursor) drawCursor(ctx, scene.cursor.x * w, scene.cursor.y * h, style.cursorSize * scene.cursor.scale * h, style.cursorColor);
 }
 
 /** Ring sprite radius in pixels (scaled per frame by the export). */
@@ -85,11 +85,13 @@ function toPng(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("encode_failed"))), "image/png"));
 }
 
-/** Export: the cursor at its output size and full-size rings. */
-export async function pointerSprites(style: PointerStyle, canvasHeightPx: number, withCursor: boolean): Promise<PointerSprites> {
+/** Export: the cursor at its largest output size (`cursorScale` x
+ * cursorSize; the backend shrinks it per frame by the rows' scale column)
+ * and full-size rings. */
+export async function pointerSprites(style: PointerStyle, canvasHeightPx: number, withCursor: boolean, cursorScale = 1): Promise<PointerSprites> {
   let cursor: PointerSprites["cursor"] = null;
   if (withCursor) {
-    const h = Math.max(8, Math.round(style.cursorSize * canvasHeightPx));
+    const h = Math.max(8, Math.round(style.cursorSize * cursorScale * canvasHeightPx));
     const pad = Math.ceil(h * CURSOR_PAD);
     const c = document.createElement("canvas");
     c.width = Math.ceil(h * 0.62) + pad * 2;

@@ -196,9 +196,43 @@ export function ringsAt(track: PointerTrack, t: number, style: PointerStyle): Ri
 // --- Canvas placement ----------------------------------------------------------
 
 export interface PointerScene {
-  /** Canvas fractions; null = not visible. */
-  cursor: { x: number; y: number } | null;
+  /** Canvas fractions; null = not visible. `scale` multiplies the style's
+   * cursorSize (see pointerScale). */
+  cursor: { x: number; y: number; scale: number } | null;
+  /** `r` already includes the scale. */
   rings: (Ring & { cx: number; cy: number })[];
+}
+
+/** Largest cursor/ring scale: 4x zoom of a recording-sized cursor is the
+ * most that still reads as a pointer. */
+export const MAX_POINTER_SCALE = 6;
+
+/** How much bigger than style.cursorSize x canvas height (and ringSize)
+ * the cursor and rings are drawn for `clip` shown through `camCrop` (its
+ * crop with the camera window applied) in fitted `box` (canvas fractions).
+ *  - sizeBase "recording": sizes are fractions of the recording's frame
+ *    height, which spans box.h / crop.h of the canvas;
+ *  - scaleWithZoom: the camera magnifies the screen by crop.h / camCrop.h,
+ *    and the pointer with it, so it keeps its size relative to the
+ *    buttons and text it points at.
+ * The preview and the export rows both use this, per frame. */
+export function pointerScale(style: Pick<PointerStyle, "scaleWithZoom" | "sizeBase">, crop: { h: number }, camCrop: { h: number }, box: { h: number }): number {
+  const base = style.sizeBase === "recording" ? box.h / Math.max(1e-6, crop.h) : 1;
+  const zoom = style.scaleWithZoom === false ? 1 : crop.h / Math.max(1e-6, camCrop.h);
+  return Math.min(MAX_POINTER_SCALE, Math.max(0.05, base * zoom));
+}
+
+/** Native cursor height of a recording as a fraction of its frame height,
+ * from the captured display's size and DPI scale: the arrow is about 22
+ * logical pixels tall on Windows and macOS. Display bounds are physical
+ * pixels on Windows and points on macOS (DesktopUnit); either way the
+ * fraction is resolution independent. null when the display is unknown. */
+export const NATIVE_CURSOR_PX = 22;
+export function nativeCursorSize(capture: { display: { bounds: { height: number }; scaleFactor: number } | null; desktopUnit: "physical-pixels" | "points" } | undefined): number | null {
+  const d = capture?.display;
+  if (!d || !(d.bounds.height > 0)) return null;
+  const logicalHeight = capture!.desktopUnit === "points" ? d.bounds.height : d.bounds.height / Math.max(0.5, d.scaleFactor || 1);
+  return Math.round((NATIVE_CURSOR_PX / logicalHeight) * 10000) / 10000;
 }
 
 export class PointerCache {
@@ -263,9 +297,11 @@ export function pointerScene(
   const cam = caches.camera.track(appliedZooms(project), clip, visibleView(box, clip.transform));
   const crop = cam ? cameraCrop(clip.crop, evalCamera(cam, s)) : clip.crop;
   const place = (p: { x: number; y: number }) => sourceToCanvas(p, crop, box, clip.transform, canvasSize);
+  const scale = pointerScale(style, clip.crop, crop, box);
   const cursorAllowed = style.cursor && src.recording?.manifest.capture.cursorCaptured === false;
   const pos = cursorAllowed ? pointerAt(track, s) : null;
-  const cursor = pos ? place(pos) : null;
+  const at = pos ? place(pos) : null;
+  const cursor = at ? { ...at, scale } : null;
   const rings = [];
   // Rings only for normal playback; a freeze or reversed clip has no
   // meaningful "moment of the click".
@@ -274,7 +310,7 @@ export function pointerScene(
     for (const r of ringsAt(track, s, style)) {
       if (prefs.ignoredClicks.length && isClickIgnored(prefs, src.id, track.clicks[r.click].t)) continue;
       const c = place(r);
-      if (c) rings.push({ ...r, cx: c.x, cy: c.y });
+      if (c) rings.push({ ...r, r: r.r * scale, cx: c.x, cy: c.y });
     }
   }
   return { cursor, rings };

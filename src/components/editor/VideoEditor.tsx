@@ -97,7 +97,7 @@ import { MIN_ZOOM_LENGTH, dragZoom, mergeSuggestions, patchZoom, removeZoom, spl
 import { analyzeFocus, type FocusSettings } from "@/lib/editor/focus";
 import { interactionTimeline, skipTarget } from "@/lib/editor/insights";
 import { eventsForSuggestions, excludeRange, focusPrefs, isClickIgnored, patchFocusPrefs, previewWithoutZooms, removeExclusion, setClickIgnored } from "@/lib/editor/focusPrefs";
-import { buildPointerTrack, pointerAt, recordingEvents } from "@/lib/editor/pointer";
+import { buildPointerTrack, nativeCursorSize, pointerAt, recordingEvents } from "@/lib/editor/pointer";
 import { FocusPanel, ZoomPanel, type AnalysisState } from "./FocusPanel";
 import MaskEditLayer from "./MaskEditLayer";
 import { SHAPE_LABELS } from "@/lib/editor/shapes";
@@ -301,6 +301,11 @@ export interface IncomingRecording {
 const selIs = (sel: Selection, kind: string, id: string) => sel !== null && sel.kind === kind && "id" in sel && sel.id === id;
 
 /** Whole-track hide/lock switches: on when every layer has it. */
+/** The Text track's single block standing for every auto caption, when
+ * they're shown combined (the track header's group switch). */
+const CAPTION_GROUP = "captions-group";
+const GROUP_KEY = "wipeclip.captionsGrouped";
+
 const layerToggles = (layers: Overlay[]): TrackToggle[] => [
   { kind: "hide", on: layers.length > 0 && layers.every((o) => o.hidden) },
   { kind: "lock", on: layers.length > 0 && layers.every((o) => o.locked) },
@@ -361,6 +366,21 @@ export default function VideoEditor({
     saveCaptionPrefs({ maxWords, style, y, look, hint, accurate });
   }, [captionOpts]);
   const [captioning, setCaptioning] = useState(false);
+  // Captions shown as one block on the Text track (a view setting, kept on this device).
+  const [captionsGrouped, setCaptionsGrouped] = useState(() => {
+    try {
+      return localStorage.getItem(GROUP_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(GROUP_KEY, captionsGrouped ? "1" : "0");
+    } catch {
+      // Not remembered.
+    }
+  }, [captionsGrouped]);
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [signedInTier, setSignedInTier] = useState<Tier>("free");
   const [showSignIn, setShowSignIn] = useState(false);
@@ -879,6 +899,12 @@ export default function VideoEditor({
   }, []);
 
   const select = useCallback((s: Selection) => {
+    // The combined captions block opens the captions panel (Edit text).
+    if (s?.kind === "overlay" && s.id === CAPTION_GROUP) {
+      setSelection(null);
+      setTool("captions");
+      return;
+    }
     setTool((t) => ((t === "filters" || t === "adjust") && s?.kind === "clip" ? t : null));
     setSelection(s);
   }, []);
@@ -1783,6 +1809,10 @@ export default function VideoEditor({
    * (all on -> all off, otherwise all on). */
   const onTrackToggle = useCallback(
     (track: string, kind: TrackToggle["kind"]) => {
+      if (kind === "group") {
+        setCaptionsGrouped((g) => !g);
+        return;
+      }
       apply((p) => {
         if (track === "audio") {
           const on = p.audio.length > 0 && p.audio.every((a) => a.muted);
@@ -1855,6 +1885,18 @@ export default function VideoEditor({
           const z = p.zooms?.find((x) => x.id === zid);
           const next = z && laid ? dragZoom(z, laid, mode, start, end, sourcesRef.current[z.sourceId]?.duration ?? Infinity) : null;
           return next ? { ...p, zooms: patchZoom(p.zooms!, zid, next) } : p;
+        }, false);
+      } else if (id === CAPTION_GROUP) {
+        // Dragging the combined block moves every caption together; its
+        // edges aren't trimmed (edit single captions in the panel).
+        if (mode !== "move") return;
+        apply((p) => {
+          const caps = p.overlays.filter((o) => o.caption && !o.locked);
+          if (!caps.length) return p;
+          const from = Math.min(...caps.map((o) => o.start));
+          const delta = Math.max(-from, start - from);
+          if (Math.abs(delta) < 1e-4) return p;
+          return { ...p, overlays: p.overlays.map((o) => (o.caption && !o.locked ? { ...o, start: o.start + delta, end: o.end + delta } : o)) };
         }, false);
       } else {
         apply((p) => {
@@ -2412,25 +2454,47 @@ export default function VideoEditor({
   // skip re-rendering tracks an edit didn't touch.
   const textTrack = useMemo<TimelineTrack>(() => {
     const layers = project.overlays.filter((o) => o.kind === "text");
+    const caps = layers.filter((o) => o.caption);
+    const grouped = captionsGrouped && caps.length > 1;
+    const block: TimelineTrack["items"] = grouped
+      ? [
+          {
+            id: CAPTION_GROUP,
+            start: Math.min(...caps.map((o) => o.start)),
+            end: Math.max(...caps.map((o) => o.end)),
+            label: `Captions · ${caps.length}`,
+            glyph: "CC",
+            hidden: caps.every((o) => o.hidden),
+            locked: caps.every((o) => o.locked),
+            selected: tool === "captions",
+            sel: { kind: "overlay" as const, id: CAPTION_GROUP },
+          },
+        ]
+      : [];
     return {
       key: "text",
       label: "Text",
       tone: "border-sky-500/40 bg-sky-500/20",
-      toggles: layerToggles(layers),
+      toggles: [...layerToggles(layers), ...(caps.length > 1 ? [{ kind: "group" as const, on: captionsGrouped }] : [])],
       deletable: true,
-      items: layers.map((o) => ({
-        id: o.id,
-        start: o.start,
-        end: o.end,
-        label: o.kind === "text" ? o.text.content.split("\n")[0] || "Text" : "",
-        glyph: "T",
-        hidden: o.hidden,
-        locked: o.locked,
-        selected: selIs(selection, "overlay", o.id),
-        sel: { kind: "overlay", id: o.id },
-      })),
+      items: [
+        ...block,
+        ...(grouped ? layers.filter((o) => !o.caption) : layers).map(
+          (o): TimelineTrack["items"][number] => ({
+            id: o.id,
+            start: o.start,
+            end: o.end,
+            label: o.kind === "text" ? o.text.content.split("\n")[0] || "Text" : "",
+            glyph: "T",
+            hidden: o.hidden,
+            locked: o.locked,
+            selected: selIs(selection, "overlay", o.id),
+            sel: { kind: "overlay", id: o.id },
+          })
+        ),
+      ],
     };
-  }, [project.overlays, selection]);
+  }, [project.overlays, selection, captionsGrouped, tool]);
   const elementsTrack = useMemo<TimelineTrack>(() => {
     const layers = project.overlays.filter((o) => o.kind !== "text");
     return {
@@ -2896,6 +2960,7 @@ export default function VideoEditor({
         }
         clickCount={rawPointer?.clicks.length ?? 0}
         cursorAllowed={recSource?.recording?.manifest.capture.cursorCaptured === false}
+        nativeCursorSize={nativeCursorSize(recSource?.recording?.manifest.capture)}
         zooms={zooms}
         pointer={project.pointer ?? null}
         analysis={analysis}

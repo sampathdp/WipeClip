@@ -21,7 +21,16 @@
  *      one in view, instead of zooming out to fit them all);
  *   4. pacing: near neighbours are merged or chained (the camera pans
  *      instead of zooming out and in), and the densest stretches are
- *      thinned to the preset's zooms-per-minute.
+ *      thinned to the preset's zooms-per-minute;
+ *   5. focus sessions (Smart Zoom 2): zooms separated by a short idle
+ *      stretch (sessionGap) are joined - merged when they show the same
+ *      area, chained (a pan, no zoom-out) when they don't - so related
+ *      actions a few seconds apart don't zoom out and back in. A rest at
+ *      full view shorter than `cooldown` is only kept for an important
+ *      zoom; otherwise the weaker of the two goes.
+ *
+ * Creator profiles (FocusProfile) adjust a preset for tutorials, general
+ * desktop demos or gaming - see focusSettings().
  */
 import { CHAIN_GAP } from "./camera.ts";
 import type { CameraZoom, ZoomEase, ZoomPathPoint } from "./types.ts";
@@ -55,7 +64,25 @@ export interface FocusSettings {
   includeTyping: boolean;
   /** Pan with the action inside a zoom instead of zooming out to fit it. */
   follow: boolean;
+  /** Zooms whose camera would rest at full view for less than this
+   * (seconds) are joined into one focus session: merged when they show
+   * the same area, panned between when they don't. Optional for settings
+   * made before Smart Zoom 2 (DEFAULT_SESSION applies). */
+  sessionGap?: number;
+  /** Shortest rest at full view between two zooms (seconds). A shorter one
+   * is bridged when the zooms show the same area, else the weaker zoom is
+   * dropped unless it is important (a marker, or scoring twice the
+   * threshold). */
+  cooldown?: number;
+  /** Longest focus session, seconds (typing and joined sessions). Longer
+   * activity continues in a chained zoom - still no zoom-out. */
+  maxSession?: number;
+  /** Shortcut key events become interactions (gaming turns this off). */
+  includeShortcuts?: boolean;
 }
+
+/** Session defaults for settings objects from before Smart Zoom 2. */
+export const DEFAULT_SESSION = { sessionGap: 3, cooldown: 4, maxSession: 60, includeShortcuts: true };
 
 export type FocusPreset = "subtle" | "balanced" | "dynamic";
 
@@ -79,6 +106,10 @@ export const FOCUS_PRESETS: Record<FocusPreset, FocusSettings> = {
     useMarkers: true,
     includeTyping: true,
     follow: true,
+    sessionGap: 3.5,
+    cooldown: 5,
+    maxSession: 60,
+    includeShortcuts: true,
   },
   balanced: {
     zoom: 1.8,
@@ -89,7 +120,7 @@ export const FOCUS_PRESETS: Record<FocusPreset, FocusSettings> = {
     hold: 1.5,
     easeIn: 0.65,
     easeOut: 0.7,
-    ease: "smooth",
+    ease: "natural",
     clusterGap: 1.3,
     clusterRadius: 0.18,
     minScore: 1.5,
@@ -99,6 +130,10 @@ export const FOCUS_PRESETS: Record<FocusPreset, FocusSettings> = {
     useMarkers: true,
     includeTyping: true,
     follow: true,
+    sessionGap: 3,
+    cooldown: 4.5,
+    maxSession: 60,
+    includeShortcuts: true,
   },
   dynamic: {
     zoom: 2.3,
@@ -109,7 +144,7 @@ export const FOCUS_PRESETS: Record<FocusPreset, FocusSettings> = {
     hold: 1.2,
     easeIn: 0.45,
     easeOut: 0.55,
-    ease: "smooth",
+    ease: "natural",
     clusterGap: 1.1,
     clusterRadius: 0.15,
     minScore: 1.0,
@@ -119,8 +154,66 @@ export const FOCUS_PRESETS: Record<FocusPreset, FocusSettings> = {
     useMarkers: true,
     includeTyping: true,
     follow: true,
+    sessionGap: 2.6,
+    cooldown: 3.5,
+    maxSession: 60,
+    includeShortcuts: true,
   },
 };
+
+/** What kind of recording it is. The presets set how strong and how
+ * frequent zooms are; the profile sets which activity matters:
+ *  - tutorial: every step counts - typing, shortcuts, following the text
+ *    cursor, long sessions so a sequence of steps stays zoomed in;
+ *  - demo: a general desktop walkthrough - a little wider, fewer zooms,
+ *    shorter sessions;
+ *  - gaming: constant clicks and keys are the game, not steps to show.
+ *    Keys (movement reads as typing), shortcuts and scrolling are
+ *    ignored; only clearly deliberate clusters or markers zoom, gently and
+ *    rarely, and the camera never pans with the action. */
+export type FocusProfile = "tutorial" | "demo" | "gaming";
+
+export const FOCUS_PROFILES: Record<FocusProfile, { label: string; hint: string }> = {
+  tutorial: { label: "Tutorial", hint: "Software steps, typing and shortcuts" },
+  demo: { label: "Demo", hint: "General desktop walkthrough, fewer and wider zooms" },
+  gaming: { label: "Gaming", hint: "Markers and deliberate moments only, no typing" },
+};
+
+/** A preset adjusted for a creator profile. Pure; the preset object
+ * itself is not changed. */
+export function focusSettings(preset: FocusPreset, profile: FocusProfile = "tutorial"): FocusSettings {
+  const p = { ...DEFAULT_SESSION, ...FOCUS_PRESETS[preset] };
+  if (profile === "tutorial") return p;
+  if (profile === "demo") {
+    const zoom = Math.max(1.3, Math.round((1 + (p.zoom - 1) * 0.8) * 100) / 100);
+    return {
+      ...p,
+      zoom,
+      maxZoom: Math.max(zoom, Math.round((1 + (p.maxZoom - 1) * 0.8) * 100) / 100),
+      minScore: p.minScore + 0.3,
+      maxPerMinute: Math.max(2, Math.round(p.maxPerMinute * 0.75)),
+      sessionGap: Math.round(p.sessionGap * 0.8 * 10) / 10,
+      maxSession: 30,
+    };
+  }
+  return {
+    ...p,
+    zoom: Math.min(p.zoom, 1.5),
+    maxZoom: Math.min(p.maxZoom, 1.8),
+    easeIn: Math.max(p.easeIn, 0.8),
+    easeOut: Math.max(p.easeOut, 0.9),
+    ease: "gentle",
+    minScore: p.minScore + 1.5,
+    maxPerMinute: Math.min(p.maxPerMinute, 3),
+    includeScroll: false,
+    includeTyping: false,
+    includeShortcuts: false,
+    follow: false,
+    sessionGap: 1.5,
+    cooldown: 8,
+    maxSession: 15,
+  };
+}
 
 /** Below this the zoom isn't worth the motion. */
 const MIN_USEFUL_ZOOM = 1.15;
@@ -147,8 +240,16 @@ const TYPING_CLICK_WINDOW = 30;
 const DEAD_ZONE = 0.32;
 /** Points this close in time (s) need to be in view together. */
 const TOGETHER = 0.6;
-/** Typing zooms may run this long (s) - a sentence takes a while. */
+/** Typing zooms may run this long (s) when the settings don't say
+ * (maxSession) - a sentence takes a while. */
 const TYPING_MAX_DURATION = 45;
+/** While typing, the camera frames the text cursor's recent and upcoming
+ * positions (this many seconds either way) instead of chasing each
+ * keystroke, so wrapping to a new line doesn't pan back and forth. */
+const TYPING_FRAME_SPAN = 4;
+/** Shortcut keys this close (s) to a typing burst belong to the typing
+ * (Ctrl+S, Ctrl+B while writing) - not a separate action at the pointer. */
+const TYPING_KEY_SLACK = 1.5;
 
 interface Interaction {
   t: number; // seconds
@@ -264,14 +365,21 @@ export function collectInteractions(events: InteractionEvent[], aspect: number, 
       }
       lastScroll = { t, tEnd: t, x: e.x, y: e.y, score: 0.4, kind: "scroll", path: [] };
       out.push(lastScroll);
-    } else if (e.type === "key" && lastPointer && inside(lastPointer.x, lastPointer.y)) {
+    } else if (e.type === "key" && s.includeShortcuts !== false && lastPointer && inside(lastPointer.x, lastPointer.y)) {
       const t = e.t / 1000;
       out.push({ t, tEnd: t, x: lastPointer.x, y: lastPointer.y, score: 0.3, kind: "key", path: [] });
     }
   }
-  out.push(...typingBursts(typing, out, moves, cuts));
-  out.sort((a, b) => a.t - b.t);
-  return { interactions: out, moves, cuts, markers, clicks };
+  const bursts = typingBursts(typing, out, moves, cuts);
+  // Shortcuts pressed while typing are part of the typing. Placed at the
+  // pointer (which can be anywhere while the text cursor works) they used
+  // to split one typing session into separate zooms.
+  const kept = bursts.length
+    ? out.filter((i) => i.kind !== "key" || !bursts.some((b) => i.t >= b.t - TYPING_KEY_SLACK && i.t <= b.tEnd + TYPING_KEY_SLACK))
+    : out;
+  kept.push(...bursts);
+  kept.sort((a, b) => a.t - b.t);
+  return { interactions: kept, moves, cuts, markers, clicks };
 }
 
 /** A left press that moved: the zoom follows the drag to its release. */
@@ -427,19 +535,49 @@ function localZoom(pts: ZoomPathPoint[], aspect: number, s: FocusSettings) {
 /** Where the camera points over time at `zoom`: it starts on the first
  * point and only moves when a later one leaves the middle of the window
  * (no jitter for small moves); moves less than PAN apart collapse into the
- * later one. Centers are clamped like the camera clamps its window. */
-function followPath(pts: ZoomPathPoint[], zoom: number, aspect: number) {
+ * later one. Centers are clamped like the camera clamps its window.
+ *
+ * With `span` > 0 (typing) the camera aims at the middle of the points
+ * within `span` seconds of the one that left the dead zone, when they fit
+ * in it, so a line of text stays framed as a whole. A point the camera
+ * can't get closer to (pressed against a frame edge) never moves it. */
+function followPath(pts: ZoomPathPoint[], zoom: number, aspect: number, span = 0) {
   const w = 1 / zoom;
   const clampC = (v: number) => Math.min(1 - w / 2, Math.max(w / 2, v));
-  let cx = clampC(pts[0].x);
-  let cy = clampC(pts[0].y);
+  const room = 2 * DEAD_ZONE * w;
+  const aim = (i: number) => {
+    const p = pts[i];
+    if (span <= 0) return { x: p.x, y: p.y };
+    let x0 = p.x;
+    let x1 = p.x;
+    let y0 = p.y;
+    let y1 = p.y;
+    for (const q of pts) {
+      if (Math.abs(q.t - p.t) > span) continue;
+      x0 = Math.min(x0, q.x);
+      x1 = Math.max(x1, q.x);
+      y0 = Math.min(y0, q.y);
+      y1 = Math.max(y1, q.y);
+    }
+    return { x: x1 - x0 <= room ? (x0 + x1) / 2 : p.x, y: y1 - y0 <= room ? (y0 + y1) / 2 : p.y };
+  };
+  const first = aim(0);
+  let cx = clampC(first.x);
+  let cy = clampC(first.y);
   const start = { x: cx, y: cy };
   const path: ZoomPathPoint[] = [];
-  for (const p of pts.slice(1)) {
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i];
     const out = Math.abs(p.x - cx) > DEAD_ZONE * w || Math.abs(p.y - cy) > DEAD_ZONE * w;
     if (!out) continue;
-    cx = clampC(p.x);
-    cy = clampC(p.y);
+    const a = aim(i);
+    const nx = clampC(a.x);
+    const ny = clampC(a.y);
+    // Against a frame edge the clamped center can't follow: no pan (it
+    // used to add a pan that went nowhere and could replace a real one).
+    if (Math.abs(nx - cx) < 0.01 * w && Math.abs(ny - cy) < 0.01 * w) continue;
+    cx = nx;
+    cy = ny;
     const prev = path[path.length - 1];
     const point = { t: p.t, x: round3(cx), y: round3(cy) };
     if (prev && p.t - prev.t < 0.5) path[path.length - 1] = point;
@@ -455,7 +593,7 @@ function followPath(pts: ZoomPathPoint[], zoom: number, aspect: number) {
 /** Framing for a set of points: one box when they fit at (close to) the
  * preset's zoom, else - with follow on - the preset's zoom (or what the
  * simultaneous points allow) and a path. null when nothing is worth it. */
-function frameFor(pts: ZoomPathPoint[], aspect: number, s: FocusSettings): { x: number; y: number; zoom: number; path: ZoomPathPoint[] } | null {
+function frameFor(pts: ZoomPathPoint[], aspect: number, s: FocusSettings, span = 0): { x: number; y: number; zoom: number; path: ZoomPathPoint[] } | null {
   const box = focusBox(pts, aspect, s);
   const wanted = Math.min(s.zoom, s.maxZoom);
   if (box.zoom >= wanted * 0.95 || !s.follow || pts.length < 2) {
@@ -463,7 +601,7 @@ function frameFor(pts: ZoomPathPoint[], aspect: number, s: FocusSettings): { x: 
   }
   const zoom = localZoom(pts, aspect, s);
   if (zoom < MIN_USEFUL_ZOOM || zoom <= box.zoom) return box.zoom >= MIN_USEFUL_ZOOM ? { ...box, path: [] } : null;
-  return { ...followPath(pts, zoom, aspect), zoom };
+  return { ...followPath(pts, zoom, aspect, span), zoom };
 }
 
 /** Zoom that keeps all points plus padding in view, capped by the preset. */
@@ -484,10 +622,13 @@ function focusBox(points: { x: number; y: number }[], aspect: number, s: FocusSe
   return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, zoom: Math.min(s.zoom, s.maxZoom, 1 / need) };
 }
 
-function rangeFor(first: number, last: number, cuts: number[], duration: number, s: FocusSettings, long = false) {
+/** Longest zoom holding typing (or a joined session). */
+const longLimit = (s: FocusSettings) => Math.max(s.maxDuration, s.maxSession ?? TYPING_MAX_DURATION);
+
+function rangeFor(first: number, last: number, cuts: number[], duration: number, s: FocusSettings, long = false, uncapped = false) {
   let start = first - s.lead - s.easeIn;
   let end = last + s.hold + s.easeOut;
-  const max = long ? Math.max(s.maxDuration, TYPING_MAX_DURATION) : s.maxDuration;
+  const max = uncapped ? Infinity : long ? longLimit(s) : s.maxDuration;
   if (end - start < s.minDuration) end = start + s.minDuration;
   if (end - start > max) end = start + max;
   // Stay inside the stretch between pause cuts: the video jumps there.
@@ -530,14 +671,14 @@ export function suggestZooms(input: FocusInput, s: FocusSettings, ids: () => str
       continue;
     }
     const points = clusterPoints(c.items);
-    const frame = frameFor(points, aspect, s);
+    const long = c.items.some((i) => i.kind === "typing");
+    const frame = frameFor(points, aspect, s, long ? TYPING_FRAME_SPAN : 0);
     if (!frame) {
       skippedSmall++; // spread over most of the screen: nothing to focus on
       continue;
     }
-    const long = c.items.some((i) => i.kind === "typing");
     const lastT = Math.max(...c.items.map((i) => i.tEnd));
-    const { start, end } = rangeFor(c.items[0].t, lastT, cuts, duration, s, long);
+    const { start, end } = rangeFor(c.items[0].t, lastT, cuts, duration, s, long, long);
     if (end - start < 2 * 0.15 + 0.2) continue;
     const clicksIn = c.items.filter((i) => i.kind === "click").length;
     const dragged = c.items.some((i) => i.kind === "click" && i.path.length > 0);
@@ -552,7 +693,11 @@ export function suggestZooms(input: FocusInput, s: FocusSettings, ids: () => str
           : c.items[0].kind === "scroll"
             ? "Scrolling"
             : "Shortcuts";
-    cands.push({ start, end, ...frame, path: frame.path.filter((p) => p.t > start && p.t < end), score: c.score + (forced ? 10 : 0), reason, points, forced, long });
+    const cand: Candidate = { start, end, ...frame, path: frame.path.filter((p) => p.t > start && p.t < end), score: c.score + (forced ? 10 : 0), reason, points, forced, long };
+    // Typing longer than one session continues in chained zooms (the
+    // camera pans on, never zooms out mid-sentence); it used to stop at
+    // 45 s while the typing went on.
+    cands.push(...splitLong(cand, longLimit(s)));
   }
   for (const m of orphanMarkers) {
     const p = pointerAt(m.t);
@@ -565,7 +710,7 @@ export function suggestZooms(input: FocusInput, s: FocusSettings, ids: () => str
 
   // Pacing: merge or chain neighbours that come too soon.
   const isNear = (a: Candidate, b: Candidate) => Math.hypot(a.x - b.x, (a.y - b.y) / aspect) < s.clusterRadius * 1.5;
-  const lengthLimit = (...cs: Candidate[]) => (cs.some((x) => x.long) ? Math.max(s.maxDuration, TYPING_MAX_DURATION) : s.maxDuration);
+  const lengthLimit = (...cs: Candidate[]) => (cs.some((x) => x.long) ? longLimit(s) : s.maxDuration);
   const paced: Candidate[] = [];
   let skippedBack = 0;
   for (const c of cands) {
@@ -616,7 +761,7 @@ export function suggestZooms(input: FocusInput, s: FocusSettings, ids: () => str
       const maxLength = lengthLimit(prev, c);
       if (near && mergedLength <= maxLength && !cutBetween(cuts, prev.end, c.start)) {
         const points = [...prev.points, ...c.points].sort((a, b) => a.t - b.t);
-        const frame = frameFor(points, aspect, prev.wide ? { ...s, follow: false } : s);
+        const frame = frameFor(points, aspect, prev.wide ? { ...s, follow: false } : s, prev.long || c.long ? TYPING_FRAME_SPAN : 0);
         if (frame) {
           const end = Math.max(prev.end, c.end);
           Object.assign(prev, {
@@ -660,10 +805,20 @@ export function suggestZooms(input: FocusInput, s: FocusSettings, ids: () => str
     paced.push(c);
   }
 
+  const sessions: SessionContext = {
+    cuts,
+    s,
+    isNear,
+    frameOf: (pts, long, wide) => frameFor(pts, aspect, wide ? { ...s, follow: false } : s, long ? TYPING_FRAME_SPAN : 0),
+    activity: clusterPoints(interactions.filter((i) => i.kind !== "key")),
+  };
+  // Focus sessions: join zooms the camera would only briefly leave.
+  const joined = joinSessions(paced, sessions);
+
   // Thin the busiest minutes, keeping the most significant zooms.
   let skippedPacing = 0;
-  const keep = new Set(paced);
-  const byScore = [...paced].sort((a, b) => a.score - b.score);
+  const keep = new Set(joined);
+  const byScore = [...joined].sort((a, b) => a.score - b.score);
   for (const c of byScore) {
     if (c.forced) continue;
     const mid = (c.start + c.end) / 2;
@@ -673,10 +828,17 @@ export function suggestZooms(input: FocusInput, s: FocusSettings, ids: () => str
       skippedPacing++;
     }
   }
+  // Thinning leaves holes: join across them too, then apply the cooldown.
+  const rested = cooldown(
+    joinSessions(
+      joined.filter((c) => keep.has(c)),
+      sessions
+    ),
+    sessions
+  );
+  skippedPacing += rested.dropped;
 
-  const zooms: CameraZoom[] = paced
-    .filter((c) => keep.has(c))
-    .map((c) => ({
+  const zooms: CameraZoom[] = rested.out.map((c) => ({
       id: ids(),
       sourceId,
       start: round3(c.start),
@@ -696,6 +858,148 @@ export function suggestZooms(input: FocusInput, s: FocusSettings, ids: () => str
 }
 
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
+
+interface SessionContext {
+  cuts: number[];
+  s: FocusSettings;
+  isNear: (a: Candidate, b: Candidate) => boolean;
+  frameOf: (pts: ZoomPathPoint[], long: boolean, wide: boolean) => { x: number; y: number; zoom: number; path: ZoomPathPoint[] } | null;
+  /** Every recorded interaction position (also those that got no zoom of
+   * their own), in time order: joining must never hide one. */
+  activity: ZoomPathPoint[];
+}
+
+/** Whether every interaction between `from` and `to` is inside the view
+ * of a zoom framed at (x, y, zoom) that pans along `path`. */
+function showsActivity(f: { x: number; y: number; zoom: number; path: ZoomPathPoint[] }, activity: ZoomPathPoint[], from: number, to: number): boolean {
+  const half = 1 / (2 * f.zoom);
+  const clampC = (v: number) => Math.min(1 - half, Math.max(half, v));
+  let lo = 0;
+  let hi = activity.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (activity[mid].t <= from) lo = mid + 1;
+    else hi = mid;
+  }
+  for (let i = lo; i < activity.length && activity[i].t < to; i++) {
+    const a = activity[i];
+    let c: { x: number; y: number } = f;
+    for (const p of f.path) if (p.t <= a.t) c = p;
+    if (Math.abs(a.x - clampC(c.x)) > half || Math.abs(a.y - clampC(c.y)) > half) return false;
+  }
+  return true;
+}
+
+/** A candidate longer than `max` as consecutive pieces of at most `max`,
+ * each starting where the camera was at the cut, chained (no gap). */
+function splitLong(c: Candidate, max: number): Candidate[] {
+  if (c.end - c.start <= max + 1e-6) return [c];
+  const out: Candidate[] = [];
+  let at = c.start;
+  let focus = { x: c.x, y: c.y };
+  while (c.end - at > 1e-6) {
+    // Don't leave a sliver at the end.
+    const end = c.end - (at + max) < 2 ? c.end : at + max;
+    const path = c.path.filter((p) => p.t > at && p.t < end);
+    out.push({ ...c, start: at, end, x: focus.x, y: focus.y, path, points: c.points.filter((p) => p.t >= at && p.t < end) });
+    const last = path[path.length - 1];
+    if (last) focus = { x: last.x, y: last.y };
+    at = end;
+  }
+  return out;
+}
+
+/** The framing a zoom holds at its end (its last follow position). */
+function heldFrame(c: Candidate) {
+  const last = c.path[c.path.length - 1];
+  return { x: last?.x ?? c.x, y: last?.y ?? c.y, zoom: c.zoom, path: [] };
+}
+
+/** Merges `c` into `prev` when they show the same area and the result
+ * stays within maxSession and still frames well. */
+function mergeSession(prev: Candidate, c: Candidate, ctx: SessionContext): boolean {
+  const { s } = ctx;
+  const maxSession = Math.max(s.maxDuration, s.maxSession ?? DEFAULT_SESSION.maxSession);
+  if (!ctx.isNear(prev, c) || Math.max(prev.end, c.end) - prev.start > maxSession) return false;
+  const points = [...prev.points, ...c.points].sort((a, b) => a.t - b.t);
+  const long = prev.long || c.long;
+  const frame = ctx.frameOf(points, long, !!prev.wide);
+  if (!frame) return false;
+  // Something happened elsewhere in between (an action that got no zoom
+  // of its own): staying here would hide it.
+  if (!showsActivity(frame, ctx.activity, Math.min(prev.start, c.start), Math.max(prev.end, c.end))) return false;
+  const end = Math.max(prev.end, c.end);
+  Object.assign(prev, {
+    end,
+    x: frame.x,
+    y: frame.y,
+    zoom: frame.zoom,
+    path: frame.path.filter((p) => p.t > prev.start && p.t < end),
+    points,
+    long,
+    score: prev.score + c.score,
+    forced: prev.forced || c.forced,
+    reason: prev.reason === c.reason ? prev.reason : `${prev.reason} + ${c.reason}`,
+  });
+  return true;
+}
+
+/** Focus sessions. Two zooms whose camera would rest at full view for less
+ * than sessionGap are joined: merged into one when they show the same
+ * area (and the result is at most maxSession long), else chained - the
+ * first holds until the second starts, then the camera pans across. No
+ * zoom-out and back in between related actions. Pause cuts always end a
+ * session (the video jumps there). */
+function joinSessions(list: Candidate[], ctx: SessionContext): Candidate[] {
+  const gap = ctx.s.sessionGap ?? DEFAULT_SESSION.sessionGap;
+  const out: Candidate[] = [];
+  for (const c0 of list) {
+    const c = { ...c0 };
+    const prev = out[out.length - 1];
+    const rest = prev ? c.start - prev.end : Infinity;
+    if (!prev || rest >= gap || cutBetween(ctx.cuts, prev.end, c.start)) {
+      out.push(c);
+      continue;
+    }
+    if (mergeSession(prev, c, ctx)) continue;
+    // Chain: hold the previous framing until this one starts - unless that
+    // would hide an action in between; then the camera zooms out for it.
+    const holdTo = c.start - CHAIN_GAP * 0.5;
+    if (rest > CHAIN_GAP * 0.5 && showsActivity(heldFrame(prev), ctx.activity, prev.end, holdTo)) prev.end = holdTo;
+    out.push(c);
+  }
+  return out;
+}
+
+/** Rests at full view longer than sessionGap but shorter than the
+ * cooldown would zoom out and straight back in. Same area: the camera
+ * stays (merged, as in joinSessions). Different areas: the weaker zoom of
+ * the pair goes, unless both are important (a marker, or a cluster
+ * scoring twice the preset's threshold) - those keep their own zooms.
+ * Rests at a pause cut are left alone: the video jumps there anyway. */
+function cooldown(list: Candidate[], ctx: SessionContext): { out: Candidate[]; dropped: number } {
+  const { s, cuts } = ctx;
+  const min = s.cooldown ?? DEFAULT_SESSION.cooldown;
+  const important = (c: Candidate) => c.forced || c.score >= 2 * s.minScore;
+  const out: Candidate[] = [];
+  let dropped = 0;
+  for (const c of list) {
+    const prev = out[out.length - 1];
+    const rest = prev ? c.start - prev.end : Infinity;
+    if (!prev || rest >= min || rest < CHAIN_GAP || cutBetween(cuts, prev.end, c.start)) {
+      out.push(c);
+      continue;
+    }
+    if (mergeSession(prev, c, ctx)) continue;
+    if (important(c) && important(prev)) {
+      out.push(c);
+      continue;
+    }
+    dropped++;
+    if (important(c) || (!important(prev) && c.score > prev.score)) out[out.length - 1] = c;
+  }
+  return { out, dropped };
+}
 
 export interface AnalyzeProgress {
   stage: "reading" | "analyzing" | "done";

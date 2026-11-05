@@ -161,6 +161,96 @@ class FocusExportTest(unittest.TestCase):
         self.assertEqual(color(frame_at(out, 1.8)[45, 80]), "red", "ring gone")
         self.assertEqual(color(frame_at(out, 2.5)[100, 170]), "white", "cursor hidden again")
 
+    def test_cursor_grows_with_the_zoom(self) -> None:
+        """Smart Zoom 2: rows with a size column. The sprite is drawn at the
+        largest size (40 px); the resting size (k 0.5, 20 px) is a static
+        layer and every other size is sampled around the hotspot, which
+        stays on the recorded position."""
+        cursor = os.path.join(self.tmp, "cursor40.png")
+        Image.new("RGBA", (40, 40), (0, 0, 255, 255)).save(cursor)
+        plan = base_plan(self.src)
+        plan.pointer = editor.PlanPointer(
+            cursor_path=cursor,
+            cursor_w=40 / H,
+            cursor_h=40 / H,
+            hot_x=0.0,
+            hot_y=0.0,
+            ring_paths=[],
+            ring_sizes=[],
+            # Hotspot at (100, 50): resting 0-1 s, growing (k 0.75) 1-1.3 s,
+            # fully zoomed (k 1) 1.3-2 s, resting again.
+            cursor_rows=[(0.0, 100 / W, 50 / H, 0.5), (1.0, 100 / W, 50 / H, 0.75), (1.3, 100 / W, 50 / H, 1.0), (2.0, 100 / W, 50 / H, 0.5)],
+            ring_rows=[],
+        )
+        _, statics = editor.cursor_scales(plan.pointer.cursor_rows, 3.0)
+        self.assertEqual(statics[:2], [0.5, 1.0], "held sizes first, exact")
+        self.assertAlmostEqual(statics[2], 0.75, delta=0.75 * 0.005, msg="a transition size snaps to the 1 % ladder")
+        # Both ways of drawing a size: static layers for all three, and -
+        # with the layer cap at 2 - geq for the transition's 0.75.
+        for cap in (editor.CURSOR_MAX_LAYERS, 2):
+            original = editor.CURSOR_MAX_LAYERS
+            editor.CURSOR_MAX_LAYERS = cap
+            try:
+                out = os.path.join(self.tmp, f"cursor-scale-{cap}.mp4")
+                render(plan, out)
+            finally:
+                editor.CURSOR_MAX_LAYERS = original
+
+            def extent(t: float) -> int:
+                """Blue pixels right of the hotspot along y = 55."""
+                row = frame_at(out, t)[55]
+                n = 0
+                for x in range(100, 160):
+                    if color(row[x]) != "blue":
+                        break
+                    n += 1
+                return n
+
+            self.assertEqual(color(frame_at(out, 0.5)[52, 102]), "blue", "tip at the hotspot")
+            self.assertEqual(color(frame_at(out, 0.5)[48, 98]), "red", "nothing above-left of the tip")
+            self.assertAlmostEqual(extent(0.5), 20, delta=2)
+            self.assertAlmostEqual(extent(1.15), 30, delta=2, msg=f"cap {cap}")
+            self.assertEqual(color(frame_at(out, 1.15)[48, 98]), "red", "the tip stays put while growing")
+            self.assertAlmostEqual(extent(1.75), 40, delta=2)
+            self.assertAlmostEqual(extent(2.5), 20, delta=2)
+
+    def test_growing_cursor_on_a_long_timeline_renders_quickly(self) -> None:
+        """20 s with a zoom transition every second, the cursor size
+        changing on half the frames and its position on every frame."""
+        long_src = os.path.join(self.tmp, "long-cursor.mp4")
+        make_quadrants(long_src, 20)
+        cursor = os.path.join(self.tmp, "cursor-long.png")
+        Image.new("RGBA", (36, 54), (0, 0, 255, 255)).save(cursor)
+        rows = []
+        for f in range(0, 20 * FPS):
+            u = (f % FPS) / FPS
+            k = 0.5 if u >= 0.5 else 0.5 + u
+            rows.append((f / FPS, 0.3 + 0.4 * u, 0.5, round(k, 4)))
+        clip = editor.PlanClip(source_path=long_src, source_has_audio=False, source_width=W, source_height=H, start=0.0, duration=20.0)
+        plan = editor.ExportPlan(width=W, height=H, fps=FPS, with_audio=False, clips=[clip])
+        plan.pointer = editor.PlanPointer(cursor, 36 / H, 54 / H, 0, 0, [], [], rows, [])
+        out = os.path.join(self.tmp, "long-cursor-out.mp4")
+        t = time.perf_counter()
+        render(plan, out)
+        elapsed = time.perf_counter() - t
+        print(f"\n  growing cursor, 20 s at {W}x{H}: rendered in {elapsed:.1f} s", end="")
+        self.assertLess(elapsed, 60)
+
+    def test_cursor_rows_with_a_size_column_are_validated(self) -> None:
+        from fastapi import HTTPException
+
+        from app.main import _EditorPointer, _pointer_plan
+
+        images = [("x", 1, 1)]
+        cur = {"image": 0, "width": 0.1, "height": 0.1, "hotX": 0, "hotY": 0}
+        ok = _pointer_plan(_EditorPointer.model_validate({"cursor": cur, "cursorRows": [[0, 0.5, 0.5, 0.5], [1, -1, -1, 1]]}), images)
+        self.assertEqual(ok.cursor_rows[0], (0, 0.5, 0.5, 0.5))
+        legacy = _pointer_plan(_EditorPointer.model_validate({"cursor": cur, "cursorRows": [[0, 0.5, 0.5]]}), images)
+        self.assertEqual(legacy.cursor_rows, [(0, 0.5, 0.5)], "older clients' rows still work")
+        for bad in ([[0, 0.5, 0.5, 0]], [[0, 0.5, 0.5, 1.5]], [[0, 0.5, 0.5, 0.5], [1, 0.5, 0.5]], [[0, 0.5, 0.5, 0.5, 1]]):
+            with self.assertRaises(HTTPException, msg=bad):
+                _pointer_plan(_EditorPointer.model_validate({"cursor": cur, "cursorRows": bad}), images)
+
     def test_frontend_payload_renders_like_the_preview(self) -> None:
         """The export payload the browser builds for a synthetic recording
         (fixture written by tests/desktop/focus.test.ts from the preview's
@@ -188,6 +278,41 @@ class FocusExportTest(unittest.TestCase):
         zoomed = frame_at(out, payload["expect"]["zoomedAt"])
         for y, x in ((5, 5), (5, W - 5), (H - 5, 5), (H - 5, W - 5)):
             self.assertEqual(color(zoomed[y, x]), "red", (y, x))
+
+    def test_frontend_cursor_rows_grow_with_the_zoom_like_the_preview(self) -> None:
+        """Smart Zoom 2: the drawn cursor rows the browser builds for the
+        same recording (fixture from tests/desktop/focus.test.ts). At the
+        fully zoomed moment the preview draws the cursor twice as tall as at
+        rest, tip on the click; the render must match. The sprite is a
+        solid square of the cursor's largest height, tip at its top-left."""
+        from app.main import _EditorPointer, _camera_rows, _pointer_plan
+
+        with open(PAYLOAD, encoding="utf-8") as f:
+            payload = json.load(f)
+        cur = payload["cursor"]
+        side = round(cur["size"] * cur["scale"] * H)
+        sprite = os.path.join(self.tmp, "cursor-e2e.png")
+        Image.new("RGBA", (side, side), (0, 0, 255, 255)).save(sprite)
+        plan = base_plan(self.src, camera=_camera_rows(payload["camera"]))
+        pointer = _EditorPointer.model_validate(
+            {"cursor": {"image": 0, "width": side / H, "height": side / H, "hotX": 0, "hotY": 0}, "cursorRows": cur["rows"]}
+        )
+        plan.pointer = _pointer_plan(pointer, [(sprite, side, side)])
+        out = os.path.join(self.tmp, "e2e-cursor.mp4")
+        render(plan, out)
+
+        def extent(frame: np.ndarray, x: int, y: int) -> int:
+            n = 0
+            while x + n < W and color(frame[y + 2, x + n]) == "blue":
+                n += 1
+            return n
+
+        at = payload["expect"]["cursorAt"]
+        zoomed = frame_at(out, at["t"])
+        self.assertEqual(color(zoomed[at["y"] + 2, at["x"] + 2]), "blue", "tip where the preview puts it")
+        self.assertAlmostEqual(extent(zoomed, at["x"], at["y"]), at["h"], delta=2)
+        rest = payload["expect"]["cursorRestAt"]
+        self.assertAlmostEqual(extent(frame_at(out, rest["t"]), W // 2, H // 2), rest["h"], delta=2)
 
     def test_requested_frame_rate_is_validated(self) -> None:
         """Screen recordings send their capture rate (their probed average is

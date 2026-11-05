@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } 
 import type { Clock } from "@/lib/editor/clock";
 import { gradeOf, isNeutralColor } from "@/lib/editor/look";
 import { DIP_AUDIO, frameShadow, locate, sourceTimeAt, videoBox, type Layout } from "@/lib/editor/timeline";
-import type { AudioClip, Canvas, Clip, Crop, EffectClip, MediaSource, Project, VoiceFx } from "@/lib/editor/types";
+import { CROP_TRANSITIONS, MASK_WIDTH, SOFT_TRANSITIONS, maskPixels } from "@/lib/editor/xfade";
+import type { AudioClip, Canvas, Clip, Crop, EffectClip, MediaSource, Project, TransitionType, VoiceFx } from "@/lib/editor/types";
 import { CameraCache, cameraCrop, clipView, evalCamera } from "@/lib/editor/camera";
 import { appliedZooms } from "@/lib/editor/focusPrefs";
 import { PointerCache, pointerScene } from "@/lib/editor/pointer";
@@ -177,6 +178,11 @@ export default function PreviewPlayer({
       let t = clock.get();
       if (t > lay.total) t = lay.total;
       const loc = locate(lay, t);
+      // The video slots are cropped (camera window) for this time; the
+      // pointer and masks sit on that picture, so they use it too. Drawing
+      // them at the clock after it advanced below put the cursor a frame
+      // ahead of the zoom while the camera moved.
+      const frameT = t;
       const needs: (Need | null)[] = [null, null];
       if (loc) {
         needs[loc.primary.index % 2] = { index: loc.primary.index, time: loc.primary.sourceTime, role: "primary" };
@@ -288,10 +294,10 @@ export default function PreviewPlayer({
       }
       drawBlurBackground(blurBgRef.current, canvas, loc ? els[loc.primary.index % 2]! : null, loc ? crops[loc.primary.index % 2] : null);
       if (maskWrapRef.current && maskCanvasRef.current) {
-        drawMasks(maskWrapRef.current, maskCanvasRef.current, project?.masks ?? [], t, lay, project ?? ({} as Project), sources, canvasSize, caches.current, loc ? els[loc.primary.index % 2]! : null);
+        drawMasks(maskWrapRef.current, maskCanvasRef.current, project?.masks ?? [], frameT, lay, project ?? ({} as Project), sources, canvasSize, caches.current, loc ? els[loc.primary.index % 2]! : null);
       }
       if (pointerRef.current) {
-        const scene = project ? pointerScene(lay, project, sources, canvasSize, t, caches.current) : { cursor: null, rings: [] };
+        const scene = project ? pointerScene(lay, project, sources, canvasSize, frameT, caches.current) : { cursor: null, rings: [] };
         drawScene(pointerRef.current, scene, project?.pointer);
       }
       applyEffects(effects, t, stage, stageW, stageH, {
@@ -526,6 +532,34 @@ function applyComposite(
         extra[n].mask = `radial-gradient(circle at 50% 50%, ${a} ${r0.toFixed(1)}px, ${b} ${r1.toFixed(1)}px)`;
         break;
       }
+      // Color drains to gray on the way out and comes back on the way in.
+      case "fadegrays": {
+        const s = (v: number) => {
+          const k = Math.min(1, Math.max(0, v));
+          return k * k * (3 - 2 * k);
+        };
+        extra[o].filter = `grayscale(${(1 - s((0.5 - p) * 2)).toFixed(3)})`;
+        extra[n].filter = `grayscale(${(1 - s(2 - 2 * p)).toFixed(3)})`;
+        extra[n].opacity = p;
+        break;
+      }
+      default: {
+        // Per-pixel transitions (xfade.ts): soft sweeps over the outgoing
+        // clip; crops show one clip inside a shape, black around it.
+        const type = loc.incoming.type;
+        if (SOFT_TRANSITIONS.has(type)) {
+          extra[n].mask = transitionMaskUrl(type, p, W, H);
+        } else if (CROP_TRANSITIONS.has(type)) {
+          const shown = p < 0.5 ? o : n;
+          extra[shown === o ? n : o].visible = false;
+          extra[shown].mask = transitionMaskUrl(type, p, W, H);
+          if (dip) {
+            dip.style.background = "#000";
+            dip.style.opacity = "1";
+            dip.style.zIndex = "0";
+          }
+        }
+      }
     }
   }
 
@@ -606,6 +640,21 @@ function applyComposite(
     el.style.filter = filters.join(" ");
     setLevel(el, Math.max(0, clip.volume * extra[slot].vol));
   }
+}
+
+let maskCanvas: HTMLCanvasElement | null = null;
+
+/** A per-pixel transition mask (xfade.ts maskPixels) as a CSS image. */
+function transitionMaskUrl(type: TransitionType, p: number, W: number, H: number): string {
+  const mw = MASK_WIDTH;
+  const mh = Math.max(1, Math.round((MASK_WIDTH * H) / Math.max(1, W)));
+  maskCanvas ??= document.createElement("canvas");
+  maskCanvas.width = mw;
+  maskCanvas.height = mh;
+  const ctx = maskCanvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.putImageData(new ImageData(maskPixels(type, p, mw, mh) as Uint8ClampedArray<ArrayBuffer>, mw, mh), 0, 0);
+  return `url("${maskCanvas.toDataURL()}")`;
 }
 
 /** CSS masks of a clip element: the transition's (stage-sized, shifted

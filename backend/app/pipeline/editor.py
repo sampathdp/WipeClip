@@ -94,6 +94,18 @@ TRANSITIONS: dict[str, tuple[str, str]] = {
     "wipedown": ("wipedown", "blend"),
     "circleopen": ("circleopen", "blend"),
     "circleclose": ("circleclose", "blend"),
+    "smoothleft": ("smoothleft", "blend"),
+    "smoothright": ("smoothright", "blend"),
+    "smoothup": ("smoothup", "blend"),
+    "smoothdown": ("smoothdown", "blend"),
+    "vertopen": ("vertopen", "blend"),
+    "horzopen": ("horzopen", "blend"),
+    "radial": ("radial", "blend"),
+    "diagtl": ("diagtl", "blend"),
+    "diagbr": ("diagbr", "blend"),
+    "circlecrop": ("circlecrop", "dip"),
+    "rectcrop": ("rectcrop", "dip"),
+    "fadegrays": ("fadegrays", "blend"),
 }
 
 # Layer blend mode -> (ffmpeg blend mode, neutral color). The layer is
@@ -470,7 +482,9 @@ class PlanPointer:
     hot_y: float
     ring_paths: list[str]  # [left, right]
     ring_sizes: list[float]  # sprite width / ring radius
-    cursor_rows: list[tuple[float, float, float]]  # (t, x, y); x < 0 hides
+    # (t, x, y) or (t, x, y, k); x < 0 hides. k (0..1] is the cursor's size
+    # relative to its sprite when it grows with the zoom (Smart Zoom 2).
+    cursor_rows: list[tuple[float, ...]]
     ring_rows: list[tuple[float, int, float, float, float, float]]  # (t, layer, x, y, r, alpha)
 
 
@@ -921,16 +935,111 @@ def _pointer_filters(plan: ExportPlan, inputs: _Inputs, base: str, total: float)
     if p.cursor_path and p.cursor_rows:
         idx = looped(p.cursor_path)
         cw, ch = max(2, _round(p.cursor_w * H)), max(2, _round(p.cursor_h * H))
-        times = [r[0] for r in p.cursor_rows]
-        xs = [OFFSCREEN if x < 0 else _round(x * W - p.hot_x * cw) for _, x, _ in p.cursor_rows]
-        ys = [OFFSCREEN if x < 0 else _round(y * H - p.hot_y * ch) for _, x, y in p.cursor_rows]
-        graph.append(
-            f"[{idx}:v]format=rgba,scale={cw}:{ch}:flags=lanczos[pcs];"
-            f"[{acc}][pcs]overlay=x='{step_expr(times, xs, 't', fps)}':y='{step_expr(times, ys, 't', fps)}':"
-            f"eval=frame:eof_action=pass:format=auto[pcd]"
-        )
-        acc = "pcd"
+        rows = p.cursor_rows
+        times = [r[0] for r in rows]
+        if not any(len(r) > 3 for r in rows):
+            xs = [OFFSCREEN if r[1] < 0 else _round(r[1] * W - p.hot_x * cw) for r in rows]
+            ys = [OFFSCREEN if r[1] < 0 else _round(r[2] * H - p.hot_y * ch) for r in rows]
+            graph.append(
+                f"[{idx}:v]format=rgba,scale={cw}:{ch}:flags=lanczos[pcs];"
+                f"[{acc}][pcs]overlay=x='{step_expr(times, xs, 't', fps)}':y='{step_expr(times, ys, 't', fps)}':"
+                f"eval=frame:eof_action=pass:format=auto[pcd]"
+            )
+            acc = "pcd"
+        else:
+            graph += _scaled_cursor(p, idx, acc, rows, cw, ch, W, H, fps, total)
+            acc = "pcd"
     return graph, acc
+
+
+# Cursor sizes (Smart Zoom 2). Sizes held a while - at rest, and the zoom
+# levels the camera holds - are exact static layers. Sizes passed through
+# during a zoom transition snap to a ladder of 1 % steps (invisible: a
+# 100 px cursor is off by at most half a pixel) and share static layers
+# too; only beyond CURSOR_MAX_LAYERS do the rarest sizes go through geq.
+# Measured on 30 s at 1080p with a zoom every 4 s: geq for every
+# transition frame 18.1 s, ladder 16.0 s, fixed-size cursor 13.8 s.
+CURSOR_HELD_LAYERS = 3
+CURSOR_HELD_MIN = 0.5  # seconds
+CURSOR_LADDER = 1.01
+CURSOR_MAX_LAYERS = 48
+
+
+def cursor_scales(rows: list[tuple[float, ...]], total: float) -> tuple[list[float], list[float]]:
+    """Per-row cursor scale as rendered, and the scales that get a static
+    layer (longest shown first). Hidden rows keep their value; it's unused."""
+    exact = [round(r[3] if len(r) > 3 else 1.0, 3) for r in rows]
+
+    def held(ks: list[float]) -> dict[float, float]:
+        out: dict[float, float] = {}
+        for i, r in enumerate(rows):
+            if r[1] < 0:
+                continue
+            end = rows[i + 1][0] if i + 1 < len(rows) else total
+            out[ks[i]] = out.get(ks[i], 0.0) + max(0.0, end - r[0])
+        return out
+
+    h = held(exact)
+    anchors = [k for k in sorted(h, key=lambda k: (-h[k], k))[:CURSOR_HELD_LAYERS] if h[k] >= CURSOR_HELD_MIN]
+    step = math.log(CURSOR_LADDER)
+
+    def snap(k: float) -> float:
+        if k in anchors:
+            return k
+        near = [a for a in anchors if abs(a - k) <= k * (CURSOR_LADDER - 1) / 2]
+        if near:
+            return near[0]
+        return round(math.exp(round(math.log(max(0.01, k)) / step) * step), 4)
+
+    ks = [snap(k) for k in exact]
+    h = held(ks)
+    ranked = sorted(h, key=lambda k: (k not in anchors, -h[k], k))
+    return ks, ranked[:CURSOR_MAX_LAYERS] or [1.0]
+
+
+def _scaled_cursor(p: PlanPointer, idx: int, acc: str, rows: list[tuple[float, ...]], cw: int, ch: int, W: int, H: int, fps: float, total: float) -> list[str]:
+    """The cursor when its size changes with the zoom. The sprite is drawn
+    at the largest size; each row's k says how much of it shows. Like the
+    rings, the sprite is never resized per frame (that reconfigures the
+    overlay on every change): sizes held for a while - at rest, and at the
+    zoom levels the camera holds - are static, pre-scaled layers, and the
+    sizes in between (zoom transitions) sample the full sprite through geq
+    around the hotspot, so the tip stays exactly on the recorded position.
+    Each layer only runs while its size is shown (timeline `enable`)."""
+    times = [r[0] for r in rows]
+    ks, statics = cursor_scales(rows, total)
+    hx, hy = p.hot_x * cw, p.hot_y * ch
+    vis = [r[1] >= 0 for r in rows]
+    moving_on = [1 if v and k not in statics else 0 for v, k in zip(vis, ks)]
+    labels = [f"pcs{j}" for j in range(len(statics))]
+    split = len(statics) + (1 if any(moving_on) else 0)
+    graph = [f"[{idx}:v]format=rgba,scale={cw}:{ch}:flags=lanczos,split={split}{''.join(f'[{lb}]' for lb in labels)}{'[pcg]' if any(moving_on) else ''}"]
+    cur = acc
+    for j, k_static in enumerate(statics):
+        on = [1 if v and k == k_static else 0 for v, k in zip(vis, ks)]
+        sw, sh = max(2, _round(cw * k_static)), max(2, _round(ch * k_static))
+        sx = [_round(r[1] * W - hx * k_static) if o else OFFSCREEN for r, o in zip(rows, on)]
+        sy = [_round(r[2] * H - hy * k_static) if o else OFFSCREEN for r, o in zip(rows, on)]
+        graph.append(
+            f"[{labels[j]}]scale={sw}:{sh}:flags=lanczos[pcz{j}];"
+            f"[{cur}][pcz{j}]overlay=x='{step_expr(times, sx, 't', fps)}':y='{step_expr(times, sy, 't', fps)}':"
+            f"eval=frame:eof_action=pass:format=auto:enable='{step_expr(times, on, 't', fps)}'[pcm{j}]"
+        )
+        cur = f"pcm{j}"
+    if not any(moving_on):
+        graph.append(f"[{cur}]null[pcd]")
+        return graph
+    mx = [_round(r[1] * W - hx) if on else OFFSCREEN for r, on in zip(rows, moving_on)]
+    my = [_round(r[2] * H - hy) if on else OFFSCREEN for r, on in zip(rows, moving_on)]
+    active = step_expr(times, moving_on, "t", fps)
+    k = step_expr(times, [k if on else 1.0 for k, on in zip(ks, moving_on)], "T", fps)
+    u, v = f"{_num(hx)}+(X-{_num(hx)})/({k})", f"{_num(hy)}+(Y-{_num(hy)})/({k})"
+    graph.append(
+        f"[pcg]geq=r='r({u},{v})':g='g({u},{v})':b='b({u},{v})':a='alpha({u},{v})*lte(X,{_num(hx)}+({_num(cw)}-{_num(hx)})*({k}))*lte(Y,{_num(hy)}+({_num(ch)}-{_num(hy)})*({k}))':enable='{active}'[pcg2];"
+        f"[{cur}][pcg2]overlay=x='{step_expr(times, mx, 't', fps)}':y='{step_expr(times, my, 't', fps)}':"
+        f"eval=frame:eof_action=pass:format=auto:enable='{active}'[pcd]"
+    )
+    return graph
 
 
 def mask_pixels(m: PlanMask, W: int, H: int) -> tuple[list[float], list[list[int]]]:

@@ -2,6 +2,59 @@
 
 Newest phase first.
 
+## Smart Zoom 2: focus sessions, natural motion, zoom-aware cursor (5 November 2026)
+
+Details: [SMART-ZOOM-2-IMPLEMENTATION.md](SMART-ZOOM-2-IMPLEMENTATION.md).
+
+**Root causes fixed.**
+
+- **Cursor and rings never scaled with the zoom.** Their size ignored the camera.
+- **Zoom out and back in between clicks 3–5 s apart.** The merge window was tied to `hold + easeOut + minGap`; Dynamic at 3.5 s gave 7 zoom-outs for 8 clicks.
+- **Unnecessary zooms while typing:**
+  - shortcuts pressed while typing were placed at the pointer and split the session;
+  - typing zooms were capped at 45 s;
+  - the camera panned on every line wrap.
+- **No-op pans at screen edges.** A point against an edge triggered pans that went nowhere.
+- **Preview cursor and masks a frame ahead of the zoomed picture.**
+
+**Functionality implemented.**
+
+- **Focus sessions:** related actions stay in one zoom, or are chained with a pan. The cooldown drops weak zooms that would come right back.
+- **Joining never hides an action** that happens elsewhere.
+- **Long typing** continues in chained zooms; typing frames the whole line.
+- **Recording type profiles:** Tutorial, Demo and Gaming.
+- **Natural easing** with a steady perceived zoom rate. Older eases are unchanged.
+- **The cursor and rings grow with the zoom** (on by default, can be turned off).
+- **Optional recording-relative cursor size**, and "Match recording size" from the display's DPI.
+- **Export draws the cursor the same way.** It renders the same per-frame size using static layers (exact for held sizes, a 1 % ladder for transitions, geq beyond 48 layers). A constant-size cursor still sends the old 3-column rows.
+
+**Tests executed.**
+
+| Suite | Result |
+|---|---|
+| `npm run desktop:test:js` | 259/259 (25 new, `smartZoom.test.ts`) |
+| `python -m unittest tests.test_focus_export` | 14/14 (4 new, real ffmpeg) |
+| Backend `pytest tests` | 146 passed |
+| `tsc` root and desktop, ESLint on changed files | pass |
+| `preview-focus.mjs` (4 variants) against `next dev desktop` in headless Chrome | 4/4 pass, no console errors |
+
+**Before/after and performance:** see sections 6 and 7 of the details. For example, Dynamic with clicks 3.5 s apart went from 7 zoom-outs to 0. Analysis of a 60-minute recording takes 102 ms. A 30 s 1080p export with a growing cursor takes 16.3 s, against 13.6 s with a fixed cursor.
+
+**Known limitations.** No visual target detection. The native cursor size is an estimate (22 logical px). Gaming thresholds were not tuned on real gameplay. Transition sizes in the export are within 0.5 % of the preview.
+
+**Manual tests still required.**
+
+- Real Windows recordings at 125/150/200 % scaling.
+- macOS Retina and multi-monitor recordings.
+- A full export in the Tauri app.
+- A subjective review of motion and profiles on real recordings.
+
+**Compatibility.**
+
+- New fields are optional, and older projects open unchanged.
+- Projects with a drawn cursor or rings *and* zooms now show them growing with the zoom: the fix, which can be switched off.
+- A varying cursor size needs this backend (4-column rows). Deploy the backend before a web build sends them; the desktop app bundles its engine.
+
 ## Phase 6: audio quality and camera presentation (31 October 2026)
 
 Details: [AUDIO.md](AUDIO.md).

@@ -48,11 +48,65 @@ export interface CameraTrack {
   keys: Key[];
 }
 
+/** CSS-style cubic Bezier timing curve through (0,0), (x1,y1), (x2,y2),
+ * (1,1): y for a given x, by Newton steps with a bisection fallback.
+ * Deterministic, so preview and export rows agree exactly. */
+function cubicBezier(x1: number, y1: number, x2: number, y2: number) {
+  const cx = 3 * x1;
+  const bx = 3 * (x2 - x1) - cx;
+  const ax = 1 - cx - bx;
+  const cy = 3 * y1;
+  const by = 3 * (y2 - y1) - cy;
+  const ay = 1 - cy - by;
+  const xAt = (t: number) => ((ax * t + bx) * t + cx) * t;
+  const dxAt = (t: number) => (3 * ax * t + 2 * bx) * t + cx;
+  return (u: number) => {
+    if (u <= 0) return 0;
+    if (u >= 1) return 1;
+    let t = u;
+    for (let i = 0; i < 8; i++) {
+      const d = dxAt(t);
+      const err = xAt(t) - u;
+      if (Math.abs(err) < 1e-7) break;
+      if (Math.abs(d) < 1e-6) {
+        t = NaN;
+        break;
+      }
+      t -= err / d;
+    }
+    if (!(t >= 0 && t <= 1) || Math.abs(xAt(t) - u) > 1e-6) {
+      let lo = 0;
+      let hi = 1;
+      t = u;
+      for (let i = 0; i < 40; i++) {
+        if (xAt(t) < u) lo = t;
+        else hi = t;
+        t = (lo + hi) / 2;
+      }
+    }
+    return ((ay * t + by) * t + cy) * t;
+  };
+}
+
 export const EASES: Record<ZoomEase, (u: number) => number> = {
   smooth: (u) => u * u * (3 - 2 * u),
   gentle: (u) => u * u * u * (u * (u * 6 - 15) + 10),
   linear: (u) => u,
+  // Starts promptly and lands softly - how a camera operator moves.
+  natural: cubicBezier(0.45, 0, 0.15, 1),
 };
+
+/** How far along the straight line from window `a` to window `b` the
+ * camera is at eased progress `e`. Rectangle interpolation moves the size
+ * linearly, so the zoom (1/size) seems to speed up as it closes in; with
+ * `perceptual` the size changes geometrically instead (a steady perceived
+ * zoom rate). Either way the window stays on the segment from a to b, so
+ * it never leaves the frame and the focus point stays put. */
+function along(a: CameraWindow, b: CameraWindow, e: number, perceptual: boolean): number {
+  if (!perceptual || Math.abs(a.s - b.s) < 1e-6 || a.s <= 0 || b.s <= 0) return e;
+  const s = a.s * Math.pow(b.s / a.s, e);
+  return (a.s - s) / (a.s - b.s);
+}
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -161,8 +215,9 @@ export function buildCameraTrack(zooms: CameraZoom[], sourceId: string, crop: Cr
       const from = Math.max(curT, at - PAN);
       if (at - from < MIN_PAN) continue;
       const next = targetWindow({ zoom: z.zoom, x: p.x, y: p.y }, crop, view);
-      if (from > curT) keys.push({ t: from, win: cur, ease: "smooth" });
-      keys.push({ t: at, win: next, ease: "smooth" });
+      const pan: ZoomEase = z.ease === "natural" ? "natural" : "smooth";
+      if (from > curT) keys.push({ t: from, win: cur, ease: pan });
+      keys.push({ t: at, win: next, ease: pan });
       cur = next;
       curT = at;
     }
@@ -187,7 +242,7 @@ export function evalCamera(track: CameraTrack, t: number): CameraWindow {
   const a = k[lo];
   const b = k[hi];
   const span = b.t - a.t;
-  const e = span > 0 ? EASES[b.ease]((t - a.t) / span) : 1;
+  const e = along(a.win, b.win, span > 0 ? (EASES[b.ease] ?? EASES.smooth)((t - a.t) / span) : 1, b.ease === "natural");
   return {
     x: a.win.x + (b.win.x - a.win.x) * e,
     y: a.win.y + (b.win.y - a.win.y) * e,

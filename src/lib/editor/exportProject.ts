@@ -180,7 +180,7 @@ export async function exportProject(
     .map(({ m, rows }) => ({ mode: m.mode, start: round(m.start), end: round(m.end), strength: m.strength, color: m.color, rows }));
   let pointer = null;
   if (rows && project.pointer) {
-    const sprites = await pointerSprites(project.pointer, canvas.height, rows.cursorUsed);
+    const sprites = await pointerSprites(project.pointer, canvas.height, rows.cursorUsed, rows.cursorScale);
     const addImage = (blob: Blob) => imageBlobs.push(blob) - 1;
     pointer = {
       cursor: sprites.cursor

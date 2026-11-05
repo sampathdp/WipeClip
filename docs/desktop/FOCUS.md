@@ -109,6 +109,6 @@ Blur with a zoom, export vs the preview's order (zoom, then blur): mean pixel di
 - The drawn cursor has a fixed arrow shape; it doesn't follow the system cursor's shape (text beam, hand) - that isn't recorded.
 - With canvas fill the sides of the frame are cut by the canvas. The camera compensates (see Camera), but the window must stay inside the recording, so the outermost strip can't always be brought into view: for a 16:9 recording at 2× in a 9:16 project, clicks within about 11% of the left/right frame edge stay off-canvas (about 8% in a 1:1 project). Use fit, or a stronger zoom, for those. Letting the window leave the frame on the hidden side would fix it but needs a backend geometry change.
 - Freeze-frame clips show no rings; reversed clips show the camera but no rings.
-- The drawn cursor and click rings keep their canvas size when the camera zooms in. Scaling them with the zoom would mean resizing their sprites per frame in the export, which was measured about 6x slower for rings.
-- Clicks alternating between two areas 3–4 s apart still get one zoom each, with the camera easing out and back in between.
+- ~~The drawn cursor and click rings keep their canvas size when the camera zooms in.~~ Fixed in Smart Zoom 2: they grow with the zoom in preview and export ([SMART-ZOOM-2-IMPLEMENTATION.md](SMART-ZOOM-2-IMPLEMENTATION.md)).
+- ~~Clicks alternating between two areas 3–4 s apart still get one zoom each, with the camera easing out and back in between.~~ Fixed in Smart Zoom 2 (focus sessions): the camera pans between them.
 - Export needs the updated backend (see Deployment).

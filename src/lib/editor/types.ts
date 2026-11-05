@@ -23,7 +23,19 @@ export type TransitionType =
   | "wipeup"
   | "wipedown"
   | "circleopen"
-  | "circleclose";
+  | "circleclose"
+  | "smoothleft"
+  | "smoothright"
+  | "smoothup"
+  | "smoothdown"
+  | "vertopen"
+  | "horzopen"
+  | "radial"
+  | "diagtl"
+  | "diagbr"
+  | "circlecrop"
+  | "rectcrop"
+  | "fadegrays";
 
 export interface Transition {
   type: TransitionType;
@@ -395,7 +407,10 @@ export interface Canvas {
 
 // --- Screen-recording focus effects (see camera.ts, pointer.ts, focus.ts) ---
 
-export type ZoomEase = "smooth" | "gentle" | "linear";
+/** "natural" (Smart Zoom 2): a soft-landing curve, and the zoom changes at
+ * a steady perceived rate (see camera.ts). The others interpolate the
+ * window rectangle directly, as zooms made before it always did. */
+export type ZoomEase = "smooth" | "gentle" | "linear" | "natural";
 
 /** A focus zoom on a recorded source. Times are *source* seconds (like a
  * clip's start/end), so trimming, splitting or moving clips keeps every
@@ -453,6 +468,15 @@ export interface PointerStyle {
   ringDuration: number;
   /** 0..1: ring opacity and how far it grows. */
   intensity: number;
+  /** The cursor and rings grow with the camera zoom, like the recorded
+   * screen under them (Smart Zoom 2). Absent = true. */
+  scaleWithZoom?: boolean;
+  /** What cursorSize and ringSize are fractions of: the canvas height
+   * ("canvas", absent - every project before Smart Zoom 2) or the
+   * recording's own frame height ("recording": the same size relative to
+   * the screen whatever the canvas shape or fit, like a real cursor;
+   * "Match recording" sets it from the display's DPI). */
+  sizeBase?: "canvas" | "recording";
 }
 
 // --- Tutorial tools (Phase 3) -------------------------------------------------
@@ -891,4 +915,5 @@ export const DEFAULT_POINTER: PointerStyle = {
   ringSize: 0.05,
   ringDuration: 0.5,
   intensity: 0.8,
+  scaleWithZoom: true,
 };

@@ -1120,11 +1120,16 @@ def _pointer_plan(p: _EditorPointer, overlay_images: list[tuple[str, int, int]])
         raise HTTPException(status_code=400, detail="Too much pointer data")
     if any(i >= len(overlay_images) for i in [*(r.image for r in p.rings), *([p.cursor.image] if p.cursor else [])]):
         raise HTTPException(status_code=400, detail="Pointer refers to a missing image")
-    cursor_rows = []
+    cursor_rows: list[tuple[float, ...]] = []
+    # [t, x, y], or [t, x, y, k] when the cursor grows with the zoom (k =
+    # size relative to the sprite, 0..1). One shape for all rows.
+    width = len(p.cursorRows[0]) if p.cursorRows else 3
     for r in p.cursorRows:
-        if not _finite(r, 3) or r[0] < 0 or not (-1 <= r[1] <= 2 and -1 <= r[2] <= 2):
+        if width not in (3, 4) or not _finite(r, width) or r[0] < 0 or not (-1 <= r[1] <= 2 and -1 <= r[2] <= 2):
             raise HTTPException(status_code=400, detail="Invalid pointer data")
-        cursor_rows.append((r[0], r[1], r[2]))
+        if width == 4 and not (0.01 <= r[3] <= 1):
+            raise HTTPException(status_code=400, detail="Invalid pointer data")
+        cursor_rows.append(tuple(r))
     ring_rows = []
     for r in p.ringRows:
         if not _finite(r, 6) or r[0] < 0 or r[1] not in (0, 1, 2, 3) or not (-1 <= r[2] <= 2 and -1 <= r[3] <= 2) or not (0 <= r[4] <= 0.5) or not (0 <= r[5] <= 1):

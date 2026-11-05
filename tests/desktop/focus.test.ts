@@ -366,7 +366,7 @@ import type { MediaSource, Project } from "../../src/lib/editor/types.ts";
 const FIXTURE = new URL("../../backend/tests/fixtures/focus_payload.json", import.meta.url);
 const VECTORS = new URL("../../backend/tests/fixtures/camera_vectors.json", import.meta.url);
 
-function syntheticRecording() {
+function syntheticRecording(drawnCursor = false) {
   const events: InteractionEvent[] = [
     { type: "move", t: 0, x: 0.5, y: 0.5 },
     { type: "move", t: 900, x: 0.25, y: 0.25 },
@@ -382,7 +382,7 @@ function syntheticRecording() {
     height: 180,
     fps: 30,
     hasAudio: false,
-    recording: { trackKind: "screen", folder: "", events, manifest: { capture: { coordinateSpace: "capture", cursorCaptured: true } } },
+    recording: { trackKind: "screen", folder: "", events, manifest: { capture: { coordinateSpace: "capture", cursorCaptured: !drawnCursor } } },
   } as unknown as MediaSource;
   const project: Project = {
     clips: [newClip("c", "s", 0, 3)],
@@ -391,7 +391,7 @@ function syntheticRecording() {
     effects: [],
     canvas: DEFAULT_CANVAS,
     zooms: [zoom({ start: 0.5, end: 2.8, x: 0.25, y: 0.25, zoom: 2, easeIn: 0.4, easeOut: 0.4 })],
-    pointer: { ...DEFAULT_POINTER, ringSize: 0.1, ringDuration: 0.6, intensity: 1 },
+    pointer: { ...DEFAULT_POINTER, ringSize: 0.1, ringDuration: 0.6, intensity: 1, cursor: drawnCursor, cursorSize: 0.1 },
   };
   return { src, project };
 }
@@ -410,11 +410,22 @@ test("export payload is the preview's own values (fixture for the backend render
   const ringScene = pointerScene(lay, project, sources, canvas, 1.1, caches);
   const ring = ringScene.rings[0];
   assert.ok(ring && ring.alpha > 0.5);
+  // Smart Zoom 2: the same recording with a drawn cursor, which grows
+  // with the zoom. The backend draws the cursor sprite at rows.cursorScale
+  // and shrinks it by each row's size column.
+  const drawn = syntheticRecording(true);
+  const drawnRows = pointerRows(drawn.project, lay, { s: drawn.src }, canvas)!;
+  assert.ok(drawnRows.cursorUsed && drawnRows.cursor.every((r) => r.length === 4), "size column while the zoom changes the size");
+  const cursorScene = pointerScene(lay, drawn.project, { s: drawn.src }, canvas, 1.6, { pointer: new PointerCache(), camera: new CameraCache() });
+  assert.ok(cursorScene.cursor && Math.abs(cursorScene.cursor.scale - 2) < 1e-6, "fully zoomed 2x: cursor twice as big");
   const payload = {
     camera: camera[0],
     ringRows: rows.rings,
+    cursor: { rows: drawnRows.cursor, scale: drawnRows.cursorScale, size: drawn.project.pointer!.cursorSize },
     expect: {
       ringAt: { t: 1.1, x: Math.round(ring.cx * 320), y: Math.round(ring.cy * 180), alpha: Math.round(ring.alpha * 1000) / 1000 },
+      cursorAt: { t: 1.6, x: Math.round(cursorScene.cursor.x * 320), y: Math.round(cursorScene.cursor.y * 180), h: Math.round(0.1 * cursorScene.cursor.scale * 180) },
+      cursorRestAt: { t: 0.2, h: Math.round(0.1 * 180) },
       // Fully zoomed on the red quadrant: the whole frame is red.
       zoomedAt: 1.6,
     },
@@ -648,7 +659,9 @@ test("typing zooms in on the text cursor and follows it along the line", () => {
   assert.ok(z.start < 4 && z.end > 10, "covers the whole burst, longer than the preset's max duration");
   assert.ok(z.end - z.start > FOCUS_PRESETS.balanced.maxDuration);
   close(z.y, 0.6, 1e-3);
-  assert.ok(z.path && z.path.length >= 2, "follows the cursor");
+  // Smart Zoom 2 frames the line ahead (TYPING_FRAME_SPAN), so it pans
+  // less often than once per dead-zone exit - but it still follows.
+  assert.ok(z.path && z.path.length >= 1, "follows the cursor");
   // At every moment the text cursor is inside the zoomed view.
   const track = buildCameraTrack([z], "s", FULL_CROP);
   for (let i = 0; i < 40; i++) {
