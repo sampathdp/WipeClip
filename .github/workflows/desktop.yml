@@ -186,6 +186,12 @@ jobs:
             src-tauri/target/release/bundle/macos/*.app.tar.gz
             src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
           if-no-files-found: error
+          # Only a hand-off to the release job (which publishes them to the
+          # releases repo) or a test build to download: kept a day, not the
+          # default 90, so old installers don't fill the storage quota.
+          retention-days: 1
+          # Installers are already compressed.
+          compression-level: 0
 
   release:
     if: needs.version.outputs.tag != ''
