@@ -285,7 +285,37 @@ export function ClipPanel({
   );
 }
 
-const TRANSITION_ORDER: (TransitionType | null)[] = [null, "fade", "crossfade", "dipblack", "dipwhite", "slideleft", "slideright", "zoom", "blur"];
+const TRANSITION_ORDER: (TransitionType | null)[] = [
+  null,
+  "fade",
+  "crossfade",
+  "dipblack",
+  "dipwhite",
+  "fadegrays",
+  "slideleft",
+  "slideright",
+  "slideup",
+  "slidedown",
+  "wipeleft",
+  "wiperight",
+  "wipeup",
+  "wipedown",
+  "smoothleft",
+  "smoothright",
+  "smoothup",
+  "smoothdown",
+  "vertopen",
+  "horzopen",
+  "diagtl",
+  "diagbr",
+  "radial",
+  "circleopen",
+  "circleclose",
+  "circlecrop",
+  "rectcrop",
+  "zoom",
+  "blur",
+];
 
 export function TransitionPanel({
   laid,
@@ -388,6 +418,44 @@ function TransitionSwatch({ type }: { type: TransitionType | null }) {
       return <div className={common} style={{ background: `radial-gradient(circle, ${b} 30%, ${a} 70%)` }} />;
     case "blur":
       return <div className={`${common} blur-[1.5px]`} style={{ background: `linear-gradient(90deg, ${a}, ${b})` }} />;
+    case "fadegrays":
+      return <div className={common} style={{ background: `linear-gradient(90deg, ${a}, #8a8a8a, ${b})` }} />;
+    case "slideup":
+    case "wipeup":
+      return <div className={common} style={{ background: `linear-gradient(180deg, ${a} 60%, ${b} 60%)` }} />;
+    case "slidedown":
+    case "wipedown":
+      return <div className={common} style={{ background: `linear-gradient(180deg, ${b} 40%, ${a} 40%)` }} />;
+    case "wipeleft":
+      return <div className={common} style={{ background: `linear-gradient(90deg, ${a} 60%, ${b} 60%)` }} />;
+    case "wiperight":
+      return <div className={common} style={{ background: `linear-gradient(90deg, ${b} 40%, ${a} 40%)` }} />;
+    case "smoothleft":
+      return <div className={common} style={{ background: `linear-gradient(90deg, ${a} 30%, ${b} 80%)` }} />;
+    case "smoothright":
+      return <div className={common} style={{ background: `linear-gradient(90deg, ${b} 20%, ${a} 70%)` }} />;
+    case "smoothup":
+      return <div className={common} style={{ background: `linear-gradient(180deg, ${a} 20%, ${b} 90%)` }} />;
+    case "smoothdown":
+      return <div className={common} style={{ background: `linear-gradient(180deg, ${b} 10%, ${a} 80%)` }} />;
+    case "vertopen":
+      return <div className={common} style={{ background: `linear-gradient(90deg, ${a} 15%, ${b} 40%, ${b} 60%, ${a} 85%)` }} />;
+    case "horzopen":
+      return <div className={common} style={{ background: `linear-gradient(180deg, ${a} 10%, ${b} 40%, ${b} 60%, ${a} 90%)` }} />;
+    case "diagtl":
+      return <div className={common} style={{ background: `linear-gradient(135deg, ${a} 45%, ${b} 85%)` }} />;
+    case "diagbr":
+      return <div className={common} style={{ background: `linear-gradient(135deg, ${b} 15%, ${a} 55%)` }} />;
+    case "radial":
+      return <div className={common} style={{ background: `conic-gradient(${b} 0 130deg, ${a} 130deg)` }} />;
+    case "circleopen":
+      return <div className={common} style={{ background: `radial-gradient(circle, ${b} 35%, ${a} 55%)` }} />;
+    case "circleclose":
+      return <div className={common} style={{ background: `radial-gradient(circle, ${a} 35%, ${b} 55%)` }} />;
+    case "circlecrop":
+      return <div className={common} style={{ background: `radial-gradient(circle, ${b} 30%, #000 31%)` }} />;
+    case "rectcrop":
+      return <div className={common} style={{ background: "#000", boxShadow: `inset 0 0 0 6px #000`, backgroundImage: `linear-gradient(${b}, ${b})`, backgroundSize: "50% 50%", backgroundPosition: "center", backgroundRepeat: "no-repeat" }} />;
     default:
       return <div className={common} style={{ background: `linear-gradient(90deg, ${a}, ${b})` }} />;
   }

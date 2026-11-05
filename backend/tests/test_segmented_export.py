@@ -109,6 +109,26 @@ class SegmentedRenderTest(unittest.TestCase):
             self.assertEqual(frame_count(path), round(total * FPS), path)
 
 
+class EveryTransitionTest(unittest.TestCase):
+    def test_every_transition_renders(self) -> None:
+        """Each editor transition is a transition the bundled ffmpeg knows,
+        and the export keeps its length with all of them in one video."""
+        tmp = tempfile.mkdtemp(prefix="transition-test-")
+        src = os.path.join(tmp, "steps.mp4")
+        make_color_steps(src)
+        kinds = list(editor.TRANSITIONS)
+        plan = plan_of(src, len(kinds) + 1)
+        for clip, kind in zip(plan.clips, kinds):
+            clip.transition, clip.transition_duration = kind, 0.2
+        out = os.path.join(tmp, "all.mp4")
+        render(plan, out)
+        check = plan_of(src, len(kinds) + 1)
+        for clip, kind in zip(check.clips, kinds):
+            clip.transition, clip.transition_duration = kind, 0.2
+        editor.quantize_plan(check)
+        encoders.validate_output(out, duration=editor.timeline_duration(check), width=W, height=H, video=True, audio=True, fps=FPS)
+
+
 def frame_count(path: str) -> int:
     err = subprocess.run([get_ffmpeg_path(), "-hide_banner", "-i", path, "-map", "0:v", "-f", "null", "-"], capture_output=True, text=True).stderr
     return int(err.rsplit("frame=", 1)[1].split()[0])

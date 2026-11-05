@@ -76,7 +76,8 @@ interface ViewRange {
 
 /** A whole-track switch in the row header; `on` = every item has it. */
 export interface TrackToggle {
-  kind: "hide" | "lock" | "mute";
+  /** group: show a track's many items (auto captions) as one block. */
+  kind: "hide" | "lock" | "mute" | "group";
   on: boolean;
 }
 
@@ -805,11 +806,13 @@ const TOGGLE_TEXT = {
   hide: { on: "◌", off: "◉", label: ["Show", "Hide"] },
   lock: { on: "🔒", off: "🔓", label: ["Unlock", "Lock"] },
   mute: { on: "🔇", off: "🔊", label: ["Unmute", "Mute"] },
+  group: { on: "▭", off: "⧉", label: ["Show captions separately", "Combine captions into one block"] },
 } as const;
 
 function TrackToggleButton({ toggle, track, onClick }: { toggle: TrackToggle; track: string; onClick: () => void }) {
   const t = TOGGLE_TEXT[toggle.kind];
-  const label = `${t.label[toggle.on ? 0 : 1]} all ${track.toLowerCase()}`;
+  const label =
+    toggle.kind === "group" ? t.label[toggle.on ? 0 : 1] : `${t.label[toggle.on ? 0 : 1]} all ${track.toLowerCase()}`;
   return (
     <button
       type="button"

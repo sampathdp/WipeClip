@@ -47,6 +47,18 @@ export const TRANSITION_LABELS: Record<TransitionType, { label: string; hint: st
   wipedown: { label: "Wipe Down", hint: "Next clip is revealed from the top" },
   circleopen: { label: "Circle Open", hint: "Next clip opens out from the center" },
   circleclose: { label: "Circle Close", hint: "Picture closes in to the center" },
+  smoothleft: { label: "Smooth Left", hint: "A soft edge sweeps the next clip in from the right" },
+  smoothright: { label: "Smooth Right", hint: "A soft edge sweeps the next clip in from the left" },
+  smoothup: { label: "Smooth Up", hint: "A soft edge sweeps the next clip up from the bottom" },
+  smoothdown: { label: "Smooth Down", hint: "A soft edge sweeps the next clip down from the top" },
+  vertopen: { label: "Doors Open", hint: "Next clip opens out from a line down the middle" },
+  horzopen: { label: "Split Open", hint: "Next clip opens out from a line across the middle" },
+  radial: { label: "Clock Wipe", hint: "Next clip sweeps around like a clock hand" },
+  diagtl: { label: "Diagonal", hint: "Next clip sweeps in from the bottom-right corner" },
+  diagbr: { label: "Diagonal Back", hint: "Next clip sweeps in from the top-left corner" },
+  circlecrop: { label: "Circle Crop", hint: "Picture shrinks to a circle, next clip grows out of it" },
+  rectcrop: { label: "Box Crop", hint: "Picture shrinks to a box, next clip grows out of it" },
+  fadegrays: { label: "Fade Through Gray", hint: "Colors fade to gray, then into the next clip" },
 };
 
 export const ANIM_IN_LABELS: Record<AnimIn, string> = {
@@ -124,7 +136,7 @@ export function canvasSize(aspect: CanvasAspect, srcW: number, srcH: number): { 
 /** Transitions whose audio dips (outgoing fades out, then incoming fades
  * in) rather than blending - same split as TRANSITIONS in editor.py.
  */
-export const DIP_AUDIO: ReadonlySet<TransitionType> = new Set(["fade", "dipblack", "dipwhite"]);
+export const DIP_AUDIO: ReadonlySet<TransitionType> = new Set(["fade", "dipblack", "dipwhite", "circlecrop", "rectcrop"]);
 
 export interface LaidOutClip {
   clip: Clip;
