@@ -72,8 +72,10 @@ jobs:
         include:
           - os: windows-latest
             bundles: nsis
-          - os: macos-latest # Apple Silicon
-            bundles: app,dmg
+          # macOS builds are off for now (releases are Windows only). To turn
+          # them back on, restore this entry:
+          # - os: macos-latest # Apple Silicon
+          #   bundles: app,dmg
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

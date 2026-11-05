@@ -66,12 +66,18 @@ const add = (target, file, asset) => {
 };
 
 const winInstaller = one(/^WipeClip_.*_x64-setup\.exe$/, "Windows installer");
-const dmg = one(/^WipeClip_.*\.dmg$/, "macOS DMG");
 add("windows-x86_64", winInstaller, `WipeClip_${version}_x64-setup.exe`);
-add("darwin-aarch64", one(/^WipeClip\.app\.tar\.gz$/, "macOS update bundle"), `WipeClip_${version}_aarch64.app.tar.gz`);
-copyFileSync(dmg, path.join(out, `WipeClip_${version}_aarch64.dmg`));
 copyFileSync(winInstaller, path.join(out, STABLE_NAMES.windows));
-copyFileSync(dmg, path.join(out, STABLE_NAMES.mac));
+// macOS is optional: the workflow can build Windows only.
+const hasMac = all.some((p) => /\.dmg$/.test(path.basename(p)));
+if (hasMac) {
+  const dmg = one(/^WipeClip_.*\.dmg$/, "macOS DMG");
+  add("darwin-aarch64", one(/^WipeClip\.app\.tar\.gz$/, "macOS update bundle"), `WipeClip_${version}_aarch64.app.tar.gz`);
+  copyFileSync(dmg, path.join(out, `WipeClip_${version}_aarch64.dmg`));
+  copyFileSync(dmg, path.join(out, STABLE_NAMES.mac));
+} else {
+  console.warn("No macOS build: releasing Windows only.");
+}
 
 const manifest = {
   version,
@@ -83,7 +89,7 @@ writeFileSync(path.join(out, "latest.json"), JSON.stringify(manifest, null, 2) +
 if (notesOut) {
   writeFileSync(
     notesOut,
-    `## What's new\n\n${notesText}\n\nWipeClip ${version} for Windows and macOS. Download the installer below, or let the app update itself.\n`
+    `## What's new\n\n${notesText}\n\nWipeClip ${version} for ${hasMac ? "Windows and macOS" : "Windows"}. Download the installer below, or let the app update itself.\n`
   );
 }
 console.log(`latest.json for ${version}: ${Object.keys(platforms).join(", ")}`);
