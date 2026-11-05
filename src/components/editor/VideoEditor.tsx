@@ -113,6 +113,8 @@ import {
   cancelSpeech,
   saveCaptionLanguage,
   savedCaptionLanguage,
+  saveCaptionPrefs,
+  savedCaptionPrefs,
   speechModel,
   speechModelCached,
   type SpeechModel,
@@ -128,6 +130,7 @@ import {
   buildSpeechAudio,
   captionOverlays,
   captionText,
+  captionUpper,
   CAPTION_STYLES,
   groupWords,
   lineCharsFor,
@@ -135,6 +138,7 @@ import {
   transcribe,
   type CaptionsProgress,
 } from "@/lib/editor/captions";
+import { editCaption, mergeCaptions, replaceInCaptions } from "@/lib/editor/captionEdit";
 import { TIER_LIMITS, toTier, type Tier } from "@/lib/entitlements";
 import AiCleanupDialog from "./AiCleanupDialog";
 import ExportDialog from "./ExportDialog";
@@ -344,8 +348,18 @@ export default function VideoEditor({
   const [soloRaw, setSolo] = useState<ReadonlySet<string>>(() => new Set());
   const [cleaningTrack, setCleaningTrack] = useState<string | null>(null);
   const [measuring, setMeasuring] = useState(false);
-  const [captionOpts, setCaptionOpts] = useState<CaptionOptions>(() => ({ language: savedCaptionLanguage(), maxWords: 3, style: "bold", y: 0.82 }));
+  const [captionOpts, setCaptionOpts] = useState<CaptionOptions>(() => ({
+    maxWords: 3,
+    style: "bold",
+    y: 0.82,
+    ...savedCaptionPrefs(),
+    language: savedCaptionLanguage(),
+  }));
   useEffect(() => saveCaptionLanguage(captionOpts.language), [captionOpts.language]);
+  useEffect(() => {
+    const { maxWords, style, y, look, hint, accurate } = captionOpts;
+    saveCaptionPrefs({ maxWords, style, y, look, hint, accurate });
+  }, [captionOpts]);
   const [captioning, setCaptioning] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [signedInTier, setSignedInTier] = useState<Tier>("free");
@@ -1172,7 +1186,7 @@ export default function VideoEditor({
     setBusy("Loading speech model…");
     let res;
     try {
-      res = await transcribe(samples, captionOpts.language, progress);
+      res = await transcribe(samples, captionOpts.language, progress, { hint: captionOpts.hint, accurate: captionOpts.accurate });
     } catch (e) {
       // "Auto" heard a language whose own model isn't downloaded: pick the
       // language so the panel offers that download (its own consent).
@@ -1181,7 +1195,7 @@ export default function VideoEditor({
     }
     stopIfCancelled();
     return { language: res.language, words: res.words, total: lay.total };
-  }, [lay, project, sources, captionOpts.language]);
+  }, [lay, project, sources, captionOpts.language, captionOpts.hint, captionOpts.accurate]);
 
   const runCaptions = useCallback(async () => {
     setPlaying(false);
@@ -1197,11 +1211,11 @@ export default function VideoEditor({
         say("No speech was found in your clips.");
         return;
       }
-      const caps = captionOverlays(chunks, captionOpts.style, captionOpts.y);
+      const caps = captionOverlays(chunks, captionOpts.style, captionOpts.y, captionOpts.look);
       // One undo step; regenerating replaces earlier captions. The words
       // are kept too, for editing by text (Transcript).
       apply((p) => ({ ...p, overlays: [...p.overlays.filter((o) => !o.caption), ...caps], transcript }));
-      say(`Added ${caps.length} captions. Click one to edit its text.`);
+      say(`Added ${caps.length} captions. Fix any word in Edit text.`);
     } catch (e) {
       if ((e as Error)?.name === "AbortError") {
         say("Captioning cancelled. Nothing was changed.");
@@ -1326,7 +1340,7 @@ export default function VideoEditor({
       if (next.transcript && project.overlays.some((o) => o.caption)) {
         const total = layout(next, lay.fps).total;
         const chunks = groupWords(next.transcript.words, captionOpts.maxWords, lineCharsFor(canvasSize), total);
-        next = { ...next, overlays: [...next.overlays.filter((o) => !o.caption), ...captionOverlays(chunks, captionOpts.style, captionOpts.y)] };
+        next = { ...next, overlays: [...next.overlays.filter((o) => !o.caption), ...captionOverlays(chunks, captionOpts.style, captionOpts.y, captionOpts.look)] };
       }
       apply(() => next);
       setSelection(null);
@@ -1341,7 +1355,7 @@ export default function VideoEditor({
         ...p,
         overlays: p.overlays.map((o) =>
           o.caption && o.kind === "text"
-            ? { ...o, y: opts.y, animIn: CAPTION_STYLES[opts.style].animIn, text: captionText(o.text.content, opts.style) }
+            ? { ...o, y: opts.y, animIn: CAPTION_STYLES[opts.style].animIn, text: captionText(o.text.content, opts.style, opts.look) }
             : o
         ),
       })),
@@ -1947,6 +1961,14 @@ export default function VideoEditor({
   // check for another language reads as "still checking".
   const [modelCheck, setModelCheck] = useState<{ language: string; cached: boolean } | null>(null);
   const modelCached = modelCheck?.language === captionOpts.language ? modelCheck.cached : null;
+  const captionItems = useMemo(
+    () =>
+      project.overlays
+        .filter((o): o is Extract<Overlay, { kind: "text" }> => o.kind === "text" && !!o.caption)
+        .map((o) => ({ id: o.id, start: o.start, end: o.end, text: o.text.content }))
+        .sort((a, b) => a.start - b.start),
+    [project.overlays]
+  );
   const [captionModel, setCaptionModel] = useState<SpeechModel | null>(null);
   useEffect(() => {
     if (tool !== "captions" && tool !== "transcript") return;
@@ -2823,9 +2845,44 @@ export default function VideoEditor({
             return { ...p, overlays: p.overlays.map((o) => (o.caption ? { ...o, hidden: hide } : o)) };
           })
         }
-        onResize={(size) => apply((p) => ({ ...p, overlays: p.overlays.map((o) => (o.caption && o.kind === "text" ? { ...o, text: { ...o.text, size } } : o)) }))}
-        onAlign={(align) => apply((p) => ({ ...p, overlays: p.overlays.map((o) => (o.caption && o.kind === "text" ? { ...o, text: { ...o.text, align } } : o)) }))}
         onExport={(f) => void exportCaptions(f)}
+        captions={captionItems}
+        total={lay.total}
+        gesture={gesture}
+        onSeek={(t) => {
+          setPlaying(false);
+          seek(t + 0.01);
+        }}
+        onEditCaption={(id, patch) =>
+          apply((p) => {
+            // Typed text follows the captions' letter case (Style).
+            const upper = captionUpper(captionOpts.style, captionOpts.look);
+            const fixed = patch.text !== undefined && upper ? { ...patch, text: patch.text.toUpperCase() } : patch;
+            return { ...p, overlays: p.overlays.map((o) => (o.id === id && o.kind === "text" && o.caption ? editCaption(o, fixed) : o)) };
+          })
+        }
+        onDeleteCaption={(id) => {
+          apply((p) => ({ ...p, overlays: p.overlays.filter((o) => o.id !== id) }));
+          if (selection?.kind === "overlay" && selection.id === id) setSelection(null);
+        }}
+        onMergeNext={(id) =>
+          apply((p) => {
+            const caps = p.overlays
+              .filter((o): o is Extract<Overlay, { kind: "text" }> => o.kind === "text" && !!o.caption)
+              .sort((a, b) => a.start - b.start);
+            const i = caps.findIndex((o) => o.id === id);
+            const next = caps[i + 1];
+            if (i < 0 || !next) return p;
+            const merged = mergeCaptions(caps[i], next, lineCharsFor(canvasSize));
+            return { ...p, overlays: p.overlays.filter((o) => o.id !== next.id).map((o) => (o.id === id ? merged : o)) };
+          })
+        }
+        onReplaceAll={(find, raw, matchCase) => {
+          const replace = captionUpper(captionOpts.style, captionOpts.look) ? raw.toUpperCase() : raw;
+          const res = replaceInCaptions(project.overlays, find, replace, matchCase);
+          if (res.changed) apply((p) => ({ ...p, overlays: replaceInCaptions(p.overlays, find, replace, matchCase).overlays }));
+          return res.changed;
+        }}
       />
     );
   } else if (tool === "focus") {

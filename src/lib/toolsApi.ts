@@ -516,7 +516,9 @@ export async function engineTranscribe(
   language: string,
   gpu: boolean,
   onProgress: (stage: "download" | "prepare" | "transcribe", value: number) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** hint: names and words to expect; accurate: slower, more careful decoding. */
+  opts: { hint?: string; accurate?: boolean } = {}
 ): Promise<{ language: string; words: { start: number; end: number; text: string }[] } | null> {
   const engine = await optionalEngine();
   if (!engine) return null;
@@ -526,6 +528,8 @@ export async function engineTranscribe(
   body.append("language", language);
   body.append("gpu", gpu ? "true" : "false");
   body.append("job_id", jobId);
+  if (opts.hint?.trim()) body.append("hint", opts.hint.trim().slice(0, 2000));
+  if (opts.accurate) body.append("accurate", "true");
   const job = `${engine.url}/api/jobs/${jobId}`;
   const cancel = () => void fetch(`${job}/cancel`, { method: "POST", headers: engineHeaders(engine) }).catch(() => {});
   signal?.addEventListener("abort", cancel, { once: true });

@@ -716,19 +716,22 @@ def detect_language(audio: np.ndarray, clips: list[tuple[int, int]], progress: P
     raise LanguageUnclear(language)
 
 
-def transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool = False) -> dict:
+def transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool = False, hint: str = "", accurate: bool = False) -> dict:
     """Word-timed transcript of 16 kHz mono float32 `audio`. `language` is
     a Whisper code or "auto" (detected by the general model; Sinhala then
     switches to the Sinhala model, if it's downloaded - else ModelNeeded).
     `gpu`: use the NVIDIA card, downloading its libraries if needed; any
     failure there falls back to the CPU. Returns {language, words: [{start,
-    end, text}]}, times in seconds within `audio`."""
+    end, text}]}, times in seconds within `audio`. `hint`: names and words
+    the speech is likely to contain (given to the general model as its
+    prompt, so it spells them that way). `accurate`: beam search instead of
+    greedy decoding - fewer wrong words, slower."""
     global _gpu_failed
     use_gpu = gpu and gpu_status()["available"]
     if use_gpu:
         ensure_gpu(progress)
     try:
-        return _transcribe(audio, language, progress, use_gpu)
+        return _transcribe(audio, language, progress, use_gpu, hint, accurate)
     except RuntimeError as exc:  # what CTranslate2 raises for CUDA errors
         if not use_gpu:
             raise
@@ -736,10 +739,10 @@ def transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool =
         _gpu_failed = True
         with _load_lock:
             _loaded.clear()
-        return _transcribe(audio, language, progress, False)
+        return _transcribe(audio, language, progress, False, hint, accurate)
 
 
-def _decode(model, audio: np.ndarray, language: str, clips: list[tuple[int, int]], batch: int, words: bool = True):
+def _decode(model, audio: np.ndarray, language: str, clips: list[tuple[int, int]], batch: int, words: bool = True, opts: Optional[dict] = None):
     """The clips' segments (a generator), decoded `batch` at a time, with
     word timings unless `words` is false.
 
@@ -756,7 +759,8 @@ def _decode(model, audio: np.ndarray, language: str, clips: list[tuple[int, int]
     early-ended clips are decoded again (see unfinished). faster-whisper
     pads to 30 s with its module-level pad_or_trim while preparing the
     batch, before returning the generator, so it's swapped only for that
-    call (transcriptions run one at a time: main.py _speech_lock)."""
+    call (transcriptions run one at a time: main.py _speech_lock).
+    `opts`: extra decoding options (_decoding)."""
     import faster_whisper.transcribe as fw
     from faster_whisper import BatchedInferencePipeline
 
@@ -771,16 +775,36 @@ def _decode(model, audio: np.ndarray, language: str, clips: list[tuple[int, int]
             task="transcribe",
             clip_timestamps=[{"start": a / RATE, "end": b / RATE} for a, b in clips],
             batch_size=batch,
-            beam_size=1,
             word_timestamps=words,
             without_timestamps=True,
+            **{"beam_size": 1, **(opts or {})},
         )
     finally:
         fw.pad_or_trim = full
     return segments
 
 
-def _transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool) -> dict:
+# Beam width for `accurate`: Whisper's own default.
+_BEAM = 5
+# Longest prompt kept: Whisper takes up to 223 prompt tokens, and a long
+# one costs decoding time on every clip.
+_MAX_HINT_CHARS = 400
+
+
+def _decoding(spec: SpeechModel, hint: str, accurate: bool) -> dict:
+    """Decoding options for the user's settings. The prompt goes to the
+    general model only: the languages' own models were fine-tuned without
+    one and may echo it back."""
+    opts: dict = {}
+    if accurate:
+        opts["beam_size"] = _BEAM
+    hint = " ".join(hint.split())[:_MAX_HINT_CHARS]
+    if hint and spec.key == "general":
+        opts["initial_prompt"] = hint
+    return opts
+
+
+def _transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool, hint: str = "", accurate: bool = False) -> dict:
     total = len(audio) / RATE
     if language == "auto":
         first = speech_clips(audio, _CLIP_SECONDS * RATE)
@@ -799,9 +823,10 @@ def _transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool)
     model = _whisper(spec, progress, gpu)
     progress("transcribe", 0.0)
     batch = _BATCH.get(spec.key, 8)
+    opts = _decoding(spec, hint, accurate)
     looped: list[tuple[int, int]] = []
-    words = _words(_decode(model, audio, language, clips, batch), total, lambda t: progress("transcribe", min(0.95, t / total)), looped=looped)
-    words += _retry(model, audio, language, looped, total)
+    words = _words(_decode(model, audio, language, clips, batch, opts=opts), total, lambda t: progress("transcribe", min(0.95, t / total)), looped=looped)
+    words += _retry(model, audio, language, looped, total, opts=opts)
     # Greedy decoding sometimes ends a clip early (one of eleven in the
     # 2-minute test: 6 of its 17 words, more often with the short encoder
     # window). Speech left after a clip's last word is decoded again.
@@ -809,8 +834,8 @@ def _transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool)
     if rest:
         # Only confident words: what's left may be a breath or noise.
         looped = []
-        words += _words(_decode(model, audio, language, rest, batch), total, lambda t: None, min_probability=0.4, looped=looped)
-        words += _retry(model, audio, language, looped, total, min_probability=0.4)
+        words += _words(_decode(model, audio, language, rest, batch, opts=opts), total, lambda t: None, min_probability=0.4, looped=looped)
+        words += _retry(model, audio, language, looped, total, min_probability=0.4, opts=opts)
     words.sort(key=lambda w: w["start"])
     progress("transcribe", 1.0)
     return {"language": language, "words": drop_loops(words)}
@@ -821,7 +846,9 @@ def _transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool)
 _LOOP_RATIO = 2.4
 
 
-def _retry(model, audio: np.ndarray, language: str, clips: list[tuple[int, int]], total: float, min_probability: float = 0.0) -> list[dict]:
+def _retry(
+    model, audio: np.ndarray, language: str, clips: list[tuple[int, int]], total: float, min_probability: float = 0.0, opts: Optional[dict] = None
+) -> list[dict]:
     """Clips whose greedy decoding looped, decoded again one at a time with
     Whisper's fallback: sampling at rising temperatures until the text
     stops looping. What still loops is left out."""
@@ -830,6 +857,7 @@ def _retry(model, audio: np.ndarray, language: str, clips: list[tuple[int, int]]
         segments, _ = model.transcribe(
             audio[a:b],
             language=language,
+            initial_prompt=(opts or {}).get("initial_prompt"),
             beam_size=1,
             temperature=[0.2, 0.4, 0.6, 0.8],
             compression_ratio_threshold=_LOOP_RATIO,

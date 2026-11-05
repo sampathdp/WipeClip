@@ -5,6 +5,7 @@
  */
 import { memoryBudgetGb } from "@/lib/platform";
 import { engineSpeechModel, engineTranscribe, type EngineGpu } from "@/lib/toolsApi";
+import { applyHint, wrap } from "./captionEdit";
 import { DEFAULT_TEXT } from "./textRaster";
 import { newId, type Layout } from "./timeline";
 import type { AnimIn, AudioClip, MediaSource, Overlay, Project, TextStyle } from "./types";
@@ -237,6 +238,38 @@ export function saveCaptionLanguage(language: string): void {
     localStorage.setItem(LANGUAGE_KEY, language);
   } catch {
     // Not remembered: "auto" next time.
+  }
+}
+
+/** The caption settings last used (style, look, words per caption, the
+ * names hint...), so the next video starts from them. */
+const PREFS_KEY = "wipeclip.captionPrefs";
+
+export interface CaptionPrefs {
+  maxWords?: number;
+  style?: CaptionStyleId;
+  y?: number;
+  look?: CaptionLook;
+  hint?: string;
+  accurate?: boolean;
+}
+
+export function savedCaptionPrefs(): CaptionPrefs {
+  try {
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(PREFS_KEY) : null;
+    const p = raw ? (JSON.parse(raw) as CaptionPrefs) : {};
+    if (p.style && !(p.style in CAPTION_STYLES)) delete p.style;
+    return p && typeof p === "object" ? p : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveCaptionPrefs(prefs: CaptionPrefs): void {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    // Not remembered: the defaults next time.
   }
 }
 
@@ -688,14 +721,35 @@ async function runOnPool(
   return { language: lang, words: results.flat() };
 }
 
+/** Settings that trade speed for accuracy. */
+export interface SpeechOptions {
+  /** Names and words the speech is likely to contain, as they should be
+   * spelled (commas or new lines between them). */
+  hint?: string;
+  /** Slower, more careful decoding (desktop engine: beam search). */
+  accurate?: boolean;
+}
+
 /** Word-timed transcript of `samples` (16 kHz mono, timeline time).
  * `language` is a code from CAPTION_LANGUAGES, or "auto" to let Whisper
  * detect it. Runs on WebGPU when available; if that fails, the run is
- * retried once on the CPU. */
+ * retried once on the CPU. `opts.hint` also corrects the spelling of the
+ * words it lists (applyHint). */
 export async function transcribe(
   samples: Float32Array,
   language: string,
-  onProgress: (p: CaptionsProgress) => void
+  onProgress: (p: CaptionsProgress) => void,
+  opts: SpeechOptions = {}
+): Promise<{ language: string; words: CaptionWord[] }> {
+  const res = await transcribeRaw(samples, language, onProgress, opts);
+  return { language: res.language, words: applyHint(res.words, opts.hint ?? "") };
+}
+
+async function transcribeRaw(
+  samples: Float32Array,
+  language: string,
+  onProgress: (p: CaptionsProgress) => void,
+  opts: SpeechOptions
 ): Promise<{ language: string; words: CaptionWord[] }> {
   if (speechSegments(samples).length === 0) return { language: language === "auto" ? "en" : language, words: [] };
   // The desktop engine when there is one; it's never left for the browser
@@ -703,7 +757,7 @@ export async function transcribe(
   const run = new AbortController();
   engineRun = run;
   try {
-    const res = await engineTranscribe(samples, language, speechCudaWanted(), (stage, value) => onProgress({ stage, value }), run.signal);
+    const res = await engineTranscribe(samples, language, speechCudaWanted(), (stage, value) => onProgress({ stage, value }), run.signal, opts);
     if (res) return { language: res.language, words: res.words.filter((w) => audible(samples, w)) };
   } catch (err) {
     if (run.signal.aborted) throw new DOMException("Speech recognition cancelled", "AbortError");
@@ -750,6 +804,8 @@ export function groupWords(words: CaptionWord[], maxWords: number, lineChars: nu
       (prev && w.start - prev.end > MAX_GAP) ||
       (cur.length > 0 && w.end - cur[0].start > MAX_CAPTION_SECONDS) ||
       (prev && /[.!?。！？]$/.test(prev.text)) ||
+      // A phrase's natural break, once the caption has a few words.
+      (prev && maxWords > 3 && cur.length >= Math.ceil(maxWords / 2) && /[,;:，、；：]$/.test(prev.text)) ||
       wrap([...cur, w].map((x) => x.text).join(" "), lineChars).split("\n").length > 2;
     if (cur.length && tooLong) {
       groups.push(cur);
@@ -774,22 +830,6 @@ export function groupWords(words: CaptionWord[], maxWords: number, lineChars: nu
       words: g.map((w) => ({ start: ms(w.start), end: ms(w.end) })),
     };
   });
-}
-
-/** Breaks text into lines of at most `chars` characters at spaces. */
-function wrap(text: string, chars: number): string {
-  const lines: string[] = [];
-  let line = "";
-  for (const word of text.split(/\s+/)) {
-    if (line && line.length + 1 + word.length > chars) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = line ? `${line} ${word}` : word;
-    }
-  }
-  if (line) lines.push(line);
-  return lines.join("\n");
 }
 
 // --- Styles and layers ------------------------------------------------------
@@ -840,12 +880,28 @@ export function lineCharsFor(canvas: { width: number; height: number }): number 
   return canvas.width >= canvas.height ? 36 : 18;
 }
 
-export function captionText(content: string, styleId: CaptionStyleId): TextStyle {
+/** The user's changes on top of a caption style: applied to every caption
+ * and kept when the style is switched. `case` absent = the style's own. */
+export type CaptionLook = Partial<
+  Pick<
+    TextStyle,
+    "font" | "weight" | "italic" | "color" | "strokeColor" | "strokeWidth" | "background" | "backgroundOpacity" | "shadow" | "highlight" | "size" | "align"
+  >
+> & { case?: "upper" | "normal" };
+
+export function captionText(content: string, styleId: CaptionStyleId, look: CaptionLook = {}): TextStyle {
   const s = CAPTION_STYLES[styleId];
-  return { ...DEFAULT_TEXT, ...s.style, content: s.upper ? content.toUpperCase() : content };
+  const { case: letterCase, ...rest } = look;
+  const upper = letterCase ? letterCase === "upper" : s.upper;
+  return { ...DEFAULT_TEXT, ...s.style, ...rest, content: upper ? content.toUpperCase() : content };
 }
 
-export function captionOverlays(chunks: CaptionChunk[], styleId: CaptionStyleId, y: number): Overlay[] {
+/** Whether a style with `look` shows its text in capitals. */
+export function captionUpper(styleId: CaptionStyleId, look: CaptionLook = {}): boolean {
+  return look.case ? look.case === "upper" : !!CAPTION_STYLES[styleId].upper;
+}
+
+export function captionOverlays(chunks: CaptionChunk[], styleId: CaptionStyleId, y: number, look: CaptionLook = {}): Overlay[] {
   return chunks.map((c) => ({
     id: newId("cap"),
     kind: "text" as const,
@@ -861,7 +917,7 @@ export function captionOverlays(chunks: CaptionChunk[], styleId: CaptionStyleId,
     animOut: "none" as const,
     hidden: false,
     locked: false,
-    text: captionText(c.text, styleId),
+    text: captionText(c.text, styleId, look),
     ...(c.words ? { words: c.words.map((w) => ({ start: round(w.start - c.start), end: round(w.end - c.start) })) } : {}),
   }));
 }

@@ -272,8 +272,9 @@ class EndpointTest(unittest.TestCase):
         samples = tone(1)
         seen = {}
 
-        def fake(audio, language, progress, gpu):
+        def fake(audio, language, progress, gpu, hint, accurate):
             seen["audio"], seen["language"], seen["gpu"] = audio, language, gpu
+            seen["hint"], seen["accurate"] = hint, accurate
             progress("transcribe", 0.5)
             return {"language": language, "words": [{"start": 0.1, "end": 0.4, "text": "hello"}]}
 
@@ -281,13 +282,15 @@ class EndpointTest(unittest.TestCase):
             res = self.client.post(
                 "/api/speech/transcribe",
                 files={"audio": ("a.f32", samples.astype("<f4").tobytes())},
-                data={"language": "si", "gpu": "true", "job_id": "speech-test-0000000001"},
+                data={"language": "si", "gpu": "true", "job_id": "speech-test-0000000001", "hint": "Ruwan, Kandy", "accurate": "true"},
                 headers=self.headers,
             )
         self.assertEqual(res.status_code, 200, res.text)
         self.assertEqual(res.json()["words"][0]["text"], "hello")
         self.assertEqual(seen["language"], "si")
         self.assertTrue(seen["gpu"])
+        self.assertEqual(seen["hint"], "Ruwan, Kandy")
+        self.assertTrue(seen["accurate"])
         np.testing.assert_array_equal(seen["audio"], samples)
 
     def test_rejects_bad_input(self) -> None:
@@ -301,7 +304,7 @@ class EndpointTest(unittest.TestCase):
                     self.assertEqual(res.status_code, 400)
 
     def test_cancel_answers_409(self) -> None:
-        def cancelled(audio, language, progress, gpu):
+        def cancelled(audio, language, progress, gpu, *_):
             main.progress.get("speech-test-0000000002").cancel.set()
             progress("transcribe", 0.1)
             return {}
@@ -327,7 +330,7 @@ class EndpointTest(unittest.TestCase):
         self.assertEqual(res.json(), {"ready": False, "sizeMb": speech.MODELS["si"].size_mb, "gpu": gpu, "own": True})
 
     def test_model_needed_answers_409(self) -> None:
-        def needed(audio, language, progress, gpu):
+        def needed(audio, language, progress, gpu, *_):
             raise speech.ModelNeeded("si", speech.MODELS["si"])
 
         with mock.patch.object(main, "LOCAL_MODE", True), mock.patch.object(speech, "transcribe", needed):
@@ -341,3 +344,22 @@ class EndpointTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DecodingOptionsTest(unittest.TestCase):
+    def test_greedy_without_settings(self) -> None:
+        self.assertEqual(speech._decoding(speech.MODELS["general"], "", False), {})
+
+    def test_accurate_uses_beam_search(self) -> None:
+        self.assertEqual(speech._decoding(speech.MODELS["general"], "", True)["beam_size"], speech._BEAM)
+
+    def test_hint_is_the_general_models_prompt(self) -> None:
+        opts = speech._decoding(speech.MODELS["general"], "  Ruwan,\n Kandy  ", False)
+        self.assertEqual(opts["initial_prompt"], "Ruwan, Kandy")
+
+    def test_no_prompt_for_a_languages_own_model(self) -> None:
+        self.assertNotIn("initial_prompt", speech._decoding(speech.MODELS["si"], "Ruwan", False))
+
+    def test_long_hint_is_cut(self) -> None:
+        opts = speech._decoding(speech.MODELS["general"], "word " * 500, False)
+        self.assertLessEqual(len(opts["initial_prompt"]), speech._MAX_HINT_CHARS)

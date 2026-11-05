@@ -610,6 +610,8 @@ async def api_speech_transcribe(
     language: str = Form("auto"),
     gpu: bool = Form(False),
     job_id: Optional[str] = Form(None),
+    hint: str = Form("", max_length=2000),
+    accurate: bool = Form(False),
 ):
     """Desktop engine only: a word-timed transcript of `audio` (raw 16 kHz
     mono float32, little-endian - the editor's speech mix) with
@@ -619,7 +621,8 @@ async def api_speech_transcribe(
     phase "download", "prepare" or "transcribe". 409 "model_needed" when
     "auto" hears a language whose own model isn't downloaded (Sinhala, Tamil, ...).
     Free and unmetered: it runs on the user's own machine, and the audio
-    never leaves it."""
+    never leaves it. `hint`: names and words to expect (spelled that way);
+    `accurate`: slower, more careful decoding."""
     if not LOCAL_MODE:
         raise HTTPException(status_code=404, detail="Not available here.")
     if not re.fullmatch(r"auto|[a-z]{2,3}", language):
@@ -638,7 +641,7 @@ async def api_speech_transcribe(
 
     try:
         async with _speech_lock:
-            result = await asyncio.to_thread(speech.transcribe, samples, language, report, gpu)
+            result = await asyncio.to_thread(speech.transcribe, samples, language, report, gpu, hint, accurate)
         return result
     except speech.ModelNeeded as exc:
         raise HTTPException(

@@ -55,7 +55,16 @@ import { DEFAULT_MASK, MASK_LABELS } from "@/lib/editor/shapeMask";
 import { CAM_CORNER_LABELS, CAM_SHAPE_LABELS, DEFAULT_CAM_LAYOUT } from "@/lib/editor/webcamLayout";
 import { DEFAULT_CURVES, IDENTITY_CURVE, curveFn, isIdentityCurve } from "@/lib/editor/curves";
 import { MAX_RAMP_SPEED, MIN_RAMP_SPEED, RAMP_PRESETS, clipTimelineLength } from "@/lib/editor/speed";
-import { CAPTION_POSITIONS, CAPTION_STYLES, setSpeechCudaWanted, speechCudaWanted, type CaptionStyleId } from "@/lib/editor/captions";
+import {
+  CAPTION_POSITIONS,
+  CAPTION_STYLES,
+  captionText,
+  captionUpper,
+  setSpeechCudaWanted,
+  speechCudaWanted,
+  type CaptionLook,
+  type CaptionStyleId,
+} from "@/lib/editor/captions";
 import { SHAPE_LABELS } from "@/lib/editor/shapes";
 import { isPremiumEffect, isPremiumFilter } from "@/lib/entitlements";
 import GradeFilter from "./GradeFilter";
@@ -1036,6 +1045,250 @@ export interface CaptionOptions {
   maxWords: number;
   style: CaptionStyleId;
   y: number;
+  /** The user's font, color and outline changes on top of `style`. */
+  look?: CaptionLook;
+  /** Names and words to expect, spelled as they should be. */
+  hint?: string;
+  /** Slower, more careful speech recognition (desktop app). */
+  accurate?: boolean;
+}
+
+/** One caption layer, as the caption list edits it. */
+export interface CaptionItem {
+  id: string;
+  start: number;
+  end: number;
+  text: string;
+}
+
+/** Font, color, outline, background and letter case for every caption. */
+function CaptionLookEditor({
+  styleId,
+  look,
+  onChange,
+  gesture,
+}: {
+  styleId: CaptionStyleId;
+  look: CaptionLook;
+  onChange: (look: CaptionLook) => void;
+  gesture: Gesture;
+}) {
+  const t = captionText("", styleId, look);
+  const set = (patch: CaptionLook) => onChange({ ...look, ...patch });
+  const hasBox = t.backgroundOpacity > 0;
+  return (
+    <div className="space-y-3">
+      <Field label="Font">
+        <select className={inputCls} value={t.font} onChange={(e) => set({ font: e.target.value })}>
+          {Object.entries(TEXT_FONTS).map(([key, f]) => (
+            <option key={key} value={key}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Chips
+        label="Caption weight"
+        value={t.weight}
+        onChange={(weight) => set({ weight })}
+        options={[
+          { value: 400 as const, label: "Regular" },
+          { value: 700 as const, label: "Bold" },
+          { value: 900 as const, label: "Black" },
+        ]}
+      />
+      <div className="flex flex-wrap items-center gap-3">
+        <Chips
+          label="Caption letter case"
+          value={captionUpper(styleId, look) ? "upper" : "normal"}
+          onChange={(c) => set({ case: c })}
+          options={[
+            { value: "normal" as const, label: "Aa" },
+            { value: "upper" as const, label: "AA" },
+          ]}
+        />
+        <label className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+          <input type="checkbox" className="accent-[var(--accent)]" checked={t.italic} onChange={(e) => set({ italic: e.target.checked })} />
+          Italic
+        </label>
+        <label className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+          <input type="checkbox" className="accent-[var(--accent)]" checked={t.shadow} onChange={(e) => set({ shadow: e.target.checked })} />
+          Shadow
+        </label>
+      </div>
+      <ColorField label="Text color" value={t.color} onChange={(color) => set({ color })} gesture={gesture} />
+      {t.anim === "karaoke" && (
+        <ColorField label="Spoken word color" value={t.highlight ?? "#facc15"} onChange={(highlight) => set({ highlight })} gesture={gesture} />
+      )}
+      <ColorField label="Outline color" value={t.strokeColor} onChange={(strokeColor) => set({ strokeColor })} gesture={gesture} />
+      <SliderField
+        label="Outline"
+        value={Math.round(t.strokeWidth * 100)}
+        min={0}
+        max={20}
+        format={(v) => (v === 0 ? "None" : `${Math.round(v)}%`)}
+        onChange={(v) => set({ strokeWidth: v / 100 })}
+        gesture={gesture}
+      />
+      <label className="flex items-center gap-2 text-xs font-medium text-foreground">
+        <input
+          type="checkbox"
+          className="accent-[var(--accent)]"
+          checked={hasBox}
+          onChange={(e) => set({ backgroundOpacity: e.target.checked ? 0.6 : 0, background: t.background || "#000000" })}
+        />
+        Background box
+      </label>
+      {hasBox && (
+        <>
+          <ColorField label="Box color" value={t.background || "#000000"} onChange={(background) => set({ background })} gesture={gesture} />
+          <SliderField
+            label="Box opacity"
+            value={Math.round(t.backgroundOpacity * 100)}
+            min={5}
+            max={100}
+            format={(v) => `${Math.round(v)}%`}
+            onChange={(v) => set({ backgroundOpacity: v / 100 })}
+            gesture={gesture}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+const fmtTime = (t: number) => {
+  const m = Math.floor(t / 60);
+  return `${m}:${(t - m * 60).toFixed(1).padStart(4, "0")}`;
+};
+
+/** Every caption's text and timing, editable in one place, with find and
+ * replace for a word the speech model got wrong throughout. */
+function CaptionList({
+  items,
+  total,
+  onEdit,
+  onDelete,
+  onMergeNext,
+  onReplaceAll,
+  onSeek,
+}: {
+  items: CaptionItem[];
+  total: number;
+  onEdit: (id: string, patch: Partial<Omit<CaptionItem, "id">>) => void;
+  onDelete: (id: string) => void;
+  onMergeNext: (id: string) => void;
+  /** Returns how many captions changed. */
+  onReplaceAll: (find: string, replace: string, matchCase: boolean) => number;
+  onSeek: (t: number) => void;
+}) {
+  const [find, setFind] = useState("");
+  const [replace, setReplace] = useState("");
+  const [matchCase, setMatchCase] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+  const q = filter.trim().toLowerCase();
+  const shown = q ? items.filter((c) => c.text.toLowerCase().includes(q)) : items;
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2 rounded-xl border border-border bg-surface-2/60 p-3">
+        <p className="text-xs font-semibold text-foreground">Find and replace</p>
+        <input className={inputCls} placeholder="Find (a wrong word)" value={find} onChange={(e) => setFind(e.target.value)} aria-label="Find in captions" />
+        <input className={inputCls} placeholder="Replace with" value={replace} onChange={(e) => setReplace(e.target.value)} aria-label="Replace with" />
+        <div className="flex items-center justify-between gap-2">
+          <label className="flex items-center gap-1.5 text-xs text-muted">
+            <input type="checkbox" className="accent-[var(--accent)]" checked={matchCase} onChange={(e) => setMatchCase(e.target.checked)} />
+            Match case
+          </label>
+          <ActionButton
+            disabled={!find.trim()}
+            onClick={() => {
+              const n = onReplaceAll(find, replace, matchCase);
+              setNote(n ? `Replaced in ${n} caption${n === 1 ? "" : "s"}.` : "Not found in any caption.");
+            }}
+          >
+            Replace all
+          </ActionButton>
+        </div>
+        {note && <p className="text-[11px] text-muted">{note}</p>}
+      </div>
+      <input className={inputCls} placeholder="Search captions" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Search captions" />
+      <ul className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+        {shown.map((c) => {
+          const i = items.indexOf(c);
+          const next = items[i + 1];
+          return (
+            <li key={c.id} className="space-y-1.5 rounded-xl border border-border bg-surface p-2">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onSeek(c.start)}
+                  className="rounded px-1.5 py-0.5 font-mono text-[11px] text-accent hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+                  title="Go to this caption"
+                >
+                  {fmtTime(c.start)} – {fmtTime(c.end)}
+                </button>
+                <span className="flex-1" />
+                {next && (
+                  <button
+                    type="button"
+                    onClick={() => onMergeNext(c.id)}
+                    className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-muted hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+                    title="Join with the next caption"
+                  >
+                    Join next
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onDelete(c.id)}
+                  className="rounded p-1 text-muted hover:bg-rose-500/10 hover:text-rose-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+                  aria-label="Delete caption"
+                  title="Delete caption"
+                >
+                  <TrashIcon width={13} height={13} />
+                </button>
+              </div>
+              <CaptionTextInput value={c.text} onCommit={(text) => onEdit(c.id, { text })} />
+              <div className="grid grid-cols-2 gap-1.5">
+                <SecondsInput value={c.start} min={0} max={Math.max(0, c.end - 0.1)} onCommit={(start) => onEdit(c.id, { start })} />
+                <SecondsInput value={c.end} min={c.start + 0.1} max={total} onCommit={(end) => onEdit(c.id, { end })} />
+              </div>
+            </li>
+          );
+        })}
+        {shown.length === 0 && <li className="text-xs text-muted">No caption has that text.</li>}
+      </ul>
+    </div>
+  );
+}
+
+/** A caption's text, saved when the field loses focus (one undo step per
+ * edit). Enter saves, Shift+Enter starts a second line, Escape undoes. */
+function CaptionTextInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft !== null && draft.trim() && draft !== value) onCommit(draft);
+    setDraft(null);
+  };
+  return (
+    <textarea
+      rows={2}
+      value={draft ?? value}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          e.currentTarget.blur();
+        } else if (e.key === "Escape") {
+          setDraft(null);
+        }
+      }}
+      aria-label="Caption text"
+      className={`${inputCls} resize-y leading-snug`}
+    />
+  );
 }
 
 /** Asks before the speech model's first download, with its size and what
@@ -1096,6 +1349,8 @@ export function SpeechGpuChoice({ gpu, busy }: { gpu?: { available: boolean; rea
   );
 }
 
+const NO_GESTURE: Gesture = { onGestureStart: () => {}, onGestureEnd: () => {} };
+
 export function CaptionsPanel({
   options,
   onOptions,
@@ -1110,9 +1365,15 @@ export function CaptionsPanel({
   model,
   hidden = false,
   onToggleHidden,
-  onResize,
-  onAlign,
   onExport,
+  captions = [],
+  total = 0,
+  onEditCaption,
+  onDeleteCaption,
+  onMergeNext,
+  onReplaceAll,
+  onSeek,
+  gesture = NO_GESTURE,
 }: {
   /** null = still checking. When false, generating asks to download the model first. */
   modelCached?: boolean | null;
@@ -1121,8 +1382,6 @@ export function CaptionsPanel({
   /** Every caption is hidden (toggled off). */
   hidden?: boolean;
   onToggleHidden?: () => void;
-  onResize?: (size: number) => void;
-  onAlign?: (align: "left" | "center" | "right") => void;
   onExport?: (format: "srt" | "vtt" | "txt") => void;
   options: CaptionOptions;
   onOptions: (o: CaptionOptions) => void;
@@ -1132,159 +1391,278 @@ export function CaptionsPanel({
   onGenerate: () => void;
   /** Stops the model download or transcription in progress. */
   onCancel?: () => void;
-  /** Applies the current style/position to the existing captions. */
+  /** Applies the current style, look and position to the existing captions. */
   onRestyle: (o: CaptionOptions) => void;
   onRemoveAll: () => void;
   onClose: () => void;
+  /** The caption layers, in time order, for the caption list. */
+  captions?: CaptionItem[];
+  /** Timeline length, seconds. */
+  total?: number;
+  onEditCaption?: (id: string, patch: Partial<Omit<CaptionItem, "id">>) => void;
+  onDeleteCaption?: (id: string) => void;
+  onMergeNext?: (id: string) => void;
+  onReplaceAll?: (find: string, replace: string, matchCase: boolean) => number;
+  onSeek?: (t: number) => void;
+  /** Brackets a color pick or slider drag as one undo step. */
+  gesture?: Gesture;
 }) {
   const set = (patch: Partial<CaptionOptions>, restyle = false) => {
     const next = { ...options, ...patch };
     onOptions(next);
     if (restyle && count > 0) onRestyle(next);
   };
+  const look = options.look ?? {};
+  const setLook = (patch: CaptionLook) => set({ look: { ...look, ...patch } }, true);
   const [consent, setConsent] = useState(false);
+  const [tab, setTab] = useState<"generate" | "edit" | "style">("generate");
   const needsModel = modelCached === false && !consent;
+  const canEdit = count > 0 && !!onEditCaption;
+  const current = canEdit ? tab : tab === "edit" ? "generate" : tab;
+  const shown = captionText("", options.style, look);
   return (
     <PanelShell title="Auto captions" onClose={onClose}>
       <div className="space-y-4">
-        <p className="text-xs text-muted">
-          Turns the speech in your clips, a screen recording&apos;s microphone and added voiceovers into timed text layers. Added audio is
-          checked on your device and music is left out - set a track to Voice or Music in its panel if it&apos;s taken wrong. Edit any
-          caption&apos;s text and timing afterwards like normal text. Speech recognition runs on your device - your audio is not uploaded.
-        </p>
-        <Field label="Language">
-          <select className={inputCls} value={options.language} onChange={(e) => set({ language: e.target.value })}>
-            {CAPTION_LANGUAGES.map((l) => (
-              <option key={l.code} value={l.code}>
-                {l.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <div>
-          <SectionTitle>Words per caption</SectionTitle>
-          <Chips
-            label="Words per caption"
-            value={options.maxWords}
-            onChange={(maxWords) => set({ maxWords })}
-            options={[
-              { value: 1, label: "1 word" },
-              { value: 3, label: "Short" },
-              { value: 8, label: "Phrase" },
-            ]}
-          />
-        </div>
-        <div>
-          <SectionTitle>Style</SectionTitle>
-          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Caption style">
-            {(Object.keys(CAPTION_STYLES) as CaptionStyleId[]).map((id) => {
-              const s = CAPTION_STYLES[id].style;
-              const active = options.style === id;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => set({ style: id }, true)}
-                  className={`flex h-14 items-center justify-center rounded-xl border bg-neutral-700 px-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
-                    active ? "border-accent-2 ring-1 ring-accent-2" : "border-border hover:border-accent/50"
-                  }`}
-                >
-                  <span
-                    className="rounded px-1.5 py-0.5 text-sm"
-                    style={{
-                      color: s.color ?? "#ffffff",
-                      fontWeight: s.weight ?? 700,
-                      background: s.backgroundOpacity ? `rgba(0,0,0,${s.backgroundOpacity})` : undefined,
-                      WebkitTextStroke: s.strokeWidth ? `1px ${s.strokeColor}` : undefined,
-                      textShadow: s.shadow ? "0 1px 3px rgba(0,0,0,0.8)" : undefined,
-                      textTransform: CAPTION_STYLES[id].upper ? "uppercase" : undefined,
-                    }}
-                  >
-                    {CAPTION_STYLES[id].label}
-                    {id === "karaoke" && <ProTag />}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <div>
-          <SectionTitle>Position</SectionTitle>
-          <Chips
-            label="Caption position"
-            value={options.y}
-            onChange={(y) => set({ y }, true)}
-            options={CAPTION_POSITIONS.map((p) => ({ value: p.y, label: p.label }))}
-          />
-        </div>
-        <SpeechGpuChoice gpu={model?.cuda} busy={busy} />
-        {needsModel ? (
-          <SpeechModelNotice model={model} busy={busy} onConsent={() => setConsent(true)} />
-        ) : busy && onCancel ? (
-          <ActionButton onClick={onCancel}>Cancel</ActionButton>
-        ) : (
-          <ActionButton onClick={onGenerate} disabled={busy || modelCached === null} tone="accent">
-            {busy ? "Generating…" : `${count > 0 ? "Regenerate" : "Generate"} captions · free`}
-          </ActionButton>
-        )}
-        {count > 0 && (
-          <div className="space-y-2 border-t border-border pt-4">
+        <Chips
+          label="Caption tools"
+          value={current}
+          onChange={setTab}
+          options={[
+            { value: "generate" as const, label: "Generate" },
+            ...(canEdit ? [{ value: "edit" as const, label: `Edit text (${count})` }] : []),
+            { value: "style" as const, label: "Style" },
+          ]}
+        />
+
+        {current === "generate" && (
+          <>
             <p className="text-xs text-muted">
-              {count} caption{count === 1 ? "" : "s"} on the Text track. Style and position changes apply to all of them; regenerating replaces them.
+              Turns the speech in your clips, a screen recording&apos;s microphone and added voiceovers into timed text layers. Added audio is
+              checked on your device and music is left out - set a track to Voice or Music in its panel if it&apos;s taken wrong. Fix any word
+              afterwards in Edit text. Speech recognition runs on your device - your audio is not uploaded.
             </p>
-            {onToggleHidden && (
-              <label className="flex items-center gap-2 text-xs font-medium text-foreground">
-                <input type="checkbox" className="accent-[var(--accent)]" checked={!hidden} onChange={onToggleHidden} />
-                Show captions (in the preview and the export)
+            <Field label="Language">
+              <select className={inputCls} value={options.language} onChange={(e) => set({ language: e.target.value })}>
+                {CAPTION_LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <p className="-mt-2 text-[11px] text-muted">Picking the spoken language instead of Auto detect gives more accurate captions.</p>
+            <div>
+              <SectionTitle>Words per caption</SectionTitle>
+              <Chips
+                label="Words per caption"
+                value={options.maxWords}
+                onChange={(maxWords) => set({ maxWords })}
+                options={[
+                  { value: 1, label: "1 word" },
+                  { value: 3, label: "Short" },
+                  { value: 5, label: "Medium" },
+                  { value: 8, label: "Phrase" },
+                ]}
+              />
+            </div>
+            <Field label="Names and special words (optional)">
+              <textarea
+                rows={2}
+                className={`${inputCls} resize-y`}
+                placeholder="e.g. Ruwan, Kandy, TypeScript"
+                value={options.hint ?? ""}
+                maxLength={600}
+                onChange={(e) => set({ hint: e.target.value })}
+              />
+            </Field>
+            <p className="-mt-2 text-[11px] text-muted">People, places, products and jargon in the video, spelled the way captions should show them.</p>
+            {model?.engine && (
+              <label className="flex items-start gap-2 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 accent-[var(--accent)]"
+                  checked={!!options.accurate}
+                  disabled={busy}
+                  onChange={(e) => set({ accurate: e.target.checked })}
+                />
+                <span>
+                  <span className="font-medium text-foreground">Best accuracy</span> - checks more possible wordings before choosing one. Fewer
+                  wrong words, about twice as slow.
+                </span>
               </label>
             )}
-            {onResize && (
-              <div>
-                <SectionTitle>Size</SectionTitle>
-                <Chips
-                  label="Caption size"
-                  value={0}
-                  onChange={(v) => v && onResize(v)}
-                  options={[
-                    { value: 0.04, label: "Small" },
-                    { value: 0.055, label: "Medium" },
-                    { value: 0.075, label: "Large" },
-                  ]}
-                />
+            <SpeechGpuChoice gpu={model?.cuda} busy={busy} />
+            {needsModel ? (
+              <SpeechModelNotice model={model} busy={busy} onConsent={() => setConsent(true)} />
+            ) : busy && onCancel ? (
+              <ActionButton onClick={onCancel}>Cancel</ActionButton>
+            ) : (
+              <ActionButton onClick={onGenerate} disabled={busy || modelCached === null} tone="accent">
+                {busy ? "Generating…" : `${count > 0 ? "Regenerate" : "Generate"} captions · free`}
+              </ActionButton>
+            )}
+            {count > 0 && (
+              <div className="space-y-2 border-t border-border pt-4">
+                <p className="text-xs text-muted">
+                  {count} caption{count === 1 ? "" : "s"} on the Text track. Regenerating replaces them, along with any text you fixed.
+                </p>
+                {onToggleHidden && (
+                  <label className="flex items-center gap-2 text-xs font-medium text-foreground">
+                    <input type="checkbox" className="accent-[var(--accent)]" checked={!hidden} onChange={onToggleHidden} />
+                    Show captions (in the preview and the export)
+                  </label>
+                )}
+                {onExport && (
+                  <div>
+                    <SectionTitle>Export</SectionTitle>
+                    <div className="flex flex-wrap gap-2">
+                      <ActionButton onClick={() => onExport("srt")}>SRT</ActionButton>
+                      <ActionButton onClick={() => onExport("vtt")}>WebVTT</ActionButton>
+                      <ActionButton onClick={() => onExport("txt")}>Transcript (.txt)</ActionButton>
+                    </div>
+                    <p className="mt-1 text-[11px] text-muted">Subtitle files use your corrected text and timings. Visible captions are also burned into the video export.</p>
+                  </div>
+                )}
+                <ActionButton onClick={onRemoveAll} tone="danger">
+                  <TrashIcon width={14} height={14} /> Remove all captions
+                </ActionButton>
               </div>
             )}
-            {onAlign && (
-              <div>
-                <SectionTitle>Alignment</SectionTitle>
-                <Chips
-                  label="Caption alignment"
-                  value={""}
-                  onChange={(v) => v && onAlign(v as "left" | "center" | "right")}
-                  options={[
-                    { value: "left", label: "Left" },
-                    { value: "center", label: "Center" },
-                    { value: "right", label: "Right" },
-                  ]}
-                />
+          </>
+        )}
+
+        {current === "edit" && onEditCaption && onDeleteCaption && onMergeNext && onReplaceAll && (
+          <CaptionList
+            items={captions}
+            total={total}
+            onEdit={onEditCaption}
+            onDelete={onDeleteCaption}
+            onMergeNext={onMergeNext}
+            onReplaceAll={onReplaceAll}
+            onSeek={(t) => onSeek?.(t)}
+          />
+        )}
+
+        {current === "style" && (
+          <>
+            <div>
+              <SectionTitle>Preset</SectionTitle>
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Caption style">
+                {(Object.keys(CAPTION_STYLES) as CaptionStyleId[]).map((id) => {
+                  const s = CAPTION_STYLES[id].style;
+                  const active = options.style === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      // A preset starts over: the look's changes are cleared.
+                      onClick={() => set({ style: id, look: {} }, true)}
+                      className={`flex h-14 items-center justify-center rounded-xl border bg-neutral-700 px-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
+                        active ? "border-accent-2 ring-1 ring-accent-2" : "border-border hover:border-accent/50"
+                      }`}
+                    >
+                      <span
+                        className="rounded px-1.5 py-0.5 text-sm"
+                        style={{
+                          color: s.color ?? "#ffffff",
+                          fontWeight: s.weight ?? 700,
+                          background: s.backgroundOpacity ? `rgba(0,0,0,${s.backgroundOpacity})` : undefined,
+                          WebkitTextStroke: s.strokeWidth ? `1px ${s.strokeColor}` : undefined,
+                          textShadow: s.shadow ? "0 1px 3px rgba(0,0,0,0.8)" : undefined,
+                          textTransform: CAPTION_STYLES[id].upper ? "uppercase" : undefined,
+                        }}
+                      >
+                        {CAPTION_STYLES[id].label}
+                        {id === "karaoke" && <ProTag />}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-            )}
-            {onExport && (
-              <div>
-                <SectionTitle>Export</SectionTitle>
-                <div className="flex flex-wrap gap-2">
-                  <ActionButton onClick={() => onExport("srt")}>SRT</ActionButton>
-                  <ActionButton onClick={() => onExport("vtt")}>WebVTT</ActionButton>
-                  <ActionButton onClick={() => onExport("txt")}>Transcript (.txt)</ActionButton>
-                </div>
-                <p className="mt-1 text-[11px] text-muted">Subtitle files use your corrected text and timings. Visible captions are also burned into the video export.</p>
+            </div>
+            <div
+              className="flex min-h-16 items-center justify-center rounded-xl border border-border bg-neutral-700 px-3 py-3"
+              aria-label="Caption preview"
+              style={{ justifyContent: shown.align === "left" ? "flex-start" : shown.align === "right" ? "flex-end" : "center" }}
+            >
+              <span
+                className="rounded px-2 py-0.5 text-lg leading-tight"
+                style={{
+                  fontFamily: TEXT_FONTS[shown.font]?.css,
+                  color: shown.color,
+                  fontWeight: shown.weight,
+                  fontStyle: shown.italic ? "italic" : undefined,
+                  background: shown.backgroundOpacity
+                    ? `color-mix(in srgb, ${shown.background || "#000000"} ${Math.round(shown.backgroundOpacity * 100)}%, transparent)`
+                    : undefined,
+                  WebkitTextStroke: shown.strokeWidth ? `${Math.max(1, shown.strokeWidth * 18)}px ${shown.strokeColor}` : undefined,
+                  paintOrder: "stroke fill",
+                  textShadow: shown.shadow ? "0 1px 3px rgba(0,0,0,0.8)" : undefined,
+                  textTransform: captionUpper(options.style, look) ? "uppercase" : undefined,
+                }}
+              >
+                Your caption{" "}
+                {shown.anim === "karaoke" ? <span style={{ color: shown.highlight ?? "#facc15" }}>here</span> : "here"}
+              </span>
+            </div>
+            <div>
+              <SectionTitle>Position</SectionTitle>
+              <Chips
+                label="Caption position"
+                value={options.y}
+                onChange={(y) => set({ y }, true)}
+                options={CAPTION_POSITIONS.map((p) => ({ value: p.y, label: p.label }))}
+              />
+            </div>
+            <div>
+              <SectionTitle>Size</SectionTitle>
+              <Chips
+                label="Caption size"
+                value={shown.size}
+                onChange={(size) => setLook({ size })}
+                options={[
+                  { value: 0.04, label: "Small" },
+                  { value: 0.055, label: "Medium" },
+                  { value: 0.075, label: "Large" },
+                  { value: 0.095, label: "Huge" },
+                ]}
+              />
+            </div>
+            <div>
+              <SectionTitle>Alignment</SectionTitle>
+              <Chips
+                label="Caption alignment"
+                value={shown.align}
+                onChange={(align) => setLook({ align })}
+                options={[
+                  { value: "left" as const, label: "Left" },
+                  { value: "center" as const, label: "Center" },
+                  { value: "right" as const, label: "Right" },
+                ]}
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between">
+                <SectionTitle>Font and color</SectionTitle>
+                {Object.keys(look).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => set({ look: {} }, true)}
+                    className="rounded px-1 text-[10px] font-semibold text-accent hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+                  >
+                    Reset to preset
+                  </button>
+                )}
               </div>
-            )}
-            <ActionButton onClick={onRemoveAll} tone="danger">
-              <TrashIcon width={14} height={14} /> Remove all captions
-            </ActionButton>
-          </div>
+              <CaptionLookEditor styleId={options.style} look={look} onChange={(l) => set({ look: l }, true)} gesture={gesture} />
+            </div>
+            <p className="text-[11px] text-muted">
+              {count > 0 ? `Changes apply to all ${count} captions.` : "Applied to the captions you generate."} To style one caption on its own, click it in the
+              preview.
+            </p>
+          </>
         )}
       </div>
     </PanelShell>
