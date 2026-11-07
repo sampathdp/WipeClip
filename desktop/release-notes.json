@@ -1,14 +1,19 @@
 {
-  "next": [
-    "Enhance voice in one click: on an audio track, clearer and fuller speech, background noise reduced, distortion repaired and the level made even, ready for video.",
-    "Voice tone presets - Podcast, Warm, Fix thin mic and Reduce boom - or set bass, boxiness, clarity, leveling and softer \"s\" sounds yourself. What you hear in the preview is what you export.",
-    "Remove hesitation sounds like \"aaa\", \"eee\", \"uhhh\" and \"mmm\" in any language, found from the sound itself. Review > Remove fillers cuts them all in one step.",
-    "Draw a volume curve on any audio track: double-click the track in the timeline to add a point, drag it up or down.",
-    "Repair distortion: recordings that were too loud get their flattened peaks rebuilt (Audio > Clean up).",
-    "Check your microphone before recording: a five-second test tells you if you're too quiet, too loud or in a noisy room, and plays it back.",
-    "Fixed the Telephone and Radio voice effects sounding slightly different in the preview than in the export."
-  ],
+  "next": [],
   "releases": [
+    {
+      "version": "1.0.1",
+      "date": "2026-11-07",
+      "notes": [
+        "Enhance voice in one click: on an audio track, clearer and fuller speech, background noise reduced, distortion repaired and the level made even, ready for video.",
+        "Voice tone presets - Podcast, Warm, Fix thin mic and Reduce boom - or set bass, boxiness, clarity, leveling and softer \"s\" sounds yourself. What you hear in the preview is what you export.",
+        "Remove hesitation sounds like \"aaa\", \"eee\", \"uhhh\" and \"mmm\" in any language, found from the sound itself. Review > Remove fillers cuts them all in one step.",
+        "Draw a volume curve on any audio track: double-click the track in the timeline to add a point, drag it up or down.",
+        "Repair distortion: recordings that were too loud get their flattened peaks rebuilt (Audio > Clean up).",
+        "Check your microphone before recording: a five-second test tells you if you're too quiet, too loud or in a noisy room, and plays it back.",
+        "Fixed the Telephone and Radio voice effects sounding slightly different in the preview than in the export."
+      ]
+    },
     {
       "version": "1.0.0",
       "date": "2026-11-07",
