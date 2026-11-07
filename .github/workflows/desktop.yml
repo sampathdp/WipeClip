@@ -22,6 +22,13 @@ on:
         type: choice
         options: [none, patch, minor, major]
         default: none
+      tests:
+        # Off only when the same commit was just tested locally (cargo test
+        # and npm run desktop:test:js): cargo test is a full debug build,
+        # several of the run's Windows minutes (which count double).
+        description: "Run the tests first (turn off if you just ran them locally)"
+        type: boolean
+        default: true
   # No tag trigger: releases are normally built and published locally
   # (npm run desktop:release, desktop/scripts/release-local.mjs), which pushes
   # the desktop-v* tag itself - a build here too would burn Windows minutes.
@@ -100,9 +107,11 @@ jobs:
       - run: npm ci
 
       - name: Rust unit tests
+        if: inputs.tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: JS desktop tests
+        if: inputs.tests
         run: npm run desktop:test:js
 
       # Public values only (repository *variables*, not secrets): they are
