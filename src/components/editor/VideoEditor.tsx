@@ -2437,7 +2437,7 @@ export default function VideoEditor({
 
   // --- render ----------------------------------------------------------------
   const header = (
-    <header className="flex items-center gap-2 border-b border-border bg-surface/80 px-3 py-2 backdrop-blur sm:gap-3 sm:px-4">
+    <header className="relative z-[60] flex items-center gap-2 border-b border-border bg-surface/80 px-3 py-2 backdrop-blur sm:gap-3 sm:px-4">
       <Link href="/" className="inline-flex shrink-0 items-center" aria-label="WipeClip home">
         <Logo size={28} textSize="text-base" />
       </Link>
