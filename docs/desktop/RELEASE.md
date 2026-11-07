@@ -189,6 +189,13 @@ Releasing a version needs no local setup: on GitHub, **Actions > Desktop > Run w
 
 **Release notes.** Before releasing, add a line per user-visible change to `next` in `desktop/release-notes.json` and commit it - plain language, written for users (what changed for them, not how). The notes show in three places: the update banner's **What's new** (before updating, from `latest.json`), a **What's new** dialog shown once on the first launch after the app updates itself (every version since the one last run; the notes are bundled with the app), and the release page. The editor footer's **What's new** link reopens the latest ones any time. A fresh install shows nothing.
 
+**Automatic: push release notes.** A push to `master` that changes `desktop/release-notes.json` (or the workflow) starts `desktop.yml`, which decides by itself:
+- **Notes in `next`:** it bumps the patch version, then builds and publishes.
+- **The current version is tagged but its release was never published** (a run that failed after tagging): it builds and publishes that tag again (`retry`).
+- **Otherwise:** nothing, and the run ends in seconds on Linux.
+
+Automatic runs skip the Rust tests (run them locally before pushing); the JS tests still run. By hand, **Run workflow** offers `patch`/`minor`/`major`, `retry`, or `none` for a test build, and a switch to skip the tests.
+
 **Preferred: release from your own Windows machine** (no Actions minutes - a workflow release costs about 40 Windows-weighted minutes of the monthly quota). From a clean, up-to-date `master`:
 
 ```sh

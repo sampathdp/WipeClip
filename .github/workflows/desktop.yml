@@ -20,7 +20,9 @@ on:
       release:
         description: "Publish a new version (none = test build only, nothing published)"
         type: choice
-        options: [none, patch, minor, major]
+        # retry: build and publish the current version's existing tag again
+        # (after a run that failed past the version step), no new version.
+        options: [none, patch, minor, major, retry]
         default: none
       tests:
         # Off only when the same commit was just tested locally (cargo test
@@ -29,9 +31,18 @@ on:
         description: "Run the tests first (turn off if you just ran them locally)"
         type: boolean
         default: true
-  # No tag trigger: releases are normally built and published locally
-  # (npm run desktop:release, desktop/scripts/release-local.mjs), which pushes
-  # the desktop-v* tag itself - a build here too would burn Windows minutes.
+  # Automatic releases: a push to master that touches the release notes (or
+  # this workflow) releases by itself when there's something to release -
+  # "next" notes (a patch version), or the current version tagged but never
+  # published (a run that failed after tagging). Otherwise the version job
+  # finds nothing and the run ends in seconds, on Linux. No tag trigger: the
+  # local release (npm run desktop:release) pushes tags itself, and a build
+  # here too would burn Windows minutes.
+  push:
+    branches: [master]
+    paths:
+      - desktop/release-notes.json
+      - .github/workflows/desktop.yml
 
 # One release at a time, so two runs can't claim the same version.
 concurrency:
@@ -48,32 +59,70 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
+      # The newest master (runs queue one after another; an earlier one may
+      # have pushed a version commit since this run was started), with tags.
       - uses: actions/checkout@v4
-        if: github.event_name == 'workflow_dispatch' && inputs.release != 'none'
+        with:
+          ref: master
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
-        if: github.event_name == 'workflow_dispatch' && inputs.release != 'none'
         with:
           node-version: 22
 
+      # What to do: bump (a new version), retry (publish the current
+      # version's existing tag), or nothing.
+      - id: plan
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          RELEASE: ${{ inputs.release }}
+        run: |
+          version=$(node -p 'require("./src-tauri/tauri.conf.json").version')
+          notes=$(node -p 'require("./desktop/release-notes.json").next.length')
+          tag="desktop-v${version}"
+          # Published already? (public repo; a draft counts as not published)
+          code=$(curl -s -o /dev/null -w "%{http_code}" "https://api.github.com/repos/sampathdp/wipeclip-releases/releases/tags/${tag}")
+          unpublished=false
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null && [ "$code" = "404" ]; then unpublished=true; fi
+          mode=none
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            case "$RELEASE" in
+              patch|minor|major) mode=bump ;;
+              retry) mode=retry ;;
+            esac
+          elif [ "$notes" -gt 0 ]; then
+            mode=bump
+          elif [ "$unpublished" = "true" ]; then
+            mode=retry
+          fi
+          if [ "$mode" = "retry" ] && ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "::error::${tag} doesn't exist - nothing to retry."; exit 1
+          fi
+          echo "mode=${mode}" >> "$GITHUB_OUTPUT"
+          echo "Version ${version}, ${notes} note(s) waiting, ${tag} published: $([ "$code" = "200" ] && echo yes || echo no) -> ${mode}"
+
       - name: Bump version, commit and tag
-        if: github.event_name == 'workflow_dispatch' && inputs.release != 'none'
+        if: steps.plan.outputs.mode == 'bump'
+        env:
+          KIND: ${{ github.event_name == 'workflow_dispatch' && inputs.release || 'patch' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          node desktop/scripts/release.mjs "${{ inputs.release }}"
+          node desktop/scripts/release.mjs "$KIND"
 
       - id: tag
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ inputs.release }}" != "none" ]; then
+          if [ "${{ steps.plan.outputs.mode }}" != "none" ]; then
             echo "tag=desktop-v$(node -p 'require("./src-tauri/tauri.conf.json").version')" >> "$GITHUB_OUTPUT"
           fi
 
   build:
     needs: version
+    # A push with nothing to release builds nothing (no Windows minutes);
+    # a manual run with release "none" is a test build.
+    if: needs.version.outputs.tag != '' || (github.event_name == 'workflow_dispatch' && inputs.release == 'none')
     strategy:
       fail-fast: false
       matrix:
@@ -106,12 +155,15 @@ jobs:
 
       - run: npm ci
 
+      # Automatic releases (push) skip the Rust tests - a full debug build,
+      # several Windows minutes; they're run locally before pushing. The JS
+      # tests are quick and always run there.
       - name: Rust unit tests
         if: inputs.tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: JS desktop tests
-        if: inputs.tests
+        if: inputs.tests || github.event_name == 'push'
         run: npm run desktop:test:js
 
       # Public values only (repository *variables*, not secrets): they are
@@ -237,4 +289,7 @@ jobs:
           RELEASES_REPO: sampathdp/wipeclip-releases
         run: |
           if [ -z "$GH_TOKEN" ]; then echo "::error::RELEASES_TOKEN secret is missing - see docs/desktop/RELEASE.md (Updates)."; exit 1; fi
+          # A retry: a release a failed run left unfinished (a draft, or
+          # missing files) is replaced. Nothing to remove otherwise.
+          gh release delete "${TAG}" --repo "${RELEASES_REPO}" --yes --cleanup-tag 2>/dev/null || true
           gh release create "${TAG}" release/* --repo "${RELEASES_REPO}" --latest             --title "WipeClip ${TAG#desktop-v}"             --notes-file release-notes.md
