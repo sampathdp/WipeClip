@@ -417,9 +417,9 @@ export async function cleanAudio(
   input: MediaInput,
   start: number,
   end: number,
-  opts: { denoise: number; level: boolean },
+  opts: { denoise: number; level: boolean; repair?: boolean },
   signal?: AbortSignal
-): Promise<Blob> {
+): Promise<{ blob: Blob; gain: number }> {
   const engine = await localEngine();
   if (!engine) throw new ApiError("Audio cleanup runs on this computer and needs the WipeClip desktop app's engine.", "engine_required");
   const body = new FormData();
@@ -429,9 +429,13 @@ export async function cleanAudio(
   body.append("end", end.toFixed(3));
   body.append("denoise", String(opts.denoise));
   body.append("level", opts.level ? "true" : "false");
+  if (opts.repair) body.append("repair", "true");
   const res = await fetch(`${engine.url}/api/audio/clean`, { method: "POST", body, headers: engineHeaders(engine), signal });
   if (!res.ok) await throwApiError(res, "This audio couldn't be cleaned up.");
-  return res.blob();
+  // A repaired copy is scaled under full scale; this undoes it (an older
+  // engine sends nothing: 1).
+  const gain = Number(res.headers.get("X-Clean-Gain") ?? 1);
+  return { blob: await res.blob(), gain: Number.isFinite(gain) && gain > 0 ? gain : 1 };
 }
 
 /** The engine's NVIDIA graphics card support (speech.py gpu_status). */

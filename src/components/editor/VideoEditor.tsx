@@ -86,7 +86,10 @@ import {
   type Selection,
   type TextStyle,
   type Transcript,
+  type VoiceTone,
+  type GainPoint,
 } from "@/lib/editor/types";
+import { presetTone } from "@/lib/editor/voiceTone";
 import { ApiError, cleanAudio, ContentBlockedError, engineDubModels, engineMatte, enginePeaks, ModelNeededError, probeVideo } from "@/lib/toolsApi";
 import { ensureMatte, fullMatte, matteJobKey, matteUnsupported, setMatteEngine, useMatteJob } from "@/lib/editor/matte";
 import { DUB_FROM, dubTimeline, type DubProgress } from "@/lib/editor/dub";
@@ -193,7 +196,8 @@ import {
   type LayerAttributes,
 } from "@/lib/editor/attributes";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
-import Timeline, { type ItemMode, type TimelineTrack, type TrackToggle } from "./Timeline";
+import Timeline, { type CurveEdit, type ItemMode, type TimelineTrack, type TrackToggle } from "./Timeline";
+import { addPoint, normalizePoints, visibleCurve } from "@/lib/editor/envelope";
 import {
   CanvasIcon,
   ElementsIcon,
@@ -1720,7 +1724,7 @@ export default function VideoEditor({
       setPlaying(false);
       setBusy("Cleaning up audio…");
       try {
-        const blob = await cleanAudio(sourceInput(src), laid.clip.start, laid.clip.end, { denoise: 0.6, level: true });
+        const { blob } = await cleanAudio(sourceInput(src), laid.clip.start, laid.clip.end, { denoise: 0.6, level: true });
         const file = new File([blob], `clean-${sourceName(src).replace(/.[^.]+$/, "")}.m4a`, { type: "audio/mp4" });
         const cleaned: MediaSource = {
           id: newId("snd"),
@@ -1764,15 +1768,15 @@ export default function VideoEditor({
    * the original, which is never changed (mix.ts). Every part of the same
    * file (a microphone split by cuts) gets it, so they stay alike. */
   const cleanTrack = useCallback(
-    async (audioId: string, strength: number) => {
+    async (audioId: string, strength: number, repair = false): Promise<boolean> => {
       const a = project.audio.find((x) => x.id === audioId);
       const src = a && sources[a.sourceId];
-      if (!a || !src) return;
+      if (!a || !src) return false;
       const duration = src.duration > 0 ? src.duration : a.offset + a.duration;
       setPlaying(false);
       setCleaningTrack(audioId);
       try {
-        const blob = await cleanAudio(sourceInput(src), 0, duration, { denoise: strength, level: false });
+        const { blob, gain } = await cleanAudio(sourceInput(src), 0, duration, { denoise: strength, level: false, repair });
         const file = new File([blob], `clean-${sourceName(src).replace(/.[^.]+$/, "")}.m4a`, { type: "audio/mp4" });
         const cleaned: MediaSource = {
           id: newId("snd"),
@@ -1787,11 +1791,14 @@ export default function VideoEditor({
         };
         addSource(cleaned);
         const parts = project.audio.filter((x) => x.sourceId === a.sourceId).length;
-        apply((p) => ({ ...p, audio: p.audio.map((x) => (x.sourceId === a.sourceId ? withCleanup(x, cleaned.id, strength) : x)) }));
-        say(`Background noise reduced${parts > 1 ? ` on all ${parts} parts of this track` : ""}. Switch to Original in the panel to compare; undo removes it.`);
+        apply((p) => ({ ...p, audio: p.audio.map((x) => (x.sourceId === a.sourceId ? withCleanup(x, cleaned.id, strength, repair ? { gain } : undefined) : x)) }));
+        const what = repair && strength > 0 ? "Distortion repaired and background noise reduced" : repair ? "Distortion repaired" : "Background noise reduced";
+        say(`${what}${parts > 1 ? ` on all ${parts} parts of this track` : ""}. Switch to Original in the panel to compare; undo removes it.`);
+        return true;
       } catch (e) {
         console.error("[editor] track noise reduction failed", e);
         say(e instanceof Error && e.message ? e.message : "This track's noise couldn't be reduced.");
+        return false;
       } finally {
         setCleaningTrack(null);
       }
@@ -1802,7 +1809,7 @@ export default function VideoEditor({
   /** Measures the whole mix's loudness (programMix.ts, loudness.ts) and
    * sets the master gain for `target`, one undo step. */
   const measureMix = useCallback(
-    async (target: Exclude<LoudnessTarget, "off">) => {
+    async (target: Exclude<LoudnessTarget, "off">): Promise<boolean> => {
       setPlaying(false);
       setMeasuring(true);
       try {
@@ -1810,13 +1817,13 @@ export default function VideoEditor({
         const mix = await renderProgramMix(lay, project, sources);
         if (!mix.samples) {
           say("There's no sound on the timeline to measure.");
-          return;
+          return false;
         }
         const result = measureLoudness(mix.samples, ANALYSIS_RATE);
         const plan = normalizationGain(result, LOUDNESS_TARGETS[target].lufs);
         if (!plan) {
           say("The mix is silent, so there's nothing to bring up to a loudness. Check that the tracks aren't muted.");
-          return;
+          return false;
         }
         const round = (v: number) => Math.round(v * 10) / 10;
         apply((p) => ({
@@ -1824,14 +1831,91 @@ export default function VideoEditor({
           master: { ...masterOf(p), loudness: target, gainDb: plan.gainDb, measured: { lufs: round(result.lufs), peakDb: round(result.peakDb), key } },
         }));
         if (mix.skipped.length) say(`Measured without ${mix.skipped.join(", ")}: ${mix.skipped.length === 1 ? "it couldn't" : "they couldn't"} be read here.`);
+        return true;
       } catch (e) {
         console.error("[editor] loudness measurement failed", e);
         say("The mix couldn't be measured.");
+        return false;
       } finally {
         setMeasuring(false);
       }
     },
     [lay, project, sources, apply, say]
+  );
+
+  /** An edit of a track's volume curve from the timeline (timeline
+   * seconds) on its points (seconds of the file). A moved point stays
+   * between its neighbors and inside the track. */
+  const editCurve = useCallback(
+    (audioId: string, edit: CurveEdit) =>
+      apply((p) => {
+        const a = p.audio.find((x) => x.id === audioId);
+        if (!a) return p;
+        const src = (t: number) => Math.min(a.offset + a.duration, Math.max(a.offset, a.offset + (t - a.start)));
+        const pts = a.envelope ?? [];
+        let next: GainPoint[];
+        // NaN: on the current curve ("Add point at playhead").
+        if (edit.kind === "add") next = addPoint(pts, src(edit.t), Number.isFinite(edit.v) ? edit.v : undefined);
+        else if (edit.kind === "remove") next = pts.filter((_, i) => i !== edit.index);
+        else {
+          const lo = edit.index > 0 ? pts[edit.index - 1].t + 0.01 : 0;
+          const hi = edit.index < pts.length - 1 ? pts[edit.index + 1].t - 0.01 : Infinity;
+          next = pts.map((q, i) => (i === edit.index ? { t: Math.min(hi, Math.max(lo, src(edit.t))), v: edit.v } : q));
+        }
+        next = normalizePoints(next);
+        return updateAudio(p, audioId, { envelope: next.length ? next : undefined });
+      }),
+    [apply]
+  );
+
+  /** A track's tone, set on every part of its file (a microphone split by
+   * cuts keeps one sound), like noise reduction. */
+  const setTrackTone = useCallback(
+    (audioId: string, tone: VoiceTone | undefined) =>
+      apply((p) => {
+        const a = p.audio.find((x) => x.id === audioId);
+        if (!a) return p;
+        return { ...p, audio: p.audio.map((x) => (x.sourceId === a.sourceId ? { ...x, tone } : x)) };
+      }),
+    [apply]
+  );
+
+  // Enhance voice measures the loudness once its tone and noise reduction
+  // are in the project (measureMix reads the rendered project).
+  const [measureNext, setMeasureNext] = useState<{ target: Exclude<LoudnessTarget, "off">; denoised: boolean | null } | null>(null);
+  const [enhancing, setEnhancing] = useState<string | null>(null);
+  useEffect(() => {
+    if (!measureNext || measuring) return;
+    const { target, denoised } = measureNext;
+    setMeasureNext(null);
+    void measureMix(target).then((ok) => {
+      const noise = denoised === true ? ", less background noise" : denoised === false ? " (the noise couldn't be reduced)" : "";
+      say(`Voice enhanced: clearer tone${noise}${ok ? ` and the mix at ${LOUDNESS_TARGETS[target].lufs} LUFS` : ""}. Undo takes it back one step at a time.`);
+    });
+  }, [measureNext, measuring, measureMix, say]);
+
+  /** Enhance voice: the "clear" tone preset, then (desktop app) medium
+   * noise reduction unless the track already has some, then the mix's
+   * loudness measured again - for voice (-16 LUFS) unless another target
+   * is already chosen. */
+  const enhanceVoice = useCallback(
+    async (audioId: string) => {
+      const a = project.audio.find((x) => x.id === audioId);
+      if (!a || enhancing) return;
+      setEnhancing(audioId);
+      try {
+        setTrackTone(audioId, presetTone("clear"));
+        // null: not tried (browser version, or already cleaned).
+        // With the clipping repair: it only redraws flattened peaks (a clean
+        // recording comes out the same), so it costs nothing to include.
+        const denoised = IS_DESKTOP && !a.clean ? await cleanTrack(audioId, 0.5, true) : null;
+        const current = masterOf(project).loudness;
+        setMeasureNext({ target: current === "off" ? "voice" : current, denoised });
+      } finally {
+        setEnhancing(null);
+      }
+    },
+    [project, enhancing, setTrackTone, cleanTrack]
   );
 
   /** Places a video layer as a webcam (webcamLayout.ts); null frees it.
@@ -2637,6 +2721,7 @@ export default function VideoEditor({
         label: `${a.muted ? "🔇 " : ""}${a.label}`,
         glyph: "♪",
         wave: { sourceId: a.sourceId, offset: a.offset, duration: a.duration, gain: a.muted ? 0 : a.volume },
+        curve: visibleCurve(a),
         selected: selIs(selection, "audio", a.id),
         sel: { kind: "audio" as const, id: a.id },
       })),
@@ -3281,11 +3366,18 @@ export default function VideoEditor({
         clip={selectedAudio}
         soloed={solo.has(selectedAudio.id)}
         onSolo={() => onSolo(selectedAudio.id)}
-        onCleanup={IS_DESKTOP ? (strength) => void cleanTrack(selectedAudio.id, strength) : undefined}
+        onCleanup={IS_DESKTOP ? (strength, repair) => void cleanTrack(selectedAudio.id, strength, repair) : undefined}
         cleaning={cleaningTrack === selectedAudio.id}
         sourceDuration={sources[selectedAudio.sourceId]?.duration ?? selectedAudio.offset + selectedAudio.duration}
         total={lay.total}
-        onChange={(patch) => apply((p) => updateAudio(p, selectedAudio.id, patch))}
+        onChange={(patch) => {
+          const { tone, ...rest } = patch;
+          if ("tone" in patch) setTrackTone(selectedAudio.id, tone);
+          if (Object.keys(rest).length) apply((p) => updateAudio(p, selectedAudio.id, rest));
+        }}
+        onEnhance={() => void enhanceVoice(selectedAudio.id)}
+        onAddCurvePoint={() => editCurve(selectedAudio.id, { kind: "add", t: clock.get(), v: NaN })}
+        enhancing={enhancing === selectedAudio.id || (cleaningTrack === selectedAudio.id && enhancing !== null) || measureNext !== null}
         onDuck={() => void duckUnderSpeech(selectedAudio.id)}
         onBeats={() => void findBeats(selectedAudio.id)}
         onSplit={split}
@@ -3604,6 +3696,7 @@ export default function VideoEditor({
               onMoveClip={(from, to) => apply((p) => moveClip(p, from, to))}
               onTrackToggle={onTrackToggle}
               onTrackDelete={onTrackDelete}
+              onCurveChange={(track, id, edit) => track === "audio" && editCurve(id, edit)}
               actions={editActions}
               onGestureStart={beginGesture}
               onGestureEnd={endGesture}

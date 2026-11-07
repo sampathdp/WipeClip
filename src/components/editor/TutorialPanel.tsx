@@ -104,6 +104,8 @@ export interface TutorialPanelProps {
   onReject: (s: EditSuggestion) => void;
   onEditSuggestion: (id: string, patch: Partial<EditSuggestion>) => void;
   onAcceptAllHigh: () => void;
+  /** Accepts every pending filler cut (words and held sounds) except low-confidence ones. */
+  onRemoveFillers: () => void;
   onClearSuggestions: () => void;
   /** Playback skips the pending cuts (nothing removed). */
   previewingCuts: boolean;
@@ -546,6 +548,8 @@ function ReviewTab(p: TutorialPanelProps) {
   const list = showAll ? p.suggestions.filter((s) => s.kind !== "retake") : pending;
   const high = pending.filter((s) => s.action === "cut" && s.confidence === "high").length;
   const pendingCuts = pending.filter((s) => s.action === "cut").length;
+  const fillers = pending.filter((s) => s.action === "cut" && s.kind === "filler");
+  const sureFillers = fillers.filter((s) => s.confidence !== "low").length;
   return (
     <>
       <Hint>
@@ -583,6 +587,18 @@ function ReviewTab(p: TutorialPanelProps) {
           </ActionButton>
         )}
         {high > 0 && <ActionButton onClick={p.onAcceptAllHigh}>Accept {high} high-confidence cut{high === 1 ? "" : "s"}</ActionButton>}
+        {sureFillers > 0 && (
+          <ActionButton
+            onClick={p.onRemoveFillers}
+            title={
+              sureFillers < fillers.length
+                ? `Cuts the filler words and held sounds (um, uh, aaa, eee, mmm). ${fillers.length - sureFillers} low-confidence one${fillers.length - sureFillers === 1 ? " stays" : "s stay"} for you to check.`
+                : "Cuts the filler words and held sounds (um, uh, aaa, eee, mmm) as one undo step."
+            }
+          >
+            Remove {sureFillers} filler{sureFillers === 1 ? "" : "s"}
+          </ActionButton>
+        )}
         {p.suggestions.length > 0 && <ActionButton onClick={p.onClearSuggestions}>Clear</ActionButton>}
       </div>
       {pendingCuts > 0 && (

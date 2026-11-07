@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { normalizeRegion, type Point } from "@/lib/recorder/coords";
 import type { Rect } from "@/lib/recorder/format";
+import { MIC_CHECK_SECONDS, analyzeMic, type MicReport } from "@/lib/recorder/micCheck";
 
 /** A settings card. `collapsible` makes the header a disclosure (open unless `defaultOpen` is false). */
 export function Section({
@@ -421,4 +422,100 @@ export function formatBytes(n: number): string {
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
   if (n >= 1024 ** 2) return `${Math.round(n / 1024 ** 2)} MB`;
   return `${Math.max(1, Math.round(n / 1024))} KB`;
+}
+
+/** Microphone check (micCheck.ts): records MIC_CHECK_SECONDS from the
+ * chosen microphone's stream, says how it sounds and what to change, and
+ * plays the take back. Nothing is kept. */
+export function MicCheck({ stream }: { stream: MediaStream }) {
+  const [state, setState] = useState<{ kind: "idle" } | { kind: "recording"; left: number } | { kind: "done"; report: MicReport; url: string } | { kind: "error"; message: string }>({ kind: "idle" });
+  const stop = useRef<(() => void) | null>(null);
+  // A running check ends with its microphone (the recorder keys this on
+  // the stream, so a new microphone starts over).
+  useEffect(() => () => stop.current?.(), [stream]);
+  useEffect(() => () => void (state.kind === "done" && URL.revokeObjectURL(state.url)), [state]);
+
+  const run = () => {
+    if (typeof MediaRecorder === "undefined") {
+      setState({ kind: "error", message: "This browser can't record sound for the check." });
+      return;
+    }
+    const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) => MediaRecorder.isTypeSupported(m));
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    const parts: Blob[] = [];
+    let cancelled = false;
+    rec.ondataavailable = (e) => e.data.size && parts.push(e.data);
+    rec.onstop = async () => {
+      if (cancelled) return;
+      try {
+        const blob = new Blob(parts, { type: rec.mimeType || mime || "audio/webm" });
+        const ctx = new AudioContext();
+        const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+        void ctx.close();
+        setState({ kind: "done", report: analyzeMic(buf.getChannelData(0), buf.sampleRate), url: URL.createObjectURL(blob) });
+      } catch {
+        setState({ kind: "error", message: "The check couldn't read the recording. Try again, or pick another microphone." });
+      }
+    };
+    rec.start();
+    let left = MIC_CHECK_SECONDS;
+    setState({ kind: "recording", left });
+    const timer = setInterval(() => {
+      left--;
+      if (left > 0) setState({ kind: "recording", left });
+      else {
+        clearInterval(timer);
+        if (rec.state !== "inactive") rec.stop();
+      }
+    }, 1000);
+    stop.current = () => {
+      cancelled = true;
+      clearInterval(timer);
+      if (rec.state !== "inactive") rec.stop();
+      stop.current = null;
+    };
+  };
+
+  return (
+    <div className="space-y-2">
+      {state.kind === "recording" ? (
+        <div className="flex items-center gap-2 text-xs text-foreground" role="status">
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" aria-hidden />
+          Talk as you will in the video… {state.left} s
+          <button
+            type="button"
+            className="font-semibold text-accent-2 hover:underline"
+            onClick={() => {
+              stop.current?.();
+              setState({ kind: "idle" });
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={run}
+          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-foreground hover:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+        >
+          {state.kind === "done" ? "Check again" : `Check my microphone (${MIC_CHECK_SECONDS} s)`}
+        </button>
+      )}
+      {state.kind === "done" && (
+        <Note tone={state.report.issues.length === 0 ? "ok" : state.report.issues.includes("no-speech") || state.report.issues.includes("clipping") ? "error" : "warn"}>
+          <p className="font-semibold">{state.report.verdict}</p>
+          {state.report.tips.length > 0 && (
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {state.report.tips.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ul>
+          )}
+          <audio controls src={state.url} className="mt-2 h-8 w-full" aria-label="Play the check back" />
+        </Note>
+      )}
+      {state.kind === "error" && <Note tone="error">{state.message}</Note>}
+    </div>
+  );
 }

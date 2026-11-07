@@ -304,6 +304,35 @@ export interface AudioClip {
    * made on this device and time-aligned with it, played instead of the
    * original unless bypassed. The original is never changed. Absent = off. */
   clean?: AudioCleanup;
+  /** Tone: low cut, EQ, de-esser, compressor (voiceTone.ts); absent = untouched. */
+  tone?: VoiceTone;
+  /** Volume curve (envelope.ts), sorted by time; absent = flat. */
+  envelope?: GainPoint[];
+}
+
+/** A point of a track's volume curve: seconds of the audio file, linear
+ * gain 0..2 (+6 dB). */
+export interface GainPoint {
+  t: number;
+  v: number;
+}
+
+export type TonePreset = "clear" | "podcast" | "warm" | "thin" | "boom";
+
+/** An audio track's tone (voiceTone.ts). */
+export interface VoiceTone {
+  /** Removes rumble below 80 Hz. */
+  lowCut: boolean;
+  /** dB, -12..12: low shelf at 120 Hz, peak at 400 Hz, high shelf at 4 kHz. */
+  bass: number;
+  mid: number;
+  treble: number;
+  /** 0..1: how much the level is evened out (0 = off). */
+  compress: number;
+  /** 0..1: how much harsh "s" sounds are softened (0 = off). */
+  deEss: number;
+  /** The preset it came from, until it's changed by hand. */
+  preset?: TonePreset;
 }
 
 export interface AudioCleanup {
@@ -312,6 +341,11 @@ export interface AudioCleanup {
   strength: number;
   /** Plays (and exports) the original instead. */
   bypass: boolean;
+  /** Clipped peaks were also redrawn (audio_clean.py repair_clipping). */
+  repaired?: boolean;
+  /** Linear gain the copy plays at: a repaired copy is scaled under full
+   * scale, and this brings it back to the original's level. Absent = 1. */
+  gain?: number;
 }
 
 /** Loudness targets for the whole mix (loudness.ts LOUDNESS_TARGETS). */

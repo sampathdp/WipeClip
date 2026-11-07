@@ -69,6 +69,158 @@
 - **Canvas changes:** the preset is kept on the layer (`camLayout`), and the layer is placed again when the canvas size changes. That isn't its own undo step: undoing the canvas change brings the old placement back.
 - **Free placement:** dragging the layer switches to free placement. Free (or leaving side by side) puts the clips back to full size.
 
+## Voice tone (7 November 2026)
+
+**Audio panel > Voice tone**, on every audio track (microphone, voiceover, uploaded audio).
+
+**Enhance voice** (one click), each part one undo step:
+1. The "Enhance voice" tone preset.
+2. Desktop app only: Medium noise reduction, unless the track already has a cleaned copy.
+3. The mix's loudness measured again: -16 LUFS, or the target already chosen.
+
+The message says what was done, and if the noise reduction failed.
+
+**Presets** (`voiceTone.ts` `TONE_PRESETS`):
+
+| Preset | Low cut | Bass | Boxiness | Clarity | Even out | Soften "s" |
+|---|---|---|---|---|---|---|
+| Enhance voice | on | -1 | -2 | +3 | 50 % | 40 % |
+| Podcast | on | +1 | -2 | +2 | 75 % | 50 % |
+| Warm | on | +3 | 0 | -2 | 40 % | 30 % |
+| Fix thin mic | off | +5 | -1 | -2 | 40 % | 20 % |
+| Reduce boom | on | -5 | -3 | +1 | 30 % | 0 |
+
+**Adjust settings:**
+- Cut rumble: a 2-pole Butterworth highpass at 80 Hz.
+- Bass: low shelf at 120 Hz. Boxiness: peak at 400 Hz (Q 1). Clarity: high shelf at 4 kHz. Each ±12 dB.
+- Even out the level: a compressor, RMS detection.
+  - Threshold -12 to -30 dBFS, ratio 1.5 to 4, attack 10 ms, release 150 ms, knee 2.83.
+  - Makeup gain: half of what a -6 dBFS signal loses, at most 12 dB.
+- Soften "s" sounds: de-esser intensity 0–1.
+- A manual change makes the preset "Custom".
+
+**The tone is set on every part of the same file**, like noise reduction: a microphone split by cuts keeps one sound.
+
+**Same sound everywhere:**
+
+| | Where | How |
+|---|---|---|
+| Wire numbers | `toneWire` | The exact filter numbers, sent to the export as `tone` |
+| Preview | `audioMixer.ts` | element → tone → voice effect → level. `BiquadFilterNode`s, then the `voice-dynamics` AudioWorklet |
+| Loudness measurement | `programMix.ts` | The same graph offline; the tone is part of `mixKey`, so a change marks the measurement out of date |
+| Export | `editor.py tone_chain` | `highpass`, `lowshelf`/`highshelf` (slope 1), `equalizer`, `deesser`, `acompressor`, before the track volume |
+
+- **The EQ** is the Audio EQ Cookbook on both sides (the Web Audio spec and ffmpeg).
+- **The de-esser and compressor** (`DYNAMICS_SOURCE`) are a line-by-line port of ffmpeg 7.1's `af_deesser.c` and `af_sidechaincompress.c` (LGPL-2.1+, the same licence as the bundled ffmpeg).
+- **A mono microphone** is processed as one channel in the preview. The export's identical stereo channels give the same result.
+
+**Measured** on a test voice (loud and quiet vowels, "s" hiss, 40 Hz rumble), largest difference below the peak:
+
+| Check | Result |
+|---|---|
+| Spec biquads + worklet code (Node) vs ffmpeg 7.1 | EQ -146 dB, de-esser exact (-400 dB), compressor -106 dB, presets -105 to -123 dB |
+| Headless Chrome (real `BiquadFilterNode` + worklet) vs ffmpeg | 8/8: -94 to -149 dB (Chrome filters in 32-bit floats) |
+| Low cut | 40 Hz rumble down 9–15 dB |
+| Compressor (75 %) | Loud/quiet gap shrinks by more than 3 dB |
+| De-esser (60 %) | "s" bursts down more than 1 dB, vowels within 0.5 dB |
+| Toned track (Podcast) in an export | Click still within 3 ms of its timeline time |
+
+**Also fixed:** the Telephone and Radio voice effects set the preview filters' Q as 0.707 dB, but Web Audio reads lowpass/highpass Q in dB. That was slightly resonant, unlike the export's Butterworth. It's now -3.01 dB (Butterworth).
+
+**Tests:**
+- `tests/desktop/voiceTone.test.ts`: 6 tests. The ffmpeg comparison runs when ffmpeg is found (the engine's copy, `FFMPEG`, or PATH).
+- `backend/tests/test_voice_tone.py`: 4 tests. Chains equal `tests/fixtures/tone-chains.json`, validation, sync.
+- `node tests/desktop/manual/preview-tone.mjs`: headless Chrome, 8/8.
+
+**Limitations:**
+- Only audio tracks. The video clips' own sound (a camera video's voice) has no tone yet.
+- The preview's compressor and de-esser keep their state across seeks. The export starts each track fresh, so the first few milliseconds after a seek can differ.
+- If the worklet can't load, the preview plays the EQ without the dynamics. The loudness measurement then leaves them out too.
+
+**Manual tests still required:**
+1. Enhance voice on a real microphone recording in the desktop app: listen, compare with Off, export, and check that it sounds the same.
+2. CPU use of several toned tracks during long playback on a low-end laptop.
+
+## Volume curves, distortion repair, microphone check (7 November 2026)
+
+### Volume curve (`envelope.ts`)
+
+**Points of gain on an audio track**, on top of its volume, fades and ducking.
+- Each point is 0–200 % (silent to +6 dB).
+- Linear between points, held before the first and after the last.
+- **Stored in seconds of the audio file** (like beats): trims, splits and ripple cuts keep each point on the sound it was set on. A part made by a split carries the whole curve.
+
+**Editing:**
+- **Timeline:** select the track. Double-click it to add a point where you click (height = level). Drag a point; it stays between its neighbors and inside the track. Double-click a point to remove it.
+- **Audio panel > Volume curve:** Add point at playhead (on the current curve, so nothing changes until it's moved), Clear curve.
+- The line shows on every track that has a curve. The dashed middle line is 100 %.
+- A drag is one undo step.
+
+**Same everywhere:**
+- The preview and the loudness measurement use `trackGainAt` (mix.ts).
+- The export uses `editor.py envelope_expr`: the same points through `keyframe_expr` with linear ease, `volume='…':eval=frame`, next to the ducking.
+- The curve is part of `mixKey`.
+
+### Distortion repair (clipping)
+
+**Audio panel > Clean up > Repair distortion** (desktop app), with or without noise reduction (strength can now be Off). Enhance voice includes it.
+
+**How:**
+- Each run of 2+ samples at the file's peak level is redrawn as a cubic Hermite curve between its neighbors, with their slopes (`audio_clean.repair_clipping`, vectorized).
+- Streamed in 10 s chunks, cut where two samples in a row are below the ceiling, so no run is split.
+- Then the usual cleanup chain. The copy is scaled to a 0.95 peak.
+- The make-up gain comes back in `X-Clean-Gain` and is stored as `AudioCleanup.gain`. The preview, the measurement and the export play the copy at it (`cleanGain`), so Compare is level-matched.
+- The export's track volume limit is raised to 8 (200 % × the make-up gain).
+
+**Measured** on a two-partial tone driven into clipping (distortion = energy outside the tone):
+
+| Driven | Distortion before → after | Make-up gain | 60 s took |
+|---|---|---|---|
+| 1.5× | -32.3 → -62.0 dB | 1.23 | 5.8 s |
+| 2× | -22.1 → -40.6 dB | 1.56 | 4.5 s |
+| 3× | -17.6 → -30.6 dB | 2.09 | 5.0 s |
+
+- ffmpeg's `adeclip` was tried first: it got -25.9 dB at 2× and runs at 1.3× real time (a 10-minute track would take 13 minutes). The repair itself takes about 2 ms per second of audio; decoding and encoding take the rest.
+- A clean recording is barely touched. A smooth crest has a few samples within 0.1 % of the peak; redrawn, they come out the same curve (error under -80 dB).
+- Timing: the repaired copy lines up with the plain cleaned copy at lag 0.
+
+**Review's clipping suggestion** now explains that turning the volume down doesn't undo clipping, and points to Repair distortion.
+
+### Microphone check (recorder, `micCheck.ts`)
+
+**Check my microphone (5 s)** under the microphone's level meter:
+- It records 5 seconds from the same stream the recording will use (with its echo cancellation, noise suppression and gain control).
+- It says how it sounds, gives one tip per problem, and plays the take back.
+- Nothing is kept. Choosing another microphone starts over.
+
+| Problem | When (dBFS of 20 ms frames) | Tip |
+|---|---|---|
+| No sound / no speech | Speech level under -70, or under 1 s of speech | Check the microphone choice and mute switch / talk the whole time |
+| Distorted | Any frame with 3+ samples at full scale | Move back, lower the input level |
+| Close to too loud | Peak over -6 and speech over -12 | Same |
+| Quiet | Speech (90th percentile) under -38 | Move closer, raise the input level |
+| Noisy room | Room (10th percentile) over -50, or under 20 dB below the speech | Fans, windows, move closer |
+
+**Checked:**
+- Synthesized speech (two voices): as is → "Sounds good". ×0.05 → quiet. With noise at amplitude 0.02 → noisy room. ×6 → distorts.
+- Headless Chrome with a fake microphone: MediaRecorder (WebM/Opus) → decodeAudioData → the check works. Chrome's fake beep is at full scale, and it's reported as distorting.
+
+**Limitation:** the take is compressed (Opus). A peak very close to full scale can come back just over it, so "distorts" is the safe side of the call.
+
+### Tests
+
+| Command | Result |
+|---|---|
+| `tests/desktop/audioRepair.test.ts` (9 tests) | Curve math, normalizing, add-on-curve, file time through a ripple cut, drawing, export rows, mix key; make-up gain; mic check verdicts |
+| `backend/tests/test_declip.py` (6 tests) | Repair quality at 1.3–3×, clean audio barely touched, end runs kept, the copy (scaled, aligned, less distortion), chunk seams, the engine's header |
+| `backend/tests/test_envelope.py` (3 tests) | Exported curve level at six times through an offset track, expression = `curveAt`, validation |
+
+### Manual tests still required
+
+1. **Timeline curve editing in the app:** add, drag and remove points on a selected track, undo, and export. Check by ear that the dip lands where it's drawn.
+2. **Repair distortion on a real clipped recording:** compare Cleaned and Original while it plays, then export.
+3. **Microphone check with real microphones:** a headset, a laptop microphone, and one turned up too high, in the desktop app (WebView2).
+
 ## How preview and export stay the same
 
 | | Preview | Export |

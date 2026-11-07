@@ -127,6 +127,48 @@ Without a transcript the review works as before (levels and recorded interaction
 - **Cancel:** both panels have a Cancel button while running. `cancelSpeech()` ends every speech worker, including one still loading the model, and the run ends with "… cancelled. Nothing was changed."
 - **Worker shutdown:** before, an ended worker left its request hanging. Now it rejects with an AbortError, and a cancel never falls through to the CPU retry.
 
+## Hesitation sounds (7 November 2026)
+
+Speech models often leave "aaa", "uhhh" or "mmm" out of the transcript, and outside English there was no filler list at all. `src/lib/editor/hesitations.ts` finds them from the sound itself, in any language.
+
+**How it decides.** Speech changes every ~100 ms, while a hesitation holds one sound. On the 16 kHz speech mix, every 10 ms:
+
+1. **Loud and not hiss:** above the noise floor by 12 dB, and few zero crossings.
+2. **Shape holds:** log energy in 16 bands (100–4000 Hz, FFT at 8 kHz, mean removed) changes by under 5 dB RMS over 50 ms, and so does the level.
+3. A run of 0.25–3.5 s of such frames is a **candidate**. It's kept if:
+   - its level stays within 14 dB;
+   - 70 % of it has a clear pitch, with a spread under 1.5 semitones and a range under 4 (a word said slowly glides in pitch);
+   - it has a pause before or after it (or is 0.4 s or longer).
+4. Pieces of one sound that wobbled are merged.
+
+**With a transcript that matches the edit:**
+- Left out: mostly inside a real word (a word said slowly), on a filler word (that suggestion covers it), or 2.5 s or more from any word (music or other sound).
+- **High** confidence: pauses on both sides, 0.35 s or longer, steady pitch.
+- Otherwise **medium**.
+
+**Without a transcript:** medium with pauses on both sides, low otherwise.
+
+**The cut** takes the sound plus the pauses around it, down to 0.2 s left on each side (at most 0.6 s taken per side). It never reaches into a recognized word.
+
+**Review panel:**
+- Suggestions are kind `filler`, titled "Hesitation sound".
+- **Remove N fillers** accepts every filler word and held sound that isn't low confidence, as one undo step.
+- The hesitations are measured with the levels and cached with them, so changing the settings doesn't measure again.
+
+**Filler words** now match stretched spellings: `ummm`, `uhhh`, `aaah`, `eee`, `hmmm`, `err`, but not `a` or `e`.
+
+**Measured** with Windows speech synthesis (two voices, about 140 s of narration including "Oh", "Wow", "Okay", "Hmm"):
+
+| Check | Result |
+|---|---|
+| Narration without hesitations | 0 found |
+| Held sounds from phonemes ("uh", "mm", "eh", "uh") | 2 of 4: both "uh" found. The synthesizer's "mm" jumps in level and its "eh" fades by 12 dB, so neither held still enough |
+| Spelled-out "uhhhhh", "ummmm", "aaaah" at a slow rate | 2 of 3: "uhhhhh" and "aaaah" found; "ummmm" glides in pitch |
+| Same, with white noise added (amplitude 0.003, 0.01, 0.02) | Same results, no false finds |
+| Speed | About 1.5 ms per second of audio (about 1 s per 10 minutes) |
+
+**Not yet checked on real microphone recordings** of hesitations: that's the first manual test.
+
 ## Safeguards
 
 - Nothing is cut without the user accepting it. Pauses are not all treated as dead time: those with speech in them, sound without words, and quiet stretches while working on screen or while the picture moves are all "review".
@@ -165,7 +207,8 @@ What the headless script checks:
 
 ## Limitations
 
-- **Fillers:** only English.
+- **Filler words:** only English text. Held sounds ("aaa", "mmm") are found in any language, see [Hesitation sounds](#hesitation-sounds-7-november-2026).
+- **Hesitation sounds:** a short "uh" (under 0.25 s), or one said in the same breath as a word ("sooo", "and-uhh") with no pause around it, isn't found. Checked only on synthesized speech, not yet on real recordings.
 - **Repeats:** only immediate and exact (after normalizing case and punctuation). A rephrased retake isn't found.
 - **Overlapping speech:** Whisper writes one word stream; two people talking at once are merged, and their repeats can look like a repeat.
 - **Word timing accuracy:** depends on the model; whisper-small's word times are less tight than turbo's. Cuts land where the next word starts, so a slightly late start can clip a breath. "Preview the result" plays the edit before applying.

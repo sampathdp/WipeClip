@@ -175,7 +175,7 @@ app.add_middleware(
     # explicitly exposed - browsers only allow the CORS-safelisted set by
     # default. The video probe endpoint returns metadata as custom headers
     # (X-Video-*) alongside the PNG body, so those need to be listed here.
-    expose_headers=["X-Video-Width", "X-Video-Height", "X-Video-Duration", "X-Video-Fps", "X-Video-Has-Audio"],
+    expose_headers=["X-Video-Width", "X-Video-Height", "X-Video-Duration", "X-Video-Fps", "X-Video-Has-Audio", "X-Clean-Gain"],
 )
 
 
@@ -440,6 +440,7 @@ async def api_audio_clean(
     end: float = Form(..., gt=0),
     denoise: float = Form(0.6, ge=0, le=1),
     level: bool = Form(True),
+    repair: bool = Form(False),
 ):
     """Desktop engine only: a cleaned copy of a clip's or an audio track's
     sound (noise reduced, loudness evened out if `level` -
@@ -459,13 +460,17 @@ async def api_audio_clean(
         in_path = await _receive_video(file, None, tmp, path=path, suffixes=_VIDEO_SUFFIXES | _AUDIO_SUFFIXES)
         out_path = os.path.join(tmp, "clean.m4a")
         try:
-            await audio_clean.clean_audio(in_path, out_path, start, end, denoise, level)
+            gain = await audio_clean.clean_audio(in_path, out_path, start, end, denoise, level, repair)
         except RuntimeError as exc:
             traceback.print_exc()
             raise HTTPException(
                 status_code=400, detail="This audio couldn't be cleaned up. The file may have no sound, or a format that can't be read."
             ) from exc
-        return _stream_result(out_path, "audio/mp4")
+        res = _stream_result(out_path, "audio/mp4")
+        # With `repair`, the copy was scaled under full scale; the editor
+        # plays it this much louder (AudioCleanup.gain).
+        res.headers["X-Clean-Gain"] = f"{gain:.6f}"
+        return res
 
 
 _DECODE_RATES = {8000, 16000, 22050, 24000, 44100, 48000}
@@ -1282,6 +1287,25 @@ def _finite(row: list[float], n: int) -> bool:
     return len(row) == n and all(math.isfinite(v) for v in row)
 
 
+def _valid_envelope(rows: list[list[float]]) -> bool:
+    """[source second >= 0, gain 0..2] rows in time order (envelope.ts)."""
+    return all(_finite(p, 2) and p[0] >= 0 and 0 <= p[1] <= 2 for p in rows) and all(q[0] >= p[0] for p, q in zip(rows, rows[1:]))
+
+
+def _plan_tone(t: "Optional[_EditorTone]") -> "Optional[editor_pipeline.PlanTone]":
+    if t is None:
+        return None
+    c = t.comp
+    return editor_pipeline.PlanTone(
+        low_cut=t.lowCut,
+        bass=t.bass,
+        mid=t.mid,
+        treble=t.treble,
+        de_ess=t.deEss,
+        comp=editor_pipeline.PlanCompressor(threshold=c.threshold, ratio=c.ratio, attack=c.attack, release=c.release, makeup=c.makeup) if c else None,
+    )
+
+
 def _camera_rows(rows: list[list[float]]) -> list[tuple[float, float, float, float]]:
     out = []
     for r in rows:
@@ -1444,6 +1468,27 @@ class _EditorOverlay(BaseModel):
     matte: Optional[_EditorMatte] = None  # video layers: background removal
 
 
+class _EditorCompressor(BaseModel):
+    """src/lib/editor/voiceTone.ts compressorFor."""
+
+    threshold: float = Field(ge=-60, le=0)  # dBFS
+    ratio: float = Field(ge=1, le=20)
+    attack: float = Field(ge=0.01, le=2000)  # ms
+    release: float = Field(ge=0.01, le=9000)
+    makeup: float = Field(ge=0, le=24)  # dB
+
+
+class _EditorTone(BaseModel):
+    """An audio track's tone (voiceTone.ts toneWire): exact filter numbers."""
+
+    lowCut: bool = False
+    bass: float = Field(0, ge=-12, le=12)  # dB
+    mid: float = Field(0, ge=-12, le=12)
+    treble: float = Field(0, ge=-12, le=12)
+    deEss: float = Field(0, ge=0, le=1)
+    comp: Optional[_EditorCompressor] = None
+
+
 class _EditorDuck(BaseModel):
     """Auto-ducking (src/lib/editor/ducking.ts): lowered by `amount` during
     each [start, end] region of speech, timeline seconds."""
@@ -1460,11 +1505,14 @@ class _EditorAudio(BaseModel):
     start: float = Field(ge=0)
     offset: float = Field(0, ge=0)
     duration: float = Field(gt=0)
-    volume: float = Field(1, ge=0, le=2)
+    volume: float = Field(1, ge=0, le=8)  # 200 % times a repaired copy's make-up gain (AudioCleanup.gain)
     fadeIn: float = Field(0, ge=0, le=10)
     fadeOut: float = Field(0, ge=0, le=10)
     duck: Optional[_EditorDuck] = None
     voice: str = "none"
+    tone: Optional[_EditorTone] = None
+    # Volume curve (envelope.ts): [source second, gain 0..2], sorted.
+    envelope: list[list[float]] = Field(default_factory=list, max_length=200)
 
 
 class _EditorEffect(BaseModel):
@@ -1738,6 +1786,8 @@ async def api_video_export(
             raise HTTPException(status_code=400, detail="Unknown voice effect")
         if a.duck and any(not _finite(r, 2) or r[1] < r[0] for r in a.duck.regions):
             raise HTTPException(status_code=400, detail="Invalid ducking")
+        if not _valid_envelope(a.envelope):
+            raise HTTPException(status_code=400, detail="Invalid volume curve")
     for e in spec.effects:
         if e.type not in editor_pipeline.EFFECTS:
             raise HTTPException(status_code=400, detail="Unknown effect")
@@ -2013,6 +2063,8 @@ async def api_video_export(
                         mono=mono,
                         duck_amount=a.duck.amount if a.duck else 0.0,
                         duck_regions=[(r[0], r[1]) for r in a.duck.regions] if a.duck else [],
+                        tone=_plan_tone(a.tone),
+                        envelope=[(p[0], p[1]) for p in a.envelope],
                     )
                 )
             plan.audio.extend(layer_audio)

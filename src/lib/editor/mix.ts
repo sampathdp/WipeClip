@@ -8,6 +8,8 @@
  * are part of the project and exported.
  * Pure - see tests/desktop/audio.test.ts.
  */
+import { toneActive, toneKey, toneWire } from "./voiceTone.ts";
+import { envelopeGain } from "./envelope.ts";
 import { DEFAULT_MASTER, type AudioClip, type Clip, type MasterAudio, type MediaSource, type Project } from "./types.ts";
 import { duckGain } from "./ducking.ts";
 
@@ -29,14 +31,21 @@ export function playedSourceId(a: AudioClip, sources?: Record<string, MediaSourc
   return c.sourceId;
 }
 
-/** An audio track's gain at timeline time `t`: volume, fades and ducking
- * (the export's chain in editor.py: volume, duck, afade). 0 outside it. */
+/** An audio track's gain at timeline time `t`: volume (with a repaired
+ * copy's make-up gain), volume curve, fades and ducking (the export's
+ * chain in editor.py: volume, curve, duck, afade). 0 outside it. */
 export function trackGainAt(a: AudioClip, t: number): number {
   const local = t - a.start;
   if (a.muted || local < 0 || local >= a.duration) return 0;
   const fadeIn = a.fadeIn > 0 ? Math.min(1, local / a.fadeIn) : 1;
   const fadeOut = a.fadeOut > 0 ? Math.min(1, (a.duration - local) / a.fadeOut) : 1;
-  return Math.max(0, a.volume * fadeIn * fadeOut * duckGain(a, t));
+  return Math.max(0, a.volume * cleanGain(a) * envelopeGain(a, t) * fadeIn * fadeOut * duckGain(a, t));
+}
+
+/** The make-up gain of the copy a track plays (1 for the original). */
+export function cleanGain(a: AudioClip): number {
+  const g = a.clean && !a.clean.bypass ? (a.clean.gain ?? 1) : 1;
+  return Number.isFinite(g) && g > 0 ? Math.min(4, g) : 1;
 }
 
 /** A clip's volume with the video-sound track's volume and mute applied. */
@@ -79,7 +88,7 @@ export function mixKey(project: Project): string {
     project.clips.map((c) => [c.sourceId, c.start, c.end, c.speed, c.ramp ?? 0, c.reverse, c.freeze, c.volume, c.transition?.type ?? 0, c.transition?.duration ?? 0]),
     project.audio
       .filter((a) => !a.muted && a.volume > 0)
-      .map((a) => [playedSourceId(a), a.start, a.offset, a.duration, a.volume, a.fadeIn, a.fadeOut, a.duck?.amount ?? 0, a.duck?.regions.length ?? 0, a.voice ?? 0]),
+      .map((a) => [playedSourceId(a), a.start, a.offset, a.duration, a.volume, a.fadeIn, a.fadeOut, a.duck?.amount ?? 0, a.duck?.regions.length ?? 0, a.voice ?? 0, ...(toneActive(a.tone) ? [toneKey(toneWire(a.tone))] : []), ...(a.envelope?.length ? [a.envelope] : [])]),
     project.overlays.filter((o) => o.kind === "video" && !o.hidden && o.volume > 0).map((o) => (o.kind === "video" ? [o.sourceId, o.start, o.end, o.offset, o.volume] : 0)),
   ];
   // FNV-1a over the JSON: short, stable, and enough to notice a change.
@@ -126,11 +135,11 @@ export function meterFraction(level: number, floorDb = -60): number {
 }
 
 /** Patch for a track's cleanup copy being made (`sourceId`) or removed. */
-export function withCleanup(a: AudioClip, sourceId: string | null, strength: number): AudioClip {
+export function withCleanup(a: AudioClip, sourceId: string | null, strength: number, repair?: { gain: number }): AudioClip {
   if (!sourceId) {
     const { clean: _drop, ...rest } = a;
     void _drop;
     return rest;
   }
-  return { ...a, clean: { sourceId, strength, bypass: false } };
+  return { ...a, clean: { sourceId, strength, bypass: false, ...(repair ? { repaired: true, gain: repair.gain } : {}) } };
 }

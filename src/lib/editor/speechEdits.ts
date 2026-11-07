@@ -12,9 +12,10 @@
 import { cutRangesFor, fillerIndices, normalizeWord } from "./wordEdit.ts";
 import type { EditSuggestion, Transcript, TranscriptWord } from "./types.ts";
 
-/** Clear hesitation sounds; the others ("ah", "hmm", "er") are also real
- * reactions or words often enough to be only "medium". */
-const SURE_FILLERS = new Set(["um", "umm", "uh", "uhh", "uhm", "erm"]);
+/** Clear hesitation sounds (um, uhh, uhm, erm, in any length); the others
+ * ("ah", "hmm", "er") are also real reactions or words often enough to be
+ * only "medium". */
+const SURE_FILLER = /^(?:u+m+|u+h+|u+h+m+|e+r+m+)$/;
 /** Longest phrase checked for an immediate repeat. */
 const MAX_REPEAT_WORDS = 8;
 /** A short repeat must follow at once; a restarted sentence (4+ words)
@@ -109,7 +110,7 @@ export function transcriptSuggestions(t: Transcript, ids: () => string): EditSug
     k = j + 1;
     if (!range) continue;
     const shaky = run.some((i) => uncertainTiming(words, i));
-    const sure = run.every((i) => SURE_FILLERS.has(norm[i]));
+    const sure = run.every((i) => SURE_FILLER.test(norm[i]));
     const text = quote(words, run[0], run[run.length - 1] + 1);
     out.push({
       id: ids(),

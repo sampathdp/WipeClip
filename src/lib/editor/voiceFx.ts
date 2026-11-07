@@ -88,7 +88,9 @@ export async function connectVoiceFx(ctx: AudioContext, fx: VoiceFx, input: Audi
     const b = ctx.createBiquadFilter();
     b.type = type;
     b.frequency.value = f;
-    b.Q.value = Math.SQRT1_2;
+    // Web Audio's lowpass/highpass Q is in dB: -3.01 dB is Butterworth,
+    // ffmpeg's default 0.707 (it was set as 0.707 dB, a little resonant).
+    b.Q.value = 20 * Math.log10(Math.SQRT1_2);
     return b;
   };
   const gain = (v: number) => {

@@ -5,7 +5,7 @@ import type { Clock } from "@/lib/editor/clock";
 import { gradeOf, isNeutralColor } from "@/lib/editor/look";
 import { DIP_AUDIO, frameShadow, locate, sourceTimeAt, videoBox, type Layout } from "@/lib/editor/timeline";
 import { CROP_TRANSITIONS, MASK_WIDTH, SOFT_TRANSITIONS, maskPixels } from "@/lib/editor/xfade";
-import type { AudioClip, Canvas, Clip, Crop, EffectClip, MediaSource, Project, TransitionType, VoiceFx } from "@/lib/editor/types";
+import type { AudioClip, Canvas, Clip, Crop, EffectClip, MediaSource, Project, TransitionType, VoiceFx, VoiceTone } from "@/lib/editor/types";
 import { CameraCache, cameraCrop, clipView, evalCamera } from "@/lib/editor/camera";
 import { shouldSeek } from "@/lib/editor/mediaSync";
 import { appliedZooms } from "@/lib/editor/focusPrefs";
@@ -15,7 +15,7 @@ import { drawMasks } from "@/lib/editor/maskDraw";
 import { clipKeyTime, clipTransformAt } from "@/lib/editor/keyframes";
 import { sourceToLocal, speedAt } from "@/lib/editor/speed";
 import { previewMixer, type PreviewMixer } from "@/lib/editor/audioMixer";
-import { VIDEO_TRACK, heardWithSolo, masterGainDb, masterOf, playedSourceId, trackGainAt } from "@/lib/editor/mix";
+import { VIDEO_TRACK, cleanGain, heardWithSolo, masterGainDb, masterOf, playedSourceId, trackGainAt } from "@/lib/editor/mix";
 import { dbToGain } from "@/lib/editor/loudness";
 import { shapeMaskUrl } from "@/lib/editor/shapeMask";
 import { LutRenderer, lutNow } from "@/lib/editor/lut";
@@ -168,7 +168,7 @@ export default function PreviewPlayer({
         masterGain = mix.masterGain;
         mixer.setMasterGain(masterGain);
       }
-      const setLevel = (el: HTMLMediaElement, key: string, level: number, fx: VoiceFx = "none") => playLevel(mixer, el, key, level, muted, fx);
+      const setLevel = (el: HTMLMediaElement, key: string, level: number, fx: VoiceFx = "none", tone?: VoiceTone) => playLevel(mixer, el, key, level, muted, fx, tone);
       const els = [slotA.current, slotB.current];
       const stage = fxRef.current;
       if (!els[0] || !els[1] || !stage || lay.clips.length === 0) return;
@@ -907,7 +907,7 @@ function syncAudio(
   /** The preview volume for a track (0 when another track is soloed). */
   volumeOf: (a: AudioClip) => number,
   ensureSrc: (el: HTMLMediaElement, url: string) => void,
-  setLevel: (el: HTMLMediaElement, key: string, level: number, fx: VoiceFx) => void
+  setLevel: (el: HTMLMediaElement, key: string, level: number, fx: VoiceFx, tone?: VoiceTone) => void
 ) {
   const live = new Set<string>();
   for (const a of audio) {
@@ -932,7 +932,7 @@ function syncAudio(
     }
     const want = a.offset + local;
     if (el.readyState >= 1 && !el.seeking && Math.abs(el.currentTime - want) > (playing ? 0.25 : 0.05)) el.currentTime = want;
-    setLevel(el, a.id, volumeOf(a) * trackGainAt(a, t), a.voice ?? "none");
+    setLevel(el, a.id, volumeOf(a) * trackGainAt(a, t), a.voice ?? "none", a.tone);
     el.playbackRate = rate;
     if (playing && el.paused) el.play().catch(() => {});
     if (!playing && !el.paused) el.pause();
@@ -958,15 +958,15 @@ function previewMix(project: Project | undefined, audio: AudioClip[], lay: Layou
     meters ||
     Math.abs(gainDb) >= 0.05 ||
     m.videoVolume > 1 ||
-    audio.some((a) => a.volume > 1) ||
+    audio.some((a) => a.volume * cleanGain(a) > 1) ||
     lay.clips.some((c) => c.clip.volume * m.videoVolume > 1);
   return { video, solo: soloSet, masterGain: dbToGain(gainDb), engage };
 }
 
 /** Sets an element's level: through the mixer when it's engaged (or for a
- * voice effect), where it can go above 100%, else on the element. */
-function playLevel(mixer: PreviewMixer, el: HTMLMediaElement, key: string, level: number, muted: boolean, fx: VoiceFx) {
-  const gain = mixer.route(el, key, fx);
+ * tone or voice effect), where it can go above 100%, else on the element. */
+function playLevel(mixer: PreviewMixer, el: HTMLMediaElement, key: string, level: number, muted: boolean, fx: VoiceFx, tone?: VoiceTone) {
+  const gain = mixer.route(el, key, fx, tone);
   if (gain) {
     el.muted = false;
     el.volume = 1;

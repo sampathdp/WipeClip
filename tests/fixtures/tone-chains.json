@@ -1,0 +1,142 @@
+{
+  "_comment": "Tone filter chains: editor.py tone_chain builds `chain` from `wire` (backend/tests/test_voice_tone.py), and tests/desktop/voiceTone.test.ts checks the preview's code against ffmpeg running `chain`, and the presets' wires.",
+  "cases": [
+    {
+      "name": "eq",
+      "wire": {
+        "lowCut": true,
+        "bass": -5,
+        "mid": -3,
+        "treble": 4,
+        "deEss": 0,
+        "comp": null
+      },
+      "chain": "highpass=f=80:t=q:w=0.707107,lowshelf=f=120:t=s:w=1:g=-5,equalizer=f=400:t=q:w=1:g=-3,highshelf=f=4000:t=s:w=1:g=4"
+    },
+    {
+      "name": "de-ess",
+      "wire": {
+        "lowCut": false,
+        "bass": 0,
+        "mid": 0,
+        "treble": 0,
+        "deEss": 0.5,
+        "comp": null
+      },
+      "chain": "deesser=i=0.5:m=0.5:f=0.5:s=o"
+    },
+    {
+      "name": "compressor",
+      "wire": {
+        "lowCut": false,
+        "bass": 0,
+        "mid": 0,
+        "treble": 0,
+        "deEss": 0,
+        "comp": {
+          "threshold": -25.5,
+          "ratio": 3.38,
+          "attack": 10,
+          "release": 150,
+          "makeup": 6.86
+        }
+      },
+      "chain": "acompressor=level_in=1:mode=downward:threshold=0.053088:ratio=3.38:attack=10:release=150:makeup=2.202926:knee=2.82843:link=average:detection=rms:mix=1"
+    },
+    {
+      "name": "preset clear",
+      "preset": "clear",
+      "wire": {
+        "lowCut": true,
+        "bass": -1,
+        "mid": -2,
+        "treble": 3,
+        "deEss": 0.4,
+        "comp": {
+          "threshold": -21,
+          "ratio": 2.75,
+          "attack": 10,
+          "release": 150,
+          "makeup": 4.77
+        }
+      },
+      "chain": "highpass=f=80:t=q:w=0.707107,lowshelf=f=120:t=s:w=1:g=-1,equalizer=f=400:t=q:w=1:g=-2,highshelf=f=4000:t=s:w=1:g=3,deesser=i=0.4:m=0.5:f=0.5:s=o,acompressor=level_in=1:mode=downward:threshold=0.089125:ratio=2.75:attack=10:release=150:makeup=1.731809:knee=2.82843:link=average:detection=rms:mix=1"
+    },
+    {
+      "name": "preset podcast",
+      "preset": "podcast",
+      "wire": {
+        "lowCut": true,
+        "bass": 1,
+        "mid": -2,
+        "treble": 2,
+        "deEss": 0.5,
+        "comp": {
+          "threshold": -25.5,
+          "ratio": 3.38,
+          "attack": 10,
+          "release": 150,
+          "makeup": 6.86
+        }
+      },
+      "chain": "highpass=f=80:t=q:w=0.707107,lowshelf=f=120:t=s:w=1:g=1,equalizer=f=400:t=q:w=1:g=-2,highshelf=f=4000:t=s:w=1:g=2,deesser=i=0.5:m=0.5:f=0.5:s=o,acompressor=level_in=1:mode=downward:threshold=0.053088:ratio=3.38:attack=10:release=150:makeup=2.202926:knee=2.82843:link=average:detection=rms:mix=1"
+    },
+    {
+      "name": "preset warm",
+      "preset": "warm",
+      "wire": {
+        "lowCut": true,
+        "bass": 3,
+        "mid": 0,
+        "treble": -2,
+        "deEss": 0.3,
+        "comp": {
+          "threshold": -19.2,
+          "ratio": 2.5,
+          "attack": 10,
+          "release": 150,
+          "makeup": 3.96
+        }
+      },
+      "chain": "highpass=f=80:t=q:w=0.707107,lowshelf=f=120:t=s:w=1:g=3,highshelf=f=4000:t=s:w=1:g=-2,deesser=i=0.3:m=0.5:f=0.5:s=o,acompressor=level_in=1:mode=downward:threshold=0.109648:ratio=2.5:attack=10:release=150:makeup=1.577611:knee=2.82843:link=average:detection=rms:mix=1"
+    },
+    {
+      "name": "preset thin",
+      "preset": "thin",
+      "wire": {
+        "lowCut": false,
+        "bass": 5,
+        "mid": -1,
+        "treble": -2,
+        "deEss": 0.2,
+        "comp": {
+          "threshold": -19.2,
+          "ratio": 2.5,
+          "attack": 10,
+          "release": 150,
+          "makeup": 3.96
+        }
+      },
+      "chain": "lowshelf=f=120:t=s:w=1:g=5,equalizer=f=400:t=q:w=1:g=-1,highshelf=f=4000:t=s:w=1:g=-2,deesser=i=0.2:m=0.5:f=0.5:s=o,acompressor=level_in=1:mode=downward:threshold=0.109648:ratio=2.5:attack=10:release=150:makeup=1.577611:knee=2.82843:link=average:detection=rms:mix=1"
+    },
+    {
+      "name": "preset boom",
+      "preset": "boom",
+      "wire": {
+        "lowCut": true,
+        "bass": -5,
+        "mid": -3,
+        "treble": 1,
+        "deEss": 0,
+        "comp": {
+          "threshold": -17.4,
+          "ratio": 2.25,
+          "attack": 10,
+          "release": 150,
+          "makeup": 3.17
+        }
+      },
+      "chain": "highpass=f=80:t=q:w=0.707107,lowshelf=f=120:t=s:w=1:g=-5,equalizer=f=400:t=q:w=1:g=-3,highshelf=f=4000:t=s:w=1:g=1,acompressor=level_in=1:mode=downward:threshold=0.134896:ratio=2.25:attack=10:release=150:makeup=1.440456:knee=2.82843:link=average:detection=rms:mix=1"
+    }
+  ]
+}

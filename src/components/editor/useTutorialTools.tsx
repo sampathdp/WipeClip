@@ -15,6 +15,7 @@ import { timelineTimeOf } from "@/lib/editor/camera";
 import { DEFAULT_CHAPTERS, suggestChapters } from "@/lib/editor/chapters";
 import { acceptedCuts, cutCandidates, interactionTimeline, previewSkips, suggestEdits, type Act } from "@/lib/editor/insights";
 import { fillersSupported, speechAwarePauses, transcriptSuggestions } from "@/lib/editor/speechEdits";
+import { findHesitations, hesitationSuggestions, type Hesitation } from "@/lib/editor/hesitations";
 import { transcriptCurrent } from "@/lib/editor/wordEdit";
 import { DEFAULT_KEYSTROKES, comboCounts, keystrokeOverlays, type KeystrokeSettings } from "@/lib/editor/keystrokes";
 import { loadVideoMeta } from "@/lib/editor/media";
@@ -87,7 +88,7 @@ export function useTutorialTools(d: Deps) {
   const analysisCtrl = useRef<AbortController | null>(null);
   useEffect(() => () => analysisCtrl.current?.abort(), []);
   const lastReport = useRef<AudioReport | null>(null);
-  const levelsCache = useRef<{ key: string; levels: AudioLevels | null; clipping: AudioSpan[]; skipped: string[] } | null>(null);
+  const levelsCache = useRef<{ key: string; levels: AudioLevels | null; hesitations: Hesitation[]; clipping: AudioSpan[]; skipped: string[] } | null>(null);
   const activity = useRef(new ActivityCache());
   const [previewingCuts, setPreviewingCuts] = useState(false);
   const [keySettings, setKeySettings] = useState<KeystrokeSettings>(DEFAULT_KEYSTROKES);
@@ -135,7 +136,13 @@ export function useTutorialTools(d: Deps) {
           setAnalysis("Mixing the timeline's audio…");
           const mix = await buildSpeechMix(lay, project, sources, { withClipping: true, signal });
           if (run !== analysisRun.current) return null;
-          cached = { key, levels: mix.samples ? measureLevels(mix.samples) : null, clipping: mix.clipping, skipped: mix.skipped };
+          cached = {
+            key,
+            levels: mix.samples ? measureLevels(mix.samples) : null,
+            hesitations: mix.samples ? findHesitations(mix.samples) : [],
+            clipping: mix.clipping,
+            skipped: mix.skipped,
+          };
           levelsCache.current = cached;
         }
         setAnalysis("Analyzing…");
@@ -186,13 +193,20 @@ export function useTutorialTools(d: Deps) {
         if (transcript && transcriptCurrent(transcript, lay)) {
           const sg = () => newId("sg");
           list = [...speechAwarePauses(list, transcript, report?.silences ?? null, sg), ...transcriptSuggestions(transcript, sg)].sort((a, b) => a.start - b.start);
-          if (!fillersSupported(transcript.language)) notes.push("Filler words are only recognized in English; repeated words are checked in any language.");
+          if (!fillersSupported(transcript.language))
+            notes.push("Filler words are only recognized in English text; held sounds like “aaa” or “mmm” are found from the sound in any language.");
         } else {
           notes.push(
             transcript
               ? "The transcript no longer matches the edit, so filler words and repeats weren't checked. Transcribe again in the Transcript panel."
               : "Transcribe the speech (Transcript panel) to also find filler words, repeated words and quiet speech."
           );
+        }
+        // Held sounds ("aaa", "eee", "mmm"), from the sound, checked against
+        // the transcript when it still matches.
+        if (cached.hesitations.length) {
+          const current = transcript && transcriptCurrent(transcript, lay) ? transcript : null;
+          list = [...list, ...hesitationSuggestions(cached.hesitations, current, list, () => newId("sg"))].sort((a, b) => a.start - b.start);
         }
         if (run !== analysisRun.current) return null;
         console.info(`[review] analysis took ${Math.round(performance.now() - t0)} ms (levels ${reused ? "reused" : "measured"}, picture ${checked ? "checked" : "not checked"})`);
@@ -709,6 +723,10 @@ export function useTutorialTools(d: Deps) {
     onAcceptAllHigh: () => {
       const high = suggestions.filter((s) => s.status === "pending" && s.action === "cut" && s.confidence === "high").map((s) => ({ ...s, status: "accepted" as const }));
       cut(acceptedCuts(high));
+    },
+    onRemoveFillers: () => {
+      const fillers = suggestions.filter((s) => s.status === "pending" && s.action === "cut" && s.kind === "filler" && s.confidence !== "low").map((s) => ({ ...s, status: "accepted" as const }));
+      cut(acceptedCuts(fillers));
     },
     onClearSuggestions: () => apply((p) => ({ ...p, suggestions: (p.suggestions ?? []).filter((s) => s.kind === "retake") })),
     previewingCuts,

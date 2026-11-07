@@ -64,7 +64,13 @@ export interface TrackItem {
   locked?: boolean;
   selected: boolean;
   sel: Selection;
+  /** An audio track's volume curve (envelope.ts visibleCurve), timeline
+   * seconds; `index` null at the item's edges. Editable when selected. */
+  curve?: { t: number; v: number; index: number | null }[];
 }
+
+/** A change to an item's volume curve, in timeline seconds and gain 0..2. */
+export type CurveEdit = { kind: "add"; t: number; v: number } | { kind: "move"; index: number; t: number; v: number } | { kind: "remove"; index: number };
 
 /** Content-pixel range worth drawing: the visible part of the timeline
  * plus a viewport of margin each side. Thumbnails and waveforms outside it
@@ -136,6 +142,8 @@ interface Props {
   onTrackToggle?: (track: string, kind: TrackToggle["kind"]) => void;
   /** Removes every item on a track. */
   onTrackDelete?: (track: string) => void;
+  /** Edits an item's volume curve (TrackItem.curve). */
+  onCurveChange?: (track: string, id: string, edit: CurveEdit) => void;
   /** Edit buttons shown in the header row in place of the time readout. */
   actions?: React.ReactNode;
   onGestureStart: () => void;
@@ -269,6 +277,9 @@ export default function Timeline(props: Props) {
   };
 
   const rowHandlers = {
+    curve: (track: string, id: string, edit: CurveEdit) => props.onCurveChange?.(track, id, edit),
+    gestureStart: () => props.onGestureStart(),
+    gestureEnd: () => props.onGestureEnd(),
     rowDown: (e: React.PointerEvent) => {
       startGesture(e, { kind: "seek" });
       props.onSeek(tOf(e.clientX));
@@ -295,6 +306,9 @@ export default function Timeline(props: Props) {
   });
   const rowApi = useMemo<RowApi>(
     () => ({
+      curve: (track, id, edit) => handlers.current.curve(track, id, edit),
+      gestureStart: () => handlers.current.gestureStart(),
+      gestureEnd: () => handlers.current.gestureEnd(),
       rowDown: (e) => handlers.current.rowDown(e),
       itemDown: (e, track, it, mode) => handlers.current.itemDown(e, track, it, mode),
       select: (s) => handlers.current.select(s),
@@ -672,6 +686,9 @@ function RowGutter({ label, children }: { label: string; children?: React.ReactN
 }
 
 interface RowApi {
+  curve: (track: string, id: string, edit: CurveEdit) => void;
+  gestureStart: () => void;
+  gestureEnd: () => void;
   rowDown: (e: React.PointerEvent) => void;
   itemDown: (e: React.PointerEvent, track: string, it: TrackItem, mode: ItemMode) => void;
   select: (s: Selection) => void;
@@ -749,6 +766,14 @@ const TrackRow = memo(function TrackRow({
               height: LANE_H - 6,
             }}
             onPointerDown={(e) => api.itemDown(e, track.key, it, "move")}
+            onDoubleClick={
+              it.curve && it.selected && !it.locked
+                ? (e) => {
+                    e.stopPropagation();
+                    api.curve(track.key, it.id, { kind: "add", ...curvePoint(e.currentTarget.getBoundingClientRect(), e, it, scale, LANE_H - 6) });
+                  }
+                : undefined
+            }
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -769,6 +794,7 @@ const TrackRow = memo(function TrackRow({
                 className="top-0 text-foreground/25"
               />
             )}
+            {it.curve && <CurveOverlay curve={it.curve} item={it} editable={it.selected && !it.locked} scale={scale} height={LANE_H - 6} onEdit={(edit) => api.curve(track.key, it.id, edit)} api={api} />}
             {compact ? null : it.thumb ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={it.thumb} alt="" className="h-4 w-4 shrink-0 object-contain" draggable={false} />
@@ -801,6 +827,88 @@ const TrackRow = memo(function TrackRow({
     </div>
   );
 });
+
+/** Timeline time and gain under the pointer, in an item's box. */
+function curvePoint(r: DOMRect, e: { clientX: number; clientY: number }, item: TrackItem, scale: number, height: number) {
+  const w = Math.max(1, (item.end - item.start) * scale);
+  const t = item.start + Math.min(w, Math.max(0, e.clientX - r.left)) / scale;
+  const v = Math.min(2, Math.max(0, 2 * (1 - (e.clientY - r.top - 2) / (height - 4))));
+  return { t, v };
+}
+
+/** Volume curve of an audio item: a line (100 % in the middle, +6 dB at
+ * the top, silence at the bottom). On the selected item: drag a point,
+ * double-click the item to add one there, double-click a point to remove it. */
+function CurveOverlay({
+  curve,
+  item,
+  editable,
+  scale,
+  height,
+  onEdit,
+  api,
+}: {
+  curve: NonNullable<TrackItem["curve"]>;
+  item: TrackItem;
+  editable: boolean;
+  scale: number;
+  height: number;
+  onEdit: (edit: CurveEdit) => void;
+  api: RowApi;
+}) {
+  const ref = useRef<SVGSVGElement>(null);
+  const flat = curve.every((p) => p.index === null) && curve.every((p) => Math.abs(p.v - 1) < 1e-6);
+  if (flat && !editable) return null;
+  const w = Math.max(1, (item.end - item.start) * scale);
+  const x = (t: number) => (t - item.start) * scale;
+  const y = (v: number) => 2 + (height - 4) * (1 - v / 2);
+  const at = (e: { clientX: number; clientY: number }) => curvePoint(ref.current!.getBoundingClientRect(), e, item, scale, height);
+  const drag = (e: React.PointerEvent, index: number) => {
+    e.stopPropagation();
+    e.preventDefault();
+    api.gestureStart();
+    const move = (ev: PointerEvent) => onEdit({ kind: "move", index, ...at(ev) });
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      api.gestureEnd();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  return (
+    <svg
+      ref={ref}
+      className="pointer-events-none absolute inset-0 z-[1] h-full w-full overflow-visible"
+      width={w}
+      height={height}
+      aria-hidden
+    >
+      {editable && <line x1={0} x2={w} y1={y(1)} y2={y(1)} className="stroke-foreground/20" strokeDasharray="2 3" />}
+      <polyline points={curve.map((p) => `${x(p.t)},${y(p.v)}`).join(" ")} fill="none" className="stroke-amber-300" strokeWidth={1.5} />
+      {editable &&
+        curve.map((p) =>
+          p.index === null ? null : (
+            <circle
+              key={p.index}
+              cx={x(p.t)}
+              cy={y(p.v)}
+              r={4}
+              className="cursor-move fill-amber-300 stroke-black/60"
+              style={{ pointerEvents: "all" }}
+              onPointerDown={(e) => drag(e, p.index!)}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                onEdit({ kind: "remove", index: p.index! });
+              }}
+            >
+              <title>Volume point. Drag to change, double-click to remove.</title>
+            </circle>
+          )
+        )}
+    </svg>
+  );
+}
 
 const TOGGLE_TEXT = {
   hide: { on: "◌", off: "◉", label: ["Show", "Hide"] },

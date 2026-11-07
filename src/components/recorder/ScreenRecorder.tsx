@@ -66,7 +66,7 @@ import { errorText, mediaError, type RecorderPlatform } from "@/lib/recorder/med
 import { LOW_DISK_BYTES, RecordingSession, type FinishedRecording, type SessionTrackInput } from "@/lib/recorder/session";
 import { CloseIcon } from "@/components/editor/icons";
 import ToolFeedback from "@/components/ToolFeedback";
-import { LevelMeter, LiveMattePreview, LivePreview, Note, RegionSelector, Section, Select, Toggle, formatBytes, useAudioLevel } from "./parts";
+import { LevelMeter, LiveMattePreview, LivePreview, MicCheck, Note, RegionSelector, Section, Select, Toggle, formatBytes, useAudioLevel } from "./parts";
 import { engineMatteFrame } from "@/lib/toolsApi";
 import SourcePicker from "./SourcePicker";
 
@@ -1182,6 +1182,7 @@ export default function ScreenRecorder({
                       />
                       {micStream && <LevelMeter level={micLevel} label="Microphone level" />}
                       {micStream && micLevel < 0.01 && <p className="text-xs text-muted">No sound yet - speak to check the level.</p>}
+                      {micStream && <MicCheck key={micStream.id} stream={micStream} />}
                       <Toggle
                         checked={wantSystemAudio}
                         onChange={setWantSystemAudio}

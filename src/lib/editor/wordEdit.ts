@@ -6,13 +6,17 @@ import { rippleCut } from "./ripple.ts";
 import { layout, type Layout } from "./timeline.ts";
 import type { Project, Transcript, TranscriptWord } from "./types.ts";
 
-/** Filler sounds, compared without case and punctuation. */
-const FILLERS = new Set(["um", "umm", "uh", "uhh", "uhm", "erm", "er", "ah", "ahh", "hmm", "mm", "mhm"]);
+/** Filler sounds, compared without case and punctuation, in any length
+ * ("um", "ummm", "uhhh", "aaah", "eee", "hmmm", "mhm"). Not "a" or "e" on
+ * their own: those are words. */
+const FILLER = /^(?:u+[hm]+|u{2,}|e+r+m*|a+h+|a{2,}|e+h+|e{2,}|h+m+|m{2,}|m+h+m+)$/;
+
+export const isFillerWord = (norm: string): boolean => FILLER.test(norm);
 
 export const normalizeWord = (text: string): string => text.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, "");
 
 export function fillerIndices(words: TranscriptWord[]): number[] {
-  return words.flatMap((w, i) => (FILLERS.has(normalizeWord(w.text)) ? [i] : []));
+  return words.flatMap((w, i) => (isFillerWord(normalizeWord(w.text)) ? [i] : []));
 }
 
 /** Whether the transcript still matches the timeline: only ripple cuts and

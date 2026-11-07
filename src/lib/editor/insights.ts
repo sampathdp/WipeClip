@@ -132,7 +132,8 @@ export function suggestEdits(
         start: c.start,
         end: Math.max(c.end, c.start + 0.3),
         title: "Audio clipping (distortion)",
-        detail: "The sound hit the maximum level here. Lower this section's volume, or re-record it if it sounds distorted.",
+        detail:
+          "The recording hit its maximum level here, so the loudest sounds are flattened and distorted. Turning the volume down doesn't undo that. On an audio track (a microphone or voiceover), select it and use Clean up > Repair distortion in the desktop app; if it's heavy, re-record this part.",
         action: "review",
         confidence: "high",
       });

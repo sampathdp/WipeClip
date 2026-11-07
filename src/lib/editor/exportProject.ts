@@ -1,3 +1,5 @@
+import { toneActive, toneWire } from "./voiceTone";
+import { envelopeWire } from "./envelope";
 import { exportEditorProject, type RenderedFile, type RenderProgress, type Resolution } from "@/lib/toolsApi";
 import { loadRaster, rasterKey } from "./rasters";
 import { overlayWidth } from "./textRaster";
@@ -15,7 +17,7 @@ import { clipKeyTimeToLocal } from "./keyframes";
 import { activeRamp, rampSegments } from "./speed";
 import { ensureMatte, fullMatte, matteUnsupported } from "./matte";
 import { IS_DESKTOP } from "../platform/env";
-import { clipMixVolume, masterGainDb, playedSourceId } from "./mix";
+import { cleanGain, clipMixVolume, masterGainDb, playedSourceId } from "./mix";
 
 /** What file the export makes: an MP4 (at a quality and, optionally, a
  * frame rate), an animated GIF, or the sound alone (M4A). */
@@ -139,11 +141,14 @@ export async function exportProject(
       start: round(a.start),
       offset: round(a.offset),
       duration: round(a.duration),
-      volume: a.volume,
+      // A repaired copy plays at its make-up gain (mix.ts cleanGain).
+      volume: Math.round(a.volume * cleanGain(a) * 10000) / 10000,
       fadeIn: a.fadeIn,
       fadeOut: a.fadeOut,
       ...(a.duck && a.duck.amount > 0 && a.duck.regions.length ? { duck: a.duck } : {}),
       ...(a.voice && a.voice !== "none" ? { voice: a.voice } : {}),
+      ...(toneActive(a.tone) ? { tone: toneWire(a.tone) } : {}),
+      ...(envelopeWire(a) ? { envelope: envelopeWire(a) } : {}),
     });
   }
 

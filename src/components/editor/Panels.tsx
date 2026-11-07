@@ -46,9 +46,13 @@ import {
   type ShapeStyle,
   type TextAnim,
   type TextStyle,
+  type TonePreset,
   type VoiceFx,
+  type VoiceTone,
   type WebcamMatte,
 } from "@/lib/editor/types";
+import { gainLabel } from "@/lib/editor/envelope";
+import { NEUTRAL_TONE, TONE_MAX_DB, TONE_PRESETS, TONE_PRESET_ORDER, editTone, presetTone, toneActive } from "@/lib/editor/voiceTone";
 import { TEXT_ANIM_LABELS } from "@/lib/editor/textAnim";
 import { DEFAULT_DUCK_AMOUNT } from "@/lib/editor/ducking";
 import { VOICE_FX_LABELS } from "@/lib/editor/voiceFx";
@@ -2445,6 +2449,83 @@ function CamLayoutSection({ layout, onChange }: { layout?: CamLayout; onChange: 
   );
 }
 
+/** Voice tone (voiceTone.ts): one-click enhancement, presets, and the
+ * settings behind them. */
+function VoiceToneSection({
+  tone,
+  onChange,
+  onEnhance,
+  enhancing,
+  gesture,
+}: {
+  tone: VoiceTone | undefined;
+  onChange: (tone: VoiceTone | undefined) => void;
+  /** Enhance voice: the preset plus noise reduction (desktop) and voice loudness. */
+  onEnhance: () => void;
+  enhancing: boolean;
+  gesture: Gesture;
+}) {
+  const active = toneActive(tone);
+  const [open, setOpen] = useState(active && !tone?.preset);
+  const t = { ...NEUTRAL_TONE, ...tone };
+  const set = (patch: Partial<Omit<VoiceTone, "preset">>) => onChange(editTone(tone, patch));
+  const db = (v: number) => `${v > 0 ? "+" : ""}${v} dB`;
+  const pct = (v: number) => (v <= 0 ? "Off" : `${Math.round(v * 100)}%`);
+  return (
+    <div className="space-y-3">
+      <SectionTitle>
+        Voice tone
+        <ProTag />
+      </SectionTitle>
+      <div className="flex flex-wrap items-center gap-2">
+        <ActionButton
+          tone="accent"
+          onClick={onEnhance}
+          disabled={enhancing}
+          title="Clearer, even speech in one step: tone, background noise (desktop app) and voice loudness (-16 LUFS). One undo step each; nothing in the file changes."
+        >
+          {enhancing ? "Enhancing…" : "Enhance voice"}
+        </ActionButton>
+        {active && (
+          <button type="button" className="text-[11px] font-semibold text-accent-2 hover:underline" onClick={() => onChange(undefined)}>
+            Turn off
+          </button>
+        )}
+      </div>
+      <Chips
+        label="Tone preset"
+        value={tone?.preset ?? (active ? "custom" : "none")}
+        onChange={(v) => (v === "none" ? onChange(undefined) : v !== "custom" && onChange(presetTone(v as TonePreset)))}
+        options={[
+          { value: "none", label: "Off" },
+          ...TONE_PRESET_ORDER.map((p) => ({ value: p, label: TONE_PRESETS[p].label })),
+          ...(active && !tone?.preset ? [{ value: "custom", label: "Custom" }] : []),
+        ]}
+      />
+      <p className="text-[11px] text-muted">
+        {tone?.preset ? TONE_PRESETS[tone.preset].hint : active ? "Your own settings." : "Pick a preset, or adjust the tone by hand."} The preview plays exactly what the export
+        will.
+      </p>
+      <button type="button" className="text-[11px] font-semibold text-accent-2 hover:underline" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {open ? "Hide settings" : "Adjust settings"}
+      </button>
+      {open && (
+        <div className="space-y-3 rounded-xl border border-border p-3">
+          <label className="flex items-center justify-between text-xs font-medium text-foreground">
+            Cut rumble (below 80 Hz)
+            <input type="checkbox" className="accent-[var(--accent)]" checked={t.lowCut} onChange={(e) => set({ lowCut: e.target.checked })} />
+          </label>
+          <SliderField label="Bass (120 Hz)" value={t.bass} min={-TONE_MAX_DB} max={TONE_MAX_DB} neutral={0} format={db} onChange={(bass) => set({ bass })} gesture={gesture} />
+          <SliderField label="Boxiness (400 Hz)" value={t.mid} min={-TONE_MAX_DB} max={TONE_MAX_DB} neutral={0} format={db} onChange={(mid) => set({ mid })} gesture={gesture} />
+          <SliderField label="Clarity (4 kHz and up)" value={t.treble} min={-TONE_MAX_DB} max={TONE_MAX_DB} neutral={0} format={db} onChange={(treble) => set({ treble })} gesture={gesture} />
+          <SliderField label="Even out the level" value={t.compress} min={0} max={1} step={0.05} neutral={0} format={pct} onChange={(compress) => set({ compress })} gesture={gesture} />
+          <SliderField label="Soften “s” sounds" value={t.deEss} min={0} max={1} step={0.05} neutral={0} format={pct} onChange={(deEss) => set({ deEss })} gesture={gesture} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Noise reduction strengths (audio_clean.py: 6..40 dB of reduction). */
 const NOISE_STRENGTHS = [
   { value: 0.25, label: "Light" },
@@ -2468,13 +2549,21 @@ export function AudioPanel({
   cleaning,
   soloed,
   onSolo,
+  onEnhance,
+  enhancing = false,
+  onAddCurvePoint,
 }: {
   clip: AudioClip;
+  /** Adds a volume curve point at the playhead, on the current curve. */
+  onAddCurvePoint: () => void;
+  /** Enhance voice in one step (tone preset, noise reduction, loudness). */
+  onEnhance: () => void;
+  enhancing?: boolean;
   sourceDuration: number;
   total: number;
   /** Makes the noise-reduced copy at a strength 0..1; absent = no local
    * engine (the browser version), so the section explains instead. */
-  onCleanup?: (strength: number) => void;
+  onCleanup?: (strength: number, repair: boolean) => void;
   /** A copy is being made for this track. */
   cleaning?: boolean;
   /** Solo for listening (preview only). */
@@ -2493,6 +2582,7 @@ export function AudioPanel({
 }) {
   const a = clip;
   const [strength, setStrength] = useState(a.clean?.strength ?? 0.5);
+  const [repair, setRepair] = useState(a.clean?.repaired ?? false);
   return (
     <PanelShell title={`Audio · ${a.label}`} onClose={onClose}>
       <div className="space-y-4">
@@ -2529,6 +2619,26 @@ export function AudioPanel({
           />
           <p className="mt-1.5 text-[11px] text-muted">Voice is captioned, music is not. Detect tells them apart from the sound.</p>
         </div>
+        <div className="space-y-2">
+          <SectionTitle>Volume curve</SectionTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionButton onClick={onAddCurvePoint} title="A point on the curve at the playhead; drag it in the timeline">
+              Add point at playhead
+            </ActionButton>
+            {!!a.envelope?.length && (
+              <button type="button" className="text-[11px] font-semibold text-accent-2 hover:underline" onClick={() => onChange({ envelope: undefined })}>
+                Clear curve
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-muted">
+            {a.envelope?.length
+              ? `${a.envelope.length} point${a.envelope.length === 1 ? "" : "s"}, from ${gainLabel(Math.min(...a.envelope.map((p) => p.v)))} to ${gainLabel(Math.max(...a.envelope.map((p) => p.v)))}. `
+              : "Raise or lower parts of this track. "}
+            In the timeline, double-click the selected track to add a point, drag a point to change it, double-click a point to remove it. The middle line is this track&apos;s volume.
+          </p>
+        </div>
+        <VoiceToneSection tone={a.tone} onChange={(tone) => onChange({ tone })} onEnhance={onEnhance} enhancing={enhancing} gesture={gesture} />
         <div className="space-y-3">
           <SectionTitle>
             Lower under speech
@@ -2567,15 +2677,23 @@ export function AudioPanel({
           )}
         </div>
         <div className="space-y-2">
-          <SectionTitle>Noise reduction</SectionTitle>
+          <SectionTitle>Clean up</SectionTitle>
           {onCleanup ? (
             <>
+              <p className="text-xs font-medium text-foreground">Background noise</p>
               <Chips
                 label="Noise reduction strength"
                 value={strength}
                 onChange={setStrength}
-                options={NOISE_STRENGTHS.map((s) => ({ value: s.value, label: s.label }))}
+                options={[{ value: 0, label: "Off" }, ...NOISE_STRENGTHS.map((s) => ({ value: s.value, label: s.label }))]}
               />
+              <label className="flex items-center justify-between gap-2 text-xs font-medium text-foreground">
+                <span>
+                  Repair distortion
+                  <span className="block text-[11px] font-normal text-muted">Redraws peaks flattened when the recording was too loud (clipping).</span>
+                </span>
+                <input type="checkbox" className="accent-[var(--accent)]" checked={repair} onChange={(e) => setRepair(e.target.checked)} />
+              </label>
               {a.clean && (
                 <Chips
                   label="Compare"
@@ -2588,9 +2706,13 @@ export function AudioPanel({
                 />
               )}
               <div className="flex flex-wrap items-center gap-2">
-                {(!a.clean || a.clean.strength !== strength) && (
-                  <ActionButton onClick={() => onCleanup(strength)} disabled={cleaning} title="Reduce steady background noise on this computer">
-                    {cleaning ? "Reducing noise…" : a.clean ? "Apply this strength" : "Reduce background noise"}
+                {(!a.clean || a.clean.strength !== strength || !!a.clean.repaired !== repair) && (
+                  <ActionButton
+                    onClick={() => onCleanup(strength, repair)}
+                    disabled={cleaning || (strength === 0 && !repair)}
+                    title="Makes a cleaned copy on this computer; the original file isn't changed"
+                  >
+                    {cleaning ? "Cleaning up…" : a.clean ? "Apply these settings" : strength === 0 && !repair ? "Pick something to clean up" : "Clean up this track"}
                   </ActionButton>
                 )}
                 {a.clean && !cleaning && (
@@ -2607,7 +2729,7 @@ export function AudioPanel({
               </p>
             </>
           ) : (
-            <p className="text-[11px] text-muted">Noise reduction runs on your computer in the WipeClip desktop app, so the recording never leaves it.</p>
+            <p className="text-[11px] text-muted">Noise reduction and distortion repair run on your computer in the WipeClip desktop app, so the recording never leaves it.</p>
           )}
         </div>
         <div>

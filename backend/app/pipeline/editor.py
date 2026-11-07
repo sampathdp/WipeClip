@@ -61,7 +61,7 @@ import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
@@ -153,6 +153,12 @@ def duck_gain_expr(au: "PlanAudio", var: str) -> str:
     return f"(1-{_num(au.duck_amount)}*({keyframe_expr(points, 'v', var)}))"
 
 
+def envelope_expr(points: list[tuple[float, float]], var: str) -> str:
+    """A track's volume curve as an expression of `var` (source seconds):
+    curveAt() in src/lib/editor/envelope.ts."""
+    return keyframe_expr([{"t": t, "v": v, "ease": "linear"} for t, v in points], "v", var)
+
+
 # Master bus: the loudness gain (src/lib/editor/loudness.ts, measured and
 # stored by the editor, so the preview plays the same level), then a peak
 # limiter at about -1 dBFS (LIMIT_CEILING there). latency=1 compensates the
@@ -166,6 +172,65 @@ def master_chain(gain_db: float) -> str:
     gain = max(-MAX_MASTER_GAIN_DB, min(MAX_MASTER_GAIN_DB, gain_db))
     pre = f"volume={gain:.2f}dB," if abs(gain) >= 0.05 else ""
     return f"{pre}alimiter=limit={LIMIT_CEILING}:level=disabled:latency=1"
+
+
+# Track tone (src/lib/editor/voiceTone.ts): a low cut, a three-band EQ, a
+# de-esser and a compressor. The editor sends the exact numbers (toneWire);
+# the preview runs the same biquads in Web Audio and a port of ffmpeg's
+# deesser and acompressor in an AudioWorklet. Must match TONE_* there.
+# tests/fixtures/tone-chains.json pins the chains built here.
+TONE_LOW_CUT_HZ = 80
+TONE_BASS_HZ = 120
+TONE_MID_HZ = 400
+TONE_MID_Q = 1
+TONE_TREBLE_HZ = 4000
+TONE_KNEE = 2.82843
+
+
+@dataclass
+class PlanCompressor:
+    threshold: float  # dBFS, RMS detection
+    ratio: float
+    attack: float  # ms
+    release: float  # ms
+    makeup: float  # dB
+
+
+@dataclass
+class PlanTone:
+    low_cut: bool = False
+    bass: float = 0.0  # dB
+    mid: float = 0.0
+    treble: float = 0.0
+    de_ess: float = 0.0  # ffmpeg deesser intensity 0..1
+    comp: Optional[PlanCompressor] = None
+
+
+def tone_chain(t: Optional[PlanTone]) -> str:
+    """The track's tone as ffmpeg filters ("" when it changes nothing).
+    Shelves use slope 1 (t=s:w=1), the Web Audio spec's shelf; the low cut
+    is a 2-pole Butterworth, like the preview's highpass at Q -3.01 dB."""
+    if t is None:
+        return ""
+    parts: list[str] = []
+    if t.low_cut:
+        parts.append(f"highpass=f={TONE_LOW_CUT_HZ}:t=q:w=0.707107")
+    if t.bass:
+        parts.append(f"lowshelf=f={TONE_BASS_HZ}:t=s:w=1:g={_num(t.bass)}")
+    if t.mid:
+        parts.append(f"equalizer=f={TONE_MID_HZ}:t=q:w={_num(TONE_MID_Q)}:g={_num(t.mid)}")
+    if t.treble:
+        parts.append(f"highshelf=f={TONE_TREBLE_HZ}:t=s:w=1:g={_num(t.treble)}")
+    if t.de_ess > 0:
+        parts.append(f"deesser=i={_num(t.de_ess)}:m=0.5:f=0.5:s=o")
+    if t.comp:
+        c = t.comp
+        parts.append(
+            f"acompressor=level_in=1:mode=downward:threshold={_num(10 ** (c.threshold / 20))}:ratio={_num(c.ratio)}"
+            f":attack={_num(c.attack)}:release={_num(c.release)}:makeup={_num(10 ** (c.makeup / 20))}"
+            f":knee={_num(TONE_KNEE)}:link=average:detection=rms:mix=1"
+        )
+    return ",".join(parts)
 
 
 ANIMS_IN = ("none", "fade", "pop", "bounce", "spin", "zoomin", "slideup", "slidedown", "slideleft", "slideright")
@@ -486,6 +551,10 @@ class PlanAudio:
     # ranges, ramping over DUCK_ATTACK before and DUCK_RELEASE after.
     duck_amount: float = 0.0
     duck_regions: list[tuple[float, float]] = field(default_factory=list)
+    tone: Optional[PlanTone] = None  # see tone_chain; before the volume, like the preview
+    # Volume curve (src/lib/editor/envelope.ts): (source second, gain 0..2),
+    # linear between points, held outside them.
+    envelope: list[tuple[float, float]] = field(default_factory=list)
 
 
 @dataclass
@@ -1879,10 +1948,16 @@ def build_export_args(
             delay = int(round(au.start * 1000))
             chain = (
                 f"[{idx}:a:0]aresample={AUDIO_RATE},{_stereo(au.mono)},"
-                f"atrim=duration={_num(au.duration)},asetpts=PTS-STARTPTS,volume={_num(au.volume)}"
+                f"atrim=duration={_num(au.duration)},asetpts=PTS-STARTPTS,"
             )
+            tone = tone_chain(au.tone)
+            if tone:
+                chain += f"{tone},"
+            chain += f"volume={_num(au.volume)}"
             if VOICE_FX.get(au.voice):
                 chain += f",{VOICE_FX[au.voice]}"
+            if au.envelope:
+                chain += f",volume='{envelope_expr(au.envelope, f'(t+{_num(au.offset)})')}':eval=frame"
             if au.duck_amount > 0 and au.duck_regions:
                 # t is the track's own time here (before adelay).
                 chain += f",volume='{duck_gain_expr(au, f'(t+{_num(au.start)})')}':eval=frame"

@@ -3,9 +3,10 @@
  * its speed, volume and the video-sound track's level (reversed clips
  * reversed, speed curves as their pieces, transitions as crossfades),
  * every unmuted audio track (its cleaned copy unless bypassed, with
- * volume, fades and ducking) and the video layers' sound. Voice effects
- * aren't applied (they change the tone, not much the level), nor is the
- * master gain - it's what this measures for. Runs in the browser; the
+ * volume, fades and ducking, and its tone - EQ, de-esser and compressor,
+ * voiceTone.ts, which can change the level a lot) and the video layers'
+ * sound. Voice effects aren't applied (they change the character, not
+ * much the level), nor is the master gain - it's what this measures for. Runs in the browser; the
  * gain curves come from mix.ts, the same math the preview uses.
  */
 import { ANALYSIS_RATE } from "./audioAnalysis";
@@ -15,6 +16,7 @@ import { decodeSourceAudio } from "./sourceAudio";
 import { RAMP_SEGMENTS, activeRamp, rampSegments } from "./speed";
 import type { Layout } from "./timeline";
 import type { MediaSource, Project } from "./types";
+import { connectTone, toneWire } from "./voiceTone";
 
 const RATE = ANALYSIS_RATE;
 const CURVE_RATE = 50; // gain automation points per second
@@ -51,7 +53,7 @@ export async function renderProgramMix(lay: Layout, project: Project, sources: R
   let scheduled = 0;
   /** Plays `buf` from `offset` for `duration` (buffer seconds) at `when`,
    * with a gain curve over its timeline span. */
-  const play = (buf: AudioBuffer, when: number, offset: number, duration: number, rate: number, gain: (t: number) => number) => {
+  const play = (buf: AudioBuffer, when: number, offset: number, duration: number, rate: number, gain: (t: number) => number, via?: { input: AudioNode; output: AudioNode }) => {
     const span = duration / rate;
     if (span <= 0) return;
     const node = ctx.createBufferSource();
@@ -62,7 +64,10 @@ export async function renderProgramMix(lay: Layout, project: Project, sources: R
     const curve = new Float32Array(n);
     for (let i = 0; i < n; i++) curve[i] = gain(when + (i / (n - 1)) * span);
     g.gain.setValueCurveAtTime(curve, when, span);
-    node.connect(g).connect(ctx.destination);
+    if (via) {
+      node.connect(via.input);
+      via.output.connect(g).connect(ctx.destination);
+    } else node.connect(g).connect(ctx.destination);
     node.start(when, offset, duration);
     scheduled++;
   };
@@ -104,7 +109,15 @@ export async function renderProgramMix(lay: Layout, project: Project, sources: R
     if (!src) continue;
     const buf = await decode(src);
     abort();
-    if (buf) play(buf, a.start, a.offset, a.duration, 1, (t) => trackGainAt(a, Math.min(t, a.start + a.duration - 1e-6)));
+    if (!buf) continue;
+    // The tone sits before the level, as in the preview and the export.
+    const wire = toneWire(a.tone);
+    let via: { input: AudioNode; output: AudioNode } | undefined;
+    if (wire) {
+      const input = ctx.createGain();
+      via = { input, output: (await connectTone(ctx, wire, input, 1)).output };
+    }
+    play(buf, a.start, a.offset, a.duration, 1, (t) => trackGainAt(a, Math.min(t, a.start + a.duration - 1e-6)), via);
   }
 
   for (const o of project.overlays) {

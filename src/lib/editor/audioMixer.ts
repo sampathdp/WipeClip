@@ -1,13 +1,29 @@
 import { connectVoiceFx } from "./voiceFx";
 import { LIMIT_CEILING } from "./loudness";
 import { meterLevel, type MeterLevel } from "./mix";
-import type { VoiceFx } from "./types";
+import type { VoiceFx, VoiceTone } from "./types";
+import { connectTone, toneKey, toneWire } from "./voiceTone";
+
+/** Wire numbers and key per tone object (tones are immutable project data,
+ * and route() runs every frame). */
+const toneCache = new WeakMap<VoiceTone, { key: string; wire: ReturnType<typeof toneWire> }>();
+function toneOf(t: VoiceTone | undefined) {
+  if (!t) return { key: "", wire: null };
+  let v = toneCache.get(t);
+  if (!v) {
+    const wire = toneWire(t);
+    v = { key: toneKey(wire), wire };
+    toneCache.set(t, v);
+  }
+  return v;
+}
 
 /** The preview's mixer: once something needs it (a voice effect, a level
  * above 100%, loudness normalization, the meters), media elements play
  * through Web Audio instead of straight out:
  *
- *   element -> voice effect -> its level (gain) -> track bus (meter)
+ *   element -> tone (voiceTone.ts) -> voice effect -> its level (gain)
+ *           -> track bus (meter)
  *           -> master gain (loudness) -> peak limiter -> master meter -> out
  *
  * which is the export's order (editor.py: per-track volume and effect, the
@@ -54,7 +70,8 @@ registerProcessor("peak-limiter", PeakLimiter);
 interface Route {
   src: MediaElementAudioSourceNode;
   gain: GainNode;
-  fx: VoiceFx;
+  /** What the chain was built for: tone key and voice effect. */
+  built: string;
   pending: boolean;
   dispose: () => void;
   key: string;
@@ -98,13 +115,14 @@ export class PreviewMixer {
     return true;
   }
 
-  /** Routes `el` (a track `key`) through its voice effect into the mix and
-   * returns the gain node that now sets its level; null when it plays
-   * straight out (not engaged and no effect). */
-  route(el: HTMLMediaElement, key: string, fx: VoiceFx = "none"): GainNode | null {
+  /** Routes `el` (a track `key`) through its tone and voice effect into
+   * the mix and returns the gain node that now sets its level; null when it
+   * plays straight out (not engaged, no tone and no effect). */
+  route(el: HTMLMediaElement, key: string, fx: VoiceFx = "none", tone?: VoiceTone): GainNode | null {
+    const t = toneOf(tone);
     let r = this.routes.get(el);
     if (!r) {
-      if (!this.engaged && fx === "none") return null;
+      if (!this.engaged && fx === "none" && !t.wire) return null;
       if (!this.engage()) return null;
       const ctx = this.ctx!;
       corsEnable(el);
@@ -112,7 +130,7 @@ export class PreviewMixer {
       const gain = ctx.createGain();
       gain.connect(this.bus(key).input);
       src.connect(gain);
-      r = { src, gain, fx: "none", pending: false, dispose: () => src.disconnect(), key };
+      r = { src, gain, built: "|none", pending: false, dispose: () => src.disconnect(), key };
       this.routes.set(el, r);
     }
     if (r.key !== key) {
@@ -122,19 +140,38 @@ export class PreviewMixer {
     }
     const ctx = this.ctx!;
     if (ctx.state === "suspended") void ctx.resume().catch(() => {});
-    if (r.fx !== fx && !r.pending) {
+    const want = `${t.key}|${fx}`;
+    if (r.built !== want && !r.pending) {
       const route = r;
       route.pending = true;
       route.dispose();
-      connectVoiceFx(ctx, fx, route.src, route.gain)
+      const build = async () => {
+        const tn = await connectTone(ctx, t.wire, route.src);
+        try {
+          const dropFx = await connectVoiceFx(ctx, fx, tn.output, route.gain);
+          return () => {
+            dropFx();
+            tn.dispose();
+            try {
+              route.src.disconnect();
+            } catch {
+              // already disconnected
+            }
+          };
+        } catch (e) {
+          tn.dispose();
+          throw e;
+        }
+      };
+      build()
         .then((dispose) => {
           route.dispose = dispose;
-          route.fx = fx;
+          route.built = want;
         })
         .catch(() => {
           route.src.connect(route.gain);
           route.dispose = () => route.src.disconnect();
-          route.fx = fx;
+          route.built = want;
         })
         .finally(() => {
           route.pending = false;
