@@ -6,8 +6,8 @@ name: Desktop
 # workflow artifacts. With release set to patch, minor or major (run on
 # master), it first bumps the version and pushes the commit and tag
 # desktop-v<version> (desktop/scripts/release.mjs), then builds that tag and
-# publishes it. Pushing such a tag yourself (npm run desktop:release --
-# <version>) does the same. Once built, a release is
+# publishes it. This costs Actions minutes; npm run desktop:release does the
+# same on your own Windows machine for free. Once built, a release is
 # *published* with the signed installers and latest.json (the app's update
 # feed) in the public releases repo (RELEASES_REPO; this code repo can stay
 # private): installed apps offer the update and the website serves the
@@ -22,12 +22,13 @@ on:
         type: choice
         options: [none, patch, minor, major]
         default: none
-  push:
-    tags: ["desktop-v*"]
+  # No tag trigger: releases are normally built and published locally
+  # (npm run desktop:release, desktop/scripts/release-local.mjs), which pushes
+  # the desktop-v* tag itself - a build here too would burn Windows minutes.
 
 # One release at a time, so two runs can't claim the same version.
 concurrency:
-  group: desktop-${{ (github.event_name == 'push' || inputs.release != 'none') && 'release' || github.run_id }}
+  group: desktop-${{ inputs.release != 'none' && 'release' || github.run_id }}
 
 jobs:
   # The tag being released: the pushed tag, or one made here from the
@@ -77,6 +78,9 @@ jobs:
           # - os: macos-latest # Apple Silicon
           #   bundles: app,dmg
     runs-on: ${{ matrix.os }}
+    # Windows minutes count double against the free quota: a stuck build
+    # shouldn't burn hours before GitHub's 6-hour default kills it.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -157,6 +161,8 @@ jobs:
         run: |
           pip install -r requirements-desktop.txt
           python -m app.pipeline.nsfw_classifier
+          python -m app.pipeline.matte
+          python -m app.pipeline.ocr
           pyinstaller desktop.spec --noconfirm
           mkdir -p ../src-tauri/resources
           rm -rf ../src-tauri/resources/engine

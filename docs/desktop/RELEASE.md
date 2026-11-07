@@ -189,15 +189,19 @@ Releasing a version needs no local setup: on GitHub, **Actions > Desktop > Run w
 
 **Release notes.** Before releasing, add a line per user-visible change to `next` in `desktop/release-notes.json` and commit it - plain language, written for users (what changed for them, not how). The notes show in three places: the update banner's **What's new** (before updating, from `latest.json`), a **What's new** dialog shown once on the first launch after the app updates itself (every version since the one last run; the notes are bundled with the app), and the release page. The editor footer's **What's new** link reopens the latest ones any time. A fresh install shows nothing.
 
-Or, from a clean `master` on your machine:
+**Preferred: release from your own Windows machine** (no Actions minutes - a workflow release costs about 40 Windows-weighted minutes of the monthly quota). From a clean, up-to-date `master`:
 
 ```sh
 npm run desktop:release -- patch      # or minor, major, or an exact version like 0.2.0
+npm run desktop:release -- patch --skip-tests
+npm run desktop:release -- --publish-only   # retry the upload if publishing failed
 ```
 
-1. `desktop/scripts/release.mjs` sets the version in `package.json` (and its lock), `src-tauri/tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, moves the `next` notes in `desktop/release-notes.json` under the new version (with today's date), commits, tags `desktop-v<version>` and pushes both. It refuses to release while `next` is empty.
-2. The tag push starts `desktop.yml`, which builds both platforms with the signing key; `desktop/scripts/update-manifest.mjs` checks that the tag matches the version, renames the assets and writes `latest.json` with the version's notes.
-3. When every platform has built, the release is **published** in the releases repo (Windows installer, macOS DMG and update tarball, fixed-name copies of both installers, `latest.json`) as the latest release. Installed apps show the update banner on their next check (launch, or every 6 hours), and the website's download buttons serve it. If any platform fails, nothing is published.
+One-time setup: `desktop/.env.release.local` with `RELEASES_TOKEN=<the releases-repo token>` (git-ignored), the updater key in `~/.tauri/`, `desktop/.env.production.local` with the same values as the repository variables, Python 3.11 (`py -3.11`, or set `DESKTOP_PYTHON`), Rust and Node. `desktop/scripts/release-local.mjs` checks all of it before changing anything.
+
+1. Runs the desktop tests, then `desktop/scripts/release.mjs --no-push`: sets the version in `package.json` (and its lock), `src-tauri/tauri.conf.json`, `Cargo.toml` and `Cargo.lock`, moves the `next` notes in `desktop/release-notes.json` under the new version (with today's date), commits and tags `desktop-v<version>` locally. It refuses to release while `next` is empty.
+2. Builds the engine (in `backend/.venv-desktop`) and the Windows installer with the signing key; `desktop/scripts/update-manifest.mjs` checks that the tag matches the version, renames the assets and writes `latest.json` with the version's notes. If the build fails, the version commit and tag are undone.
+3. Pushes the commit and tag (a tag push no longer starts `desktop.yml`), then the release is **published** in the releases repo - as a draft first, made the latest release only once every file is uploaded (Windows installer, macOS DMG and update tarball, fixed-name copies of both installers, `latest.json`) as the latest release. Installed apps show the update banner on their next check (launch, or every 6 hours), and the website's download buttons serve it. If any platform fails, nothing is published.
 
 There's no manual check before users get it, so try the build first when a change is risky: run the workflow by hand on `master` (Actions > Desktop > Run workflow) and install the artifact.
 

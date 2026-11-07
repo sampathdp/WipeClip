@@ -1,5 +1,7 @@
-// Releases a new desktop version in one command:
-//   npm run desktop:release -- 0.1.2      (or: patch | minor | major)
+// Version bump for a desktop release. Usually run for you: by
+// desktop/scripts/release-local.mjs (npm run desktop:release, builds on this
+// machine) or by the Desktop workflow's "release" input.
+//   node desktop/scripts/release.mjs 0.1.2 [--no-push]   (or: patch | minor | major)
 // Sets the version everywhere the app reads it (package.json and its lock,
 // src-tauri/tauri.conf.json, Cargo.toml and Cargo.lock), files the "next"
 // notes in desktop/release-notes.json under that version (the app shows them
@@ -21,6 +23,9 @@ const fail = (msg) => {
 const conf = path.join(root, "src-tauri", "tauri.conf.json");
 const current = JSON.parse(readFileSync(conf, "utf8")).version;
 const arg = process.argv[2];
+// --no-push: commit and tag only (desktop/scripts/release-local.mjs builds
+// first and pushes once the build has worked).
+const noPush = process.argv.includes("--no-push");
 if (!arg) fail(`Usage: npm run desktop:release -- <version|patch|minor|major>  (now ${current})`);
 
 const [ma, mi, pa] = current.split(".").map(Number);
@@ -62,6 +67,10 @@ writeFileSync(notesFile, JSON.stringify({ next: [], releases: [{ version: next, 
 git("add", "package.json", "package-lock.json", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock", "desktop/release-notes.json");
 git("commit", "-m", `chore: release desktop ${next}`);
 git("tag", tag);
+if (noPush) {
+  console.log(`Committed and tagged ${tag} (not pushed).`);
+  process.exit(0);
+}
 git("push", "origin", branch);
 git("push", "origin", tag);
-console.log(`Released ${tag}. GitHub builds and publishes it (Actions > Desktop); apps offer the update once it's done.`);
+console.log(`Pushed ${tag}.`);
