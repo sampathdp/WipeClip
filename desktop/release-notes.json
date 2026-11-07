@@ -1,14 +1,19 @@
 {
-  "next": [
-    "Remove, blur or replace your webcam background - no green screen needed. Pick it under Background on a webcam layer, or before you record to see it live. It runs on your computer.",
-    "Draft can now read your screen on your computer: chapters named after what was on screen, cuts for waiting, labels for the buttons you clicked, and a privacy check for emails, keys and card numbers that you review before export.",
-    "New Scenes tab shows the parts of your recording at a glance - click one to jump there.",
-    "A Projects button in the editor takes you back to your projects (your work is saved).",
-    "Fixed: the preview could get stuck on one frame after the playhead reached the end of the video.",
-    "Smoother recording on modest computers: capture no longer waits on a slow encoder, lighter previews, and sensible defaults (720p, lighter webcam) on lower-end PCs.",
-    "Fixed: the More menu in the editor opened behind the video preview."
-  ],
+  "next": [],
   "releases": [
+    {
+      "version": "1.0.0",
+      "date": "2026-11-07",
+      "notes": [
+        "Remove, blur or replace your webcam background - no green screen needed. Pick it under Background on a webcam layer, or before you record to see it live. It runs on your computer.",
+        "Draft can now read your screen on your computer: chapters named after what was on screen, cuts for waiting, labels for the buttons you clicked, and a privacy check for emails, keys and card numbers that you review before export.",
+        "New Scenes tab shows the parts of your recording at a glance - click one to jump there.",
+        "A Projects button in the editor takes you back to your projects (your work is saved).",
+        "Fixed: the preview could get stuck on one frame after the playhead reached the end of the video.",
+        "Smoother recording on modest computers: capture no longer waits on a slow encoder, lighter previews, and sensible defaults (720p, lighter webcam) on lower-end PCs.",
+        "Fixed: the More menu in the editor opened behind the video preview."
+      ]
+    },
     {
       "version": "0.1.18",
       "date": "2026-11-05",
