@@ -131,6 +131,8 @@ The export's timeline limit (10 minutes) bounds the measurement's memory.
 
 ## Webcam background removal: not implemented
 
+**Update (7 November 2026):** implemented in the engine instead of the browser; see [WEBCAM-BACKGROUND.md](WEBCAM-BACKGROUND.md). The text below is this phase's original decision.
+
 **Decision:** not added in this phase. Chroma key on video layers (green screen) still works for webcams.
 
 The preview and the export must show the same matte, which means a per-frame mask for the whole webcam track. The options checked:

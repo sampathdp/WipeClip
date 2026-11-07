@@ -6,6 +6,7 @@ import { CREATOR_PRESETS, type CreatorPresetId } from "@/lib/editor/creatorPrese
 import { useClockTime, type Clock } from "@/lib/editor/clock";
 import { voiceoverSupported } from "@/lib/editor/voiceover";
 import { DEFAULT_KEY } from "@/lib/editor/chromaKey";
+import { DEFAULT_MATTE, MATTE_MODE_LABELS, fullMatte, type MatteJob } from "@/lib/editor/matte";
 import { EASE_LABELS, KEYFRAME_SNAP, clipTransformAt, keyframeAt, overlayValues, upsertKeyframe, type KeyValues } from "@/lib/editor/keyframes";
 import { FILTERS, FILTER_ORDER } from "@/lib/editor/look";
 import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
@@ -46,6 +47,7 @@ import {
   type TextAnim,
   type TextStyle,
   type VoiceFx,
+  type WebcamMatte,
 } from "@/lib/editor/types";
 import { TEXT_ANIM_LABELS } from "@/lib/editor/textAnim";
 import { DEFAULT_DUCK_AMOUNT } from "@/lib/editor/ducking";
@@ -1686,10 +1688,13 @@ export function OverlayPanel({
   style,
   fonts,
   onCamLayout,
+  background,
 }: {
   overlay: Overlay;
   /** Video layers: place as a webcam (webcamLayout.ts); null = by hand. */
   onCamLayout?: (layout: CamLayout | null) => void;
+  /** Video layers: webcam background removal. */
+  background?: MatteControls;
   keys: KeyframeControls;
   /** Uploaded fonts to offer, and uploading another. */
   fonts: { custom: { key: string; label: string }[]; onUpload: (file: File) => void };
@@ -1896,6 +1901,9 @@ export function OverlayPanel({
           </div>
         )}
         {o.kind === "video" && onCamLayout && <CamLayoutSection layout={o.camLayout} onChange={onCamLayout} />}
+        {o.kind === "video" && background && (
+          <BackgroundSection matte={o.matte ?? null} controls={background} onChange={(matte) => onChange({ matte } as Partial<Overlay>)} gesture={gesture} />
+        )}
 
         <OverlayTransformFields overlay={o} onChange={onChange} gesture={gesture} keys={keys} />
 
@@ -1913,7 +1921,7 @@ export function OverlayPanel({
               ))}
             </select>
           </Field>
-          {(o.kind === "image" || o.kind === "video") && <ChromaKeySection overlay={o} onChange={onChange} gesture={gesture} />}
+          {(o.kind === "image" || (o.kind === "video" && !o.matte)) && <ChromaKeySection overlay={o} onChange={onChange} gesture={gesture} />}
         </div>
         <MaskSection mask={o.mask} onChange={(mask) => onChange({ mask })} gesture={gesture} />
 
@@ -2074,6 +2082,142 @@ const BLEND_LABELS: Record<BlendMode, string> = {
 };
 
 type EyeDropperCtor = new () => { open: () => Promise<{ sRGBHex: string }> };
+
+export interface MatteControls {
+  /** Why background removal can't run on this layer, or null. */
+  unsupported: string | null;
+  /** The engine's work on this layer's video. */
+  job: MatteJob | null;
+  /** The chosen background image or video, if it's still there. */
+  bgSource: MediaSource | null;
+  onPickImage: () => void;
+  onPickVideo: () => void;
+  onRetry: () => void;
+}
+
+const MATTE_MODES = ["original", "remove", "blur", "image", "video"] as const;
+
+/** Webcam background removal (matte.ts): no green screen needed. The mask
+ * is made on this computer the first time; switching modes or adjusting
+ * the edge afterwards is instant. */
+function BackgroundSection({
+  matte,
+  controls,
+  onChange,
+  gesture,
+}: {
+  matte: WebcamMatte | null;
+  controls: MatteControls;
+  onChange: (m: WebcamMatte | null) => void;
+  gesture: Gesture;
+}) {
+  const m = matte ? fullMatte(matte) : null;
+  const set = (patch: Partial<WebcamMatte>) => m && onChange({ ...m, ...patch });
+  const { unsupported, job, bgSource } = controls;
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const missingBg = !!m && (m.mode === "image" || m.mode === "video") && !!m.bgSourceId && !bgSource;
+  return (
+    <div className="space-y-3">
+      <SectionTitle>Background</SectionTitle>
+      {unsupported ? (
+        <p className="text-[11px] text-muted">{unsupported}</p>
+      ) : (
+        <>
+          <Chips
+            label="Webcam background"
+            value={m ? m.mode : "original"}
+            onChange={(mode) => (mode === "original" ? onChange(null) : onChange({ ...(m ?? DEFAULT_MATTE), mode }))}
+            options={MATTE_MODES.map((k) => ({ value: k, label: k === "original" ? "Original" : MATTE_MODE_LABELS[k] }))}
+          />
+          {m && (
+            <Chips
+              label="Edge detail"
+              value={m.detail}
+              onChange={(detail) => set({ detail })}
+              options={[
+                { value: "fine", label: "Fine hair" },
+                { value: "fast", label: "Faster" },
+              ]}
+            />
+          )}
+          {m && job?.status === "working" && (
+            <div className="space-y-1" role="status">
+              <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
+                <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: pct(job.progress) }} />
+              </div>
+              <p className="text-[11px] text-muted">Finding you in the video… {pct(job.progress)}. Runs on this computer; you can keep editing.</p>
+            </div>
+          )}
+          {m && job?.status === "error" && (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-red-500/40 bg-red-500/5 p-2 text-[11px] text-red-600 dark:text-red-400" role="alert">
+              <span>{job.message}</span>
+              <button type="button" onClick={controls.onRetry} className="shrink-0 rounded border border-border px-2 py-0.5 font-semibold text-foreground hover:border-accent-2">
+                Try again
+              </button>
+            </div>
+          )}
+          {m?.mode === "blur" && <SliderField label="Blur" value={m.blur} min={0} max={100} neutral={DEFAULT_MATTE.blur} onChange={(blur) => set({ blur })} gesture={gesture} />}
+          {m && (m.mode === "image" || m.mode === "video") && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={m.mode === "image" ? controls.onPickImage : controls.onPickVideo}
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-foreground hover:border-accent-2"
+                >
+                  {bgSource ? "Change…" : m.mode === "image" ? "Choose image…" : "Choose video…"}
+                </button>
+                <span className="min-w-0 truncate text-[11px] text-muted">
+                  {missingBg ? "The background file is missing. Choose it again." : bgSource ? "Background set" : "No background chosen yet"}
+                </span>
+              </div>
+              {bgSource && (
+                <>
+                  <Chips label="Background fit" value={m.fit} onChange={(fit) => set({ fit })} options={[{ value: "fill", label: "Fill" }, { value: "fit", label: "Fit" }]} />
+                  <SliderField label="Zoom" value={m.scale} min={1} max={4} step={0.05} neutral={1} format={(v) => `${v.toFixed(2)}×`} onChange={(scale) => set({ scale })} gesture={gesture} />
+                  <SliderField label="Position left to right" value={m.x} min={0} max={1} step={0.01} neutral={0.5} format={pct} onChange={(x) => set({ x })} gesture={gesture} />
+                  <SliderField label="Position top to bottom" value={m.y} min={0} max={1} step={0.01} neutral={0.5} format={pct} onChange={(y) => set({ y })} gesture={gesture} />
+                  {m.mode === "video" && (
+                    <label className="flex items-center gap-2 text-xs font-medium text-foreground">
+                      <input type="checkbox" className="accent-[var(--accent)]" checked={m.loop} onChange={(e) => set({ loop: e.target.checked })} />
+                      Loop the video (off: hold its last frame)
+                    </label>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+          {m && (
+            <details className="rounded-xl border border-border p-3">
+              <summary className="cursor-pointer select-none text-xs font-semibold text-foreground">Edge</summary>
+              <div className="mt-3 space-y-3">
+                <SliderField
+                  label="Outline"
+                  value={m.edge}
+                  min={-100}
+                  max={100}
+                  neutral={0}
+                  format={(v) => (v === 0 ? "As found" : v < 0 ? `Tighter ${-Math.round(v)}` : `Looser ${Math.round(v)}`)}
+                  onChange={(edge) => set({ edge })}
+                  gesture={gesture}
+                />
+                <SliderField label="Softness" value={m.soft} min={0} max={100} neutral={DEFAULT_MATTE.soft} onChange={(soft) => set({ soft })} gesture={gesture} />
+                <p className="text-[11px] text-muted">Tighter trims leftover background around hair and shoulders; looser brings back edges that were cut off.</p>
+                <button
+                  type="button"
+                  onClick={() => set({ edge: DEFAULT_MATTE.edge, soft: DEFAULT_MATTE.soft, blur: DEFAULT_MATTE.blur, fit: DEFAULT_MATTE.fit, x: 0.5, y: 0.5, scale: 1, loop: true })}
+                  className="text-[11px] font-semibold text-accent hover:underline dark:text-accent-light"
+                >
+                  Reset adjustments
+                </button>
+              </div>
+            </details>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 function ChromaKeySection({ overlay: o, onChange, gesture }: { overlay: Overlay; onChange: (patch: Partial<Overlay>) => void; gesture: Gesture }) {
   const key = o.key;

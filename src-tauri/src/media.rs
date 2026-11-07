@@ -157,6 +157,30 @@ pub fn media_open(
         .collect()
 }
 
+/// The engine's cache of matted webcam videos (backend/app/pipeline/
+/// matte.py), in the app's local data folder (engine.rs passes it on).
+pub(crate) const MATTE_DIR: &str = "matte-cache";
+
+/// Whether `path` is a matted video the engine made: an .mp4 directly in
+/// the matte cache, compared after resolving both sides.
+fn in_matte_dir(dir: &Path, path: &Path) -> bool {
+    let (Ok(dir), Ok(file)) = (fs::canonicalize(dir), fs::canonicalize(path)) else { return false };
+    file.parent() == Some(dir.as_path()) && has_ext(&file, &["mp4"]) && file.is_file()
+}
+
+/// Lets the editor play a matted webcam video (webcam background removal).
+/// Only files the engine wrote to its matte cache are allowed - not
+/// remembered, since they're a cache made again when missing.
+#[tauri::command]
+pub fn matte_open(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join(MATTE_DIR);
+    let path = PathBuf::from(path);
+    if !in_matte_dir(&dir, &path) {
+        return Err("That file isn't a background removal video.".into());
+    }
+    app.asset_protocol_scope().allow_file(&path).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +191,23 @@ mod tests {
         assert!(!has_ext(Path::new("C:/a/clip.exe"), &VIDEO_EXTS));
         assert!(!has_ext(Path::new("C:/a/clip"), &VIDEO_EXTS));
         assert!(has_ext(Path::new("C:/rec/mic.m4a"), &RECORDING_EXTS));
+    }
+
+    #[test]
+    fn matte_files_only_from_the_cache() {
+        let root = std::env::temp_dir().join(format!("wipeclip-matte-test-{}", std::process::id()));
+        let cache = root.join(MATTE_DIR);
+        fs::create_dir_all(cache.join("sub")).unwrap();
+        fs::write(cache.join("a.mp4"), b"x").unwrap();
+        fs::write(cache.join("a.exe"), b"x").unwrap();
+        fs::write(cache.join("sub").join("b.mp4"), b"x").unwrap();
+        fs::write(root.join("c.mp4"), b"x").unwrap();
+        assert!(in_matte_dir(&cache, &cache.join("a.mp4")));
+        assert!(!in_matte_dir(&cache, &cache.join("a.exe")));
+        assert!(!in_matte_dir(&cache, &cache.join("sub").join("b.mp4")));
+        assert!(!in_matte_dir(&cache, &root.join("c.mp4")));
+        assert!(!in_matte_dir(&cache, &cache.join("..").join("c.mp4")));
+        assert!(!in_matte_dir(&cache, &cache.join("missing.mp4")));
+        let _ = fs::remove_dir_all(&root);
     }
 }

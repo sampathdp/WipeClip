@@ -9,12 +9,13 @@ import { SHAPE_LABELS } from "@/lib/editor/shapes";
 import { formatTime } from "@/lib/editor/timeline";
 import type { FocusPreset } from "@/lib/editor/focus";
 import type { Chapter, Draft, DraftItem, EditSuggestion, MaskMode, PrivacyMask, ShapeType } from "@/lib/editor/types";
+import { SCENE_TAG_LABELS, type ScreenAnalysis, type Understanding } from "@/lib/editor/sceneAnalysis";
 import { willApply } from "@/lib/editor/draft";
 import { ActionButton, PanelShell, SecondsInput } from "./Inspector";
 import { SliderField, type Gesture } from "./Panels";
 import { TrashIcon } from "./icons";
 
-export type TutorialTab = "draft" | "review" | "chapters" | "shortcuts" | "privacy" | "annotate" | "retake";
+export type TutorialTab = "draft" | "scenes" | "review" | "chapters" | "shortcuts" | "privacy" | "annotate" | "retake";
 
 /** What "Generate draft" proposes (src/lib/editor/draft.ts). */
 export interface DraftSettings {
@@ -24,10 +25,17 @@ export interface DraftSettings {
   cuts: boolean;
   review: ReviewSettings;
   chapters: boolean;
+  /** Read the screen (desktop engine): scenes, chapter titles, waiting
+   * cuts, annotations and privacy suggestions (sceneAnalysis.ts). */
+  screen: boolean;
+  screenLevel: "quick" | "thorough";
+  annotations: boolean;
+  privacy: boolean;
 }
 
 const TABS: { id: TutorialTab; label: string }[] = [
   { id: "draft", label: "Draft" },
+  { id: "scenes", label: "Scenes" },
   { id: "review", label: "Review" },
   { id: "chapters", label: "Chapters" },
   { id: "shortcuts", label: "Shortcuts" },
@@ -79,6 +87,13 @@ export interface TutorialPanelProps {
   onClose: () => void;
   hasEvents: boolean;
   isMac: boolean;
+  // scenes
+  /** Screen reading runs here (desktop app, a video in the project). */
+  screenAvailable: boolean;
+  scene: { analysis: ScreenAnalysis; understanding: Understanding } | null;
+  onAnalyzeScreen: (level: "quick" | "thorough") => void;
+  /** Frame previews of draft items (privacy: the spot to hide), by item id. */
+  draftPreviews: Record<string, { src: string; box?: [number, number, number, number] }>;
   // review
   suggestions: EditSuggestion[];
   analysis: string | null;
@@ -153,6 +168,7 @@ export function TutorialPanel(p: TutorialPanelProps) {
         ))}
       </div>
       {p.tab === "draft" && <DraftTab {...p} />}
+      {p.tab === "scenes" && <ScenesTab {...p} />}
       {p.tab === "review" && <ReviewTab {...p} />}
       {p.tab === "chapters" && <ChaptersTab {...p} />}
       {p.tab === "shortcuts" && <ShortcutsTab {...p} />}
@@ -163,12 +179,47 @@ export function TutorialPanel(p: TutorialPanelProps) {
   );
 }
 
-const KIND_LABEL: Record<DraftItem["kind"], string> = { cut: "Cuts", zoom: "Zooms", highlights: "Click highlights", chapter: "Chapters", review: "Worth a look" };
-const KIND_ORDER: DraftItem["kind"][] = ["cut", "zoom", "highlights", "chapter", "review"];
+const KIND_LABEL: Record<DraftItem["kind"], string> = {
+  privacy: "Privacy review",
+  cut: "Cuts",
+  zoom: "Zooms",
+  highlights: "Click highlights",
+  chapter: "Chapters",
+  annotation: "Annotations",
+  review: "Worth a look",
+};
+const KIND_ORDER: DraftItem["kind"][] = ["privacy", "cut", "zoom", "highlights", "chapter", "annotation", "review"];
+
+/** A frame preview, with a spot outlined (fractions of the frame). */
+function FramePreview({ src, box }: { src: string; box?: [number, number, number, number] }) {
+  return (
+    <div className="relative mt-1.5 overflow-hidden rounded-md border border-border">
+      {/* eslint-disable-next-line @next/next/no-img-element -- a data URL from the local engine */}
+      <img src={src} alt="" className="block w-full" />
+      {box && (
+        <div
+          className="absolute rounded-sm border-2 border-red-500 bg-red-500/20"
+          style={{ left: `${box[0] * 100}%`, top: `${box[1] * 100}%`, width: `${box[2] * 100}%`, height: `${box[3] * 100}%` }}
+        />
+      )}
+    </div>
+  );
+}
 
 function DraftTab(p: TutorialPanelProps) {
   const keys = useShortcutKeys();
-  const [ds, setDs] = useState<DraftSettings>({ zooms: true, preset: "balanced", highlights: true, cuts: true, review: { silence: DEFAULT_SILENCE, idle: 10 }, chapters: true });
+  const [ds, setDs] = useState<DraftSettings>({
+    zooms: true,
+    preset: "balanced",
+    highlights: true,
+    cuts: true,
+    review: { silence: DEFAULT_SILENCE, idle: 10 },
+    chapters: true,
+    screen: p.screenAvailable,
+    screenLevel: "quick",
+    annotations: true,
+    privacy: true,
+  });
   const d = p.draft;
   const set = (patch: Partial<DraftSettings>) => setDs((s) => ({ ...s, ...patch }));
   const accepted = d ? d.items.filter((i) => willApply(d, i)).length : 0;
@@ -181,8 +232,11 @@ function DraftTab(p: TutorialPanelProps) {
     <>
       <Hint>
         Builds a first edit from the recording: zooms and click highlights from your mouse and keyboard activity, cuts for long pauses and dead time,
-        chapters where something changed. It uses timing, sound levels and the recorded events only - it doesn&apos;t understand what is on screen or
-        what is said. Nothing changes until you apply what you accept.
+        chapters where something changed.{" "}
+        {ds.screen
+          ? "With “Read the screen”, it also reads what's on screen - on this computer, nothing is uploaded - for chapter titles, annotations and privacy checks. Everything says what it's based on."
+          : "It uses timing, sound levels and the recorded events only - it doesn't read what is on screen."}{" "}
+        Nothing changes until you apply what you accept.
       </Hint>
       <div className="space-y-2 rounded-xl border border-border p-3">
         <Check label="Zooms" checked={ds.zooms} onChange={(zooms) => set({ zooms })} />
@@ -221,6 +275,42 @@ function DraftTab(p: TutorialPanelProps) {
           </div>
         )}
         <Check label="Chapters" checked={ds.chapters} onChange={(chapters) => set({ chapters })} />
+        {p.screenAvailable && (
+          <>
+            <Check
+              label="Read the screen"
+              checked={ds.screen}
+              onChange={(screen) => set({ screen })}
+              hint="Finds scenes and reads text where the screen settles. Runs on this computer."
+            />
+            {ds.screen && (
+              <div className="ml-6 space-y-2">
+                <div className="grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="How closely to read">
+                  {(
+                    [
+                      ["quick", "Quick", "A few moments a minute, only what changed"],
+                      ["thorough", "Thorough", "More moments, whole screen - better for privacy; slower"],
+                    ] as const
+                  ).map(([v, label, hint]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      role="radio"
+                      aria-checked={ds.screenLevel === v}
+                      title={hint}
+                      onClick={() => set({ screenLevel: v })}
+                      className={`rounded-lg border px-2 py-1 text-[11px] font-semibold ${ds.screenLevel === v ? "border-accent-2 bg-accent-2/10 text-foreground" : "border-border text-muted hover:text-foreground"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <Check label="Annotations from clicked buttons and commands" checked={ds.annotations} onChange={(annotations) => set({ annotations })} />
+                <Check label="Privacy check (emails, keys, card numbers…)" checked={ds.privacy} onChange={(privacy) => set({ privacy })} />
+              </div>
+            )}
+          </>
+        )}
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         {p.analysis ? (
@@ -284,11 +374,19 @@ function DraftTab(p: TutorialPanelProps) {
               <Title>
                 {KIND_LABEL[k]} ({counts(k).length})
               </Title>
+              {k === "privacy" && !d.appliedAt && (
+                <p className="mb-2 text-[11px] text-muted">
+                  Possible sensitive text, found on this computer. Accept each one you want hidden - they&apos;re not accepted by “Accept all”. Detection
+                  can miss things, so watch the recording before you publish. After applying, move or resize a mask in the Privacy tab.
+                </p>
+              )}
               {!d.appliedAt && counts(k).length > 1 && (
                 <div className="mb-2 flex gap-3 text-[11px]">
-                  <button type="button" className="font-semibold text-accent-2 underline" onClick={() => p.onDraftStatus("accepted", k)}>
-                    Accept all {KIND_LABEL[k].toLowerCase()}
-                  </button>
+                  {k !== "privacy" && (
+                    <button type="button" className="font-semibold text-accent-2 underline" onClick={() => p.onDraftStatus("accepted", k)}>
+                      Accept all {KIND_LABEL[k].toLowerCase()}
+                    </button>
+                  )}
                   <button type="button" className="font-semibold text-muted underline" onClick={() => p.onDraftStatus("rejected", k)}>
                     Reject all
                   </button>
@@ -308,6 +406,7 @@ function DraftTab(p: TutorialPanelProps) {
                           <p className="text-[11px] text-amber-600 dark:text-amber-400">Mostly inside the cut at {cutTitle(i.insideCut)}: left out if that cut is applied.</p>
                         )}
                         {i.status === "accepted" && !willApply(d, i) && <p className="text-[11px] text-muted">Won&apos;t be applied: its cut is accepted.</p>}
+                        {p.draftPreviews[i.id] && <FramePreview src={p.draftPreviews[i.id].src} box={p.draftPreviews[i.id].box} />}
                       </div>
                       <span className={`rounded px-1 text-[10px] font-semibold ${CONFIDENCE[i.confidence]}`}>{i.confidence}</span>
                     </div>
@@ -336,6 +435,102 @@ function DraftTab(p: TutorialPanelProps) {
               </ul>
             </div>
           ))}
+        </>
+      )}
+    </>
+  );
+}
+
+function ScenesTab(p: TutorialPanelProps) {
+  const [level, setLevel] = useState<"quick" | "thorough">("quick");
+  const [open, setOpen] = useState<string | null>(null);
+  const u = p.scene?.understanding;
+  if (!p.screenAvailable) return <Hint>Scene analysis reads the screen on your computer, in the WipeClip desktop app.</Hint>;
+  return (
+    <>
+      <Hint>
+        Finds the scenes of the recording from what&apos;s on screen - where it changes and settles, headings, dialogs, terminals, code, errors - plus
+        your clicks and what&apos;s said. It reads only English and other Latin-script text, on this computer; nothing is uploaded. Each scene says
+        what it&apos;s based on; “Unclear” means there wasn&apos;t enough to go on.
+      </Hint>
+      <div className="flex flex-wrap items-center gap-2">
+        {p.analysis ? (
+          <>
+            <span className="text-xs text-muted" role="status">
+              {p.analysis}
+            </span>
+            <button type="button" className="text-xs font-semibold underline" onClick={p.onCancelAnalysis}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <select className="rounded-lg border border-border bg-surface px-2 py-1 text-xs" value={level} onChange={(e) => setLevel(e.target.value as "quick" | "thorough")} aria-label="How closely to read">
+              <option value="quick">Quick</option>
+              <option value="thorough">Thorough (slower)</option>
+            </select>
+            <ActionButton tone="accent" onClick={() => p.onAnalyzeScreen(level)}>
+              {u ? "Analyze again" : "Analyze the screen"}
+            </ActionButton>
+          </>
+        )}
+      </div>
+      {p.scene && u && (
+        <>
+          <p className="mt-2 text-[11px] text-muted">
+            {p.scene.analysis.stats.framesRead} moments read, {u.events.length} events, {u.scenes.length} scenes · {(p.scene.analysis.stats.scanSeconds + p.scene.analysis.stats.readSeconds).toFixed(0)} s
+            {" · "}
+            <button type="button" className="font-semibold text-accent-2 underline" onClick={() => p.onTab("draft")}>
+              Review suggestions in Draft
+            </button>
+          </p>
+          <ul className="mt-3 space-y-1.5">
+            {u.scenes.map((sc) => {
+              const frame = sc.frame !== undefined ? p.scene!.analysis.frames[sc.frame] : undefined;
+              const evs = u.events.filter((e) => sc.events.includes(e.id));
+              return (
+                <li key={sc.id} className="rounded-xl border border-border p-2 text-xs">
+                  <div className="flex items-start gap-2">
+                    <button type="button" className="font-mono text-muted hover:text-foreground" onClick={() => p.onSeek(sc.start)} title="Go to">
+                      {formatTime(sc.start)}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold text-foreground">{sc.title}</p>
+                      <p className="text-[11px] text-muted">
+                        {sc.tags.map((t) => SCENE_TAG_LABELS[t]).join(" · ")} · {formatTime(sc.end - sc.start)}
+                        {sc.titleFrom === "kind" ? "" : ` · title from ${sc.titleFrom === "screen" ? "the screen" : sc.titleFrom === "speech" ? "what's said" : sc.titleFrom}`}
+                      </p>
+                    </div>
+                    <span className={`rounded px-1 text-[10px] font-semibold ${CONFIDENCE[sc.confidence >= 0.7 ? "high" : sc.confidence >= 0.5 ? "medium" : "low"]}`}>
+                      {Math.round(sc.confidence * 100)}%
+                    </span>
+                  </div>
+                  {frame && <FramePreview src={frame.preview} />}
+                  {evs.length > 0 && (
+                    <button type="button" className="mt-1 text-[11px] font-semibold text-muted underline" onClick={() => setOpen(open === sc.id ? null : sc.id)} aria-expanded={open === sc.id}>
+                      {open === sc.id ? "Hide" : "Show"} {evs.length} event{evs.length === 1 ? "" : "s"}
+                    </button>
+                  )}
+                  {open === sc.id && (
+                    <ul className="mt-1 space-y-1">
+                      {evs.map((e) => (
+                        <li key={e.id} className="flex gap-2 text-[11px]">
+                          <button type="button" className="font-mono text-muted hover:text-foreground" onClick={() => p.onSeek(Math.max(0, e.t - 0.5))}>
+                            {formatTime(e.t)}
+                          </button>
+                          <span className="min-w-0 flex-1">
+                            <span className="text-foreground">{e.description}</span>
+                            <span className="block text-muted">{e.evidence.join(". ")}.</span>
+                          </span>
+                          <span className="text-muted">{Math.round(e.confidence * 100)}%</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         </>
       )}
     </>

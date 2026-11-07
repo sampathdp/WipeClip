@@ -301,6 +301,22 @@ test("recording import keeps tracks separate and in sync", () => {
   }
 });
 
+test("a webcam background picked in the recorder opens with the recording", () => {
+  const m = manifest();
+  const tracksWith = (background: unknown): ImportedTrack[] => [
+    { track: m.tracks[0], sourceId: "screen", duration: 10, width: 1920, height: 1080 },
+    { track: { ...m.tracks[2], background } as ImportedTrack["track"], sourceId: "cam", duration: 10, width: 1280, height: 720 },
+  ];
+  const camOf = (background: unknown) => planRecordingProject(m, tracksWith(background), () => "x").project.overlays[0];
+  const blurred = camOf("blur");
+  assert.equal(blurred.kind === "video" && blurred.matte?.mode, "blur");
+  const plain = camOf(undefined);
+  assert.equal(plain.kind === "video" && plain.matte, undefined);
+  // The manifest is a file on disk: anything else is ignored.
+  const odd = camOf("image");
+  assert.equal(odd.kind === "video" && odd.matte, undefined);
+});
+
 test("recording import fails clearly without a screen track and skips empty tracks", () => {
   const m = manifest();
   assert.throws(() => planRecordingProject(m, [], () => "x"), /no screen video/);

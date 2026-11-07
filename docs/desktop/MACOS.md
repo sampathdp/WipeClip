@@ -122,7 +122,7 @@ Manual checks, recording the macOS version each time:
 Release build (unsigned, local only):
 
 ```sh
-cd backend && .venv/bin/pip install -r requirements-desktop.txt && python -m app.pipeline.nsfw_classifier && .venv/bin/pyinstaller desktop.spec --noconfirm && cd ..
+cd backend && .venv/bin/pip install -r requirements-desktop.txt && python -m app.pipeline.nsfw_classifier && python -m app.pipeline.matte && python -m app.pipeline.ocr && .venv/bin/pyinstaller desktop.spec --noconfirm && cd ..
 mkdir -p src-tauri/resources && cp -R backend/dist/wipeclip-engine src-tauri/resources/engine
 WIPECLIP_REQUIRE_ENGINE=1 npm run desktop:build -- --bundles app,dmg
 ```

@@ -51,6 +51,10 @@ export interface RecordingTrack {
   deviceLabel?: string;
   /** The device disconnected or stopped before the recording ended. */
   endedEarly?: boolean;
+  /** Webcam: the background chosen in the recorder, applied when the editor
+   * opens the recording (the file itself is the original camera). Optional,
+   * added without a format bump: readers that don't know it ignore it. */
+  background?: "remove" | "blur";
 }
 
 export interface Rect {

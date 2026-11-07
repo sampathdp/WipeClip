@@ -7,6 +7,7 @@ import { DIP_AUDIO, frameShadow, locate, sourceTimeAt, videoBox, type Layout } f
 import { CROP_TRANSITIONS, MASK_WIDTH, SOFT_TRANSITIONS, maskPixels } from "@/lib/editor/xfade";
 import type { AudioClip, Canvas, Clip, Crop, EffectClip, MediaSource, Project, TransitionType, VoiceFx } from "@/lib/editor/types";
 import { CameraCache, cameraCrop, clipView, evalCamera } from "@/lib/editor/camera";
+import { shouldSeek } from "@/lib/editor/mediaSync";
 import { appliedZooms } from "@/lib/editor/focusPrefs";
 import { PointerCache, pointerScene } from "@/lib/editor/pointer";
 import { drawScene } from "@/lib/editor/pointerDraw";
@@ -158,7 +159,7 @@ export default function PreviewPlayer({
       }
     };
 
-    const tick = (now: number) => {
+    const step = (now: number) => {
       const dt = Math.min(0.25, (now - last) / 1000);
       last = now;
       const { lay, sources, canvas, canvasSize, effects, audio, playing, rate, volume, muted, onEnded, project, mix } = state.current;
@@ -170,10 +171,7 @@ export default function PreviewPlayer({
       const setLevel = (el: HTMLMediaElement, key: string, level: number, fx: VoiceFx = "none") => playLevel(mixer, el, key, level, muted, fx);
       const els = [slotA.current, slotB.current];
       const stage = fxRef.current;
-      if (!els[0] || !els[1] || !stage || lay.clips.length === 0) {
-        raf = requestAnimationFrame(tick);
-        return;
-      }
+      if (!els[0] || !els[1] || !stage || lay.clips.length === 0) return;
 
       let t = clock.get();
       if (t > lay.total) t = lay.total;
@@ -201,16 +199,16 @@ export default function PreviewPlayer({
           if (!src) continue;
           el.playbackRate = rate * speedAt(clip, need.time - clip.start);
           ensureSrc(el, src.url);
-          const drift = Math.abs(el.currentTime - need.time);
           const driven = seekDriven(clip);
           // The primary drives the clock while playing, so it's only
           // re-seeked on a real jump (scrub, clip switch); the incoming
           // clip is kept within a quarter second of it. Seek-driven slots
           // follow every frame.
           const tolerance = driven ? 0.02 : playing ? (need.role === "primary" ? 0.5 : 0.25) : 0.03;
-          if (el.readyState >= 1 && !el.seeking && drift > tolerance && (driven || !el.ended)) {
-            el.currentTime = need.time;
-          }
+          // An ended element is seeked back too (mediaSync.ts): leaving it
+          // alone froze the preview for good once the playhead had touched
+          // the end of the recording.
+          if (shouldSeek(el, need.time, tolerance, driven)) el.currentTime = need.time;
           // A seek-driven slot is always mid-seek while playing; holding the
           // playhead for it would freeze playback.
           if (playing && !driven && !el.ended && (el.seeking || el.readyState < 3)) stalled = true;
@@ -313,6 +311,20 @@ export default function PreviewPlayer({
       syncAudio(pool, audio, sources, t, playing && !stalled, rate, (a) => volume * (heardWithSolo(a.id, mix.solo) ? 1 : 0), ensureSrc, setLevel);
 
       clock.set(t);
+    };
+
+    // One frame that throws must not stop the preview for good: the next
+    // frame is always scheduled, and the error is reported once.
+    let reported = false;
+    const tick = (now: number) => {
+      try {
+        step(now);
+      } catch (e) {
+        if (!reported) {
+          reported = true;
+          console.error("[preview] a frame failed", e);
+        }
+      }
       raf = requestAnimationFrame(tick);
     };
 

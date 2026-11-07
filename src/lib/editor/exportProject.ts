@@ -13,6 +13,8 @@ import type { Clip, MediaSource, Overlay, Project } from "./types";
 import { sourceInput } from "./sourceFile";
 import { clipKeyTimeToLocal } from "./keyframes";
 import { activeRamp, rampSegments } from "./speed";
+import { ensureMatte, fullMatte, matteUnsupported } from "./matte";
+import { IS_DESKTOP } from "../platform/env";
 import { clipMixVolume, masterGainDb, playedSourceId } from "./mix";
 
 /** What file the export makes: an MP4 (at a quality and, optionally, a
@@ -88,6 +90,7 @@ export async function exportProject(
         animOut: o.animOut,
         ...blendKey(o),
         ...(o.key ? { key: o.key } : {}),
+        ...(await mattePayload(o, sources, imageBlobs, addSourceRef)),
         ...overlayKeyframes(o),
         ...planHints(o),
         // Shape mask as a PNG at the layer's proportions.
@@ -265,6 +268,27 @@ export async function exportProject(
     onProgress,
     keep
   );
+}
+
+/** Webcam background removal (matte.ts): the matted file the preview draws
+ * from (made now if it isn't yet) and the background, sent as an image or
+ * a source video. A background that's gone exports clear, as the preview
+ * shows it. Layers it can't run on (not a disk video, the website) export
+ * their original picture, as the preview shows them. */
+async function mattePayload(o: Overlay & { kind: "video" }, sources: Record<string, MediaSource>, imageBlobs: Blob[], addSourceRef: (id: string) => number) {
+  const src = sources[o.sourceId];
+  if (!o.matte || matteUnsupported(src, IS_DESKTOP)) return {};
+  const m = fullMatte(o.matte);
+  const { path } = await ensureMatte(src, m.detail);
+  const bg = m.bgSourceId ? sources[m.bgSourceId] : undefined;
+  let mode = m.mode;
+  let bgRef = {};
+  if (mode === "image" && bg?.kind === "image") bgRef = { image: imageBlobs.push(await fitForExport(await sourceFile(bg))) - 1 };
+  else if (mode === "video" && bg && bg.duration > 0) bgRef = { video: addSourceRef(bg.id) };
+  else if (mode === "image" || mode === "video") mode = "remove";
+  return {
+    matte: { mode, path, edge: m.edge, soft: m.soft, blur: m.blur, fit: m.fit, x: m.x, y: m.y, scale: m.scale, loop: m.loop, ...bgRef },
+  };
 }
 
 /** Layer keyframes in timeline seconds. */

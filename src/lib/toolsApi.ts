@@ -615,6 +615,138 @@ export async function engineDub(
   }
 }
 
+export interface MattedVideo {
+  /** The matted file on this machine (picture on top, mask below). */
+  path: string;
+  /** Its width and half height. */
+  width: number;
+  height: number;
+  fps: number;
+}
+
+/** Desktop app: the matted file of a webcam video - webcam background
+ * removal (backend/app/pipeline/matte.py), made by the engine on this
+ * machine if it isn't cached yet. The video is a disk file (`path`), or one
+ * held in memory (`key` + `file`): the engine is asked by key first and gets
+ * the file only if it doesn't have it yet (a local hand-over; nothing goes
+ * online). `signal` stops it in the engine too. */
+export async function engineMatte(
+  input: { path: string } | { key: string; file: File },
+  duration: number,
+  detail: "fine" | "fast",
+  onProgress: (value: number) => void,
+  signal?: AbortSignal
+): Promise<MattedVideo> {
+  const engine = await localEngine();
+  if (!engine) throw new EngineUnavailableError();
+  const jobId = crypto.randomUUID();
+  const form = (withFile: boolean) => {
+    const body = new FormData();
+    if ("path" in input) body.append("path", input.path);
+    else {
+      body.append("key", input.key);
+      if (withFile) body.append("file", input.file, input.file.name || "webcam.mp4");
+    }
+    body.append("duration", String(Math.max(0, Math.round(duration * 1000) / 1000)));
+    body.append("detail", detail);
+    body.append("job_id", jobId);
+    return body;
+  };
+  const job = `${engine.url}/api/jobs/${jobId}`;
+  const cancel = () => void fetch(`${job}/cancel`, { method: "POST", headers: engineHeaders(engine) }).catch(() => {});
+  signal?.addEventListener("abort", cancel, { once: true });
+  const poll = setInterval(() => {
+    void fetch(job, { headers: engineHeaders(engine) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p: { phase: string; progress: number | null } | null) => {
+        if (p?.phase === "matte") onProgress(p.progress ?? 0);
+      })
+      .catch(() => {});
+  }, 500);
+  try {
+    const send = (withFile: boolean) => fetch(`${engine.url}/api/matte/render`, { method: "POST", body: form(withFile), headers: engineHeaders(engine), signal });
+    let res = await send(false);
+    if (res.status === 409) {
+      const detail = (await res.clone().json().catch(() => null))?.detail;
+      if (detail?.code === "need_file") res = await send(true);
+    }
+    if (res.status === 409) throw new DOMException("Background removal cancelled", "AbortError");
+    if (!res.ok) await throwApiError(res, "Couldn't remove the background from this video.");
+    return (await res.json()) as MattedVideo;
+  } finally {
+    clearInterval(poll);
+    signal?.removeEventListener("abort", cancel);
+  }
+}
+
+/** Desktop app: scene analysis of a screen recording by the engine on this
+ * machine (backend/app/pipeline/scenes.py; the result's shape is
+ * sceneAnalysis.ts ScreenAnalysis). `clicks`: [t, x, y] in source seconds
+ * and frame fractions. Nothing goes online. `signal` stops it in the engine. */
+export async function engineSceneAnalyze(
+  input: { path: string } | { key: string; file: File },
+  level: "quick" | "thorough",
+  clicks: [number, number, number][],
+  duration: number,
+  onProgress: (stage: "scan" | "read", value: number) => void,
+  signal?: AbortSignal
+): Promise<unknown> {
+  const engine = await localEngine();
+  if (!engine) throw new EngineUnavailableError();
+  const jobId = crypto.randomUUID();
+  const form = (withFile: boolean) => {
+    const body = new FormData();
+    if ("path" in input) body.append("path", input.path);
+    else {
+      body.append("key", input.key);
+      if (withFile) body.append("file", input.file, input.file.name || "recording.mp4");
+    }
+    body.append("level", level);
+    body.append("clicks", JSON.stringify(clicks));
+    body.append("duration", String(Math.max(0, Math.round(duration * 1000) / 1000)));
+    body.append("job_id", jobId);
+    return body;
+  };
+  const job = `${engine.url}/api/jobs/${jobId}`;
+  const cancel = () => void fetch(`${job}/cancel`, { method: "POST", headers: engineHeaders(engine) }).catch(() => {});
+  signal?.addEventListener("abort", cancel, { once: true });
+  const poll = setInterval(() => {
+    void fetch(job, { headers: engineHeaders(engine) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p: { phase: string; progress: number | null } | null) => {
+        if (p?.phase === "scan" || p?.phase === "read") onProgress(p.phase, p.progress ?? 0);
+      })
+      .catch(() => {});
+  }, 500);
+  try {
+    const send = (withFile: boolean) => fetch(`${engine.url}/api/scene/analyze`, { method: "POST", body: form(withFile), headers: engineHeaders(engine), signal });
+    let res = await send(false);
+    if (res.status === 409 && (await res.clone().json().catch(() => null))?.detail?.code === "need_file") res = await send(true);
+    if (res.status === 409) throw new DOMException("Scene analysis cancelled", "AbortError");
+    if (!res.ok) await throwApiError(res, "The screen couldn't be analyzed.");
+    return await res.json();
+  } finally {
+    clearInterval(poll);
+    signal?.removeEventListener("abort", cancel);
+  }
+}
+
+/** Desktop app: the person mask (w x h bytes, 255 = person) of one small
+ * live webcam frame (RGBA), for the recorder's preview. By the engine on
+ * this machine; nothing goes online. */
+export async function engineMatteFrame(rgba: Uint8ClampedArray, w: number, h: number, signal?: AbortSignal): Promise<Uint8Array> {
+  const engine = await localEngine();
+  if (!engine) throw new EngineUnavailableError();
+  const res = await fetch(`${engine.url}/api/matte/frame?w=${w}&h=${h}`, {
+    method: "POST",
+    body: new Blob([rgba as Uint8ClampedArray<ArrayBuffer>]),
+    headers: { ...engineHeaders(engine), "Content-Type": "application/octet-stream" },
+    signal,
+  });
+  if (!res.ok) await throwApiError(res, "Background removal isn't available right now.");
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 /** The engine for optional measurements: null when there's none or it
  * couldn't start (the analysis then goes without the picture). */
 async function optionalEngine(): Promise<LocalEngine | null> {

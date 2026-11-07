@@ -2,6 +2,46 @@
 
 Newest phase first.
 
+## Scene analysis and a preview fix (7 November 2026)
+
+Details: [SCENE-ANALYSIS.md](SCENE-ANALYSIS.md).
+
+**Done and verified by tests.**
+- The Draft can "Read the screen" (desktop, on this computer).
+- Results: scenes with evidence and confidence; chapters titled from on-screen headings, apps, addresses, commands or speech; cuts for silent, still, input-free waiting; annotations naming clicked buttons and terminal commands; privacy masks for possible sensitive text.
+- Privacy masks need one accept each, and export warns about unreviewed ones.
+- A Scenes tab lists the scenes with frame previews.
+- OCR: PaddleOCR PP-OCRv3 English, bundled, about 11 MB, on the existing onnxruntime.
+- Measured on an i7-9750H: Quick takes 9–13 s for a one-minute 1080p recording.
+- **Preview fix:** after the playhead had touched the end of the recording (played to it, or dragged to the edge), the preview stayed on one frame for good, because ended videos were never re-seeked or played. Fixed (`mediaSync.ts`, tested), and one failing frame can no longer stop the preview loop.
+
+**Not done.**
+- No vision-language model.
+- Latin script only.
+- Masks don't follow scrolling.
+- No real low-end machine or long recordings measured.
+
+**Manual tests still required.**
+- In the app: Read the screen on a real tutorial recording, the Scenes tab, privacy review and export, scrubbing after playing to the end.
+
+## Webcam background removal (7 November 2026)
+
+Details: [WEBCAM-BACKGROUND.md](WEBCAM-BACKGROUND.md).
+
+**Done and verified by tests.**
+- Webcam layers get Original, Remove, Blur, Image and Video backgrounds, plus edge outline and softness, with no green screen.
+- The engine makes one matted file per webcam video (picture over mask) with Google's MediaPipe selfie segmenter (Apache-2.0, 250 KB, bundled), run by the OpenCV it already ships. The preview and the export both read that file, with shared math.
+- Measured on an i7-9750H, sustained on a 24 s clip: 20.9 fps for 720p30 with "Fine hair" (color-guided edges), 28.1 fps with "Faster", on the CPU, in the background. The GPU was measured slower for this model, so it isn't used.
+- Works on recorded webcams and on video layers added from a file (handed to the local engine once, by key).
+- The recorder's camera preview shows Remove or Blur live, and the recording opens in the editor with it applied.
+- Green screen on recorded (disk) webcams: layer videos now load with CORS, so the keyed canvas can read them.
+- Settings live on the layer (undo, autosave, project files); the matted file is a derived cache.
+- The export composites the real matted file in ffmpeg, rendered and checked pixel by pixel for every mode.
+
+**Not done.** The website (no engine there, and frames are never sent to a server for this). Pixel-identical preview and export blur (very close; identical would make the Blur slider slow).
+
+**Manual tests still required.** A real webcam recording through the app UI: preview, seeking, each mode, reopening the project, and export.
+
 ## Smart Zoom 2: focus sessions, natural motion, zoom-aware cursor (5 November 2026)
 
 Details: [SMART-ZOOM-2-IMPLEMENTATION.md](SMART-ZOOM-2-IMPLEMENTATION.md).

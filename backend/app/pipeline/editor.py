@@ -443,6 +443,32 @@ class PlanOverlay:
     sprite_cols: int = 1
     sprite_rows: int = 1
     sprite_times: list[float] = field(default_factory=list)
+    # Webcam background removal (video layers; app/pipeline/matte.py): the
+    # matted file (picture on top, mask below) replaces the layer's picture.
+    matte: PlanMatte | None = None
+
+
+@dataclass
+class PlanMatte:
+    """Same settings and math as src/lib/editor/matte.ts, which draws the
+    preview from the same matted file."""
+
+    path: str
+    mode: str  # "remove" | "blur" | "image" | "video"
+    edge: float = 0.0  # -100..100: shrink .. grow the outline
+    soft: float = 25.0  # 0..100: edge softness
+    blur: float = 50.0  # 0..100: background blur ("blur")
+    bg_path: str | None = None  # "image" / "video"
+    bg_width: int = 0
+    bg_height: int = 0
+    fit: str = "fill"  # "fill" | "fit"
+    x: float = 0.5  # 0..1: which part of an overflowing background shows
+    y: float = 0.5
+    scale: float = 1.0  # 1..4
+    loop: bool = True  # "video": loop, else hold its last frame
+
+
+MATTE_MODES = ("remove", "blur", "image", "video")
 
 
 @dataclass
@@ -548,7 +574,7 @@ def plan_from_json(text: str) -> ExportPlan:
     return ExportPlan(
         **{k: v for k, v in raw.items() if k not in ("clips", "overlays", "audio", "effects", "pointer", "masks")},
         clips=[PlanClip(**{**c, "camera": [tuple(r) for r in c.get("camera", [])]}) for c in raw["clips"]],
-        overlays=[PlanOverlay(**o) for o in raw.get("overlays", [])],
+        overlays=[PlanOverlay(**{**o, "matte": PlanMatte(**o["matte"]) if o.get("matte") else None}) for o in raw.get("overlays", [])],
         audio=[PlanAudio(**a) for a in raw.get("audio", [])],
         effects=[PlanEffect(**e) for e in raw.get("effects", [])],
         pointer=(
@@ -1434,8 +1460,85 @@ def _effect_filters(e: PlanEffect, W: int, H: int) -> str:
 _BACK_OUT = "(1+2.70158*pow({p}-1,3)+1.70158*pow({p}-1,2))"
 
 
+def matte_curve(m: float, edge: float) -> float:
+    """The mask's edge curve, 0..1 in and out - the same as edgeCurve() in
+    src/lib/editor/matte.ts. Twice as steep as the mask, centered on a
+    threshold that `edge` moves: below it a pixel is background, above it
+    the person. Steepening drops the faint halo the model leaves around a
+    person; moving the threshold over the softened mask grows or shrinks
+    the outline."""
+    c = 0.5 - max(-100.0, min(100.0, edge)) / 100 * 0.4
+    return max(0.0, min(1.0, (m - c) * 2 + 0.5))
+
+
+def matte_soft_sigma(soft: float, height: float) -> float:
+    """Edge softness as a Gaussian blur's sigma in pixels of a mask
+    `height` tall (matte.ts softSigma)."""
+    return (0.002 + 0.02 * max(0.0, min(100.0, soft)) / 100) * height
+
+
+def matte_blur_sigma(blur: float, height: float) -> float:
+    """Background blur's sigma in pixels of a layer `height` tall (matte.ts blurSigma)."""
+    return 0.05 * max(0.0, min(100.0, blur)) / 100 * height
+
+
+def matte_bg_rect(box_w: float, box_h: float, m: PlanMatte) -> tuple[float, float, float, float]:
+    """Where an image or video background goes in the layer's box: (left,
+    top, width, height) in the box's pixels (matte.ts bgRect). "fill" covers
+    the box, "fit" shows all of it; `scale` enlarges it; x/y pick which part
+    of an overflowing background shows (0.5 = centered)."""
+    bw, bh = max(1, m.bg_width), max(1, m.bg_height)
+    k = (max if m.fit == "fill" else min)(box_w / bw, box_h / bh) * max(1.0, min(4.0, m.scale))
+    w, h = bw * k, bh * k
+    return (box_w - w) * m.x, (box_h - h) * m.y, w, h
+
+
+def _matte_head(m: PlanMatte, src: str, n: int, plan: ExportPlan, start: float, end: float, tw: int, th: int, bg_idx: int | None) -> str:
+    """Filters from the matted file `src` (picture on top, mask below) to the
+    layer at tw x th, without its output label: the person over a clear,
+    blurred, image or video background."""
+    s, fps, length = _num(start), _num(plan.fps), _num(max(0.05, end - start))
+    c = 0.5 - max(-100.0, min(100.0, m.edge)) / 100 * 0.4
+    # The mask half is limited-range luma (16..235) as encoded: at the
+    # layer's size, to 0..1, softened, then the edge curve (matte_curve) -
+    # sizes relative to the height, as the preview does at its own size.
+    graph = [
+        f"{src}setpts=PTS-STARTPTS+{s}/TB,fps={fps},split[mpa{n}][mpb{n}]",
+        f"[mpb{n}]crop=iw:ih/2:0:ih/2,extractplanes=y,scale={tw}:{th}:flags=bicubic,"
+        f"lut=c0='clip((val-16)*255/219,0,255)',gblur=sigma={_num(matte_soft_sigma(m.soft, th))}:steps=2,"
+        f"lut=c0='clip(((val/255-{_num(c)})*2+0.5)*255,0,255)'[mpm{n}]",
+    ]
+    picture = f"[mpa{n}]crop=iw:ih/2:0:0,scale={tw}:{th}:flags=lanczos,format=rgba"
+    if m.mode == "blur":
+        graph.append(f"{picture},split[mpc{n}][mpd{n}]")
+        graph.append(f"[mpd{n}]gblur=sigma={_num(max(0.01, matte_blur_sigma(m.blur, th)))}:steps=3[mpg{n}]")
+        back = f"[mpg{n}]"
+    else:
+        graph.append(f"{picture}[mpc{n}]")
+        back = None
+    if m.mode in ("image", "video") and bg_idx is not None:
+        left, top, w, h = matte_bg_rect(tw, th, m)
+        prep = f"[{bg_idx}:v]"
+        if m.mode == "video":
+            # Starts with the layer; ffmpeg loops the input (-stream_loop),
+            # or the last frame is held when it's shorter than the layer.
+            prep += ("" if m.loop else f"tpad=stop_mode=clone:stop_duration={length},") + f"fps={fps},"
+        graph.append(f"{prep}setpts=PTS-STARTPTS+{s}/TB,scale={max(2, round(w))}:{max(2, round(h))}:flags=bicubic,format=rgba[mpi{n}]")
+        # A clear box the size of the layer, the background placed in it
+        # (a "fit" background leaves the rest clear).
+        graph.append(f"color=c=black@0:s={tw}x{th}:r={fps}:d={length},format=rgba,setpts=PTS-STARTPTS+{s}/TB[mpk{n}]")
+        graph.append(f"[mpk{n}][mpi{n}]overlay=x={_num(left)}:y={_num(top)}:format=rgb:eof_action=pass,format=rgba[mpg{n}]")
+        back = f"[mpg{n}]"
+    if back is None:
+        graph.append(f"[mpc{n}][mpm{n}]alphamerge")
+    else:
+        graph.append(f"[mpc{n}][mpm{n}]alphamerge[mpf{n}]")
+        graph.append(f"{back}[mpf{n}]overlay=format=rgb,format=rgba")
+    return ";".join(graph)
+
+
 def _overlay_filters(
-    o: PlanOverlay, src: str, n: int, plan: ExportPlan, base_label: str, mask_idx: int | None = None
+    o: PlanOverlay, src: str, n: int, plan: ExportPlan, base_label: str, mask_idx: int | None = None, bg_idx: int | None = None
 ) -> tuple[str, str]:
     """Filter chain for one overlay (the pad `src`, e.g. "[3:v:0]") plus the
     overlay onto `base_label`; returns (chain, output label). Same geometry and
@@ -1471,6 +1574,12 @@ def _overlay_filters(
     # the layer's length) to start at the layer's timeline position, so the
     # time-based fades/animations and `enable` below see timeline time.
     parts.insert(0, f"setpts=PTS-STARTPTS+{s}/TB,fps={_num(plan.fps)}" if o.video else f"setpts=PTS-STARTPTS+{s}/TB")
+    if o.matte:
+        # The matted file in place of the video (src is its input), composed
+        # at the layer's size; the rest of the chain (opacity, rotation,
+        # animation, shape mask, placement) runs on the result as on any layer.
+        src = _matte_head(o.matte, src, n, plan, o.start, o.end, target_w, target_h, bg_idx) + f"[mto{n}];[mto{n}]"
+        parts = ["null"]
     sized = len(parts)  # filters up to here run before the shape mask
     opacities = keyframe_values(kfs, "opacity") if kfs else [o.opacity]
     if len(set(opacities)) > 1:
@@ -1719,10 +1828,19 @@ def build_export_args(
         graph += pointer_graph
 
     for n, o in enumerate(plan.overlays):
+        bg_idx = None
         if o.video:
-            # Just the layer's range of its video; shifted into place in
+            # Just the layer's range of its video (or of its matted file,
+            # which has the same timing); shifted into place in
             # _overlay_filters, and gone after its end (eof_action=pass).
-            src = f"[{inputs.add('-ss', _num(o.offset), '-t', _num(o.end - o.start), '-i', o.image_path)}:v:0]"
+            picture = o.matte.path if o.matte else o.image_path
+            src = f"[{inputs.add('-ss', _num(o.offset), '-t', _num(o.end - o.start), '-i', picture)}:v:0]"
+            m = o.matte
+            if m and m.bg_path and m.mode == "image":
+                bg_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end - o.start + 0.1), "-i", m.bg_path)
+            elif m and m.bg_path and m.mode == "video":
+                loop = ["-stream_loop", "-1"] if m.loop else []
+                bg_idx = inputs.add(*loop, "-t", _num(o.end - o.start), "-i", m.bg_path)
         else:
             # Looped still for the layer's own length, shifted into place in
             # _overlay_filters. Looping it from t=0 instead made ffmpeg decode
@@ -1737,7 +1855,7 @@ def build_export_args(
             )
             src = f"[oli{n}]"
         mask_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end - o.start + 0.1), "-i", o.mask_path) if o.mask_path else None
-        chain, v_acc = _overlay_filters(o, src, n, plan, v_acc, mask_idx)
+        chain, v_acc = _overlay_filters(o, src, n, plan, v_acc, mask_idx, bg_idx)
         graph.append(chain)
     if plan.output_format == "gif":
         # A shared palette from the whole clip, at GIF size and frame rate.

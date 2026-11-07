@@ -258,6 +258,20 @@ export function buildNotices({ engine = false } = {}) {
         [{ name: "Marqo/nsfw-image-detection-384", version: "0c26ec2", license: "Apache-2.0", texts: [apache] }],
       ),
     );
+    parts.push(
+      section(
+        "Background removal model",
+        "Model files bundled with the engine (backend/app/pipeline/matte.py), unmodified.",
+        [{ name: "MediaPipe selfie segmenter (general and landscape), Google", version: "float16/1", license: "Apache-2.0", texts: [apache] }],
+      ),
+    );
+    parts.push(
+      section(
+        "Text reading models",
+        "Model files bundled with the engine for scene analysis (backend/app/pipeline/ocr.py), unmodified.",
+        [{ name: "PaddleOCR PP-OCRv3 English detector and recognizer (ONNX export by RapidOCR)", version: "1cfba2e", license: "Apache-2.0", texts: [apache] }],
+      ),
+    );
     const ffmpeg = ffmpegNotice(engineDir);
     if (ffmpeg) {
       const gpl = readFileSync(path.join(here, "..", "notices", "GPL-3.0.txt"), "utf8").replace(/\r\n/g, "\n").trim();

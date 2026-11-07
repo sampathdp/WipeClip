@@ -23,6 +23,8 @@ import {
   type Draft,
   type DraftItem,
   type EditSuggestion,
+  type Overlay,
+  type PrivacyMask,
   type Project,
 } from "./types.ts";
 import { mergeSuggestions } from "./zoomEdits.ts";
@@ -51,6 +53,12 @@ export interface DraftInputs {
   chapters: Chapter[];
   /** Recorded clicks that could be highlighted; 0 = none. */
   clicks: number;
+  /** What the chapters are based on, in plain words (default: change points). */
+  chapterDetail?: string;
+  /** Annotation layers from the screen (sceneAnalysis.ts). */
+  annotations?: { overlay: Overlay; title: string; detail: string; confidence: DraftItem["confidence"] }[];
+  /** Privacy masks from possible sensitive text (sceneAnalysis.ts). */
+  masks?: { mask: PrivacyMask; title: string; detail: string; confidence: DraftItem["confidence"] }[];
   inputsKey: string;
   notes: string[];
 }
@@ -130,7 +138,7 @@ export function buildDraft(input: DraftInputs, ids: () => string, now = new Date
       kind: "chapter",
       status: "pending",
       title: `Chapter: ${ch.title}`,
-      detail: "Where something changed (a marker, another app, a long pause) - not an understanding of the content.",
+      detail: input.chapterDetail ?? "Where something changed (a marker, another app, a long pause) - not an understanding of the content.",
       confidence: "low",
       start: ch.t,
       end: ch.t,
@@ -138,13 +146,34 @@ export function buildDraft(input: DraftInputs, ids: () => string, now = new Date
       ...withCut(cutItems.find((c) => ch.t > c.start && ch.t < c.end)?.id),
     });
   }
+  for (const a of input.annotations ?? []) {
+    const o = a.overlay;
+    items.push({
+      id: ids(),
+      kind: "annotation",
+      status: "pending",
+      title: a.title,
+      detail: a.detail,
+      confidence: a.confidence,
+      start: o.start,
+      end: o.end,
+      annotation: o,
+      ...withCut(cutItems.find((c) => o.start >= c.start && o.end <= c.end)?.id),
+    });
+  }
+  for (const m of input.masks ?? []) {
+    items.push({ id: ids(), kind: "privacy", status: "pending", title: m.title, detail: m.detail, confidence: m.confidence, start: m.mask.start, end: m.mask.end, mask: m.mask });
+  }
   items.sort((a, b) => a.start - b.start || a.kind.localeCompare(b.kind));
   return { version: DRAFT_VERSION, createdAt: now.toISOString(), timelineKey: timelineKey(lay), inputsKey: input.inputsKey, items, notes: input.notes };
 }
 
-/** Accept or reject items (all of them, all of one kind, or by id). */
+/** Accept or reject items (all of them, all of one kind, or by id).
+ * Accepting "all" leaves privacy masks as they are: each one covers part of
+ * the picture, so it's accepted on its own, after a look. */
 export function setDraftStatus(d: Draft, status: DraftItem["status"], which: "all" | DraftItem["kind"] | string[]): Draft {
-  const hit = (i: DraftItem) => (which === "all" ? true : Array.isArray(which) ? which.includes(i.id) : i.kind === which);
+  const hit = (i: DraftItem) =>
+    which === "all" ? !(status === "accepted" && i.kind === "privacy") : Array.isArray(which) ? which.includes(i.id) : i.kind === which;
   return { ...d, items: d.items.map((i) => (hit(i) ? { ...i, status } : i)) };
 }
 
@@ -180,7 +209,7 @@ export function applyDraft(project: Project, fps: number): ApplyResult | { error
   if (isStale(d, lay) && go.some((i) => i.kind !== "zoom" && i.kind !== "highlights")) {
     return { error: "The timeline changed since this draft was made, so its cuts and chapters no longer line up. Generate the draft again." };
   }
-  const applied: ApplyResult["applied"] = { zoom: 0, highlights: 0, cut: 0, chapter: 0, review: 0 };
+  const applied: ApplyResult["applied"] = { zoom: 0, highlights: 0, cut: 0, chapter: 0, review: 0, annotation: 0, privacy: 0 };
   const skipped: string[] = [];
   let p: Project = project;
 
@@ -204,6 +233,16 @@ export function applyDraft(project: Project, fps: number): ApplyResult | { error
   if (reviews.length) {
     p = { ...p, suggestions: [...(p.suggestions ?? []).filter((s) => s.kind === "retake"), ...reviews] };
     applied.review = reviews.length;
+  }
+  const layers = go.filter((i) => i.kind === "annotation" && i.annotation).map((i) => i.annotation!);
+  if (layers.length) {
+    p = { ...p, overlays: [...p.overlays, ...layers] };
+    applied.annotation = layers.length;
+  }
+  const masks = go.filter((i) => i.kind === "privacy" && i.mask).map((i) => i.mask!);
+  if (masks.length) {
+    p = { ...p, masks: [...(p.masks ?? []), ...masks] };
+    applied.privacy = masks.length;
   }
   for (const c of go.filter((i) => i.kind === "cut").sort((a, b) => b.start - a.start)) {
     const res = rippleCut(p, layout(p, fps), c.start, c.end);

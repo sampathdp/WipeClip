@@ -30,7 +30,11 @@ import { loadRecordingBundle, recoverRecording } from "@/lib/recorder/bundle";
 import { recordingToSources } from "@/lib/recorder/editorImport";
 import { parseManifest } from "@/lib/recorder/format";
 import { planRecordingProject } from "@/lib/recorder/importPlan";
-import { ApiError, ContentBlockedError, probeVideo, videoActivity } from "@/lib/toolsApi";
+import { ApiError, ContentBlockedError, engineSceneAnalyze, probeVideo, videoActivity } from "@/lib/toolsApi";
+import { PRIVACY_LABELS, sourceToCanvas, understand, type ScreenAnalysis, type Understanding } from "@/lib/editor/sceneAnalysis";
+import { matteInput } from "@/lib/editor/matte";
+import { DEFAULT_TEXT } from "@/lib/editor/textRaster";
+import { canvasSize } from "@/lib/editor/timeline";
 import Dialog from "./Dialog";
 import { ActionButton } from "./Inspector";
 import type { DraftSettings, ReviewSettings, TutorialPanelProps, TutorialTab } from "./TutorialPanel";
@@ -89,6 +93,13 @@ export function useTutorialTools(d: Deps) {
   const [keySettings, setKeySettings] = useState<KeystrokeSettings>(DEFAULT_KEYSTROKES);
   const [replaceBusy, setReplaceBusy] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingReplace | null>(null);
+
+  // --- scene analysis (sceneAnalysis.ts; the engine reads the screen) ---------
+  /** The latest analysis of the main video and what was made of it. Kept
+   * for this session; the engine caches the analysis itself, so running it
+   * again on the same file is instant. */
+  const [scene, setScene] = useState<{ key: string; sourceId: string; analysis: ScreenAnalysis; understanding: Understanding } | null>(null);
+  const screenSource = recSource ?? (project.clips[0] ? sources[project.clips[0].sourceId] : undefined);
 
   const events = recordingEvents(recSource);
   const acts: Act[] | null = useMemo(() => (recSource && events ? interactionTimeline(lay, recSource.id, events) : null), [lay, recSource, events]);
@@ -226,13 +237,98 @@ export function useTutorialTools(d: Deps) {
     [reviewSuggestions, apply, say]
   );
 
+  /** Reads the screen of the main video (engine) and makes events, scenes
+   * and suggestions of it. Null when it can't run here. */
+  const runScene = useCallback(
+    async (level: "quick" | "thorough", signal: AbortSignal, run: number): Promise<{ analysis: ScreenAnalysis; understanding: Understanding } | null> => {
+      const src = screenSource;
+      if (!IS_DESKTOP || !src || (!src.disk && !src.file)) return null;
+      const clicks: [number, number, number][] = (src === recSource && events ? events : [])
+        .filter((e) => e.type === "button" && e.down && e.x >= 0 && e.x <= 1 && e.y >= 0 && e.y <= 1)
+        .map((e) => [e.t / 1000, (e as { x: number }).x, (e as { y: number }).y]);
+      const label = (stage: "scan" | "read", v: number) =>
+        setAnalysis(stage === "scan" ? `Scanning the screen… ${Math.round(v * 100)}%` : `Reading the screen (on this computer)… ${Math.round(v * 100)}%`);
+      setAnalysis("Scanning the screen…");
+      const analysis = (await engineSceneAnalyze(matteInput(src), level, clicks, src.duration, label, signal)) as ScreenAnalysis;
+      if (run !== analysisRun.current) return null;
+      const understanding = understand(
+        { analysis, sourceId: src.id, lay, events: src === recSource ? events : null, cues: captionCues(project.overlays) },
+        (prefix) => newId(prefix)
+      );
+      setScene({ key: timelineKey(lay), sourceId: src.id, analysis, understanding });
+      return { analysis, understanding };
+    },
+    [screenSource, recSource, events, lay, project.overlays]
+  );
+
+  /** "Analyze the screen" on its own (the Scenes tab). */
+  const analyzeScreen = useCallback(
+    async (level: "quick" | "thorough") => {
+      const run = ++analysisRun.current;
+      analysisCtrl.current?.abort();
+      const ctrl = new AbortController();
+      analysisCtrl.current = ctrl;
+      try {
+        const res = await runScene(level, ctrl.signal, run);
+        if (!res) {
+          if (run === analysisRun.current) say("Screen analysis runs in the desktop app, on a video in the project.");
+          return;
+        }
+        const n = res.understanding.scenes.length;
+        say(`${n} scene${n === 1 ? "" : "s"} found. Generate a draft to review chapters, cuts, annotations and privacy suggestions.`);
+      } catch (e) {
+        if ((e as Error)?.name === "AbortError") return;
+        say(e instanceof ApiError ? e.message : "The screen couldn't be analyzed. Your project hasn't changed.");
+      } finally {
+        if (run === analysisRun.current) setAnalysis(null);
+        if (analysisCtrl.current === ctrl) analysisCtrl.current = null;
+      }
+    },
+    [runScene, say]
+  );
+
+  /** Annotation text layers for the suggestions, placed by the clicked
+   * spot on the canvas (or low on the screen), in the editor's text style. */
+  const annotationLayers = useCallback(
+    (u: Understanding, sourceId: string) => {
+      const src = sources[sourceId];
+      const clip = project.clips.find((c) => c.sourceId === sourceId);
+      const original = sources[project.clips[0]?.sourceId ?? ""];
+      if (!src || !clip || !original) return [];
+      const canvas = canvasSize(project.canvas.aspect, original.width, original.height);
+      return u.annotations.map((a) => {
+        const at = sourceToCanvas(clip, src, canvas, project.canvas, a.at.x, a.at.y);
+        // Under the clicked spot when there's room, else above it.
+        const y = at.y < 0.8 ? Math.min(0.92, at.y + 0.08) : at.y - 0.08;
+        const overlay: Overlay = {
+          id: newId("ovl"),
+          kind: "text",
+          start: Math.round(a.start * 100) / 100,
+          end: Math.round(Math.min(lay.total, a.end) * 100) / 100,
+          x: Math.max(0.15, Math.min(0.85, at.x)),
+          y,
+          width: 0.25,
+          rotation: 0,
+          opacity: 1,
+          animIn: "fade",
+          animOut: "fade",
+          hidden: false,
+          locked: false,
+          text: { ...DEFAULT_TEXT, content: a.text, size: 0.04, background: "#000000", backgroundOpacity: 0.7 },
+        };
+        return { overlay, title: `Annotation: ${a.text}`, detail: a.evidence, confidence: (a.confidence >= 0.75 ? "high" : a.confidence >= 0.5 ? "medium" : "low") as "high" | "medium" | "low" };
+      });
+    },
+    [sources, project.clips, project.canvas, lay.total]
+  );
+
   // --- draft ----------------------------------------------------------------------
   /** Record -> Analyze -> Review: zooms, click highlights, cuts, review
    * items and chapters in one reviewable draft (draft.ts). Generating is
    * one undo step; nothing else changes until the draft is applied. */
   const generateDraft = useCallback(
     async (ds: DraftSettings) => {
-      const inputsKey = JSON.stringify([mixKey(lay, project, sources), timelineKey(lay), recSource?.id ?? null, events?.length ?? 0, project.focus ?? null, ds]);
+      const inputsKey = JSON.stringify([mixKey(lay, project, sources), timelineKey(lay), recSource?.id ?? null, events?.length ?? 0, project.focus ?? null, captionCues(project.overlays).length, ds]);
       if (project.draft && !project.draft.appliedAt && project.draft.inputsKey === inputsKey) {
         say("The draft is up to date: nothing it's based on has changed.");
         return;
@@ -269,9 +365,59 @@ export function useTutorialTools(d: Deps) {
           suggestions = r.list;
           notes.push(...r.notes);
         }
-        const chapters = ds.chapters ? suggestChapters({ acts, cues: captionCues(project.overlays), audio: lastReport.current, total: lay.total }, DEFAULT_CHAPTERS, () => newId("ch")) : [];
+        // Reading the screen: scenes give chapters titled from what was on
+        // screen, waiting to cut, annotations and privacy masks.
+        let screen: { analysis: ScreenAnalysis; understanding: Understanding } | null = null;
+        if (ds.screen && IS_DESKTOP) {
+          try {
+            screen = await runScene(ds.screenLevel, ctrl.signal, run);
+          } catch (e) {
+            if ((e as Error)?.name === "AbortError") return;
+            notes.push(e instanceof ApiError ? `The screen wasn't read: ${e.message}` : "The screen couldn't be read, so this draft is based on timing, sound and recorded events only.");
+          }
+          if (run !== analysisRun.current) return;
+          if (screen) {
+            const st = screen.analysis.stats;
+            notes.push(
+              `Screen read on this computer: ${st.framesRead} moment${st.framesRead === 1 ? "" : "s"} where the screen settled, ${st.clicksRead} click${st.clicksRead === 1 ? "" : "s"} (${(st.scanSeconds + st.readSeconds).toFixed(0)} s). Only English and other Latin-script text is read.`
+            );
+            if (screen.understanding.masks.length)
+              notes.push("Privacy suggestions can miss things (small, blurred or moving text, pictures) and can be wrong. Check each one, and watch the recording before you publish.");
+          }
+        }
+        const fromScreen = screen && ds.chapters && screen.understanding.chapters.length > 0;
+        const chapters = !ds.chapters
+          ? []
+          : fromScreen
+            ? screen!.understanding.chapters
+            : suggestChapters({ acts, cues: captionCues(project.overlays), audio: lastReport.current, total: lay.total }, DEFAULT_CHAPTERS, () => newId("ch"));
+        if (screen && ds.cuts) suggestions = [...suggestions, ...screen.understanding.cuts];
         if (run !== analysisRun.current) return;
-        const draft = buildDraft({ lay, project, zooms, suggestions, chapters, clicks: ds.highlights ? clicks : 0, inputsKey, notes }, () => newId("di"));
+        const draft = buildDraft(
+          {
+            lay,
+            project,
+            zooms,
+            suggestions,
+            chapters,
+            clicks: ds.highlights ? clicks : 0,
+            inputsKey,
+            notes,
+            ...(fromScreen ? { chapterDetail: "Where the screen moved on to something else, titled with what was read there (a heading, an app, an address, a command) or said." } : {}),
+            ...(screen && ds.annotations ? { annotations: annotationLayers(screen.understanding, screenSource!.id) } : {}),
+            ...(screen && ds.privacy
+              ? {
+                  masks: screen.understanding.masks.map((m) => ({
+                    mask: m.mask,
+                    title: `Hide: ${PRIVACY_LABELS[m.category]}`,
+                    detail: `${m.reason}. Covers it for as long as that part of the screen stays as it is - check that it's the right spot.`,
+                    confidence: (m.confidence >= 0.8 ? "high" : m.confidence >= 0.55 ? "medium" : "low") as "high" | "medium" | "low",
+                  })),
+                }
+              : {}),
+          },
+          () => newId("di")
+        );
         apply((p) => ({ ...p, draft }));
         setTab("draft");
         say(draft.items.length ? `Draft ready: ${draft.items.length} suggestion${draft.items.length === 1 ? "" : "s"} to review. Nothing has changed yet.` : "The draft found nothing to suggest.");
@@ -284,8 +430,25 @@ export function useTutorialTools(d: Deps) {
         if (analysisCtrl.current === ctrl) analysisCtrl.current = null;
       }
     },
-    [lay, project, sources, recSource, events, acts, reviewSuggestions, apply, say]
+    [lay, project, sources, recSource, events, acts, reviewSuggestions, apply, say, runScene, annotationLayers, screenSource]
   );
+
+  /** Frame previews for draft items (privacy: with the spot marked), from
+   * this session's analysis. */
+  const draftPreviews = useMemo(() => {
+    const out: Record<string, { src: string; box?: [number, number, number, number] }> = {};
+    const d = project.draft;
+    if (!d || !scene) return out;
+    const byMask = new Map(scene.understanding.masks.map((m) => [m.mask.id, m]));
+    for (const i of d.items) {
+      if (i.kind === "privacy" && i.mask) {
+        const m = byMask.get(i.mask.id);
+        const f = m ? scene.analysis.frames[m.frame] : undefined;
+        if (f) out[i.id] = { src: f.preview, box: [i.mask.x, i.mask.y, i.mask.w, i.mask.h] };
+      }
+    }
+    return out;
+  }, [project.draft, scene]);
 
   const applyDraftNow = useCallback(() => {
     const res = applyDraft(project, lay.fps);
@@ -301,6 +464,8 @@ export function useTutorialTools(d: Deps) {
       a.highlights && "click highlights",
       a.chapter && `${a.chapter} chapter${a.chapter === 1 ? "" : "s"}`,
       a.review && `${a.review} item${a.review === 1 ? "" : "s"} to review`,
+      a.annotation && `${a.annotation} annotation${a.annotation === 1 ? "" : "s"}`,
+      a.privacy && `${a.privacy} privacy mask${a.privacy === 1 ? "" : "s"}`,
     ].filter(Boolean);
     say(`Applied ${parts.join(", ") || "nothing"}.${res.skipped.length ? ` ${res.skipped.join(" ")}` : ""} Undo with ${modKey()}+Z.`);
   }, [project, lay.fps, apply, say]);
@@ -548,6 +713,10 @@ export function useTutorialTools(d: Deps) {
     onClearSuggestions: () => apply((p) => ({ ...p, suggestions: (p.suggestions ?? []).filter((s) => s.kind === "retake") })),
     previewingCuts,
     onPreviewCuts: setPreviewingCuts,
+    screenAvailable: IS_DESKTOP && !!screenSource && (!!screenSource.disk || !!screenSource.file),
+    scene: scene && scene.key === timelineKey(lay) ? scene : null,
+    onAnalyzeScreen: (level) => void analyzeScreen(level),
+    draftPreviews,
     draft: project.draft ?? null,
     draftStale: project.draft ? isStale(project.draft, lay) : false,
     onGenerateDraft: (s) => void generateDraft(s),

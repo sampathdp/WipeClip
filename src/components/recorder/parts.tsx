@@ -204,6 +204,136 @@ export function LivePreview({ stream, className, mirror }: { stream: MediaStream
   return <video ref={ref} muted playsInline className={`${className ?? ""} ${mirror ? "-scale-x-100" : ""}`} />;
 }
 
+/** The live camera with its background removed or blurred, as a preview of
+ * what the editor will make (the recording itself stays the original).
+ * Small frames go to the engine on this machine one after another; the
+ * mask is smoothed over time here and scaled up over the full picture. If
+ * the engine can't segment, the plain camera shows with a note. */
+export function LiveMattePreview({
+  stream,
+  mode,
+  segment,
+  className,
+  mirror,
+}: {
+  stream: MediaStream;
+  mode: "remove" | "blur";
+  segment: (rgba: Uint8ClampedArray, w: number, h: number, signal: AbortSignal) => Promise<Uint8Array>;
+  className?: string;
+  mirror?: boolean;
+}) {
+  const video = useRef<HTMLVideoElement>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    const v = video.current;
+    const out = canvas.current;
+    if (!v || !out) return;
+    v.srcObject = stream;
+    void v.play().catch(() => {});
+    const abort = new AbortController();
+    const small = document.createElement("canvas");
+    const maskCanvas = document.createElement("canvas");
+    const fg = document.createElement("canvas");
+    let smooth: Float32Array | null = null;
+    let raf = 0;
+    let busy = false;
+    const draw = (mask: HTMLCanvasElement | null) => {
+      const W = Math.min(640, v.videoWidth);
+      const H = Math.round((v.videoHeight * W) / Math.max(1, v.videoWidth));
+      if (!W || !H) return;
+      if (out.width !== W) out.width = W;
+      if (out.height !== H) out.height = H;
+      const ctx = out.getContext("2d")!;
+      ctx.clearRect(0, 0, W, H);
+      if (!mask) {
+        ctx.drawImage(v, 0, 0, W, H);
+        return;
+      }
+      if (mode === "blur") {
+        ctx.filter = `blur(${Math.round(H * 0.025)}px)`;
+        ctx.drawImage(v, -H * 0.05, -H * 0.05, W + H * 0.1, H + H * 0.1);
+        ctx.filter = "none";
+      }
+      fg.width = W;
+      fg.height = H;
+      const f = fg.getContext("2d")!;
+      f.drawImage(v, 0, 0, W, H);
+      f.globalCompositeOperation = "destination-in";
+      f.imageSmoothingQuality = "high";
+      f.drawImage(mask, 0, 0, W, H);
+      f.globalCompositeOperation = "source-over";
+      ctx.drawImage(fg, 0, 0);
+    };
+    const step = async () => {
+      if (abort.signal.aborted) return;
+      raf = requestAnimationFrame(() => void step());
+      if (busy || v.readyState < 2 || !v.videoWidth) return;
+      busy = true;
+      try {
+        const w = 256;
+        const h = Math.max(16, Math.round((v.videoHeight * w) / v.videoWidth));
+        small.width = w;
+        small.height = h;
+        const sctx = small.getContext("2d", { willReadFrequently: true })!;
+        sctx.drawImage(v, 0, 0, w, h);
+        const m = await segment(sctx.getImageData(0, 0, w, h).data, w, h, abort.signal);
+        // Smoothed over time where it barely changes (less shimmer), new
+        // where it moved (no trails) - as the editor's own pass does.
+        if (!smooth || smooth.length !== m.length) smooth = Float32Array.from(m);
+        else for (let i = 0; i < m.length; i++) {
+          const d = m[i] - smooth[i];
+          smooth[i] += d * Math.min(1, 0.35 + (2.5 * Math.abs(d)) / 255);
+        }
+        maskCanvas.width = w;
+        maskCanvas.height = h;
+        const mctx = maskCanvas.getContext("2d")!;
+        const img = mctx.createImageData(w, h);
+        for (let i = 0; i < smooth.length; i++) {
+          // The editor's default edge curve: steeper, so faint halos drop.
+          const a = Math.max(0, Math.min(1, (smooth[i] / 255 - 0.5) * 2 + 0.5));
+          img.data[i * 4 + 3] = a * 255;
+        }
+        mctx.putImageData(img, 0, 0);
+        draw(maskCanvas);
+      } catch {
+        if (!abort.signal.aborted) {
+          setFailed(true);
+          abort.abort();
+          const loop = () => {
+            draw(null);
+            raf = requestAnimationFrame(loop);
+          };
+          loop();
+        }
+      } finally {
+        busy = false;
+      }
+    };
+    void step();
+    return () => {
+      abort.abort();
+      cancelAnimationFrame(raf);
+      v.srcObject = null;
+    };
+  }, [stream, mode, segment]);
+  return (
+    <div className="relative">
+      <video ref={video} muted playsInline className="hidden" />
+      <canvas
+        ref={canvas}
+        className={`${className ?? ""} ${mirror ? "-scale-x-100" : ""}`}
+        style={mode === "remove" ? { backgroundImage: "repeating-conic-gradient(#8884 0% 25%, transparent 0% 50%)", backgroundSize: "16px 16px" } : undefined}
+      />
+      {failed && (
+        <p className="absolute inset-x-0 bottom-0 rounded-b-lg bg-black/60 px-2 py-1 text-[11px] text-white">
+          Live preview isn&apos;t available; the editor still removes the background after recording.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Preview of the captured surface with a draggable region on top.
  * `region` is in fractions of the surface; null = everything. */
 export function RegionSelector({

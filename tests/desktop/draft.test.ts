@@ -178,7 +178,7 @@ test("applying: cuts ripple through text, captions, stickers, audio and chapters
   assert.ok(!("error" in res), "error" in res ? res.error : "");
   if ("error" in res) return;
   const q = res.project;
-  assert.deepEqual(res.applied, { zoom: 1, highlights: 1, cut: 1, chapter: 1, review: 1 });
+  assert.deepEqual(res.applied, { zoom: 1, highlights: 1, cut: 1, chapter: 1, review: 1, annotation: 0, privacy: 0 });
   assert.deepEqual(res.skipped, []);
   const lay0 = layout(p0, 30);
   const lay1 = layout(q, 30);

@@ -94,6 +94,9 @@ pub async fn local_engine(app: AppHandle, state: State<'_, EngineState>) -> Resu
     // other local data, so uninstalling with "delete app data" removes them.
     if let Ok(dir) = app.path().app_local_data_dir() {
         command.env("WIPECLIP_MODELS_DIR", dir.join("speech-models"));
+        // Webcam background removal's matted videos (backend/app/pipeline/
+        // matte.py), a cache the editor plays through media::matte_open.
+        command.env("WIPECLIP_MATTE_DIR", dir.join(crate::media::MATTE_DIR));
     }
     // Finished exports stay on disk there (export.rs rendered_dir).
     if let Some(dir) = crate::export::rendered_dir(&app) {

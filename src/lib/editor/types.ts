@@ -272,7 +272,7 @@ export type Overlay =
   | (OverlayBase & { kind: "text"; text: TextStyle })
   /** Picture-in-picture: a video playing from `offset` (source seconds)
    * for the layer's time range, with its own sound at `volume` (0..2). */
-  | (OverlayBase & { kind: "video"; sourceId: string; offset: number; volume: number; camLayout?: CamLayout })
+  | (OverlayBase & { kind: "video"; sourceId: string; offset: number; volume: number; camLayout?: CamLayout; matte?: WebcamMatte | null })
   /** Arrow, highlight circle, rectangle, numbered step, callout, focus outline. */
   | (OverlayBase & { kind: "shape"; shape: ShapeStyle });
 
@@ -332,6 +332,34 @@ export interface MasterAudio {
    * (dBFS) and the mix's key (mix.ts mixKey), to tell when it's out of
    * date. Absent = not measured. */
   measured?: { lufs: number; peakDb: number; key: string };
+}
+
+/** Webcam background removal on a video layer (matte.ts). Absent = the
+ * original picture. The person's mask is made on this machine and cached
+ * outside the project (it's derived, made again when missing). */
+export interface WebcamMatte {
+  /** "remove": clear background; "blur": the webcam's own background,
+   * blurred; "image"/"video": another picture behind the person. */
+  mode: "remove" | "blur" | "image" | "video";
+  /** "fine": color-guided edges (better hair, slower to make); "fast". */
+  detail: "fine" | "fast";
+  /** -100..100: shrink .. grow the outline. */
+  edge: number;
+  /** 0..100: edge softness. */
+  soft: number;
+  /** 0..100: background blur ("blur"). */
+  blur: number;
+  /** "image"/"video": the background source. */
+  bgSourceId?: string;
+  /** Background placement: "fill" covers the layer, "fit" shows all of it. */
+  fit: "fill" | "fit";
+  /** 0..1: which part of an overflowing background shows (0.5 = centered). */
+  x: number;
+  y: number;
+  /** 1..4: background zoom. */
+  scale: number;
+  /** "video": loop it, or hold its last frame when it's shorter. */
+  loop: boolean;
 }
 
 /** A webcam layer's layout preset (webcamLayout.ts), kept so it can be
@@ -573,7 +601,7 @@ export interface Chapter {
  * (it's only suggestions - generating again recreates it). */
 export const DRAFT_VERSION = 1;
 
-export type DraftItemKind = "zoom" | "highlights" | "cut" | "chapter" | "review";
+export type DraftItemKind = "zoom" | "highlights" | "cut" | "chapter" | "review" | "annotation" | "privacy";
 
 /** One proposal of a draft (src/lib/editor/draft.ts). Nothing in it is
  * applied until the user applies the draft. */
@@ -594,6 +622,10 @@ export interface DraftItem {
   suggestion?: EditSuggestion;
   /** kind "chapter". */
   chapter?: Chapter;
+  /** kind "annotation": the text layer it adds (sceneAnalysis.ts). */
+  annotation?: Overlay;
+  /** kind "privacy": the mask it adds - only ever when accepted one by one. */
+  mask?: PrivacyMask;
   /** kind "zoom"/"chapter": the cut that would remove it (mostly inside). */
   insideCut?: string;
 }
@@ -863,7 +895,7 @@ export function migrateProject(raw: unknown): Project {
   };
 }
 
-const DRAFT_KINDS = new Set<DraftItemKind>(["zoom", "highlights", "cut", "chapter", "review"]);
+const DRAFT_KINDS = new Set<DraftItemKind>(["zoom", "highlights", "cut", "chapter", "review", "annotation", "privacy"]);
 
 /** A saved draft is kept only if it's this version and every item is
  * well-formed; anything else is dropped (it can be generated again). */
@@ -880,7 +912,9 @@ export function validDraft(raw: unknown): raw is Draft {
       Number.isFinite(i.end) &&
       (i.kind !== "zoom" || (!!i.zoom && Number.isFinite(i.zoom.start) && Number.isFinite(i.zoom.end))) &&
       ((i.kind !== "cut" && i.kind !== "review") || !!i.suggestion) &&
-      (i.kind !== "chapter" || !!i.chapter)
+      (i.kind !== "chapter" || !!i.chapter) &&
+      (i.kind !== "annotation" || (i.annotation?.kind === "text" && Number.isFinite(i.annotation.start) && Number.isFinite(i.annotation.end))) &&
+      (i.kind !== "privacy" || (!!i.mask && [i.mask.x, i.mask.y, i.mask.w, i.mask.h, i.mask.start, i.mask.end].every(Number.isFinite)))
   );
 }
 

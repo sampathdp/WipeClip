@@ -70,6 +70,8 @@ export interface SessionTrackInput {
   kind: TrackKind;
   stream: MediaStream;
   deviceLabel?: string;
+  /** Webcam: background to apply in the editor (RecordingTrack.background). */
+  background?: "remove" | "blur";
 }
 
 export interface SessionConfig {
@@ -714,7 +716,7 @@ export class RecordingSession {
   }
 }
 
-function baseTrack(t: Pick<SessionTrackInput, "kind" | "deviceLabel">, file: string, mimeType: string): RecordingTrack {
+function baseTrack(t: Pick<SessionTrackInput, "kind" | "deviceLabel" | "background">, file: string, mimeType: string): RecordingTrack {
   const video = t.kind === "screen" || t.kind === "webcam";
   return {
     kind: t.kind,
@@ -726,6 +728,7 @@ function baseTrack(t: Pick<SessionTrackInput, "kind" | "deviceLabel">, file: str
     hasVideo: video,
     hasAudio: !video,
     deviceLabel: t.deviceLabel,
+    ...(t.kind === "webcam" && t.background ? { background: t.background } : {}),
   };
 }
 

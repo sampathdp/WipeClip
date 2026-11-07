@@ -43,7 +43,7 @@ import {
 import { createProjectFile, PROJECT_FILE_EXT, ProjectFileError, projectFileName, readProjectFile } from "@/lib/editor/projectFile";
 import { useOverlayRasters } from "@/lib/editor/rasters";
 import { sourceFile, sourceInput, sourceName, sourceSize } from "@/lib/editor/sourceFile";
-import { chooseVideoOnDisk, diskMediaUrl, openDiskMedia } from "@/lib/platform/media";
+import { chooseVideoOnDisk, diskMediaUrl, matteUrl, openDiskMedia } from "@/lib/platform/media";
 import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
 import { DEFAULT_TEXT } from "@/lib/editor/textRaster";
 import {
@@ -87,7 +87,8 @@ import {
   type TextStyle,
   type Transcript,
 } from "@/lib/editor/types";
-import { ApiError, cleanAudio, ContentBlockedError, engineDubModels, enginePeaks, ModelNeededError, probeVideo } from "@/lib/toolsApi";
+import { ApiError, cleanAudio, ContentBlockedError, engineDubModels, engineMatte, enginePeaks, ModelNeededError, probeVideo } from "@/lib/toolsApi";
+import { ensureMatte, fullMatte, matteJobKey, matteUnsupported, setMatteEngine, useMatteJob } from "@/lib/editor/matte";
 import { DUB_FROM, dubTimeline, type DubProgress } from "@/lib/editor/dub";
 import type { RecordingBundle } from "@/lib/recorder/bundle";
 import { recordingToSources } from "@/lib/recorder/editorImport";
@@ -214,6 +215,7 @@ import {
   UndoIcon,
   UploadIcon,
   VolumeIcon,
+  ChevronLeftIcon,
 } from "./icons";
 
 const TOOL = "video_editor";
@@ -857,6 +859,77 @@ export default function VideoEditor({
       }),
     [apply, clock]
   );
+  // --- webcam background removal (matte.ts) ----------------------------------
+  useEffect(() => {
+    if (IS_DESKTOP) setMatteEngine({ render: engineMatte, url: matteUrl });
+  }, []);
+  // Every shown webcam layer with its background removed gets its matted
+  // file made (once per video and detail, cached by the engine): the
+  // layers' source ids and details, a line each.
+  const matteJobs = [
+    ...new Set(project.overlays.flatMap((o) => (o.kind === "video" && o.matte && !o.hidden && sources[o.sourceId] ? [`${o.sourceId}\t${o.matte.detail ?? "fine"}`] : []))),
+  ].join("\n");
+  useEffect(() => {
+    if (!IS_DESKTOP) return;
+    for (const line of matteJobs.split("\n").filter(Boolean)) {
+      const [id, detail] = line.split("\t");
+      const src = sourcesRef.current[id];
+      if (src && !matteUnsupported(src, IS_DESKTOP)) ensureMatte(src, detail === "fast" ? "fast" : "fine").catch(() => {});
+    }
+  }, [matteJobs]);
+  const selectedLayerSrc = selectedOverlay?.kind === "video" ? sources[selectedOverlay.sourceId] : undefined;
+  const selectedMatteJob = useMatteJob(
+    selectedOverlay?.kind === "video" && selectedOverlay.matte ? matteJobKey(selectedLayerSrc, selectedOverlay.matte.detail) : null
+  );
+  const matteBgInput = useRef<HTMLInputElement>(null);
+  const matteBgFor = useRef<string | null>(null);
+  const setMatteBg = useCallback(
+    (layerId: string, src: MediaSource) =>
+      apply((p) => {
+        const o = p.overlays.find((x) => x.id === layerId);
+        return o?.kind === "video" && o.matte ? updateOverlay(p, layerId, { matte: { ...fullMatte(o.matte), bgSourceId: src.id } } as Partial<Overlay>) : p;
+      }),
+    [apply]
+  );
+  /** A background video picked on disk: played where it is, like any disk
+   * video, after the same decode check and screening as an import. */
+  const pickMatteVideo = useCallback(
+    async (layerId: string) => {
+      const disk = await chooseVideoOnDisk().catch((e) => {
+        say(String(e));
+        return null;
+      });
+      if (!disk) return;
+      setBusy("Adding background video…");
+      try {
+        const url = await diskMediaUrl(disk.path);
+        const [meta, probe] = await Promise.all([loadVideoMeta(url), probeVideo(disk)]);
+        URL.revokeObjectURL(probe.previewUrl);
+        const src: MediaSource = {
+          id: newId("lyr"),
+          kind: "layer",
+          file: null,
+          disk,
+          url,
+          duration: meta.duration,
+          width: meta.width,
+          height: meta.height,
+          fps: probe.info.fps > 0 && probe.info.fps <= 240 ? probe.info.fps : 30,
+          hasAudio: probe.info.hasAudio ?? false,
+        };
+        addSource(src);
+        setMatteBg(layerId, src);
+      } catch (e) {
+        if (e instanceof ContentBlockedError || e instanceof ApiError || e instanceof EngineUnavailableError) say(e.message);
+        else if (e instanceof Error && e.message === "media_error") say("This video's format can't be played. Try an MP4 (H.264) file.");
+        else say("Couldn't use this video as the background. Try a different file.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [addSource, setMatteBg, say]
+  );
+
   const overlayKeys = (o: Overlay): KeyframeControls => ({
     clock,
     keyframes: o.keyframes,
@@ -2371,6 +2444,11 @@ export default function VideoEditor({
       <span className="hidden rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[11px] font-bold text-accent sm:inline dark:text-accent-light">
         Editor
       </span>
+      {phase === "edit" && (
+        <ToolButton label="Back to projects (this one is saved)" onClick={closeProject} text="Projects">
+          <ChevronLeftIcon />
+        </ToolButton>
+      )}
       {phase === "edit" && original && info && (
         <div className="hidden min-w-0 flex-1 md:block">
           <input
@@ -2436,8 +2514,19 @@ export default function VideoEditor({
         {phase === "edit" && (
           <button
             type="button"
-            onClick={() => {
+            onClick={async () => {
               setPlaying(false);
+              // Privacy suggestions nobody looked at: not hidden in the export, so ask.
+              const d = project.draft;
+              const unreviewed = d && !d.appliedAt ? d.items.filter((i) => i.kind === "privacy" && i.status === "pending").length : 0;
+              if (
+                unreviewed &&
+                !(await confirmAction(
+                  `${unreviewed} possible sensitive spot${unreviewed === 1 ? " hasn't" : "s haven't"} been reviewed in the Draft, so ${unreviewed === 1 ? "it isn't" : "they aren't"} hidden in this export. Export anyway?`,
+                  { okLabel: "Export anyway" }
+                ))
+              )
+                return;
               setDialog({ kind: "export" });
             }}
             className="btn-primary inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold"
@@ -3144,6 +3233,23 @@ export default function VideoEditor({
         sourceDuration={selectedOverlay.kind === "video" ? sources[selectedOverlay.sourceId]?.duration : undefined}
         onChange={(patch) => changeOverlay(selectedOverlay.id, patch)}
         onCamLayout={selectedOverlay.kind === "video" ? (l) => setCamLayout(selectedOverlay.id, l) : undefined}
+        background={
+          selectedOverlay.kind === "video"
+            ? {
+                unsupported: matteUnsupported(selectedLayerSrc, IS_DESKTOP),
+                job: selectedMatteJob,
+                bgSource: selectedOverlay.matte?.bgSourceId ? (sources[selectedOverlay.matte.bgSourceId] ?? null) : null,
+                onPickImage: () => {
+                  matteBgFor.current = selectedOverlay.id;
+                  matteBgInput.current?.click();
+                },
+                onPickVideo: () => void pickMatteVideo(selectedOverlay.id),
+                onRetry: () => {
+                  if (selectedLayerSrc && selectedOverlay.matte) ensureMatte(selectedLayerSrc, selectedOverlay.matte.detail).catch(() => {});
+                },
+              }
+            : undefined
+        }
         keys={overlayKeys(selectedOverlay)}
         fonts={{
           custom: Object.values(sources)
@@ -3415,11 +3521,25 @@ export default function VideoEditor({
               solo={solo}
               meters={tool === "audio"}
             >
+              {/* A webcam background image (matte.ts), picked from the layer panel. */}
+              <input
+                ref={matteBgInput}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  const layerId = matteBgFor.current;
+                  e.target.value = "";
+                  if (f && layerId) void importImage(f).then((src) => src && setMatteBg(layerId, src));
+                }}
+              />
               <OverlayLayer
                 clock={clock}
                 canvasSize={canvasSize}
                 overlays={project.overlays}
                 rasters={rasters}
+                sources={sources}
                 playback={{ playing, rate, volume, muted: muted || solo.size > 0 }}
                 selectedId={selectedOverlay?.id ?? null}
                 onSelect={(id) => {

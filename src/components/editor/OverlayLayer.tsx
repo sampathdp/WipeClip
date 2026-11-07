@@ -11,7 +11,8 @@ import { spriteIndex } from "@/lib/editor/textAnim";
 import { shapeMaskUrl } from "@/lib/editor/shapeMask";
 import { drawKeyedFrame } from "@/lib/editor/chromaKey";
 import { previewMixer } from "@/lib/editor/audioMixer";
-import type { ChromaKey, Overlay } from "@/lib/editor/types";
+import { bgVideoTime, drawMatteFrame, fullMatte, matteJobKey, useMatteJob } from "@/lib/editor/matte";
+import type { ChromaKey, MediaSource, Overlay, WebcamMatte } from "@/lib/editor/types";
 
 type Drag =
   | { kind: "move"; id: string; px: number; py: number; x: number; y: number }
@@ -31,6 +32,7 @@ export default function OverlayLayer({
   canvasSize,
   overlays,
   rasters,
+  sources,
   playback,
   selectedId,
   onSelect,
@@ -43,6 +45,8 @@ export default function OverlayLayer({
   canvasSize: { width: number; height: number };
   overlays: Overlay[];
   rasters: { byKey: Record<string, RasterSticker>; byId: Record<string, RasterSticker> };
+  /** Webcam background removal reads a layer's disk file and its background. */
+  sources: Record<string, MediaSource>;
   /** Player state the video layers follow. */
   playback: { playing: boolean; rate: number; volume: number; muted: boolean };
   selectedId: string | null;
@@ -176,9 +180,13 @@ export default function OverlayLayer({
                   layerId={o.id}
                   url={img.url}
                   sourceTime={o.offset + (time - o.start)}
+                  layerTime={time - o.start}
                   gain={o.volume}
                   playback={playback}
                   chromaKey={o.key ?? null}
+                  matte={o.matte ? fullMatte(o.matte) : null}
+                  matteKey={o.matte ? matteJobKey(sources[o.sourceId], fullMatte(o.matte).detail) : null}
+                  bgSource={o.matte?.bgSourceId ? (sources[o.matte.bgSourceId] ?? null) : null}
                   mask={o.mask ? shapeMaskUrl(o.mask, w / Math.max(1, h)) : null}
                   className={`h-full w-full cursor-move object-fill ${selected ? "" : "hover:outline hover:outline-1 hover:outline-white/60"}`}
                   onPointerDown={(e) => {
@@ -297,9 +305,13 @@ function OverlayVideo({
   layerId,
   url,
   sourceTime,
+  layerTime,
   gain,
   playback,
   chromaKey,
+  matte,
+  matteKey,
+  bgSource,
   mask,
   className,
   onPointerDown,
@@ -309,28 +321,62 @@ function OverlayVideo({
   layerId: string;
   url: string;
   sourceTime: number;
+  /** Seconds since the layer started (a background video's clock). */
+  layerTime: number;
   gain: number;
   playback: { playing: boolean; rate: number; volume: number; muted: boolean };
   chromaKey: ChromaKey | null;
+  /** Webcam background removal; the original shows until its matted file is ready. */
+  matte: WebcamMatte | null;
+  /** Which engine job (matte.ts matteJobKey) the matted file comes from. */
+  matteKey: string | null;
+  bgSource: MediaSource | null;
   className: string;
   onPointerDown: (e: React.PointerEvent) => void;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const keyed = useRef<HTMLCanvasElement>(null);
+  const matted = useRef<HTMLVideoElement>(null);
+  const bgVideo = useRef<HTMLVideoElement>(null);
+  const bgImage = useRef<HTMLImageElement>(null);
+  const job = useMatteJob(matte ? matteKey : null);
+  const matteUrl = matte && job?.status === "ready" ? job.url : null;
+  const bg = matte && (matte.mode === "image" || matte.mode === "video") && bgSource && bgSource.kind !== "audio" ? bgSource : null;
+  const bgIsVideo = !!bg && bg.duration > 0;
+  // Drawn on a canvas instead of the video: chroma key, or the matted file.
+  const drawn = !!chromaKey || !!matteUrl;
+  const { playing, rate, volume, muted } = playback;
 
-  // Keyed: the video stays mounted (it plays the sound and decodes) but
-  // hidden, and a canvas shows each frame with the key color removed.
+  // The video stays mounted (it plays the sound and decodes) but hidden,
+  // and a canvas shows each frame keyed, or matted (the matted file's own
+  // hidden video, kept on the same time).
   useEffect(() => {
-    if (!chromaKey) return;
+    if (!chromaKey && !(matte && matteUrl)) return;
     let raf = 0;
     const draw = () => {
-      if (ref.current && keyed.current) drawKeyedFrame(ref.current, keyed.current, chromaKey);
+      const canvas = keyed.current;
+      if (canvas && matte && matteUrl && matted.current) {
+        const b = bgIsVideo ? bgVideo.current : bgImage.current;
+        const ready = b && (b instanceof HTMLVideoElement ? b.readyState >= 2 : b.complete && b.naturalWidth > 0);
+        drawMatteFrame(matted.current, canvas, matte, ready && bg ? { el: b, width: bg.width, height: bg.height } : null);
+      } else if (canvas && chromaKey && ref.current) drawKeyedFrame(ref.current, canvas, chromaKey);
       raf = requestAnimationFrame(draw);
     };
     draw();
     return () => cancelAnimationFrame(raf);
-  }, [chromaKey]);
-  const { playing, rate, volume, muted } = playback;
+  }, [chromaKey, matte, matteUrl, bg, bgIsVideo]);
+
+  // The matted file and a background video follow the playhead like the layer's own video.
+  const loop = matte?.loop ?? true;
+  const bgDuration = bg?.duration ?? 0;
+  useEffect(() => {
+    follow(matted.current, sourceTime, playing, rate);
+    if (bgIsVideo) {
+      const t = bgVideoTime(layerTime, bgDuration, loop);
+      // A held last frame doesn't play on.
+      follow(bgVideo.current, t, playing && (loop || layerTime < bgDuration), rate);
+    }
+  }, [sourceTime, layerTime, playing, rate, bgIsVideo, bgDuration, loop, matteUrl]);
 
   useEffect(() => {
     const el = ref.current;
@@ -360,26 +406,59 @@ function OverlayVideo({
     const el = ref.current;
     return () => el?.pause();
   }, []);
+  useEffect(() => {
+    const els = [matted.current, bgVideo.current];
+    return () => els.forEach((el) => el?.pause());
+  }, [matteUrl, bgIsVideo]);
 
   const maskStyle = mask ? { maskImage: `url("${mask}")`, WebkitMaskImage: `url("${mask}")`, maskSize: "100% 100%", WebkitMaskSize: "100% 100%" } : undefined;
   const video = (
     <video
       ref={ref}
       src={url}
+      // With CORS from the start: a keyed layer (chroma key) reads its pixels
+      // on a canvas, and a disk file (asset protocol, another origin) would
+      // taint it otherwise. The preview mixer needs the same for its sound.
+      crossOrigin={cors(url)}
       playsInline
       preload="auto"
       draggable={false}
       aria-hidden
-      className={chromaKey ? "pointer-events-none absolute inset-0 h-full w-full opacity-0" : className}
-      style={chromaKey ? undefined : maskStyle}
-      onPointerDown={chromaKey ? undefined : onPointerDown}
+      className={drawn ? HIDDEN : className}
+      style={drawn ? undefined : maskStyle}
+      onPointerDown={drawn ? undefined : onPointerDown}
     />
   );
-  if (!chromaKey) return video;
+  if (!drawn) return video;
   return (
     <>
       {video}
+      {matteUrl && <video ref={matted} src={matteUrl} crossOrigin={cors(matteUrl)} muted playsInline preload="auto" aria-hidden className={HIDDEN} />}
+      {matteUrl && bg && (bgIsVideo ? (
+        <video ref={bgVideo} src={bg.url} crossOrigin={cors(bg.url)} muted playsInline preload="auto" aria-hidden className={HIDDEN} />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element -- drawn onto the canvas, never shown
+        <img ref={bgImage} src={bg.url} crossOrigin={cors(bg.url)} alt="" aria-hidden className={HIDDEN} />
+      ))}
       <canvas ref={keyed} className={`relative ${className}`} style={maskStyle} onPointerDown={onPointerDown} aria-hidden />
     </>
   );
+}
+
+const HIDDEN = "pointer-events-none absolute inset-0 h-full w-full opacity-0";
+
+/** Media the matte canvas reads pixels from: disk files come from the
+ * asset protocol, another origin, so they're loaded with CORS (which it
+ * answers) or the canvas would be tainted and unreadable. */
+const cors = (url: string) => (/^(blob|data):/.test(url) ? undefined : "anonymous");
+
+/** Keeps a muted helper video (matted file, background video) on `time`:
+ * re-seeked on a real jump, otherwise left to play - like the layer's own. */
+function follow(el: HTMLVideoElement | null, time: number, playing: boolean, rate: number) {
+  if (!el) return;
+  el.playbackRate = rate;
+  const drift = Math.abs(el.currentTime - time);
+  if (el.readyState >= 1 && !el.seeking && drift > (playing ? 0.3 : 0.04)) el.currentTime = time;
+  if (playing && el.paused && !el.ended) el.play().catch(() => {});
+  if (!playing && !el.paused) el.pause();
 }

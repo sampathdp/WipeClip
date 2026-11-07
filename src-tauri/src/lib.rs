@@ -379,6 +379,7 @@ pub fn run() {
             opened::opened_file_read,
             media::media_choose,
             media::media_open,
+            media::matte_open,
             notify::notify_if_away,
             shortcuts::recorder_shortcuts,
             recording::recording_default_dir,

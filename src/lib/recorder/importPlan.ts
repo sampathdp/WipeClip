@@ -4,6 +4,7 @@
  * picture-in-picture layer - all lined up by each track's start offset so
  * they stay in sync. Pure - see tests/desktop/recorder.test.ts.
  */
+import { DEFAULT_MATTE } from "../editor/matte.ts";
 import { DEFAULT_CANVAS, newClip, type AudioClip, type Overlay, type Project } from "../editor/types.ts";
 import type { RecordingManifest, RecordingTrack, TrackKind } from "./format.ts";
 
@@ -102,6 +103,8 @@ function webcamLayer(id: string, cam: ImportedTrack, start: number, end: number,
     animOut: "none",
     hidden: false,
     locked: false,
+    // The background picked in the recorder (validated: the manifest is a file on disk).
+    ...(cam.track.background === "remove" || cam.track.background === "blur" ? { matte: { ...DEFAULT_MATTE, mode: cam.track.background } } : {}),
   };
 }
 

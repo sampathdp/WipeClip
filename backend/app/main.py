@@ -68,11 +68,11 @@ import traceback
 import uuid
 import wave
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, ValidationError
@@ -116,7 +116,7 @@ from app.config import (
     RESOLUTION_HEIGHTS,
     SHARPEN_AMOUNT_PRESETS,
 )
-from app.pipeline import activity, audio_clean, dub, encoders, io_utils, moderation, speech
+from app.pipeline import activity, audio_clean, dub, encoders, io_utils, matte, moderation, scenes, speech
 from app.pipeline import editor as editor_pipeline
 from app.pipeline import video as video_pipeline
 from app.queue import get_queue
@@ -750,6 +750,185 @@ async def api_dub_render(
     return Response(content=buf.getvalue(), media_type="audio/wav")
 
 
+async def _engine_video(path: Optional[str], key: Optional[str], file: Optional[UploadFile]) -> str:
+    """Desktop engine: the video a local analysis works on - a file on disk
+    (`path`), or one the editor holds in memory, named by `key`: handed over
+    as `file` the first time (409 "need_file" asks for it), then kept in the
+    matte cache (matte.store_source)."""
+    if path:
+        return _local_file(path, _VIDEO_SUFFIXES)
+    if not key:
+        raise HTTPException(status_code=400, detail="No video given.")
+    stored = await asyncio.to_thread(matte.stored_source, key)
+    if stored is None and file is None:
+        raise HTTPException(status_code=409, detail={"code": "need_file", "message": "Send the video."})
+    if stored is None:
+        suffix = Path(file.filename or "").suffix.lower()  # type: ignore[union-attr]
+        if suffix not in _VIDEO_SUFFIXES:
+            raise HTTPException(status_code=400, detail="Please use a video file (MP4, MOV or WebM).")
+        stored = await asyncio.to_thread(matte.store_source, key, suffix, file.file.read)  # type: ignore[union-attr]
+    return str(stored)
+
+
+MAX_SCENE_CLICKS = 5000
+_scene_lock = asyncio.Lock()
+
+
+@app.post("/api/scene/analyze")
+async def api_scene_analyze(
+    path: Optional[str] = Form(None),
+    key: Optional[str] = Form(None, pattern=r"^[0-9a-f]{16,64}$"),
+    file: Optional[UploadFile] = File(None),
+    level: Literal["quick", "thorough"] = Form("quick"),
+    clicks: str = Form("[]", max_length=200_000),
+    duration: float = Form(0, ge=0, le=24 * 3600),
+    job_id: Optional[str] = Form(None),
+) -> dict:
+    """Desktop engine only: scene analysis of a screen recording
+    (app/pipeline/scenes.py) - what changes when, what the screen shows
+    where it settles, names of clicked buttons, possible sensitive text.
+    `clicks`: JSON [[t, x, y], ...], seconds and fractions of the frame.
+    Progress and cancel under `job_id`: phase "scan" or "read". One at a
+    time (it keeps the CPU busy). Runs on the user's own machine: no frame
+    or text leaves it, and text isn't logged."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    try:
+        parsed = json.loads(clicks)
+        click_list = [[round(float(c[0]), 3), round(float(c[1]), 5), round(float(c[2]), 5)] for c in parsed[:MAX_SCENE_CLICKS]]
+        if not all(math.isfinite(v) for c in click_list for v in c):
+            raise ValueError
+    except (ValueError, TypeError, IndexError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid clicks") from exc
+    src = await _engine_video(path, key, file)
+    try:
+        info = await asyncio.to_thread(editor_pipeline.probe_media, src)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="This file has no video to analyze.") from exc
+    length = info.duration if info.duration > 0 else duration
+
+    job = progress.start(job_id)
+
+    def report(stage: str, value: float) -> None:
+        if job:
+            job.check()
+            job.phase, job.done, job.total = stage, value, 1.0
+
+    try:
+        async with _scene_lock:
+            return await asyncio.to_thread(scenes.analyze, src, info.width, info.height, length, level, click_list, report)
+    except progress.Cancelled as exc:
+        raise HTTPException(status_code=409, detail={"code": "cancelled", "message": "Scene analysis cancelled."}) from exc
+    except OSError as exc:
+        # No text in the log: only that it failed (a model download, a file).
+        print(f"[scene] analysis failed: {type(exc).__name__}")
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "model_download", "message": "The text reading model couldn't be loaded. Check your connection and try again."},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="This video couldn't be analyzed.") from exc
+    finally:
+        progress.finish(job_id)
+
+
+@app.post("/api/matte/render")
+async def api_matte_render(
+    path: Optional[str] = Form(None),
+    key: Optional[str] = Form(None, pattern=r"^[0-9a-f]{16,64}$"),
+    file: Optional[UploadFile] = File(None),
+    job_id: Optional[str] = Form(None),
+    # The editor's own measure of the length: recorded WebM files often
+    # carry none in their header, which only progress reporting needs.
+    duration: float = Form(0, ge=0, le=24 * 3600),
+    detail: Literal["fine", "fast"] = Form("fine"),
+) -> dict:
+    """Desktop engine only: the matted file of a webcam video (app/pipeline/
+    matte.py) - its picture on top and the person's mask below - made first
+    if it isn't cached. The video is a file on disk (`path`), or one the
+    editor holds in memory, named by `key`: handed over as `file` the first
+    time (409 "need_file" asks for it), kept in the matte cache after that.
+    `detail`: "fine" (color-guided edges, better hair) or "fast".
+    Answers the matted file's path (in the matte cache), its width and half
+    height, and its frame rate. Progress and cancel under `job_id`: phase
+    "prepare" or "matte". Runs on the user's own machine; nothing leaves it."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    src = await _engine_video(path, key, file)
+    try:
+        info = await asyncio.to_thread(editor_pipeline.probe_media, src)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="This file has no video to remove the background from.") from exc
+
+    job = progress.start(job_id)
+
+    def report(stage: str, value: float) -> None:
+        if job:
+            job.check()
+            job.phase, job.done, job.total = stage, value, 1.0
+
+    try:
+        length = info.duration if info.duration > 0 else duration
+        out = await asyncio.to_thread(matte.render, src, info.width, info.height, info.fps, length, report, detail == "fine")
+    except progress.Cancelled as exc:
+        raise HTTPException(status_code=409, detail={"code": "cancelled", "message": "Background removal cancelled."}) from exc
+    except OSError as exc:
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "model_download", "message": "The background removal model couldn't be downloaded. Check your connection and try again."},
+        ) from exc
+    except RuntimeError as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail={"code": "matte_failed", "message": "Couldn't remove the background from this video."}) from exc
+    finally:
+        progress.finish(job_id)
+    w, h = matte.matte_size(info.width, info.height)
+    return {"path": str(out), "width": w, "height": h, "fps": info.fps}
+
+
+MATTE_FRAME_MAX_PIXELS = 512 * 512
+
+
+@app.post("/api/matte/frame")
+async def api_matte_frame(request: Request, w: int = Query(..., ge=16, le=512), h: int = Query(..., ge=16, le=512)) -> Response:
+    """Desktop engine only: the person mask of one small live webcam frame,
+    for the recorder's preview (the recording itself stays untouched). Body:
+    raw RGBA pixels, w x h; answers the mask, w x h bytes (255 = person). The
+    model is loaded once and reused; nothing leaves the machine."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    if w * h > MATTE_FRAME_MAX_PIXELS:
+        raise HTTPException(status_code=400, detail="Frame too large")
+    raw = await request.body()
+    if len(raw) != w * h * 4:
+        raise HTTPException(status_code=400, detail="Invalid frame")
+
+    def segment() -> bytes:
+        rgba = np.frombuffer(raw, np.uint8).reshape(h, w, 4)
+        bgr = np.ascontiguousarray(rgba[..., 2::-1])
+        mask = matte.raw_mask(matte.model_for(w, h), bgr)
+        return (cv2.resize(mask, (w, h), interpolation=cv2.INTER_LINEAR) * 255 + 0.5).astype(np.uint8).tobytes()
+
+    try:
+        out = await asyncio.to_thread(segment)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "model_download", "message": "The background removal model couldn't be downloaded. Check your connection and try again."},
+        ) from exc
+    return Response(content=out, media_type="application/octet-stream")
+
+
+@app.post("/api/matte/clear")
+def api_matte_clear() -> dict:
+    """Desktop engine only: deletes every cached matted file (they're made
+    again when needed)."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    return {"freed": matte.clear_cache()}
+
+
 @app.post("/api/video/probe")
 async def api_video_probe(
     ticket: Optional[str] = Form(None),
@@ -1186,6 +1365,52 @@ class _EditorKey(BaseModel):
     smoothness: float = Field(ge=0, le=100)
 
 
+class _EditorMatte(BaseModel):
+    """Webcam background removal on a video layer (src/lib/editor/matte.ts).
+    `path`: its matted file, made by /api/matte/render (only files in the
+    matte cache are accepted). `image`: background image (index into
+    `overlays`); `video`: background video (index into `sources`)."""
+
+    mode: Literal["remove", "blur", "image", "video"]
+    path: str = Field(max_length=1024)
+    edge: float = Field(0, ge=-100, le=100)
+    soft: float = Field(25, ge=0, le=100)
+    blur: float = Field(50, ge=0, le=100)
+    image: Optional[int] = Field(None, ge=0, lt=EDITOR_MAX_STICKERS)
+    video: Optional[int] = Field(None, ge=0, lt=EDITOR_MAX_SOURCES)
+    fit: Literal["fill", "fit"] = "fill"
+    x: float = Field(0.5, ge=0, le=1)
+    y: float = Field(0.5, ge=0, le=1)
+    scale: float = Field(1, ge=1, le=4)
+    loop: bool = True
+
+
+def _matte_file(raw: str) -> str:
+    """A matted file the engine made itself: in the matte cache, nowhere else."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=400, detail="Background removal is only available in the desktop app.")
+    try:
+        p = Path(raw).resolve(strict=True)
+        root = matte.cache_dir().resolve()
+    except OSError as exc:
+        raise HTTPException(status_code=409, detail={"code": "matte_missing", "message": "A webcam's background removal needs to be redone."}) from exc
+    if p.parent != root or p.suffix != ".mp4" or not p.is_file():
+        raise HTTPException(status_code=400, detail="Invalid background removal file.")
+    return str(p)
+
+
+def _plan_matte(m: _EditorMatte, overlay_images, source_paths, source_infos) -> editor_pipeline.PlanMatte:
+    bg_path, bw, bh = None, 0, 0
+    if m.mode == "image" and m.image is not None:
+        bg_path, bw, bh = overlay_images[m.image]
+    elif m.mode == "video" and m.video is not None:
+        bg_path, bw, bh = source_paths[m.video], source_infos[m.video].width, source_infos[m.video].height
+    return editor_pipeline.PlanMatte(
+        path=_matte_file(m.path), mode=m.mode, edge=m.edge, soft=m.soft, blur=m.blur,
+        bg_path=bg_path, bg_width=bw, bg_height=bh, fit=m.fit, x=m.x, y=m.y, scale=m.scale, loop=m.loop,
+    )  # fmt: skip
+
+
 class _EditorSprite(BaseModel):
     """Animated text: the image is a cols x rows grid of states, state k
     shown from times[k] (timeline seconds; src/lib/editor/textAnim.ts)."""
@@ -1216,6 +1441,7 @@ class _EditorOverlay(BaseModel):
     keyframes: list[_EditorKeyframe] = Field(default_factory=list, max_length=EDITOR_MAX_KEYFRAMES)
     sprite: Optional[_EditorSprite] = None
     mask: Optional[int] = Field(None, ge=0, lt=EDITOR_MAX_STICKERS)  # video layers: mask PNG index
+    matte: Optional[_EditorMatte] = None  # video layers: background removal
 
 
 class _EditorDuck(BaseModel):
@@ -1486,6 +1712,15 @@ async def api_video_export(
         _check_keyframes(o.keyframes)
         if o.mask is not None and (o.video is None or o.mask >= len(overlays)):
             raise HTTPException(status_code=400, detail="Layer mask is missing")
+        mt = o.matte
+        if mt and (
+            o.video is None
+            or (mt.mode == "image" and (mt.image is None or mt.image >= len(overlays)))
+            or (mt.mode == "video" and (mt.video is None or mt.video >= len(source_items)))
+        ):
+            raise HTTPException(status_code=400, detail="Background removal refers to a missing file")
+        if mt:
+            _matte_file(mt.path)
         sp = o.sprite
         if sp and (
             o.image is None
@@ -1739,6 +1974,7 @@ async def api_video_export(
                         sprite_rows=o.sprite.rows if o.sprite else 1,
                         sprite_times=list(o.sprite.times) if o.sprite else [],
                         mask_path=overlay_images[o.mask][0] if o.mask is not None else None,
+                        matte=_plan_matte(o.matte, overlay_images, source_paths, source_infos) if o.matte and o.video is not None else None,
                     )
                 )
             if branding:

@@ -65,7 +65,8 @@ import { errorText, mediaError, type RecorderPlatform } from "@/lib/recorder/med
 import { LOW_DISK_BYTES, RecordingSession, type FinishedRecording, type SessionTrackInput } from "@/lib/recorder/session";
 import { CloseIcon } from "@/components/editor/icons";
 import ToolFeedback from "@/components/ToolFeedback";
-import { LevelMeter, LivePreview, Note, RegionSelector, Section, Select, Toggle, formatBytes, useAudioLevel } from "./parts";
+import { LevelMeter, LiveMattePreview, LivePreview, Note, RegionSelector, Section, Select, Toggle, formatBytes, useAudioLevel } from "./parts";
+import { engineMatteFrame } from "@/lib/toolsApi";
 import SourcePicker from "./SourcePicker";
 
 type Step = "setup" | "countdown" | "recording" | "review";
@@ -128,6 +129,7 @@ function folderName(d = new Date()) {
 
 
 const AUTO_OPEN_KEY = "wipeclip.recorder.autoOpen";
+const CAM_BG_KEY = "wipeclip.recorder.camBackground";
 function readAutoOpen(): boolean {
   try {
     return localStorage.getItem(AUTO_OPEN_KEY) !== "0";
@@ -171,6 +173,24 @@ export default function ScreenRecorder({
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
   const [camId, setCamId] = useState<string>("off");
   const [camStream, setCamStream] = useState<MediaStream | null>(null);
+  // Webcam background (matte.ts in the editor): previewed live here, applied
+  // when the recording opens in the editor. Remembered between recordings.
+  const [camBg, setCamBgState] = useState<"original" | "remove" | "blur">(() => {
+    try {
+      const v = localStorage.getItem(CAM_BG_KEY);
+      return v === "remove" || v === "blur" ? v : "original";
+    } catch {
+      return "original";
+    }
+  });
+  const setCamBg = (v: "original" | "remove" | "blur") => {
+    setCamBgState(v);
+    try {
+      localStorage.setItem(CAM_BG_KEY, v);
+    } catch {
+      // per-viewer convenience only
+    }
+  };
   const micLevel = useAudioLevel(micStream);
   const systemAudioStream = useMemo(() => {
     const tracks = source?.stream.getAudioTracks() ?? [];
@@ -655,7 +675,13 @@ export default function ScreenRecorder({
     const tracks: SessionTrackInput[] = native ? [] : [{ kind: "screen", stream: new MediaStream(video) }];
     if (!native && source.hasSystemAudio && wantSystemAudio) tracks.push({ kind: "system-audio", stream: new MediaStream(source.stream.getAudioTracks()) });
     if (micStream) tracks.push({ kind: "microphone", stream: micStream, deviceLabel: micStream.getAudioTracks()[0]?.label });
-    if (camStream) tracks.push({ kind: "webcam", stream: new MediaStream(camStream.getVideoTracks()), deviceLabel: camStream.getVideoTracks()[0]?.label });
+    if (camStream)
+      tracks.push({
+        kind: "webcam",
+        stream: new MediaStream(camStream.getVideoTracks()),
+        deviceLabel: camStream.getVideoTracks()[0]?.label,
+        ...(camBg !== "original" ? { background: camBg } : {}),
+      });
 
     const s = native ? { width: outW, height: outH, frameRate: fps } : video[0].getSettings();
     const capture: CaptureInfo = {
@@ -723,6 +749,7 @@ export default function ScreenRecorder({
     wantSystemAudio,
     micStream,
     camStream,
+    camBg,
     display,
     platform,
     region,
@@ -1155,7 +1182,27 @@ export default function ScreenRecorder({
                         disabled={!support?.media}
                         options={deviceOptions("videoinput", "Camera")}
                       />
-                      {camStream ? (
+                      {camStream && (
+                        <Select
+                          label="Background"
+                          value={camBg}
+                          onChange={(v) => setCamBg(v as "original" | "remove" | "blur")}
+                          options={[
+                            { value: "original", label: "Original" },
+                            { value: "remove", label: "Remove" },
+                            { value: "blur", label: "Blur" },
+                          ]}
+                        />
+                      )}
+                      {camStream && camBg !== "original" ? (
+                        <LiveMattePreview
+                          stream={camStream}
+                          mode={camBg}
+                          segment={engineMatteFrame}
+                          mirror
+                          className="aspect-video w-full rounded-lg border border-border bg-black/40 object-cover"
+                        />
+                      ) : camStream ? (
                         <LivePreview stream={camStream} mirror className="aspect-video w-full rounded-lg border border-border bg-black object-cover" />
                       ) : (
                         <div className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted">No camera</div>

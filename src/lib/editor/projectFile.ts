@@ -72,6 +72,8 @@ export function referencedSources(p: Project): Set<string> {
   }
   for (const o of p.overlays) {
     if ("sourceId" in o && typeof o.sourceId === "string") ids.add(o.sourceId);
+    // A webcam's background image or video (matte.ts).
+    if (o.kind === "video" && o.matte?.bgSourceId) ids.add(o.matte.bgSourceId);
     // Uploaded fonts: "src:<id>".
     if (o.kind === "text" && o.text.font.startsWith("src:")) ids.add(o.text.font.slice(4));
   }
@@ -95,7 +97,9 @@ export function remapSources(p: Project, map: Map<string, string>): Project {
       ...(c.look.lut ? { look: { ...c.look, lut: { ...c.look.lut, sourceId: to(c.look.lut.sourceId) } } } : {}),
     })),
     overlays: p.overlays.map((o) =>
-      "sourceId" in o && typeof o.sourceId === "string"
+      o.kind === "video"
+        ? { ...o, sourceId: to(o.sourceId), ...(o.matte?.bgSourceId ? { matte: { ...o.matte, bgSourceId: to(o.matte.bgSourceId) } } : {}) }
+        : "sourceId" in o && typeof o.sourceId === "string"
         ? { ...o, sourceId: to(o.sourceId) }
         : o.kind === "text" && o.text.font.startsWith("src:")
           ? { ...o, text: { ...o.text, font: `src:${to(o.text.font.slice(4))}` } }

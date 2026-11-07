@@ -1,5 +1,11 @@
 {
-  "next": [],
+  "next": [
+    "Remove, blur or replace your webcam background - no green screen needed. Pick it under Background on a webcam layer, or before you record to see it live. It runs on your computer.",
+    "Draft can now read your screen on your computer: chapters named after what was on screen, cuts for waiting, labels for the buttons you clicked, and a privacy check for emails, keys and card numbers that you review before export.",
+    "New Scenes tab shows the parts of your recording at a glance - click one to jump there.",
+    "A Projects button in the editor takes you back to your projects (your work is saved).",
+    "Fixed: the preview could get stuck on one frame after the playhead reached the end of the video."
+  ],
   "releases": [
     {
       "version": "0.1.18",

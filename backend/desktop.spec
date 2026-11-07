@@ -25,6 +25,20 @@ nsfw_model = os.path.join("app", "models", "nsfw-image-detection-384.safetensors
 if not os.path.exists(nsfw_model):
     raise SystemExit(f"{nsfw_model} missing - run `python -m app.pipeline.nsfw_classifier` first")
 datas += [(nsfw_model, os.path.join("app", "models"))]
+# The background removal models (app/pipeline/matte.py), fetched into
+# app/models/ by `python -m app.pipeline.matte` before this runs.
+# And the text reading models for scene analysis (app/pipeline/ocr.py),
+# fetched by `python -m app.pipeline.ocr`.
+for matte_model, step in (
+    ("selfie_segmenter.tflite", "matte"),
+    ("selfie_segmenter_landscape.tflite", "matte"),
+    ("en_PP-OCRv3_det_infer.onnx", "ocr"),
+    ("en_PP-OCRv3_rec_infer.onnx", "ocr"),
+):
+    matte_path = os.path.join("app", "models", matte_model)
+    if not os.path.exists(matte_path):
+        raise SystemExit(f"{matte_path} missing - run `python -m app.pipeline.{step}` first")
+    datas += [(matte_path, os.path.join("app", "models"))]
 datas += collect_data_files("imageio_ffmpeg")  # the static ffmpeg binary
 binaries = []
 

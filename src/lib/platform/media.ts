@@ -47,6 +47,14 @@ export async function openDiskMedia(paths: string[]): Promise<Map<string, { ok: 
 }
 
 /** The URL a disk file plays from (after openDiskMedia or chooseVideoOnDisk). */
+/** A playable URL for a matted webcam video the engine made (webcam
+ * background removal; media.rs matte_open allows only its cache). */
+export async function matteUrl(path: string): Promise<string> {
+  const { invoke, convertFileSrc } = await core();
+  await invoke("matte_open", { path });
+  return convertFileSrc(path);
+}
+
 export async function diskMediaUrl(path: string): Promise<string> {
   const { convertFileSrc } = await core();
   return convertFileSrc(path);
