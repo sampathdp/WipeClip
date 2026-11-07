@@ -117,7 +117,27 @@ export async function memoryBudgetGb(): Promise<number | null> {
   return reported ? reported / 2 : null;
 }
 
-export type SaveResult = { status: "saved"; path: string } | { status: "cancelled" };
+/** A modest computer: 4 or fewer logical cores (a dual-core i3) or about
+ * 8 GB of RAM or less. The recorder then starts with lighter settings
+ * (720p, 30 fps, smaller webcam) and slower previews. Desktop only (the
+ * website can't tell, see memoryBudgetGb); asked once. */
+let lowEnd: Promise<boolean> | null = null;
+export function isLowEndMachine(): Promise<boolean> {
+  lowEnd ??= (async () => {
+    const cores = navigator.hardwareConcurrency || 0;
+    if (!IS_DESKTOP) return cores > 0 && cores <= 4;
+    try {
+      const m = await invoke<{ totalBytes: number | null; cores: number }>("system_memory");
+      // 8 GB machines report a little under 8 (memory reserved for graphics).
+      return m.cores <= 4 || (m.totalBytes != null && m.totalBytes <= 8.5 * 1024 ** 3);
+    } catch {
+      return cores > 0 && cores <= 4;
+    }
+  })();
+  return lowEnd;
+}
+
+export type SaveResult ={ status: "saved"; path: string } | { status: "cancelled" };
 
 /** Saves an exported video, with kind "project" a project file
  * (.wipeclip), or with kind "image" a PNG (the image tools). Website: the usual browser download. Desktop: the OS save

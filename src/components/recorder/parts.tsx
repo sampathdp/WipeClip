@@ -215,12 +215,16 @@ export function LiveMattePreview({
   segment,
   className,
   mirror,
+  maxFps = 12,
 }: {
   stream: MediaStream;
   mode: "remove" | "blur";
   segment: (rgba: Uint8ClampedArray, w: number, h: number, signal: AbortSignal) => Promise<Uint8Array>;
   className?: string;
   mirror?: boolean;
+  /** At most this many masks a second: each is a round trip to the engine
+   * (a neural network on the CPU) plus a full redraw. */
+  maxFps?: number;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -238,6 +242,7 @@ export function LiveMattePreview({
     let smooth: Float32Array | null = null;
     let raf = 0;
     let busy = false;
+    let lastAt = 0;
     const draw = (mask: HTMLCanvasElement | null) => {
       const W = Math.min(640, v.videoWidth);
       const H = Math.round((v.videoHeight * W) / Math.max(1, v.videoWidth));
@@ -268,7 +273,10 @@ export function LiveMattePreview({
     const step = async () => {
       if (abort.signal.aborted) return;
       raf = requestAnimationFrame(() => void step());
-      if (busy || v.readyState < 2 || !v.videoWidth) return;
+      if (busy || v.readyState < 2 || !v.videoWidth || document.hidden) return;
+      const t = performance.now();
+      if (t - lastAt < 1000 / maxFps) return;
+      lastAt = t;
       busy = true;
       try {
         const w = 256;
@@ -316,7 +324,7 @@ export function LiveMattePreview({
       cancelAnimationFrame(raf);
       v.srcObject = null;
     };
-  }, [stream, mode, segment]);
+  }, [stream, mode, segment, maxFps]);
   return (
     <div className="relative">
       <video ref={video} muted playsInline className="hidden" />

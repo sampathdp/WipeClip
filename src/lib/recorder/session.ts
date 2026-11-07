@@ -83,8 +83,10 @@ export interface SessionConfig {
   input: InputSettings | null;
   inputPermissions: InputPermissions;
   videoBitsPerSecond: number;
+  /** Webcam bitrate (default: the screen one, at most 4 Mbps). */
+  webcamBitsPerSecond?: number;
   audioBitsPerSecond: number;
-  app: { version: string | null; platform: string };
+  app:{ version: string | null; platform: string };
   /** Captured surface in desktop coordinates, for mapping events onto the
    * video (null = unknown; events stay in desktop space). */
   surface: Rect | null;
@@ -333,7 +335,7 @@ export class RecordingSession {
     const video = input.kind === "screen" || input.kind === "webcam";
     const recorder = new MediaRecorder(input.stream, {
       mimeType,
-      ...(video ? { videoBitsPerSecond: input.kind === "webcam" ? Math.min(4_000_000, this.cfg.videoBitsPerSecond) : this.cfg.videoBitsPerSecond } : {}),
+      ...(video ? { videoBitsPerSecond: input.kind === "webcam" ? (this.cfg.webcamBitsPerSecond ?? Math.min(4_000_000, this.cfg.videoBitsPerSecond)) : this.cfg.videoBitsPerSecond } : {}),
       audioBitsPerSecond: this.cfg.audioBitsPerSecond,
     });
     const writer = new ChunkWriter(

@@ -14,10 +14,11 @@
  * See docs/desktop/RECORDER.md.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { confirmAction, getDesktopCapabilities } from "@/lib/platform";
+import { confirmAction, getDesktopCapabilities, isLowEndMachine } from "@/lib/platform";
 import {
   captureExcludeWindow,
   captureSupport,
+  capturePreview,
   captureThumbnail,
   inputPermissions,
   onMiniAction,
@@ -166,6 +167,8 @@ export default function ScreenRecorder({
   const [resolution, setResolution] = useState<Resolution>("native");
   const [fps, setFps] = useState<30 | 60>(30);
   const [quality, setQuality] = useState<Quality>("standard");
+  // A modest computer (isLowEndMachine): lighter defaults and previews.
+  const [lowEnd, setLowEnd] = useState(false);
 
   // devices
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -252,6 +255,14 @@ export default function ScreenRecorder({
     void inputPermissions()
       .then(setPerms)
       .catch(() => setPerms(null));
+    // Lighter defaults on a modest computer: 720p (the encoder's work grows
+    // with the pixels), pointer sampled at 30 Hz. Still changeable below.
+    void isLowEndMachine().then((le) => {
+      if (!le) return;
+      setLowEnd(true);
+      setResolution((r) => (r === "native" ? "720" : r));
+      setInput((i) => (i.sampleHz === DEFAULT_INPUT_SETTINGS.sampleHz ? { ...i, sampleHz: 30 } : i));
+    });
     void recordingDefaultDir()
       .then((dir) => {
         setSaveDir(dir);
@@ -462,36 +473,44 @@ export default function ScreenRecorder({
     [source]
   );
 
-  // Native preview: a still of the source every few hundred ms (once a
-  // second while recording), drawn into the preview canvas.
+  // Native preview, drawn into the preview canvas. Before recording: a
+  // still of the source a few times a second (a GDI grab of the whole
+  // display, so cheaper scaling and less often on a modest computer).
+  // While recording: the encoder's own latest frame once a second (no
+  // second screen grab next to the recording), and nothing at all while
+  // this window is hidden or minimized - nobody sees it then.
   const nativeId = source?.nativeSource?.id;
   const previewCanvas = source?.preview;
   useEffect(() => {
-    if (!nativeId || !previewCanvas || step === "review") return;
+    if (!nativeId || !previewCanvas || step === "review" || step === "countdown") return;
     let stopped = false;
     let failures = 0;
+    const recording = step === "recording";
+    const [w, h] = lowEnd ? [960, 540] : [1280, 720];
     void (async () => {
       while (!stopped) {
-        try {
-          const img = await captureThumbnail(nativeId, 1280, 720);
-          if (stopped) return;
-          failures = 0;
-          drawPreview(previewCanvas, img);
-        } catch (e) {
-          // Window closed (or minimized) before recording: back to the picker.
-          if (++failures >= 3 && step === "setup") {
-            setSource((cur) => (cur?.nativeSource?.id === nativeId ? null : cur));
-            setNotice(errorText(e, "That source isn't available any more.") + " Choose what to record again.");
-            return;
+        if (!document.hidden) {
+          try {
+            const img = recording ? await capturePreview(w, h) : await captureThumbnail(nativeId, w, h, lowEnd);
+            if (stopped) return;
+            failures = 0;
+            drawPreview(previewCanvas, img);
+          } catch (e) {
+            // Window closed (or minimized) before recording: back to the picker.
+            if (++failures >= 3 && !recording) {
+              setSource((cur) => (cur?.nativeSource?.id === nativeId ? null : cur));
+              setNotice(errorText(e, "That source isn't available any more.") + " Choose what to record again.");
+              return;
+            }
           }
         }
-        await new Promise((r) => setTimeout(r, step === "setup" ? 250 : 1000));
+        await new Promise((r) => setTimeout(r, recording ? 1000 : lowEnd ? 500 : 250));
       }
     })();
     return () => {
       stopped = true;
     };
-  }, [nativeId, previewCanvas, step]);
+  }, [nativeId, previewCanvas, step, lowEnd]);
 
   // Mini player while recording (native capture only: it relies on the
   // window being excluded from capture). Fed with the time and state.
@@ -558,7 +577,14 @@ export default function ScreenRecorder({
       if (id === "off") return;
       try {
         const s = await navigator.mediaDevices.getUserMedia({
-          video: { deviceId: id === "default" ? undefined : { exact: id }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+          // A modest computer encodes the webcam on the CPU next to the
+          // screen: 360p at 24 fps is a fraction of the work of 720p30.
+          video: {
+            deviceId: id === "default" ? undefined : { exact: id },
+            width: { ideal: lowEnd ? 640 : 1280 },
+            height: { ideal: lowEnd ? 360 : 720 },
+            frameRate: { ideal: lowEnd ? 24 : 30, max: 30 },
+          },
         });
         setCamStream(s);
         void refreshDevices();
@@ -567,7 +593,7 @@ export default function ScreenRecorder({
         setError(mediaError(e, "camera", platform));
       }
     },
-    [camStream, platform, refreshDevices]
+    [camStream, platform, refreshDevices, lowEnd]
   );
 
   // A selected device unplugged before recording.
@@ -598,7 +624,7 @@ export default function ScreenRecorder({
   const cursorInVideo = source?.nativeSource ? !(hideCursor && !!nativeSupport?.cursorControl) : (source?.cursorCaptured ?? true);
   const systemAudioOn = source?.nativeSource ? wantSystemAudio : !!source?.hasSystemAudio;
   const videoBps = Math.round(Math.min(40e6, Math.max(1.5e6, QUALITY_BPP[quality] * outW * outH * outFps)));
-  const mbPerMin = ((videoBps + (micStream ? 128e3 : 0) + (systemAudioOn ? 128e3 : 0) + (camStream ? 2.5e6 : 0)) * 60) / 8 / 1024 / 1024;
+  const mbPerMin = ((videoBps + (micStream ? 128e3 : 0) + (systemAudioOn ? 128e3 : 0) + (camStream ? (lowEnd ? 1.2e6 : 2.5e6) : 0)) * 60) / 8 / 1024 / 1024;
   const inputAvailable = perms !== null && perms.mouse !== "unsupported";
 
   // --- recording -----------------------------------------------------------------------
@@ -709,6 +735,7 @@ export default function ScreenRecorder({
           activeWindow: perms?.activeWindow ?? "unknown",
         },
         videoBitsPerSecond: videoBps,
+        ...(lowEnd ? { webcamBitsPerSecond: 1_200_000 } : {}),
         audioBitsPerSecond: 128_000,
         app: { version: appVersion, platform },
         surface: display?.bounds ?? null,
@@ -767,6 +794,7 @@ export default function ScreenRecorder({
     restoreWindow,
     showReview,
     autoOpen,
+    lowEnd,
   ]);
 
   useEffect(() => {
@@ -1199,6 +1227,7 @@ export default function ScreenRecorder({
                           stream={camStream}
                           mode={camBg}
                           segment={engineMatteFrame}
+                          maxFps={lowEnd ? 5 : 12}
                           mirror
                           className="aspect-video w-full rounded-lg border border-border bg-black/40 object-cover"
                         />
@@ -1248,6 +1277,11 @@ export default function ScreenRecorder({
                         { value: "high", label: "High" },
                       ]}
                     />
+                    {lowEnd && (
+                      <p className="text-xs text-muted">
+                        Lighter settings for this computer: 720p, a smaller webcam picture and slower previews keep the recording smooth. Higher settings may drop frames.
+                      </p>
+                    )}
                     <p className="text-xs text-muted">
                       About {Math.max(1, Math.round(mbPerMin))} MB per minute. The editor opens recordings of any size and exports up to 10 minutes.
                     </p>

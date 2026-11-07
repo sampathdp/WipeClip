@@ -182,16 +182,17 @@ pub async fn capture_sources() -> Result<Vec<CaptureSource>, String> {
 
 /// A still of a source, scaled to fit max_width x max_height: 8-byte
 /// header (width, height as u32 LE) then RGBA pixels.
+/// `fast`: cheaper, rougher scaling (live previews; the picker leaves it off).
 #[tauri::command]
-pub async fn capture_thumbnail(id: String, max_width: u32, max_height: u32) -> Result<Response, String> {
+pub async fn capture_thumbnail(id: String, max_width: u32, max_height: u32, fast: Option<bool>) -> Result<Response, String> {
     #[cfg(windows)]
     {
-        let (w, h, rgba) = sources::thumbnail(&id, max_width.clamp(16, 3840), max_height.clamp(16, 2160))?;
+        let (w, h, rgba) = sources::thumbnail(&id, max_width.clamp(16, 3840), max_height.clamp(16, 2160), fast.unwrap_or(false))?;
         Ok(Response::new(with_header(w, h, rgba)))
     }
     #[cfg(not(windows))]
     {
-        let _ = (id, max_width, max_height);
+        let _ = (id, max_width, max_height, fast);
         Err(UNSUPPORTED.into())
     }
 }

@@ -102,6 +102,29 @@ All paths in the manifest are relative to the folder. Readers accept any `versio
 - Recording runs off the UI thread: file writes and input handling are async Tauri commands and background threads; the hook callbacks only push into a bounded buffer (200,000 events) so input is never delayed.
 - The window keeps recording when minimized (`background_throttling: Disabled`, macOS 14+; Chromium doesn't freeze pages that are capturing).
 
+## Modest computers (dual-core, 8 GB, no dedicated GPU)
+
+What keeps the recorder smooth on a laptop like a dual-core i3 with 8 GB of RAM and only integrated graphics.
+
+Native Windows capture (`src-tauri/src/capture/video.rs`):
+
+- **Capture, encoding and previews don't wait on each other.** Before this change, one lock covered all three. Media Foundation's `WriteSample` blocks while the encoder is behind, so a slow encoder also stopped new screen frames and the recording froze. Now the capture callback only copies the new frame on the GPU, under a short lock. A separate `capture-encoder` thread does the converting and writing, and it is the only thread that waits. Status counters are atomics.
+- **Previews never wait for the GPU.** The mini player and the recording preview read the frame back through two staging textures that take turns, mapped with `D3D11_MAP_FLAG_DO_NOT_WAIT`. Screenshots still read the current frame.
+- **The encoder actually loaded is checked.** Asking Media Foundation for hardware transforms still gives the software encoder when there is no hardware one (old or missing graphics driver). `loaded_encoder_is_hardware` checks the loaded encoder for `MFT_ENUM_HARDWARE_URL_Attribute`.
+- **Software encoder settings** (`software_settings`): at most 720p and 30 fps, with the bitrate scaled to the smaller picture (at least 1.5 Mbps, never more than asked). It uses the Baseline profile, no B-frames and the fastest preset (`CODECAPI_AVEncCommonQualityVsSpeed` 0). The page gets the real size and frame rate back from `capture_start`, plus a warning that suggests installing the latest graphics driver.
+- **The encoder thread sleeps until the next frame is due**, on a high-resolution waitable timer, instead of polling every 8 ms.
+- `WIPECLIP_FORCE_SOFTWARE_ENCODER=1` skips the hardware encoder. Use it for support and to test this path on a fast machine: `cargo test --lib capture::video -- --ignored --nocapture`.
+
+Page (`isLowEndMachine` in `src/lib/platform/index.ts`: 4 or fewer logical cores, or about 8 GB of RAM or less):
+
+- Defaults to 720p and a 30 Hz pointer sample rate. A note in the Video section says why; both can still be changed.
+- Webcam at 640x360, 24 fps, 1.2 Mbps (instead of 1280x720, 30 fps, up to 4 Mbps).
+- Setup preview every 500 ms at 960x540 with cheaper GDI scaling (`capture_thumbnail` `fast`), instead of every 250 ms at 1280x720.
+- While recording, the main window's preview shows the encoder's own frame (`capture_preview`) once a second. There is no second full-screen GDI grab next to the recording. The mini player refreshes every 500 ms (250 ms otherwise).
+- On every machine, previews skip while their window is hidden. The live webcam background preview is capped at 5 masks a second on modest computers (12 otherwise): each mask is a round trip to the local engine.
+
+On the machine, check the app log (`%LOCALAPPDATA%\co.wipeclip.desktop\logs`). `software H.264: ...` means no hardware encoder was found. `native capture stopped: X ms, N frames, M dropped` shows whether the encoder kept up.
+
 ## Editing recordings (Phase 2)
 
 Focus zooms, click highlights and the drawn cursor are described in [FOCUS.md](FOCUS.md). For a drawn cursor, record with **Leave the mouse pointer out of the video**: the recorder asks the web engine for `cursor: "never"` and stores in `capture.cursorCaptured` whether it was honored (an optional field added to format v1; readers that don't know it ignore it). If it wasn't, the system pointer stays in the video and the editor offers only click highlights, so two cursors never show.

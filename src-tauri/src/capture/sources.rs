@@ -8,7 +8,7 @@ use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, EnumDisplayMonitors, GetDC, GetMonitorInfoW, ReleaseDC, SelectObject,
-    SetBrushOrgEx, SetStretchBltMode, StretchBlt, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HALFTONE, HBITMAP, HDC, HMONITOR,
+    SetBrushOrgEx, SetStretchBltMode, StretchBlt, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, COLORONCOLOR, DIB_RGB_COLORS, HALFTONE, HBITMAP, HDC, HMONITOR,
     MONITORINFO, MONITORINFOEXW, SRCCOPY,
 };
 use windows::Win32::Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS};
@@ -263,15 +263,17 @@ fn fit(w: i32, h: i32, max_w: u32, max_h: u32) -> (i32, i32) {
     (((w as f64 * s).round() as i32).max(1), ((h as f64 * s).round() as i32).max(1))
 }
 
-fn stretch(dst: &Dib, src: HDC, sx: i32, sy: i32, sw: i32, sh: i32) {
+/// `fast`: plain pixel dropping (COLORONCOLOR) instead of averaging
+/// (HALFTONE), several times cheaper on a full display; for live previews.
+fn stretch(dst: &Dib, src: HDC, sx: i32, sy: i32, sw: i32, sh: i32, fast: bool) {
     unsafe {
-        SetStretchBltMode(dst.dc, HALFTONE);
+        SetStretchBltMode(dst.dc, if fast { COLORONCOLOR } else { HALFTONE });
         let _ = SetBrushOrgEx(dst.dc, 0, 0, None);
         let _ = StretchBlt(dst.dc, 0, 0, dst.w, dst.h, Some(src), sx, sy, sw, sh, SRCCOPY);
     }
 }
 
-pub fn thumbnail(id: &str, max_w: u32, max_h: u32) -> Result<(u32, u32, Vec<u8>), String> {
+pub fn thumbnail(id: &str, max_w: u32, max_h: u32, fast: bool) -> Result<(u32, u32, Vec<u8>), String> {
     unsafe {
         let screen = GetDC(None);
         let result = (|| match parse_id(id)? {
@@ -281,7 +283,7 @@ pub fn thumbnail(id: &str, max_w: u32, max_h: u32) -> Result<(u32, u32, Vec<u8>)
                 let (w, h) = (r.right - r.left, r.bottom - r.top);
                 let (tw, th) = fit(w, h, max_w, max_h);
                 let dib = Dib::new(screen, tw, th)?;
-                stretch(&dib, screen, r.left, r.top, w, h);
+                stretch(&dib, screen, r.left, r.top, w, h, fast);
                 Ok((tw as u32, th as u32, dib.rgba()))
             }
             Target::Window(hwnd) => {
@@ -302,7 +304,7 @@ pub fn thumbnail(id: &str, max_w: u32, max_h: u32) -> Result<(u32, u32, Vec<u8>)
                 let (cw, ch) = ((vis.right - vis.left).min(fw - cx), (vis.bottom - vis.top).min(fh - cy));
                 let (tw, th) = fit(cw.max(1), ch.max(1), max_w, max_h);
                 let dib = Dib::new(screen, tw, th)?;
-                stretch(&dib, full.dc, cx, cy, cw.max(1), ch.max(1));
+                stretch(&dib, full.dc, cx, cy, cw.max(1), ch.max(1), fast);
                 Ok((tw as u32, th as u32, dib.rgba()))
             }
         })();

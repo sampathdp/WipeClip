@@ -13,9 +13,14 @@
 import { useEffect, useRef, useState } from "react";
 import { capturePreview, MINI_STATE_EVENT, sendMiniAction, type MiniState } from "@/lib/platform/recorder";
 import { formatDuration } from "@/lib/recorder/clock";
+import { isLowEndMachine } from "@/lib/platform";
 import { PauseIcon, PlayIcon } from "@/components/editor/icons";
 
-const PREVIEW_MS = 200;
+/** Preview refresh: a GPU readback of the recorded frame each time, so
+ * slower on a modest computer (isLowEndMachine), where it competes with
+ * the encoder. */
+const PREVIEW_MS = 250;
+const PREVIEW_MS_LOW_END = 500;
 
 function draw(canvas: HTMLCanvasElement, img: ImageData) {
   if (canvas.width !== img.width || canvas.height !== img.height) {
@@ -48,16 +53,19 @@ export default function MiniPlayer() {
   useEffect(() => {
     let stopped = false;
     void (async () => {
+      const every = (await isLowEndMachine()) ? PREVIEW_MS_LOW_END : PREVIEW_MS;
       while (!stopped) {
-        try {
-          const img = await capturePreview(608, 342);
-          if (stopped) return;
-          if (canvasRef.current) draw(canvasRef.current, img);
-          setHasFrame(true);
-        } catch {
-          // not started yet, or just stopped
+        if (!document.hidden) {
+          try {
+            const img = await capturePreview(608, 342);
+            if (stopped) return;
+            if (canvasRef.current) draw(canvasRef.current, img);
+            setHasFrame(true);
+          } catch {
+            // not started yet, or just stopped
+          }
         }
-        await new Promise((r) => setTimeout(r, PREVIEW_MS));
+        await new Promise((r) => setTimeout(r, every));
       }
     })();
     return () => {

@@ -150,9 +150,10 @@ function toImageData(data: ArrayBuffer | number[]): ImageData {
   return new ImageData(new Uint8ClampedArray(buf, 8, width * height * 4), width, height);
 }
 
-/** A still of a source, fitted into maxWidth x maxHeight. */
-export async function captureThumbnail(id: string, maxWidth: number, maxHeight: number): Promise<ImageData> {
-  return toImageData(await call<ArrayBuffer | number[]>("capture_thumbnail", { id, maxWidth, maxHeight }));
+/** A still of a source, fitted into maxWidth x maxHeight. `fast`: cheaper,
+ * rougher scaling (live previews on modest computers). */
+export async function captureThumbnail(id: string, maxWidth: number, maxHeight: number, fast = false): Promise<ImageData> {
+  return toImageData(await call<ArrayBuffer | number[]>("capture_thumbnail", { id, maxWidth, maxHeight, fast }));
 }
 
 /** The latest recorded frame, scaled to fit (mini player preview). */
