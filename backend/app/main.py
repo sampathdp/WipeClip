@@ -441,6 +441,11 @@ async def api_audio_clean(
     denoise: float = Form(0.6, ge=0, le=1),
     level: bool = Form(True),
     repair: bool = Form(False),
+    wind: bool = Form(False),
+    mouth: bool = Form(False),
+    echo: int = Form(0, ge=0, le=3),
+    isolate: bool = Form(False),
+    job_id: Optional[str] = Form(None),
 ):
     """Desktop engine only: a cleaned copy of a clip's or an audio track's
     sound (noise reduced, loudness evened out if `level` -
@@ -449,6 +454,10 @@ async def api_audio_clean(
     lines up with the original sample for sample. Free and unmetered like
     the import check: it runs on the user's own machine. The cloud backend
     refuses it; the recording never leaves the device.
+
+    `echo` (1-3) reduces reverb, `isolate` keeps only the voice (downloads
+    the separator model first if needed). Those are slow: progress and
+    cancel under `job_id`, phase "download", "separate" or "echo".
     """
     if not LOCAL_MODE:
         raise HTTPException(status_code=404, detail="Not available here.")
@@ -459,13 +468,42 @@ async def api_audio_clean(
     with tempfile.TemporaryDirectory() as tmp:
         in_path = await _receive_video(file, None, tmp, path=path, suffixes=_VIDEO_SUFFIXES | _AUDIO_SUFFIXES)
         out_path = os.path.join(tmp, "clean.m4a")
+        job = progress.start(job_id) if (echo or isolate) else None
+
+        def report(stage: str, value: float) -> None:
+            if job:
+                job.check()
+                job.phase, job.done, job.total = stage, value, 1.0
+
         try:
-            gain = await audio_clean.clean_audio(in_path, out_path, start, end, denoise, level, repair)
+            if isolate:
+                # The separator shares the machine with speech recognition
+                # and voice translation: one heavy model at a time.
+                async with _speech_lock:
+                    gain = await audio_clean.clean_audio(in_path, out_path, start, end, denoise, level, repair, wind, mouth, echo, isolate, report)
+            else:
+                gain = await audio_clean.clean_audio(in_path, out_path, start, end, denoise, level, repair, wind, mouth, echo, isolate, report)
+        except progress.Cancelled as exc:
+            raise HTTPException(status_code=409, detail={"code": "cancelled", "message": "Cleaning up was cancelled."}) from exc
+        except audio_clean.TooLong as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Background and echo removal work on up to {audio_clean.MAX_HEAVY_SECONDS // 60} minutes of audio at a time. Split the track first.",
+            ) from exc
+        except OSError as exc:
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=502,
+                detail={"code": "model_download", "message": "The voice separation model couldn't be downloaded. Check your connection and try again."},
+            ) from exc
         except RuntimeError as exc:
             traceback.print_exc()
             raise HTTPException(
                 status_code=400, detail="This audio couldn't be cleaned up. The file may have no sound, or a format that can't be read."
             ) from exc
+        finally:
+            if job:
+                progress.finish(job_id)
         res = _stream_result(out_path, "audio/mp4")
         # With `repair`, the copy was scaled under full scale; the editor
         # plays it this much louder (AudioCleanup.gain).
@@ -681,6 +719,15 @@ async def api_speech_transcribe(
 # Longest video whose voice is translated in one go: 30 minutes of 44.1 kHz
 # stereo float32 is about 640 MB in memory.
 MAX_DUB_SECONDS = 30 * 60
+
+
+@app.get("/api/audio/models")
+def api_audio_models() -> dict:
+    """Desktop engine only: whether the voice separation model that
+    background removal uses is on this machine, and its download size."""
+    if not LOCAL_MODE:
+        raise HTTPException(status_code=404, detail="Not available here.")
+    return {"separator": {"ready": speech.is_ready(dub.SEPARATOR), "sizeMb": dub.SEPARATOR.size_mb}}
 
 
 @app.get("/api/dub/models")
@@ -1292,6 +1339,11 @@ def _valid_envelope(rows: list[list[float]]) -> bool:
     return all(_finite(p, 2) and p[0] >= 0 and 0 <= p[1] <= 2 for p in rows) and all(q[0] >= p[0] for p, q in zip(rows, rows[1:]))
 
 
+def _valid_spans(rows: list[list[float]]) -> bool:
+    """[start, end] rows, start >= 0, end > start, in order, not overlapping."""
+    return all(_finite(r, 2) and 0 <= r[0] < r[1] for r in rows) and all(q[0] >= p[1] for p, q in zip(rows, rows[1:]))
+
+
 def _plan_tone(t: "Optional[_EditorTone]") -> "Optional[editor_pipeline.PlanTone]":
     if t is None:
         return None
@@ -1513,6 +1565,8 @@ class _EditorAudio(BaseModel):
     tone: Optional[_EditorTone] = None
     # Volume curve (envelope.ts): [source second, gain 0..2], sorted.
     envelope: list[list[float]] = Field(default_factory=list, max_length=200)
+    # Breaths turned down (breaths.ts): [start, end] source seconds, sorted.
+    breaths: list[list[float]] = Field(default_factory=list, max_length=2000)
 
 
 class _EditorEffect(BaseModel):
@@ -1788,6 +1842,8 @@ async def api_video_export(
             raise HTTPException(status_code=400, detail="Invalid ducking")
         if not _valid_envelope(a.envelope):
             raise HTTPException(status_code=400, detail="Invalid volume curve")
+        if not _valid_spans(a.breaths):
+            raise HTTPException(status_code=400, detail="Invalid breaths")
     for e in spec.effects:
         if e.type not in editor_pipeline.EFFECTS:
             raise HTTPException(status_code=400, detail="Unknown effect")
@@ -2065,6 +2121,7 @@ async def api_video_export(
                         duck_regions=[(r[0], r[1]) for r in a.duck.regions] if a.duck else [],
                         tone=_plan_tone(a.tone),
                         envelope=[(p[0], p[1]) for p in a.envelope],
+                        breaths=[(r[0], r[1]) for r in a.breaths],
                     )
                 )
             plan.audio.extend(layer_audio)

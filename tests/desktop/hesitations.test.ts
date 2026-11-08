@@ -157,7 +157,7 @@ const H: Hesitation = { start: 3.5, end: 4.2, soundStart: 3.48, soundEnd: 4.22, 
 test("with a transcript: a sound between words is a high-confidence cut that keeps a short pause", () => {
   const [s, ...rest] = hesitationSuggestions([H], tr(words("one@2.5 two@2.75 three@4.7 four@4.95")), [], ids);
   assert.equal(rest.length, 0);
-  assert.equal(s.kind, "filler");
+  assert.equal(s.kind, "hesitation");
   assert.equal(s.action, "cut");
   assert.equal(s.confidence, "high");
   assert.match(s.title, /^Hesitation sound/);

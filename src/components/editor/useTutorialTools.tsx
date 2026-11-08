@@ -8,7 +8,9 @@
  */
 import { modKey } from "@/lib/platform/keys";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { detectAudio, measureLevels, type AudioLevels, type AudioReport, type AudioSpan } from "@/lib/editor/audioAnalysis";
+import { DEFAULT_SILENCE, detectAudio, measureLevels, type AudioLevels, type AudioReport, type AudioSpan } from "@/lib/editor/audioAnalysis";
+import { breathsForTrack, breathsOutsideWords, findBreaths, type BreathSpan } from "@/lib/editor/breaths";
+import type { AutoCleanupOptions, AutoCleanupResult } from "@/lib/editor/cleanupPlan";
 import { ActivityCache, screenPieces, type ScreenPiece } from "@/lib/editor/screenActivity";
 import { buildSpeechMix } from "@/lib/editor/captions";
 import { timelineTimeOf } from "@/lib/editor/camera";
@@ -44,6 +46,8 @@ import { FOCUS_PRESETS, analyzeFocus } from "@/lib/editor/focus";
 import { eventsForSuggestions, focusPrefs } from "@/lib/editor/focusPrefs";
 
 interface Deps {
+  /** Opens Clean up audio (VideoEditor). */
+  onOpenCleanup: () => void;
   project: Project;
   lay: Layout;
   sources: Record<string, MediaSource>;
@@ -88,7 +92,16 @@ export function useTutorialTools(d: Deps) {
   const analysisCtrl = useRef<AbortController | null>(null);
   useEffect(() => () => analysisCtrl.current?.abort(), []);
   const lastReport = useRef<AudioReport | null>(null);
-  const levelsCache = useRef<{ key: string; levels: AudioLevels | null; hesitations: Hesitation[]; clipping: AudioSpan[]; skipped: string[] } | null>(null);
+  const levelsCache = useRef<{
+    key: string;
+    levels: AudioLevels | null;
+    hesitations: Hesitation[];
+    breaths: BreathSpan[];
+    /** The audio tracks mixed in as speech (captions.ts buildSpeechMix). */
+    speechTracks: string[];
+    clipping: AudioSpan[];
+    skipped: string[];
+  } | null>(null);
   const activity = useRef(new ActivityCache());
   const [previewingCuts, setPreviewingCuts] = useState(false);
   const [keySettings, setKeySettings] = useState<KeystrokeSettings>(DEFAULT_KEYSTROKES);
@@ -140,6 +153,8 @@ export function useTutorialTools(d: Deps) {
             key,
             levels: mix.samples ? measureLevels(mix.samples) : null,
             hesitations: mix.samples ? findHesitations(mix.samples) : [],
+            breaths: mix.samples ? findBreaths(mix.samples) : [],
+            speechTracks: mix.tracks,
             clipping: mix.clipping,
             skipped: mix.skipped,
           };
@@ -505,6 +520,78 @@ export function useTutorialTools(d: Deps) {
     [project, lay.fps, apply, say]
   );
 
+  /** Clean up audio's edits (CleanupDialog): analyzes the timeline like
+   * Review > Analyze, then in one undo step turns the breaths down on the
+   * speech tracks and cuts the chosen kinds of suggestions - those that
+   * aren't low confidence. Everything else stays in Review to look at.
+   * null when cancelled or superseded. */
+  const autoCleanup = useCallback(
+    async (o: AutoCleanupOptions): Promise<AutoCleanupResult | null> => {
+      const run = ++analysisRun.current;
+      analysisCtrl.current?.abort();
+      const ctrl = new AbortController();
+      analysisCtrl.current = ctrl;
+      try {
+        const r = await reviewSuggestions({ silence: DEFAULT_SILENCE, idle: 10 }, run, ctrl.signal);
+        if (!r || run !== analysisRun.current) return null;
+        const cached = levelsCache.current;
+        const transcript = project.transcript && transcriptCurrent(project.transcript, lay) ? project.transcript : null;
+        const kinds = new Set<EditSuggestion["kind"]>([
+          ...(o.silences ? (["silence"] as const) : []),
+          ...(o.hesitations ? (["hesitation"] as const) : []),
+          ...(o.fillers ? (["filler"] as const) : []),
+          ...(o.stutters ? (["repeat"] as const) : []),
+        ]);
+        const chosen = r.list.filter((s) => s.action === "cut" && kinds.has(s.kind) && s.confidence !== "low");
+        const rest = r.list.filter((s) => !chosen.includes(s));
+        let next: Project = { ...project, suggestions: [...(project.suggestions ?? []).filter((x) => x.kind === "retake"), ...rest] };
+        let breaths = 0;
+        if (o.breaths && cached) {
+          const spans = breathsOutsideWords(cached.breaths, transcript);
+          const voice = new Set(cached.speechTracks);
+          next = {
+            ...next,
+            audio: next.audio.map((a) => {
+              if (!voice.has(a.id)) return a;
+              const b = breathsForTrack(a, spans);
+              breaths += b.length;
+              return { ...a, breaths: b.length ? b : undefined };
+            }),
+          };
+        }
+        let removed = 0;
+        for (const c of acceptedCuts(chosen.map((s) => ({ ...s, status: "accepted" as const })))) {
+          const res = rippleCut(next, layout(next, lay.fps), c.start, c.end);
+          if (!res.ok) {
+            say(res.error);
+            return null;
+          }
+          next = res.project;
+          removed += res.removed;
+        }
+        apply(() => next);
+        const count = (k: EditSuggestion["kind"]) => chosen.filter((s) => s.kind === k).length;
+        return {
+          removed,
+          silences: count("silence"),
+          hesitations: count("hesitation"),
+          fillers: count("filler"),
+          stutters: count("repeat"),
+          breaths,
+          toReview: rest.filter((s) => s.action === "cut" && s.status === "pending").length,
+          notes: r.notes,
+        };
+      } catch (e) {
+        if ((e as Error)?.name === "AbortError") return null;
+        throw e;
+      } finally {
+        if (run === analysisRun.current) setAnalysis(null);
+        if (analysisCtrl.current === ctrl) analysisCtrl.current = null;
+      }
+    },
+    [reviewSuggestions, project, lay, apply, say]
+  );
+
   const setStatus = useCallback(
     (id: string, status: EditSuggestion["status"]) =>
       apply((p) => ({ ...p, suggestions: (p.suggestions ?? []).map((s) => (s.id === id ? { ...s, status } : s)) })),
@@ -724,8 +811,9 @@ export function useTutorialTools(d: Deps) {
       const high = suggestions.filter((s) => s.status === "pending" && s.action === "cut" && s.confidence === "high").map((s) => ({ ...s, status: "accepted" as const }));
       cut(acceptedCuts(high));
     },
+    onOpenCleanup: d.onOpenCleanup,
     onRemoveFillers: () => {
-      const fillers = suggestions.filter((s) => s.status === "pending" && s.action === "cut" && s.kind === "filler" && s.confidence !== "low").map((s) => ({ ...s, status: "accepted" as const }));
+      const fillers = suggestions.filter((s) => s.status === "pending" && s.action === "cut" && (s.kind === "filler" || s.kind === "hesitation") && s.confidence !== "low").map((s) => ({ ...s, status: "accepted" as const }));
       cut(acceptedCuts(fillers));
     },
     onClearSuggestions: () => apply((p) => ({ ...p, suggestions: (p.suggestions ?? []).filter((s) => s.kind === "retake") })),
@@ -816,7 +904,7 @@ export function useTutorialTools(d: Deps) {
     );
   }
 
-  return { panelProps, dialog, acts, setTab, skipRanges };
+  return { panelProps, dialog, acts, setTab, skipRanges, autoCleanup };
 }
 
 function pickVideoFile(): Promise<File | null> {

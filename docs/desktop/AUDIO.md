@@ -221,6 +221,118 @@ The message says what was done, and if the noise reduction failed.
 2. **Repair distortion on a real clipped recording:** compare Cleaned and Original while it plays, then export.
 3. **Microphone check with real microphones:** a headset, a laptop microphone, and one turned up too high, in the desktop app (WebView2).
 
+## Clean up audio (8 November 2026)
+
+**Clean up audio…** opens from the Audio panel and from Review. Pick options (chips, remembered on this device), then **Enhance** runs them all.
+
+| Group | Option | What runs | Default |
+|---|---|---|---|
+| Clean the sound (desktop app) | Remove noise | `afftdn`, Medium | on |
+| | Fix clipping | `repair_clipping` | on |
+| | Remove mouth sounds | `adeclick` (new) | on |
+| | Remove wind noise | 120 Hz low cut, 4-pole, instead of the gentle 70 Hz one (new) | off |
+| | Remove echo (Light / Medium / Strong) | WPE + late reverb suppression (new, `dereverb.py`) | off |
+| | Remove background audio | The voice separator, voice kept (new) | off |
+| Voice | Studio sound | The "Enhance voice" tone preset | on |
+| | Normalize | -16 LUFS (or the chosen target) | on |
+| | Remove breaths | Breaths turned down 18 dB (new, `breaths.ts`) | on |
+| Cut out | Remove long silences | Review's silence cuts (1.5 s+) | on |
+| | Eliminate hesitations | `hesitations.ts` | on |
+| | Filler words | Transcript filler words | on |
+| | Remove stuttering | Transcript repeats | off (a repeat can be deliberate) |
+
+**How it runs** (VideoEditor `runCleanup`), each stage on the project the last one left:
+1. One cleaned copy per voice file with the chosen sound fixes, plus the tone.
+2. Review's analysis of the new sound. In one undo step: breaths set on the speech tracks, and the chosen cuts that aren't low confidence. The rest stay in Review.
+3. The loudness measured.
+
+The message says what was done and how many uncertain cuts wait in Review.
+
+**Voice tracks** (`voiceTracks`): microphone recordings, sound from a video, and tracks set to Voice. An uploaded file on Detect counts unless it has beats or ducking. Computer sound, muted tracks and music are left alone.
+
+**Breaths** (`breaths.ts`):
+- Frames between 5 dB over the room and 8 dB under the speech.
+- Not bright: difference energy under 1.6 times the signal's, which leaves out "s", "sh", "f".
+- As much energy above 1.3 kHz as under 250 Hz (leaves out hum and a voice's low tail), and no pitch.
+- 0.15–1 s long, with speech within 1 s. Left alone when mostly over a transcript word.
+- Stored per track in file seconds (`AudioClip.breaths`). Turned down by `BREATH_DROP_DB` with 30 ms ramps, the same in the preview (`trackGainAt`) and the export (`breath_points` through `keyframe_expr`).
+
+**Mouth sounds:** `adeclick` adds no delay (measured on a smooth burst). The cleanup's delay compensation is now measured without it, because it would remove the measuring impulse as a click.
+
+**Hesitations written as a word:** speech models often write a held sound as a short "word" ("අ", "ஆ", "अ", "aa", "ahh"). Before, that word made the detector think the sound was inside a real word, so it was skipped.
+- Now a word counts as the hesitation itself when all of these hold:
+  - it's short: one or two letters, one letter repeated, or up to four of a, e, i, o, u, h, m, n, r;
+  - it lasts 0.35 s or more;
+  - the held sound fills 60 % of it.
+- A word of two different letters ("ahh", "an") gives medium confidence at most.
+- "sooo" (a real word said slowly) is still left alone.
+- Hesitations now have their own kind (`hesitation`). Remove fillers and Clean up handle them with the filler words.
+
+**Measured:**
+- Mouth clicks: on a test signal, sharp jumps fell more than tenfold, and the copy lines up with one made without it (lag 0).
+- Wind: rumble at 40 Hz is more than 15 dB lower than with the gentle low cut, and 400 Hz is within 1 dB.
+- Breaths: a synthesized breath between phrases is found; an "s", plain speech, hum and a file without speech give none. No false finds on about 140 s of synthesized narration (two voices, with and without noise), at about 1 ms per second of audio.
+- Export: a breath is 18 dB lower, within 1 dB, and back to full level after it.
+
+### Echo and background (8 November 2026)
+
+**Remove echo** (`backend/app/pipeline/dereverb.py`, numpy, no model):
+1. **WPE** (weighted prediction error, Nakatani et al. 2010): in the short-time spectrum (32 ms frames, 8 ms hop), each frequency's late reverb is predicted from the frames 24–104 ms before it and subtracted. The prediction is weighted by the speech's own power, estimated in 3 iterations. Filters are estimated per 8 s block.
+2. **Late reverb suppression** (Lebart 2001 / Habets 2007): what's left of the tail is estimated from the spectrum 50 ms earlier, decayed at the room's rate, and taken out with a spectral gain no lower than the strength's floor.
+
+| Strength | Room assumed | Gain floor |
+|---|---|---|
+| Light | 0.4 s | -12 dB |
+| Medium | 0.7 s | -15 dB |
+| Strong | 1.0 s | -20 dB |
+
+The user picks the strength. The room's reverb time can't be read reliably from continuous speech: two blind estimators were tried, and both stayed at 0.55–0.7 s (or scattered 1–2.6 s) for rooms of 0.3–1.4 s.
+
+**Measured** on synthesized speech in simulated rooms (level in the pauses relative to speech; lower is less echo):
+
+| | Room 0.4 s, DRR +3 dB | 0.7 s, 0 dB | 1.0 s, -3 dB | Dry speech (SDR) |
+|---|---|---|---|---|
+| Before | -29 dB | -23 dB | -19 dB | |
+| Light | -38 | -27 | -21 | 21.8 dB |
+| Medium | -43 | -29 | -22 | 16.7 dB |
+| Strong | -45 | -30 | -23 | 14.6 dB |
+
+- WPE alone gave 1–4 dB, so the suppression stage does most of the work.
+- Very echoey rooms (DRR -3 dB) improve only 3–4 dB. That's a limit of single-microphone methods, and the hint says so.
+- Speed: about 1/3 of real time (30 s in 10 s).
+
+**Remove background audio:**
+- Runs the voice translation's separator (HT-Demucs fine-tuned vocals, MIT, 166 MB ONNX) and keeps the vocals stem.
+- It's downloaded on first use, with the size shown in the dialog (`GET /api/audio/models`).
+- Track at 48 kHz → separator at 44.1 kHz stereo → back to 48 kHz, the same length.
+- Shares the engine's lock with speech recognition and voice translation.
+- **Measured:** synthesized speech over chords and a beat. The music left in the pauses fell from -10.5 dB to -39.8 dB relative to the speech. Same timing (lag 0 against the plain cleaned copy), same length. Speed: about 1.6× real time on an i7-9750H (30 s took 47 s).
+
+**Order in the copy:** clipping repair → background removal → echo removal → the ffmpeg chain (mouth clicks, wind, noise) → scaled under full scale, with the make-up gain stored.
+
+**Progress and cancel:** both stages report under a job id ("download", "separate", "echo"). The dialog shows the stage and percentage, and Cancel stops the engine (409, nothing changed).
+
+**Limit:** both stages hold the range in memory, so they take up to 30 minutes of audio at a time (`MAX_HEAVY_SECONDS`), with a clear message beyond that.
+
+**Defaults:** both are off. Background removal is slow and needs a download; echo removal colors a dry recording a little (SDR 15–22 dB).
+
+**Tests:** `backend/tests/test_echo_background.py` (6 tests) uses `tests/fixtures/speech-10s.wav` (10 s of synthesized narration). It checks:
+- the pauses get quieter in a room, and Strong > Medium > Light;
+- a dry voice barely changes and keeps its timing;
+- the echo copy lines up and reports progress;
+- the 30-minute limit, cancel (409) and the model status;
+- music removed behind the voice (runs when the separator is downloaded; skipped otherwise).
+
+The separator check was run here with the model downloaded to a scratch folder.
+
+**Not offered:** keeping only the music (the background stem). There was no need for it yet.
+
+**Tests:**
+- JS: `tests/desktop/breaths.test.ts` (5 tests) and `tests/desktop/cleanupPlan.test.ts` (4 tests).
+- Backend: `backend/tests/test_cleanup_options.py` (5 tests).
+
+**Manual tests still required:** Clean up audio on a real recording with breaths, lip smacks and "aaa" sounds, in Sinhala and in English, in the desktop app. Listen to each change and export.
+
 ## How preview and export stay the same
 
 | | Preview | Export |

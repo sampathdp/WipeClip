@@ -2552,8 +2552,11 @@ export function AudioPanel({
   onEnhance,
   enhancing = false,
   onAddCurvePoint,
+  onOpenCleanup,
 }: {
   clip: AudioClip;
+  /** Opens Clean up audio (noise, clipping, breaths, hesitations, silences...). */
+  onOpenCleanup: () => void;
   /** Adds a volume curve point at the playhead, on the current curve. */
   onAddCurvePoint: () => void;
   /** Enhance voice in one step (tone preset, noise reduction, loudness). */
@@ -2637,6 +2640,12 @@ export function AudioPanel({
               : "Raise or lower parts of this track. "}
             In the timeline, double-click the selected track to add a point, drag a point to change it, double-click a point to remove it. The middle line is this track&apos;s volume.
           </p>
+        </div>
+        <div className="space-y-2 rounded-xl border border-accent-2/40 bg-accent-2/5 p-3">
+          <ActionButton tone="accent" onClick={onOpenCleanup} title="Noise, clipping, mouth sounds, breaths, long silences, hesitations and filler words, in one go">
+            Clean up audio…
+          </ActionButton>
+          <p className="text-[11px] text-muted">Remove noise, breaths, mouth sounds, long silences and “aaa”, “mmm” in one go.</p>
         </div>
         <VoiceToneSection tone={a.tone} onChange={(tone) => onChange({ tone })} onEnhance={onEnhance} enhancing={enhancing} gesture={gesture} />
         <div className="space-y-3">

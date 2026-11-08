@@ -308,6 +308,8 @@ export interface AudioClip {
   tone?: VoiceTone;
   /** Volume curve (envelope.ts), sorted by time; absent = flat. */
   envelope?: GainPoint[];
+  /** Breaths turned down (breaths.ts): [start, end] in seconds of the file. */
+  breaths?: [number, number][];
 }
 
 /** A point of a track's volume curve: seconds of the audio file, linear
@@ -343,6 +345,13 @@ export interface AudioCleanup {
   bypass: boolean;
   /** Clipped peaks were also redrawn (audio_clean.py repair_clipping). */
   repaired?: boolean;
+  /** Wind and rumble cut (a steep 120 Hz low cut), mouth clicks removed. */
+  wind?: boolean;
+  mouth?: boolean;
+  /** Echo and reverb reduced at this strength, 1-3 (dereverb.py). */
+  echo?: number;
+  /** Only the voice kept: background sound and music removed (the separator). */
+  isolated?: boolean;
   /** Linear gain the copy plays at: a repaired copy is scaled under full
    * scale, and this brings it back to the original's level. Absent = 1. */
   gain?: number;
@@ -604,6 +613,8 @@ export type SuggestionKind =
   // From the transcript (speechEdits.ts).
   | "filler"
   | "repeat"
+  // From the sound (hesitations.ts): held "aaa", "mmm".
+  | "hesitation"
   | "no-speech";
 
 /** Something worth a look, in timeline seconds. Suggestions never change

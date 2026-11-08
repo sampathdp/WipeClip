@@ -90,7 +90,7 @@ import {
   type GainPoint,
 } from "@/lib/editor/types";
 import { presetTone } from "@/lib/editor/voiceTone";
-import { ApiError, cleanAudio, ContentBlockedError, engineDubModels, engineMatte, enginePeaks, ModelNeededError, probeVideo } from "@/lib/toolsApi";
+import { ApiError, cleanAudio, type CleanStage, ContentBlockedError, engineAudioModels, engineDubModels, engineMatte, enginePeaks, ModelNeededError, probeVideo } from "@/lib/toolsApi";
 import { ensureMatte, fullMatte, matteJobKey, matteUnsupported, setMatteEngine, useMatteJob } from "@/lib/editor/matte";
 import { DUB_FROM, dubTimeline, type DubProgress } from "@/lib/editor/dub";
 import type { RecordingBundle } from "@/lib/recorder/bundle";
@@ -198,6 +198,8 @@ import {
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import Timeline, { type CurveEdit, type ItemMode, type TimelineTrack, type TrackToggle } from "./Timeline";
 import { addPoint, normalizePoints, visibleCurve } from "@/lib/editor/envelope";
+import { autoCleanupOptions, cleanupSummary, voiceTracks, type AutoCleanupResult, type CleanupOption } from "@/lib/editor/cleanupPlan";
+import CleanupDialog from "./CleanupDialog";
 import {
   CanvasIcon,
   ElementsIcon,
@@ -1768,7 +1770,13 @@ export default function VideoEditor({
    * the original, which is never changed (mix.ts). Every part of the same
    * file (a microphone split by cuts) gets it, so they stay alike. */
   const cleanTrack = useCallback(
-    async (audioId: string, strength: number, repair = false): Promise<boolean> => {
+    async (
+      audioId: string,
+      strength: number,
+      repair = false,
+      extra: { wind?: boolean; mouth?: boolean; echo?: number; isolate?: boolean } = {},
+      run: { signal?: AbortSignal; onProgress?: (stage: CleanStage, value: number) => void } = {}
+    ): Promise<boolean> => {
       const a = project.audio.find((x) => x.id === audioId);
       const src = a && sources[a.sourceId];
       if (!a || !src) return false;
@@ -1776,7 +1784,7 @@ export default function VideoEditor({
       setPlaying(false);
       setCleaningTrack(audioId);
       try {
-        const { blob, gain } = await cleanAudio(sourceInput(src), 0, duration, { denoise: strength, level: false, repair });
+        const { blob, gain } = await cleanAudio(sourceInput(src), 0, duration, { denoise: strength, level: false, repair, ...extra }, run.signal, run.onProgress);
         const file = new File([blob], `clean-${sourceName(src).replace(/.[^.]+$/, "")}.m4a`, { type: "audio/mp4" });
         const cleaned: MediaSource = {
           id: newId("snd"),
@@ -1791,11 +1799,23 @@ export default function VideoEditor({
         };
         addSource(cleaned);
         const parts = project.audio.filter((x) => x.sourceId === a.sourceId).length;
-        apply((p) => ({ ...p, audio: p.audio.map((x) => (x.sourceId === a.sourceId ? withCleanup(x, cleaned.id, strength, repair ? { gain } : undefined) : x)) }));
-        const what = repair && strength > 0 ? "Distortion repaired and background noise reduced" : repair ? "Distortion repaired" : "Background noise reduced";
-        say(`${what}${parts > 1 ? ` on all ${parts} parts of this track` : ""}. Switch to Original in the panel to compare; undo removes it.`);
+        apply((p) => ({ ...p, audio: p.audio.map((x) => (x.sourceId === a.sourceId ? withCleanup(x, cleaned.id, strength, { ...(repair ? { repairGain: gain } : { gain }), ...extra }) : x)) }));
+        const what = [
+          strength > 0 && "background noise reduced",
+          repair && "distortion repaired",
+          extra.mouth && "mouth clicks removed",
+          extra.wind && "wind and rumble cut",
+          extra.echo && "echo reduced",
+          extra.isolate && "background removed",
+        ].filter(Boolean) as string[];
+        const sentence = what.length ? what.join(", ").replace(/^./, (c) => c.toUpperCase()) : "Cleaned";
+        say(`${sentence}${parts > 1 ? ` on all ${parts} parts of this track` : ""}. Switch to Original in the panel to compare; undo removes it.`);
         return true;
       } catch (e) {
+        if ((e as Error)?.name === "AbortError") {
+          say("Cleaning up was cancelled. Nothing was changed.");
+          return false;
+        }
         console.error("[editor] track noise reduction failed", e);
         say(e instanceof Error && e.message ? e.message : "This track's noise couldn't be reduced.");
         return false;
@@ -2075,7 +2095,9 @@ export default function VideoEditor({
   );
 
   // --- tutorial tools (Phase 3) ------------------------------------------------
+  const [cleanupOpen, setCleanupOpen] = useState(false);
   const tutorial = useTutorialTools({
+    onOpenCleanup: () => setCleanupOpen(true),
     project,
     lay,
     sources,
@@ -2092,6 +2114,121 @@ export default function VideoEditor({
     fileName: (original && sourceName(original)) || "wipeclip",
     onClose: () => setTool(null),
   });
+  // --- Clean up audio (CleanupDialog, cleanupPlan.ts) ------------------------
+  // In stages, each on the project the last one left: the sound fixes and
+  // the tone (cleaned copies are added to the project), then the edits
+  // (Review's analysis of the new sound: breaths and cuts, one undo step),
+  // then the loudness of the result.
+  const [cleanupBusy, setCleanupBusy] = useState<string | null>(null);
+  type CleanupJob = { chosen: Set<CleanupOption>; cleaned: string[]; studio: boolean; edit: AutoCleanupResult | null };
+  const [cleanupStage, setCleanupStage] = useState<{ stage: "edit" | "measure"; job: CleanupJob } | null>(null);
+  const cleanupVoices = useMemo(() => voiceTracks(project.audio, sources), [project.audio, sources]);
+  const cleanupCtrl = useRef<AbortController | null>(null);
+  const [separatorModel, setSeparatorModel] = useState<{ ready: boolean; sizeMb: number } | null>(null);
+  useEffect(() => {
+    if (!cleanupOpen || !IS_DESKTOP) return;
+    let live = true;
+    void engineAudioModels().then((m) => live && setSeparatorModel(m?.separator ?? null));
+    return () => {
+      live = false;
+    };
+  }, [cleanupOpen]);
+  const cancelCleanup = useCallback(() => {
+    cleanupCtrl.current?.abort();
+    cleanupCtrl.current = null;
+    setCleanupStage(null);
+    setCleanupBusy(null);
+  }, []);
+
+  const finishCleanup = useCallback(
+    (job: CleanupJob, lufs: number | null) => {
+      setCleanupBusy(null);
+      setCleanupOpen(false);
+      say(cleanupSummary({ cleaned: job.cleaned, studio: job.studio, lufs, edit: job.edit }));
+    },
+    [say]
+  );
+
+  const runCleanup = useCallback(
+    async (chosen: Set<CleanupOption>, echo: number) => {
+      setPlaying(false);
+      const job: CleanupJob = { chosen, cleaned: [], studio: false, edit: null };
+      const ctrl = new AbortController();
+      cleanupCtrl.current = ctrl;
+      // One copy per file (a microphone split by cuts is one file).
+      const files = [...new Map(cleanupVoices.map((a) => [a.sourceId, a])).values()];
+      const engineFix =
+        IS_DESKTOP && ["noise", "clipping", "mouth", "wind", "echo", "background"].some((k) => chosen.has(k as CleanupOption));
+      if (engineFix) {
+        const STAGE: Record<CleanStage, string> = { download: "Downloading the voice separation model", separate: "Removing background audio", echo: "Removing echo" };
+        for (const [i, a] of files.entries()) {
+          const of = files.length > 1 ? ` (${i + 1} of ${files.length})` : "";
+          setCleanupBusy(`Cleaning the sound${of}…`);
+          const ok = await cleanTrack(
+            a.id,
+            chosen.has("noise") ? 0.5 : 0,
+            chosen.has("clipping"),
+            { wind: chosen.has("wind"), mouth: chosen.has("mouth"), echo: chosen.has("echo") ? echo : 0, isolate: chosen.has("background") },
+            { signal: ctrl.signal, onProgress: (stage, v) => setCleanupBusy(`${STAGE[stage]}${of}… ${Math.round(v * 100)}%`) }
+          );
+          if (!ok || ctrl.signal.aborted) {
+            setCleanupBusy(null);
+            return;
+          }
+        }
+        job.cleaned = [
+          chosen.has("background") && "background audio removed",
+          chosen.has("noise") && "noise removed",
+          chosen.has("echo") && "echo reduced",
+          chosen.has("clipping") && "clipping fixed",
+          chosen.has("mouth") && "mouth sounds removed",
+          chosen.has("wind") && "wind noise removed",
+        ].filter(Boolean) as string[];
+      }
+      if (ctrl.signal.aborted) return;
+      if (chosen.has("studio") && files.length) {
+        for (const a of files) setTrackTone(a.id, presetTone("clear"));
+        job.studio = true;
+      }
+      const edits = ["breaths", "silences", "hesitations", "fillers", "stutters"].some((k) => chosen.has(k as CleanupOption));
+      if (edits) setCleanupStage({ stage: "edit", job });
+      else if (chosen.has("normalize")) setCleanupStage({ stage: "measure", job });
+      else finishCleanup(job, null);
+    },
+    [cleanupVoices, cleanTrack, setTrackTone, finishCleanup]
+  );
+
+  // The next stage runs once the last one's changes are in the project.
+  const cleanupRunning = useRef(false);
+  useEffect(() => {
+    if (!cleanupStage || cleanupRunning.current || cleaningTrack || measuring) return;
+    const { stage, job } = cleanupStage;
+    cleanupRunning.current = true;
+    setCleanupStage(null);
+    void (async () => {
+      try {
+        if (stage === "edit") {
+          setCleanupBusy("Finding silences, hesitations and breaths…");
+          job.edit = await tutorial.autoCleanup(autoCleanupOptions(job.chosen));
+          if (job.chosen.has("normalize")) setCleanupStage({ stage: "measure", job });
+          else finishCleanup(job, null);
+        } else {
+          setCleanupBusy("Setting the loudness…");
+          const current = masterOf(project).loudness;
+          const target = current === "off" ? "voice" : current;
+          const ok = await measureMix(target);
+          finishCleanup(job, ok ? LOUDNESS_TARGETS[target].lufs : null);
+        }
+      } catch (e) {
+        console.error("[editor] clean up audio failed", e);
+        setCleanupBusy(null);
+        say("Cleaning up the audio stopped part way. What was done so far can be undone.");
+      } finally {
+        cleanupRunning.current = false;
+      }
+    })();
+  }, [cleanupStage, cleaningTrack, measuring, tutorial, project, measureMix, finishCleanup, say]);
+
   const highlights = useHighlights({
     project,
     lay,
@@ -3376,6 +3513,7 @@ export default function VideoEditor({
           if (Object.keys(rest).length) apply((p) => updateAudio(p, selectedAudio.id, rest));
         }}
         onEnhance={() => void enhanceVoice(selectedAudio.id)}
+        onOpenCleanup={() => setCleanupOpen(true)}
         onAddCurvePoint={() => editCurve(selectedAudio.id, { kind: "add", t: clock.get(), v: NaN })}
         enhancing={enhancing === selectedAudio.id || (cleaningTrack === selectedAudio.id && enhancing !== null) || measureNext !== null}
         onDuck={() => void duckUnderSpeech(selectedAudio.id)}
@@ -3734,6 +3872,18 @@ export default function VideoEditor({
         />
       )}
       {tutorial.dialog}
+      {cleanupOpen && (
+        <CleanupDialog
+          tracks={cleanupVoices.map((a) => a.label)}
+          engine={IS_DESKTOP}
+          hasTranscript={!!project.transcript && transcriptCurrent(project.transcript, lay)}
+          busy={cleanupBusy}
+          separator={separatorModel}
+          onCancel={cancelCleanup}
+          onRun={(chosen, echo) => void runCleanup(chosen, echo)}
+          onClose={() => setCleanupOpen(false)}
+        />
+      )}
       {dialog?.kind === "export" && originalId && (
         <ExportDialog
           project={dialog.clip?.project ?? project}

@@ -159,6 +159,24 @@ def envelope_expr(points: list[tuple[float, float]], var: str) -> str:
     return keyframe_expr([{"t": t, "v": v, "ease": "linear"} for t, v in points], "v", var)
 
 
+# Must match BREATH_DROP_DB / BREATH_RAMP in src/lib/editor/breaths.ts.
+BREATH_DROP_DB = -18.0
+BREATH_RAMP = 0.03
+
+
+def breath_points(spans: list[tuple[float, float]]) -> list[dict]:
+    """Breath gain as keyframes (source seconds): 1 outside, BREATH_DROP_DB
+    inside, ramping over BREATH_RAMP inside each span - breathGain()."""
+    low = 10 ** (BREATH_DROP_DB / 20)
+    pts: list[dict] = []
+    for a, b in sorted(spans):
+        r = min(BREATH_RAMP, (b - a) / 2)
+        pts += [{"t": a, "v": 1.0}, {"t": a + r, "v": low}, {"t": b - r, "v": low}, {"t": b, "v": 1.0}]
+    for p in pts:
+        p["ease"] = "linear"
+    return pts
+
+
 # Master bus: the loudness gain (src/lib/editor/loudness.ts, measured and
 # stored by the editor, so the preview plays the same level), then a peak
 # limiter at about -1 dBFS (LIMIT_CEILING there). latency=1 compensates the
@@ -555,6 +573,8 @@ class PlanAudio:
     # Volume curve (src/lib/editor/envelope.ts): (source second, gain 0..2),
     # linear between points, held outside them.
     envelope: list[tuple[float, float]] = field(default_factory=list)
+    # Breaths turned down (src/lib/editor/breaths.ts): (start, end) source seconds.
+    breaths: list[tuple[float, float]] = field(default_factory=list)
 
 
 @dataclass
@@ -1958,6 +1978,8 @@ def build_export_args(
                 chain += f",{VOICE_FX[au.voice]}"
             if au.envelope:
                 chain += f",volume='{envelope_expr(au.envelope, f'(t+{_num(au.offset)})')}':eval=frame"
+            if au.breaths:
+                chain += f",volume='{keyframe_expr(breath_points(au.breaths), 'v', f'(t+{_num(au.offset)})')}':eval=frame"
             if au.duck_amount > 0 and au.duck_regions:
                 # t is the track's own time here (before adelay).
                 chain += f",volume='{duck_gain_expr(au, f'(t+{_num(au.start)})')}':eval=frame"

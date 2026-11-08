@@ -104,6 +104,8 @@ export interface TutorialPanelProps {
   onReject: (s: EditSuggestion) => void;
   onEditSuggestion: (id: string, patch: Partial<EditSuggestion>) => void;
   onAcceptAllHigh: () => void;
+  /** Opens Clean up audio. */
+  onOpenCleanup: () => void;
   /** Accepts every pending filler cut (words and held sounds) except low-confidence ones. */
   onRemoveFillers: () => void;
   onClearSuggestions: () => void;
@@ -548,7 +550,7 @@ function ReviewTab(p: TutorialPanelProps) {
   const list = showAll ? p.suggestions.filter((s) => s.kind !== "retake") : pending;
   const high = pending.filter((s) => s.action === "cut" && s.confidence === "high").length;
   const pendingCuts = pending.filter((s) => s.action === "cut").length;
-  const fillers = pending.filter((s) => s.action === "cut" && s.kind === "filler");
+  const fillers = pending.filter((s) => s.action === "cut" && (s.kind === "filler" || s.kind === "hesitation"));
   const sureFillers = fillers.filter((s) => s.confidence !== "low").length;
   return (
     <>
@@ -582,9 +584,14 @@ function ReviewTab(p: TutorialPanelProps) {
             </button>
           </>
         ) : (
-          <ActionButton tone="accent" onClick={() => p.onAnalyze({ silence, idle })}>
-            Analyze recording
-          </ActionButton>
+          <>
+            <ActionButton tone="accent" onClick={() => p.onAnalyze({ silence, idle })}>
+              Analyze recording
+            </ActionButton>
+            <ActionButton onClick={p.onOpenCleanup} title="Noise, breaths, mouth sounds, long silences, hesitations and filler words, fixed in one go">
+              Clean up audio…
+            </ActionButton>
+          </>
         )}
         {high > 0 && <ActionButton onClick={p.onAcceptAllHigh}>Accept {high} high-confidence cut{high === 1 ? "" : "s"}</ActionButton>}
         {sureFillers > 0 && (

@@ -10,6 +10,7 @@
  */
 import { toneActive, toneKey, toneWire } from "./voiceTone.ts";
 import { envelopeGain } from "./envelope.ts";
+import { breathGain } from "./breaths.ts";
 import { DEFAULT_MASTER, type AudioClip, type Clip, type MasterAudio, type MediaSource, type Project } from "./types.ts";
 import { duckGain } from "./ducking.ts";
 
@@ -39,7 +40,7 @@ export function trackGainAt(a: AudioClip, t: number): number {
   if (a.muted || local < 0 || local >= a.duration) return 0;
   const fadeIn = a.fadeIn > 0 ? Math.min(1, local / a.fadeIn) : 1;
   const fadeOut = a.fadeOut > 0 ? Math.min(1, (a.duration - local) / a.fadeOut) : 1;
-  return Math.max(0, a.volume * cleanGain(a) * envelopeGain(a, t) * fadeIn * fadeOut * duckGain(a, t));
+  return Math.max(0, a.volume * cleanGain(a) * envelopeGain(a, t) * breathGain(a, t) * fadeIn * fadeOut * duckGain(a, t));
 }
 
 /** The make-up gain of the copy a track plays (1 for the original). */
@@ -88,7 +89,7 @@ export function mixKey(project: Project): string {
     project.clips.map((c) => [c.sourceId, c.start, c.end, c.speed, c.ramp ?? 0, c.reverse, c.freeze, c.volume, c.transition?.type ?? 0, c.transition?.duration ?? 0]),
     project.audio
       .filter((a) => !a.muted && a.volume > 0)
-      .map((a) => [playedSourceId(a), a.start, a.offset, a.duration, a.volume, a.fadeIn, a.fadeOut, a.duck?.amount ?? 0, a.duck?.regions.length ?? 0, a.voice ?? 0, ...(toneActive(a.tone) ? [toneKey(toneWire(a.tone))] : []), ...(a.envelope?.length ? [a.envelope] : [])]),
+      .map((a) => [playedSourceId(a), a.start, a.offset, a.duration, a.volume, a.fadeIn, a.fadeOut, a.duck?.amount ?? 0, a.duck?.regions.length ?? 0, a.voice ?? 0, ...(toneActive(a.tone) ? [toneKey(toneWire(a.tone))] : []), ...(a.envelope?.length ? [a.envelope] : []), ...(a.breaths?.length ? [a.breaths] : [])]),
     project.overlays.filter((o) => o.kind === "video" && !o.hidden && o.volume > 0).map((o) => (o.kind === "video" ? [o.sourceId, o.start, o.end, o.offset, o.volume] : 0)),
   ];
   // FNV-1a over the JSON: short, stable, and enough to notice a change.
@@ -135,11 +136,30 @@ export function meterFraction(level: number, floorDb = -60): number {
 }
 
 /** Patch for a track's cleanup copy being made (`sourceId`) or removed. */
-export function withCleanup(a: AudioClip, sourceId: string | null, strength: number, repair?: { gain: number }): AudioClip {
+/** `opts.repairGain`: the copy also had its clipping repaired, and plays at
+ * this make-up gain. */
+export function withCleanup(
+  a: AudioClip,
+  sourceId: string | null,
+  strength: number,
+  opts: { repairGain?: number; gain?: number; wind?: boolean; mouth?: boolean; echo?: number; isolate?: boolean } = {}
+): AudioClip {
   if (!sourceId) {
     const { clean: _drop, ...rest } = a;
     void _drop;
     return rest;
   }
-  return { ...a, clean: { sourceId, strength, bypass: false, ...(repair ? { repaired: true, gain: repair.gain } : {}) } };
+  return {
+    ...a,
+    clean: {
+      sourceId,
+      strength,
+      bypass: false,
+      ...(opts.repairGain !== undefined ? { repaired: true, gain: opts.repairGain } : opts.gain !== undefined && opts.gain !== 1 ? { gain: opts.gain } : {}),
+      ...(opts.wind ? { wind: true } : {}),
+      ...(opts.mouth ? { mouth: true } : {}),
+      ...(opts.echo ? { echo: opts.echo } : {}),
+      ...(opts.isolate ? { isolated: true } : {}),
+    },
+  };
 }

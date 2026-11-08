@@ -417,8 +417,20 @@ export async function cleanAudio(
   input: MediaInput,
   start: number,
   end: number,
-  opts: { denoise: number; level: boolean; repair?: boolean },
-  signal?: AbortSignal
+  opts: {
+    denoise: number;
+    level: boolean;
+    repair?: boolean;
+    wind?: boolean;
+    mouth?: boolean;
+    /** Echo and reverb reduction strength, 1-3 (0 or absent: off). */
+    echo?: number;
+    /** Keep only the voice (the separator model, downloaded on first use). */
+    isolate?: boolean;
+  },
+  signal?: AbortSignal,
+  /** The slow stages: "download" (the separator model), "separate", "echo". */
+  onProgress?: (stage: CleanStage, value: number) => void
 ): Promise<{ blob: Blob; gain: number }> {
   const engine = await localEngine();
   if (!engine) throw new ApiError("Audio cleanup runs on this computer and needs the WipeClip desktop app's engine.", "engine_required");
@@ -430,12 +442,51 @@ export async function cleanAudio(
   body.append("denoise", String(opts.denoise));
   body.append("level", opts.level ? "true" : "false");
   if (opts.repair) body.append("repair", "true");
-  const res = await fetch(`${engine.url}/api/audio/clean`, { method: "POST", body, headers: engineHeaders(engine), signal });
-  if (!res.ok) await throwApiError(res, "This audio couldn't be cleaned up.");
-  // A repaired copy is scaled under full scale; this undoes it (an older
-  // engine sends nothing: 1).
-  const gain = Number(res.headers.get("X-Clean-Gain") ?? 1);
-  return { blob: await res.blob(), gain: Number.isFinite(gain) && gain > 0 ? gain : 1 };
+  if (opts.wind) body.append("wind", "true");
+  if (opts.mouth) body.append("mouth", "true");
+  if (opts.echo) body.append("echo", String(Math.max(1, Math.min(3, Math.round(opts.echo)))));
+  if (opts.isolate) body.append("isolate", "true");
+  // The slow stages report progress and can be cancelled under a job id.
+  const slow = !!(opts.echo || opts.isolate);
+  const jobId = slow ? crypto.randomUUID() : null;
+  if (jobId) body.append("job_id", jobId);
+  const job = jobId ? `${engine.url}/api/jobs/${jobId}` : null;
+  const cancel = () => job && void fetch(`${job}/cancel`, { method: "POST", headers: engineHeaders(engine) }).catch(() => {});
+  signal?.addEventListener("abort", cancel, { once: true });
+  const poll =
+    job && onProgress
+      ? setInterval(() => {
+          void fetch(job, { headers: engineHeaders(engine) })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((p: { phase: string; progress: number | null } | null) => {
+              if (p && ["download", "separate", "echo"].includes(p.phase)) onProgress(p.phase as CleanStage, p.progress ?? 0);
+            })
+            .catch(() => {});
+        }, 700)
+      : null;
+  try {
+    const res = await fetch(`${engine.url}/api/audio/clean`, { method: "POST", body, headers: engineHeaders(engine), signal });
+    if (res.status === 409) throw new DOMException("Cleaning up cancelled", "AbortError");
+    if (!res.ok) await throwApiError(res, "This audio couldn't be cleaned up.");
+    // The copy is scaled under full scale when it had to be; this undoes it
+    // (an older engine sends nothing: 1).
+    const gain = Number(res.headers.get("X-Clean-Gain") ?? 1);
+    return { blob: await res.blob(), gain: Number.isFinite(gain) && gain > 0 ? gain : 1 };
+  } finally {
+    if (poll) clearInterval(poll);
+    signal?.removeEventListener("abort", cancel);
+  }
+}
+
+export type CleanStage = "download" | "separate" | "echo";
+
+/** Desktop app: whether the voice separation model (background removal)
+ * is on this machine yet, and its download size. null without the engine. */
+export async function engineAudioModels(): Promise<{ separator: { ready: boolean; sizeMb: number } } | null> {
+  const engine = await optionalEngine().catch(() => null);
+  if (!engine) return null;
+  const res = await fetch(`${engine.url}/api/audio/models`, { headers: engineHeaders(engine) }).catch(() => null);
+  return res?.ok ? ((await res.json()) as { separator: { ready: boolean; sizeMb: number } }) : null;
 }
 
 /** The engine's NVIDIA graphics card support (speech.py gpu_status). */

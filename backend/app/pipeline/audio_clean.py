@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 from functools import lru_cache
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -89,17 +90,26 @@ def filter_delay(filters: str) -> int:
     return max(0, int(np.argmax(np.abs(x))) - _RATE // 2)
 
 
-def clean_filters(denoise: float, floor_db: float | None) -> str:
+def clean_filters(denoise: float, floor_db: float | None, wind: bool = False, mouth: bool = False) -> str:
     """`denoise` 0..1 maps to afftdn's noise reduction of 6..40 dB. Runs at
     _RATE, so the denoiser's delay is the same for every file, and is
     compensated: the input is padded by it and the output starts that much
-    later, so the copy lines up with the original sample for sample."""
-    parts = [f"aresample={_RATE}", "highpass=f=70"]
+    later, so the copy lines up with the original sample for sample.
+
+    `wind`: wind and rumble - a steeper low cut at 120 Hz (two 2-pole
+    stages) instead of the gentle one at 70 Hz. `mouth`: clicks and lip
+    smacks - ffmpeg's adeclick, before the denoiser (clicks would throw
+    off its noise estimate); it adds no delay (measured on a smooth burst).
+    The delay is measured without it: it would remove the measuring
+    impulse as a click."""
+    parts = [f"aresample={_RATE}", "highpass=f=120,highpass=f=120" if wind else "highpass=f=70"]
     d = max(0.0, min(1.0, denoise))
     if d > 0 and floor_db is not None:
         parts.append(f"afftdn=nr={6 + 34 * d:.1f}:nf={floor_db:.1f}")
+    delay = filter_delay(",".join(parts))
+    if mouth:
+        parts.insert(2, "adeclick")
     chain = ",".join(parts)
-    delay = filter_delay(chain)
     if delay:
         chain = f"{parts[0]},apad=pad_len={delay},{','.join(parts[1:])},atrim=start_sample={delay},asetpts=PTS-STARTPTS"
     return chain
@@ -245,16 +255,44 @@ def repair_to_raw(in_path: str, raw_path: str, start: float, dur: float, channel
     return 1.0 / scale, repaired
 
 
-async def clean_audio(in_path: str, out_path: str, start: float, end: float, denoise: float, level: bool, repair: bool = False) -> float:
+Report = Callable[[str, float], None]
+
+# Background removal and echo reduction hold the whole range in memory
+# (the separator and WPE work on it whole): about 0.4 GB per 30 minutes.
+MAX_HEAVY_SECONDS = 30 * 60
+
+
+class TooLong(ValueError):
+    pass
+
+
+async def clean_audio(
+    in_path: str,
+    out_path: str,
+    start: float,
+    end: float,
+    denoise: float,
+    level: bool,
+    repair: bool = False,
+    wind: bool = False,
+    mouth: bool = False,
+    echo: int = 0,
+    isolate: bool = False,
+    report: Optional[Report] = None,
+) -> float:
     """Writes the cleaned copy; returns the gain to play it at (above 1 when
-    the clipping repair had to scale it down to fit)."""
+    it had to be scaled down to fit under full scale). `echo`: 0 off, 1-3
+    reverb reduction strength (dereverb.py). `isolate`: keep only the voice
+    (the separator model, downloaded on first use). `report(stage, 0..1)`
+    gets the slow stages ("download", "separate", "echo") and may raise to
+    cancel."""
     dur = max(0.05, end - start)
-    if repair:
-        return await _clean_repaired(in_path, out_path, start, dur, denoise)
+    if repair or echo or isolate:
+        return await _clean_staged(in_path, out_path, start, dur, denoise, repair, wind, mouth, echo, isolate, report or (lambda s, v: None))
     floor = None
     if denoise > 0:
         floor = noise_floor_db(await asyncio.to_thread(_decode, in_path, start, min(dur, _ANALYZE_SECONDS)))
-    filters = clean_filters(denoise, floor)
+    filters = clean_filters(denoise, floor, wind, mouth)
     if level:
         # Measure the cleaned range, then one gain to the target, kept under
         # the true-peak ceiling.
@@ -281,21 +319,73 @@ async def clean_audio(in_path: str, out_path: str, start: float, end: float, den
     return 1.0
 
 
-async def _clean_repaired(in_path: str, out_path: str, start: float, dur: float, denoise: float) -> float:
-    """Clipping repaired first (on the original samples), then the usual
+def _decode_to_raw(in_path: str, raw_path: str, start: float, dur: float, channels: int) -> None:
+    with open(raw_path, "wb") as f:
+        for c in _chunks(in_path, start, dur, channels):
+            f.write(np.ascontiguousarray(c, np.float32).tobytes())
+
+
+def _isolate_voice(x: np.ndarray, report: Report) -> np.ndarray:
+    """The voice of `x` (n, channels) at _RATE: the separator (dub.py) at
+    its 44.1 kHz in stereo, and back, the same length and timing."""
+    from app.pipeline import dub, speech
+
+    speech.ensure_model(dub.SEPARATOR, lambda stage, v: report("download", v))
+    n, channels = x.shape
+    stereo = x if channels == 2 else np.repeat(x, 2, axis=1)
+    at44 = dub._ffmpeg(np.ascontiguousarray(stereo, np.float32).reshape(-1), _RATE, dub.RATE, channels=2).reshape(-1, 2).T
+    voice = dub.separate(np.ascontiguousarray(at44), lambda v: report("separate", v))
+    back = dub._ffmpeg(np.ascontiguousarray(voice.T, np.float32).reshape(-1), dub.RATE, _RATE, channels=2).reshape(-1, 2)
+    back = back[:n] if len(back) >= n else np.pad(back, ((0, n - len(back)), (0, 0)))
+    return back if channels == 2 else back.mean(axis=1, keepdims=True)
+
+
+async def _clean_staged(
+    in_path: str, out_path: str, start: float, dur: float, denoise: float, repair: bool, wind: bool, mouth: bool, echo: int, isolate: bool, report: Report
+) -> float:
+    """On the samples, in order: clipping repaired (on the original), the
+    voice kept (the separator), the reverb reduced (WPE). Then the usual
     cleanup chain, scaled under full scale; returns the make-up gain."""
+    from app.pipeline import dereverb as dr
     from app.pipeline.editor import probe_audio_mono
 
     channels = 1 if probe_audio_mono(in_path) else 2
     raw = out_path + ".f32"
+
+    def prepare() -> float:
+        if (isolate or echo) and dur > MAX_HEAVY_SECONDS:
+            raise TooLong(dur)
+        if repair:
+            repair_to_raw(in_path, raw, start, dur, channels)
+        else:
+            _decode_to_raw(in_path, raw, start, dur, channels)
+        if isolate or echo:
+            x = np.fromfile(raw, np.float32).reshape(-1, channels)
+            if len(x) == 0:
+                raise RuntimeError("no sound")
+            if isolate:
+                x = _isolate_voice(x, report)
+            if echo:
+                x = np.ascontiguousarray(x, np.float32)
+                for ch in range(channels):
+                    x[:, ch] = dr.dereverb(x[:, ch], _RATE, echo, lambda v, ch=ch: report("echo", (ch + v) / channels))
+            np.ascontiguousarray(x, np.float32).tofile(raw)
+        data = np.memmap(raw, np.float32, mode="r")
+        peak = float(np.max(np.abs(data))) if data.size else 0.0
+        del data
+        if peak <= 0:
+            raise RuntimeError("no sound")
+        return peak
+
     try:
-        gain, _ = await asyncio.to_thread(repair_to_raw, in_path, raw, start, dur, channels)
+        peak = await asyncio.to_thread(prepare)
+        gain = 1.0 / min(1.0, _REPAIR_HEADROOM / peak)
         floor = None
         if denoise > 0:
             n = min(os.path.getsize(raw) // (4 * channels), int(_ANALYZE_SECONDS * _RATE))
             x = np.fromfile(raw, np.float32, count=n * channels).reshape(-1, channels).mean(axis=1)
             floor = noise_floor_db(x)  # afftdn runs before the scaling
-        filters = f"{clean_filters(denoise, floor)},volume={1 / gain:.6f}"
+        filters = f"{clean_filters(denoise, floor, wind, mouth)},volume={1 / gain:.6f}"
         await _run_ffmpeg(
             ["-y", "-f", "f32le", "-ar", str(_RATE), "-ac", str(channels), "-i", raw, "-af", filters, "-ar", "48000", "-c:a", "aac", "-b:a", "192k", out_path]
         )  # fmt: skip

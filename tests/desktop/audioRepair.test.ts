@@ -136,7 +136,7 @@ test("export rows, mix key and labels", () => {
 test("a repaired copy plays at its make-up gain; the original and old copies at 1", () => {
   const plain = withCleanup(track(), "clean1", 0.5);
   assert.equal(cleanGain(plain), 1);
-  const repaired = withCleanup(track(), "clean2", 0, { gain: 1.6 });
+  const repaired = withCleanup(track(), "clean2", 0, { repairGain: 1.6 });
   assert.equal(repaired.clean?.repaired, true);
   assert.equal(cleanGain(repaired), 1.6);
   close(trackGainAt(repaired, 5), 1.6);

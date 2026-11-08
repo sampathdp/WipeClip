@@ -149,6 +149,7 @@ export async function exportProject(
       ...(a.voice && a.voice !== "none" ? { voice: a.voice } : {}),
       ...(toneActive(a.tone) ? { tone: toneWire(a.tone) } : {}),
       ...(envelopeWire(a) ? { envelope: envelopeWire(a) } : {}),
+      ...(a.breaths?.length ? { breaths: a.breaths } : {}),
     });
   }
 

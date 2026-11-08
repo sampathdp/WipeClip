@@ -40,7 +40,7 @@ export interface Hesitation {
 const HOP_SEC = 0.01;
 const WIN_SEC = 0.03;
 /** Spectral shape: log energy in this many bands, 100-4000 Hz. */
-const BANDS = 16;
+export const BANDS = 16;
 const BAND_LO = 100;
 const BAND_HI = 4000;
 /** The shape is compared with the frame this far ahead (50 ms). */
@@ -78,7 +78,7 @@ function percentile(values: ArrayLike<number>, p: number): number {
 
 /** Log band energies of one Hann-windowed frame (radix-2 FFT), with their
  * mean removed. */
-class BandSpectrum {
+export class BandSpectrum {
   private size: number;
   private re: Float32Array;
   private im: Float32Array;
@@ -109,7 +109,8 @@ class BandSpectrum {
       this.rev[i] = r;
     }
   }
-  measure(x: Float32Array, at: number, out: Float32Array) {
+  /** Fills `out` with the shape; returns the bands' mean level, dB. */
+  measure(x: Float32Array, at: number, out: Float32Array): number {
     const { size, re, im, rev } = this;
     re.fill(0);
     im.fill(0);
@@ -151,11 +152,12 @@ class BandSpectrum {
     }
     mean /= BANDS;
     for (let k = 0; k < BANDS; k++) out[k] -= mean;
+    return mean;
   }
 }
 
 /** Pitch of one window by normalized autocorrelation: [Hz, clarity 0..1]. */
-function pitchOf(x: Float32Array, a: number, n: number, rate: number): [number, number] {
+export function pitchOf(x: Float32Array, a: number, n: number, rate: number): [number, number] {
   const minLag = Math.floor(rate / MAX_HZ);
   const maxLag = Math.min(n - 1, Math.ceil(rate / MIN_HZ));
   let best = 0;
@@ -350,6 +352,24 @@ const MAX_PAUSE_TAKEN = 0.6;
  * sound, not hesitation in speech. */
 const NEAR_WORD = 2.5;
 
+const shortLetters = (text: string) => [...text.normalize("NFC").replace(/[\p{M}\p{P}\p{S}\s]+/gu, "").toLowerCase()];
+
+/** A transcript word that is the held sound itself: speech models often
+ * write a hesitation as a short "word" ("aa", "අ", "ஆ", "अ", "ahh"). Short
+ * means one or two letters, or one letter repeated (marks such as vowel
+ * signs don't count), or up to four of the letters hesitations are spelled
+ * with in Latin script ("ahh", "umm", "hmm", "err" - not "sooo", a real
+ * word said slowly). It must last long for a word (0.35 s or more), and
+ * the held sound must fill most of it. */
+export function heardAsWord(text: string, start: number, end: number, h: Pick<Hesitation, "start" | "end">): boolean {
+  const letters = shortLetters(text);
+  if (letters.length === 0) return true;
+  const short = letters.length <= 2 || new Set(letters).size === 1 || (letters.length <= 4 && letters.every((l) => "aeiouhmnr".includes(l)));
+  const len = end - start;
+  const covered = Math.min(h.end, end) - Math.max(h.start, start);
+  return short && len >= 0.35 && h.end - h.start >= 0.3 && covered >= 0.6 * len;
+}
+
 /** Review suggestions for the hesitations. `transcript`: one that still
  * matches the edit, or null - then the sound alone decides and the
  * confidence is lower. `existing`: the other suggestions; a hesitation
@@ -362,29 +382,35 @@ export function hesitationSuggestions(
 ): EditSuggestion[] {
   const words = transcript?.words ?? [];
   const fillers = new Set(fillerIndices(words));
-  const taken = existing.filter((s) => s.action === "cut" && (s.kind === "filler" || s.kind === "repeat"));
+  const taken = existing.filter((s) => s.action === "cut" && (s.kind === "filler" || s.kind === "repeat" || s.kind === "hesitation"));
   const out: EditSuggestion[] = [];
   for (const h of found) {
     const len = h.end - h.start;
     if (taken.some((s) => s.start < h.soundEnd && s.end > h.soundStart)) continue;
     let prevEnd = -Infinity;
     let nextStart = Infinity;
+    let heardAs: string | null = null;
     if (transcript) {
       // Mostly inside a real word: a word said slowly ("sooo"), not a filler.
       let inWords = 0;
       let onFiller = false;
+      const itself = new Set<number>();
       for (let i = 0; i < words.length; i++) {
         const w = words[i];
         const o = Math.min(h.end, w.end) - Math.max(h.start, w.start);
         if (o <= 0) continue;
         if (fillers.has(i)) onFiller = true;
-        else inWords += o;
+        else if (heardAsWord(w.text, w.start, w.end, h)) {
+          itself.add(i);
+          heardAs = w.text.trim();
+        } else inWords += o;
       }
       if (onFiller || inWords > Math.min(0.25, len * 0.5)) continue;
-      for (const w of words) {
+      words.forEach((w, i) => {
+        if (itself.has(i)) return;
         if (w.end <= h.start + 0.05) prevEnd = Math.max(prevEnd, w.end);
         if (w.start >= h.end - 0.05) nextStart = Math.min(nextStart, w.start);
-      }
+      });
       if (h.start - prevEnd > NEAR_WORD && nextStart - h.end > NEAR_WORD) continue;
     }
     // The sound, plus the pause around it down to KEEP_PAUSE on each side.
@@ -395,8 +421,11 @@ export function hesitationSuggestions(
     if (Number.isFinite(nextStart)) end = Math.min(end, Math.max(h.soundEnd, nextStart - 0.03));
     if (end - start < MIN_SEC) continue;
     const isolated = h.pauseBefore && h.pauseAfter;
+    // Written as a word of two different letters ("ahh", "umm"): it could be
+    // a short real word said slowly, so not "high".
+    const wordLike = heardAs !== null && new Set(shortLetters(heardAs)).size > 1;
     const confidence: EditSuggestion["confidence"] = transcript
-      ? isolated && len >= 0.35 && h.pitchSpread <= 0.8
+      ? isolated && len >= 0.35 && h.pitchSpread <= 0.8 && !wordLike
         ? "high"
         : "medium"
       : isolated
@@ -404,12 +433,13 @@ export function hesitationSuggestions(
         : "low";
     out.push({
       id: ids(),
-      kind: "filler",
+      kind: "hesitation",
       start,
       end,
       title: `Hesitation sound (${len.toFixed(1)} s)`,
       detail:
         "A held, steady voice sound with no word in it, like “aaa”, “eee”, “uhhh” or “mmm”. Found from the sound itself, so it works in any language." +
+        (heardAs ? ` The transcript wrote it as “${heardAs}”.` : "") +
         (transcript ? "" : " There's no transcript to check it against, so listen first.") +
         (isolated ? "" : " It runs straight into the speech next to it, so play the cut before applying it."),
       action: "cut",
