@@ -1,12 +1,17 @@
 {
-  "next": [
-    "New Clean up audio: pick what to fix - noise, echo, background audio, clipping, mouth sounds, wind, breaths, long silences, hesitations and filler words - and press Enhance to do it all at once. Find it in the Audio panel and in Review.",
-    "Remove background audio keeps only your voice, taking out music, TV and other sounds behind it. It downloads its model once and runs on your computer.",
-    "Remove echo makes a voice recorded in an empty or echoey room sound closer. Choose Light, Medium or Strong.",
-    "Breaths between sentences are turned down, and mouth clicks and lip smacks are removed.",
-    "Hesitation sounds like \"aaa\" and \"mmm\" are now found even when the transcript writes them as a short word, which helps Sinhala, Tamil and Hindi speech most."
-  ],
+  "next": [],
   "releases": [
+    {
+      "version": "1.0.2",
+      "date": "2026-11-08",
+      "notes": [
+        "New Clean up audio: pick what to fix - noise, echo, background audio, clipping, mouth sounds, wind, breaths, long silences, hesitations and filler words - and press Enhance to do it all at once. Find it in the Audio panel and in Review.",
+        "Remove background audio keeps only your voice, taking out music, TV and other sounds behind it. It downloads its model once and runs on your computer.",
+        "Remove echo makes a voice recorded in an empty or echoey room sound closer. Choose Light, Medium or Strong.",
+        "Breaths between sentences are turned down, and mouth clicks and lip smacks are removed.",
+        "Hesitation sounds like \"aaa\" and \"mmm\" are now found even when the transcript writes them as a short word, which helps Sinhala, Tamil and Hindi speech most."
+      ]
+    },
     {
       "version": "1.0.1",
       "date": "2026-11-07",
