@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
 import { useI18n, useLocaleHref } from "@/i18n/client";
+import { WELCOME_CLOSED_EVENT } from "@/components/ColorBloomPopup";
 
 const STORAGE_KEY = "wipeclip_welcome_seen";
 const OPEN_DELAY_MS = 1200;
@@ -56,6 +57,7 @@ export default function WelcomeModal() {
     try {
       localStorage.setItem(STORAGE_KEY, "1");
     } catch {}
+    window.dispatchEvent(new Event(WELCOME_CLOSED_EVENT));
   };
 
   useEffect(() => {

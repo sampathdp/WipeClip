@@ -36,6 +36,7 @@ ${page("/download", "Download the app", "features, system requirements and insta
 ${page("/pricing", "Pricing", "free plan, one-time passes and what each includes")}
 ${page("/about", "About", "what WipeClip is, who makes it and how files are handled")}
 ${page("/whats-new", "What's new", "release notes for every desktop app version")}
+${page("/colorbloom", "ColorBloom", "the studio's free mindful coloring app for Android phones")}
 
 ## Free tools
 

@@ -8,7 +8,7 @@ import { buildPageMetadata, jsonLdString, SITE_URL } from "@/lib/seo";
 import { LATEST_RELEASE, RELEASES } from "@/lib/releases";
 
 const title = "What's New in WipeClip: Release Notes";
-const description = `WipeClip release notes for Windows and Mac. Latest v${LATEST_RELEASE.version}: voice translation to English and captions in Sinhala, Tamil, Hindi, Kannada and Telugu.`;
+const description = `WipeClip release notes for Windows and Mac: every update to the free desktop video editor and screen recorder. Latest: v${LATEST_RELEASE.version}, ${LATEST_RELEASE.date}.`;
 
 export const metadata: Metadata = buildPageMetadata({ title, description, path: "/whats-new" });
 

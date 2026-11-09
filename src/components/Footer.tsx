@@ -72,6 +72,10 @@ export default function Footer({ lang = "en" }: { lang?: Lang }) {
           <Link href="/whats-new" className="transition-colors hover:text-foreground">
             {t.whatsNew}
           </Link>
+          <span className="text-border">&middot;</span>
+          <Link href="/colorbloom" className="transition-colors hover:text-foreground">
+            ColorBloom
+          </Link>
           {GUIDES.length > 0 && (
             <>
               <span className="text-border">&middot;</span>

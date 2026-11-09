@@ -47,6 +47,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.7,
     },
     {
+      url: `${siteUrl}/colorbloom`,
+      lastModified: "2026-11-09",
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
       url: `${siteUrl}/tools`,
       lastModified: "2026-10-24",
       changeFrequency: "weekly",
