@@ -134,6 +134,7 @@ import {
   buildSpeechAudio,
   captionOverlays,
   captionText,
+  captionPresetOf,
   captionUpper,
   CAPTION_STYLES,
   groupWords,
@@ -374,6 +375,8 @@ export default function VideoEditor({
     saveCaptionPrefs({ maxWords, style, y, look, hint, accurate });
   }, [captionOpts]);
   const [captioning, setCaptioning] = useState(false);
+  // Which tab the captions panel opens on; `n` remounts it on each opening.
+  const [captionsEntry, setCaptionsEntry] = useState<{ tab: "generate" | "edit" | "style"; n: number }>({ tab: "generate", n: 0 });
   // Captions shown as one block on the Text track (a view setting, kept on this device).
   const [captionsGrouped, setCaptionsGrouped] = useState(() => {
     try {
@@ -485,6 +488,11 @@ export default function VideoEditor({
   useEffect(() => {
     sourcesRef.current = sources;
   }, [sources]);
+  // For select(): the combined captions block reads the captions' look.
+  const overlaysRef = useRef(project.overlays);
+  useEffect(() => {
+    overlaysRef.current = project.overlays;
+  }, [project.overlays]);
   useEffect(() => {
     const jobs = thumbJobs.current;
     return () => {
@@ -978,9 +986,15 @@ export default function VideoEditor({
   }, []);
 
   const select = useCallback((s: Selection) => {
-    // The combined captions block opens the captions panel (Edit text).
+    // The combined captions block opens the captions panel on Style, which
+    // changes every caption at once.
     if (s?.kind === "overlay" && s.id === CAPTION_GROUP) {
       setSelection(null);
+      // Start from how the captions look now, so a change to one setting
+      // (size, say) doesn't also bring back the last-used font or case.
+      const first = overlaysRef.current.filter((o) => o.caption && o.kind === "text").sort((a, b) => a.start - b.start)[0];
+      if (first?.kind === "text") setCaptionOpts((o) => ({ ...o, y: first.y, ...captionPresetOf(first.text, first.animIn, o.style) }));
+      setCaptionsEntry((e) => ({ tab: "style", n: e.n + 1 }));
       setTool("captions");
       return;
     }
@@ -3217,6 +3231,8 @@ export default function VideoEditor({
   } else if (tool === "captions") {
     toolPanel = (
       <CaptionsPanel
+        key={captionsEntry.n}
+        initialTab={captionsEntry.tab}
         options={captionOpts}
         onOptions={setCaptionOpts}
         count={project.overlays.filter((o) => o.caption).length}
@@ -3658,7 +3674,10 @@ export default function VideoEditor({
   const openTab = (t: GroupTab["id"]) => {
     if (t === "transition") openTransition();
     else if (t === "filters" || t === "adjust") openLook(t);
-    else setTool(t);
+    else {
+      if (t === "captions") setCaptionsEntry((e) => ({ tab: "generate", n: e.n + 1 }));
+      setTool(t);
+    }
   };
   const tabsOf = (g: (typeof TOOL_GROUPS)[number]) => g.tabs.filter((x) => x.id !== "focus" || IS_DESKTOP || zooms.length > 0);
   const activeGroup = groupOf(tool);

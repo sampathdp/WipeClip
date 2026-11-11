@@ -1193,10 +1193,22 @@ function CaptionList({
   const [matchCase, setMatchCase] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  // "text": every caption as one timed line, read top to bottom like the
+  // full transcript; "cards": each with its timing fields and actions.
+  const [view, setView] = useState<"text" | "cards">("text");
   const q = filter.trim().toLowerCase();
   const shown = q ? items.filter((c) => c.text.toLowerCase().includes(q)) : items;
   return (
     <div className="space-y-3">
+      <Chips
+        label="Caption list view"
+        value={view}
+        onChange={setView}
+        options={[
+          { value: "text" as const, label: "Full text" },
+          { value: "cards" as const, label: "Detailed" },
+        ]}
+      />
       <div className="space-y-2 rounded-xl border border-border bg-surface-2/60 p-3">
         <p className="text-xs font-semibold text-foreground">Find and replace</p>
         <input className={inputCls} placeholder="Find (a wrong word)" value={find} onChange={(e) => setFind(e.target.value)} aria-label="Find in captions" />
@@ -1219,6 +1231,24 @@ function CaptionList({
         {note && <p className="text-[11px] text-muted">{note}</p>}
       </div>
       <input className={inputCls} placeholder="Search captions" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Search captions" />
+      {view === "text" ? (
+        <div className="max-h-[32rem] overflow-y-auto rounded-xl border border-border bg-surface pr-1" aria-label="All caption text">
+          {shown.map((c) => (
+            <div key={c.id} className="flex items-start gap-1.5 border-b border-border/40 px-1.5 py-1 last:border-b-0">
+              <button
+                type="button"
+                onClick={() => onSeek(c.start)}
+                className="mt-1.5 shrink-0 rounded px-1 font-mono text-[10px] text-accent hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+                title={`Go to this caption (${fmtTime(c.start)} – ${fmtTime(c.end)})`}
+              >
+                {fmtTime(c.start)}
+              </button>
+              <CaptionTextInput value={c.text} onCommit={(text) => onEdit(c.id, { text })} compact />
+            </div>
+          ))}
+          {shown.length === 0 && <p className="p-2 text-xs text-muted">No caption has that text.</p>}
+        </div>
+      ) : (
       <ul className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
         {shown.map((c) => {
           const i = items.indexOf(c);
@@ -1265,21 +1295,30 @@ function CaptionList({
         })}
         {shown.length === 0 && <li className="text-xs text-muted">No caption has that text.</li>}
       </ul>
+      )}
+      <p className="text-[11px] text-muted">
+        {view === "text"
+          ? "Click a time to go there. Edit any line; Enter saves. Detailed shows each caption's timing and Join and Delete."
+          : "Times and text are saved when you leave a field."}
+      </p>
     </div>
   );
 }
 
 /** A caption's text, saved when the field loses focus (one undo step per
  * edit). Enter saves, Shift+Enter starts a second line, Escape undoes. */
-function CaptionTextInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+function CaptionTextInput({ value, onCommit, compact = false }: { value: string; onCommit: (v: string) => void; compact?: boolean }) {
   const [draft, setDraft] = useState<string | null>(null);
+  // Compact (Full text view): sized to its text, no frame, so the list
+  // reads as running text.
+  const rows = compact ? Math.max(1, (draft ?? value).split("\n").length) : 2;
   const commit = () => {
     if (draft !== null && draft.trim() && draft !== value) onCommit(draft);
     setDraft(null);
   };
   return (
     <textarea
-      rows={2}
+      rows={rows}
       value={draft ?? value}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
@@ -1292,7 +1331,11 @@ function CaptionTextInput({ value, onCommit }: { value: string; onCommit: (v: st
         }
       }}
       aria-label="Caption text"
-      className={`${inputCls} resize-y leading-snug`}
+      className={
+        compact
+          ? "field-sizing-content min-w-0 flex-1 resize-none rounded-md border border-transparent bg-transparent px-1.5 py-1 text-sm leading-snug text-foreground hover:border-border focus:border-accent-2 focus:outline-none"
+          : `${inputCls} resize-y leading-snug`
+      }
     />
   );
 }
@@ -1380,7 +1423,10 @@ export function CaptionsPanel({
   onReplaceAll,
   onSeek,
   gesture = NO_GESTURE,
+  initialTab = "generate",
 }: {
+  /** The tab it opens on (the combined captions block opens Style). */
+  initialTab?: "generate" | "edit" | "style";
   /** null = still checking. When false, generating asks to download the model first. */
   modelCached?: boolean | null;
   /** The speech model this device will download (captions.ts speechModel). */
@@ -1421,7 +1467,7 @@ export function CaptionsPanel({
   const look = options.look ?? {};
   const setLook = (patch: CaptionLook) => set({ look: { ...look, ...patch } }, true);
   const [consent, setConsent] = useState(false);
-  const [tab, setTab] = useState<"generate" | "edit" | "style">("generate");
+  const [tab, setTab] = useState<"generate" | "edit" | "style">(initialTab);
   const needsModel = modelCached === false && !consent;
   const canEdit = count > 0 && !!onEditCaption;
   const current = canEdit ? tab : tab === "edit" ? "generate" : tab;

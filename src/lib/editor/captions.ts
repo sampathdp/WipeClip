@@ -896,6 +896,34 @@ export function captionText(content: string, styleId: CaptionStyleId, look: Capt
   return { ...DEFAULT_TEXT, ...s.style, ...rest, content: upper ? content.toUpperCase() : content };
 }
 
+/** The look that reproduces a caption as it is now on top of `styleId`
+ * (its font, colors, size and letter case), so the Style tab opens on what
+ * the captions look like rather than on the last settings used. */
+export function lookFromCaption(t: TextStyle, styleId: CaptionStyleId): CaptionLook {
+  const base = captionText("", styleId);
+  const look: CaptionLook = {};
+  const keys = ["font", "weight", "italic", "color", "strokeColor", "strokeWidth", "background", "backgroundOpacity", "shadow", "highlight", "size", "align"] as const;
+  for (const k of keys) if (t[k] !== undefined && t[k] !== base[k]) (look as Record<string, unknown>)[k] = t[k];
+  const letters = t.content.replace(/[^\p{L}]/gu, "");
+  const upper = letters.length > 0 && letters === letters.toUpperCase() && letters !== letters.toLowerCase();
+  if (upper !== captionUpper(styleId)) look.case = upper ? "upper" : "normal";
+  return look;
+}
+
+/** The preset a caption was most likely made with (same entrance, fewest
+ * changes on top), and the look that reproduces it on that preset. Ties
+ * keep `current`. */
+export function captionPresetOf(t: TextStyle, animIn: AnimIn, current: CaptionStyleId): { style: CaptionStyleId; look: CaptionLook } {
+  let best = { style: current, look: lookFromCaption(t, current), score: Infinity };
+  const ids = [current, ...(Object.keys(CAPTION_STYLES) as CaptionStyleId[]).filter((id) => id !== current)];
+  for (const id of ids) {
+    const look = lookFromCaption(t, id);
+    const score = Object.keys(look).length + (CAPTION_STYLES[id].animIn === animIn ? 0 : 100);
+    if (score < best.score) best = { style: id, look, score };
+  }
+  return { style: best.style, look: best.look };
+}
+
 /** Whether a style with `look` shows its text in capitals. */
 export function captionUpper(styleId: CaptionStyleId, look: CaptionLook = {}): boolean {
   return look.case ? look.case === "upper" : !!CAPTION_STYLES[styleId].upper;
