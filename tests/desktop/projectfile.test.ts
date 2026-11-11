@@ -88,6 +88,28 @@ test("project file round trip keeps the edit, files and recording details, with 
   assert.deepEqual([...referencedSources(opened.project)].sort(), opened.sources.map((s) => s.id).sort());
 });
 
+test("cleaned audio copies are saved and followed; files without them still open", async () => {
+  const video = source("src_a", "clip.mp4", new Uint8Array([1, 2, 3, 4]));
+  const voice = source("snd_v", "voice.m4a", new Uint8Array([5, 6]), "audio/mp4", { kind: "audio", width: 0, height: 0, fps: 0 });
+  const cleaned = source("snd_c", "clean-voice.m4a", new Uint8Array([7, 8, 9]), "audio/mp4", { kind: "audio", width: 0, height: 0, fps: 0 });
+  const p: Project = {
+    ...project(["src_a"]),
+    audio: [{ id: "a1", sourceId: "snd_v", label: "voice", start: 0, offset: 0, duration: 2, volume: 1, fadeIn: 0, fadeOut: 0, muted: false, clean: { sourceId: "snd_c", strength: 0.5, bypass: false } } as Project["audio"][number]],
+  };
+
+  const opened = await readProjectFile(await createProjectFile({ name: "Voice", createdAt: 1 }, p, [video, voice, cleaned]));
+  const byName = Object.fromEntries(opened.sources.map((s) => [s.file.name, s]));
+  assert.ok(byName["clean-voice.m4a"], "the cleaned copy is in the file");
+  assert.deepEqual(new Uint8Array(await byName["clean-voice.m4a"].file.arrayBuffer()), new Uint8Array([7, 8, 9]));
+  assert.equal(opened.project.audio[0].sourceId, byName["voice.m4a"].id);
+  assert.equal(opened.project.audio[0].clean?.sourceId, byName["clean-voice.m4a"].id, "the track still plays its cleaned copy");
+
+  // Saved before cleaned copies were kept: opens, the track plays the original.
+  const old = await readProjectFile(await createProjectFile({ name: "Voice", createdAt: 1 }, p, [video, voice]));
+  assert.equal(old.sources.length, 2);
+  assert.ok(!old.sources.some((s) => s.id === old.project.audio[0].clean?.sourceId));
+});
+
 async function fileWith(manifest: unknown, extra: { name: string; data: Blob }[] = []) {
   return buildZip([{ name: "project.json", data: new Blob([JSON.stringify(manifest)]) }, ...extra]);
 }

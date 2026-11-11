@@ -113,7 +113,7 @@ def _has_soxr() -> bool:
         import imageio_ffmpeg
 
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        res = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-buildconf"], capture_output=True, text=True, creationflags=flags)
+        res = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-buildconf"], capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=flags)
         _soxr = "--enable-libsoxr" in res.stdout
     return _soxr
 

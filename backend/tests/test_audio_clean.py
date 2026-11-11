@@ -86,6 +86,14 @@ class AudioCleanTest(unittest.TestCase):
         self.assertAlmostEqual(integrated_lufs(out), -16, delta=1)
         self.assertAlmostEqual(len(samples(out, 0, 10)) / 48000, 5, delta=0.15)
 
+    def test_loudness_reads_files_with_any_name(self) -> None:
+        # ffmpeg prints the path in UTF-8; read with Windows' code page, a
+        # name with "”" (byte 0x9d) used to lose the whole output.
+        named = os.path.join(self.dir.name, "My “demo” clip ÝÍ.mp4")
+        with open(self.src, "rb") as a, open(named, "wb") as b:
+            b.write(a.read())
+        self.assertIsNotNone(audio_clean._loudness(named, "anull"))
+
     def test_range_and_no_denoise(self) -> None:
         out = os.path.join(self.dir.name, "range.m4a")
         with mock.patch.object(main, "LOCAL_MODE", True):

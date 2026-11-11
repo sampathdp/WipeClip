@@ -64,7 +64,7 @@ def _loudness(in_path: str, filters: str) -> tuple[float, float] | None:
     """Integrated loudness (LUFS) and true peak (dBTP) after `filters`."""
     err = subprocess.run(
         [get_ffmpeg_path(), "-hide_banner", "-nostats", "-i", in_path, "-af", f"{filters},ebur128=peak=true", "-f", "null", "-"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     ).stderr
     i = re.findall(r"I:\s+(-?[\d.]+) LUFS", err)
     p = re.findall(r"Peak:\s+(-?[\d.]+|-inf) dBFS", err)

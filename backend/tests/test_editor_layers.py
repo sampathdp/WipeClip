@@ -250,6 +250,28 @@ class SpeedRampExportTest(unittest.TestCase):
         self.assertFalse(is_red(0.7))
         self.assertFalse(is_red(4.2))
 
+    def test_short_ramped_clip_next_to_another_exports(self) -> None:
+        # A 0.34 s clip with a gentle ramp: its 24 sound pieces (14 ms each)
+        # are too short for atempo, which used to leave the clip silent with
+        # no timestamps and fail the export at the next clip.
+        tmp = tempfile.mkdtemp(prefix="ramp-short-")
+        src = os.path.join(tmp, "tone.mp4")
+        subprocess.run(
+            [get_ffmpeg_path(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"color=gray:s={W}x{H}:r={FPS}:d=4",
+             "-f", "lavfi", "-i", "sine=f=440:d=4", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", src],
+            check=True,
+        )
+        ramp = [round(1.048 - 0.002 * n, 3) for n in range(24)]
+        short = editor.PlanClip(source_path=src, source_has_audio=True, source_width=W, source_height=H, start=1.0, duration=0.335, ramp=ramp)
+        after = editor.PlanClip(source_path=src, source_has_audio=True, source_width=W, source_height=H, start=2.0, duration=1.5)
+        plan = editor.ExportPlan(width=W, height=H, fps=FPS, with_audio=True, clips=[short, after])
+        out = os.path.join(tmp, "out.mp4")
+        render(plan, out)
+        probe = editor.probe_media(out)
+        self.assertAlmostEqual(probe.duration, editor.timeline_duration(plan), delta=0.15)
+        self.assertGreater(audio_rms(out, 0.05, 0.2), 0.05, "the short clip keeps its sound")
+        self.assertGreater(audio_rms(out, 0.6, 1.0), 0.05)
+
 
 def audio_rms(path: str, start: float, dur: float) -> float:
     import numpy as np

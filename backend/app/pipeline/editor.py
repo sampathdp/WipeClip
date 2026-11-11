@@ -282,6 +282,9 @@ ANIM_SECONDS = 0.35
 SLIDE_DISTANCE = 0.15  # fraction of canvas width (x) / height (y)
 
 AUDIO_RATE = 48000
+# Shortest source piece a speed ramp's sound is split into (seconds); under
+# it the clip's sound plays at the ramp's average tempo (_clip_audio_chain).
+MIN_RAMP_AUDIO_PIECE = 0.05
 
 # Voice effects - the preview's Web Audio graphs in src/lib/editor/voiceFx.ts.
 # Pitch: resample to the new pitch, then atempo back to the length.
@@ -314,7 +317,7 @@ _ROTATION_RE = re.compile(r"rotation of (-?\d+(?:\.\d+)?) degrees|rotate\s*:\s*(
 
 def _ffmpeg_info(path: str) -> str:
     proc = subprocess.run(
-        [get_ffmpeg_path(), "-hide_banner", "-i", path], capture_output=True, text=True, errors="replace"
+        [get_ffmpeg_path(), "-hide_banner", "-i", path], capture_output=True, text=True, encoding="utf-8", errors="replace"
     )
     return proc.stderr
 
@@ -657,6 +660,12 @@ def plan_to_json(plan: ExportPlan) -> str:
     return json.dumps(asdict(plan))
 
 
+def _tone_from_json(t: Optional[dict]) -> Optional[PlanTone]:
+    if not t:
+        return None
+    return PlanTone(**{**t, "comp": PlanCompressor(**t["comp"]) if t.get("comp") else None})
+
+
 def plan_from_json(text: str) -> ExportPlan:
     raw = json.loads(text)
     pointer = raw.get("pointer")
@@ -664,7 +673,7 @@ def plan_from_json(text: str) -> ExportPlan:
         **{k: v for k, v in raw.items() if k not in ("clips", "overlays", "audio", "effects", "pointer", "masks")},
         clips=[PlanClip(**{**c, "camera": [tuple(r) for r in c.get("camera", [])]}) for c in raw["clips"]],
         overlays=[PlanOverlay(**{**o, "matte": PlanMatte(**o["matte"]) if o.get("matte") else None}) for o in raw.get("overlays", [])],
-        audio=[PlanAudio(**a) for a in raw.get("audio", [])],
+        audio=[PlanAudio(**{**a, "tone": _tone_from_json(a.get("tone"))}) for a in raw.get("audio", [])],
         effects=[PlanEffect(**e) for e in raw.get("effects", [])],
         pointer=(
             PlanPointer(
@@ -729,7 +738,7 @@ _FFMPEG_MAJOR = re.compile(r"ffmpeg version n?(\d+)\.")
 def _ffmpeg_major() -> int:
     """The ffmpeg binary's major version; 0 if it can't be told (a git build)."""
     try:
-        out = subprocess.run([get_ffmpeg_path(), "-hide_banner", "-version"], capture_output=True, text=True, timeout=30).stdout
+        out = subprocess.run([get_ffmpeg_path(), "-hide_banner", "-version"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30).stdout
     except (OSError, subprocess.SubprocessError):
         return 0
     m = _FFMPEG_MAJOR.search(out)
@@ -1404,7 +1413,7 @@ def has_vidstab() -> bool:
     global _VIDSTAB
     if _VIDSTAB is None:
         try:
-            out = subprocess.run([get_ffmpeg_path(), "-hide_banner", "-filters"], capture_output=True, text=True, timeout=30).stdout
+            out = subprocess.run([get_ffmpeg_path(), "-hide_banner", "-filters"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30).stdout
             _VIDSTAB = "vidstabdetect" in out
         except (OSError, subprocess.SubprocessError):
             _VIDSTAB = False
@@ -1436,6 +1445,18 @@ async def prepare_stabilization(plan: ExportPlan, tmp: str, cancel: "threading.E
 
 def _clip_audio_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int) -> str:
     d = _num(clip.duration)
+    if clip.ramp and clip.source_has_audio and clip.source_length / len(clip.ramp) < MIN_RAMP_AUDIO_PIECE:
+        # Too short to split: atempo emits nothing for a piece under ~21 ms,
+        # leaving the clip without sound, and the silence apad then makes
+        # has no timestamps, which fails the next concat ("Invalid data
+        # found when processing input"). One tempo for the whole clip, the
+        # ramp's average, keeps it the same length.
+        piece = clip.source_length / len(clip.ramp)
+        average = clip.source_length / sum(piece / s for s in clip.ramp)
+        return (
+            f"[{idx}:a:0]aresample={AUDIO_RATE},{_stereo(clip.source_mono)},{_atempo(average)},"
+            f"volume={_num(clip.volume)},apad,atrim=duration={d},asetpts=PTS-STARTPTS[a{i}]"
+        )
     if clip.ramp and clip.source_has_audio:
         # Each source piece at its own tempo, joined back together.
         k = len(clip.ramp)

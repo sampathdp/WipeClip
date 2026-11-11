@@ -93,6 +93,18 @@ class FrameExportTest(unittest.TestCase):
         back = editor.plan_from_json(editor.plan_to_json(plan))
         self.assertEqual((back.frame_padding, back.frame_radius, back.frame_shadow), (0.1, 0.04, 0.5))
 
+    def test_plan_round_trip_keeps_voice_tone(self) -> None:
+        # The desktop engine renders from the JSON (jobs.editor_export_job):
+        # a track's tone came back a dict, and the export failed at the mix.
+        plan = base_plan(self.src)
+        comp = editor.PlanCompressor(threshold=-19.2, ratio=2.5, attack=10, release=150, makeup=3.96)
+        tone = editor.PlanTone(bass=5, mid=-1, treble=-2, de_ess=0.2, comp=comp)
+        plan.audio = [editor.PlanAudio(path=self.src, start=0, offset=0, duration=1, tone=tone), editor.PlanAudio(path=self.src, start=1, offset=0, duration=1)]
+        back = editor.plan_from_json(editor.plan_to_json(plan))
+        self.assertEqual(back.audio[0].tone, tone)
+        self.assertIsNone(back.audio[1].tone)
+        self.assertEqual(editor.tone_chain(back.audio[0].tone), editor.tone_chain(tone))
+
     def test_shadow_numbers_match_the_preview(self) -> None:
         self.assertIsNone(editor.frame_shadow(0))
         self.assertEqual(editor.frame_shadow(1), (0.02, 0.06, 0.6))

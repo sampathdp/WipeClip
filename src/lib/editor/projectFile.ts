@@ -84,6 +84,15 @@ export function referencedSources(p: Project): Set<string> {
   return ids;
 }
 
+/** Sources the project plays when present but can do without: audio
+ * tracks' cleaned copies (mix.ts playedSourceId falls back to the
+ * original). Saved in the file; older files without them still open. */
+export function optionalSources(p: Project): Set<string> {
+  const ids = new Set<string>();
+  for (const a of p.audio) if (a.clean) ids.add(a.clean.sourceId);
+  return ids;
+}
+
 /** The project with every source id replaced through `map`. Opened files
  * get fresh ids, so opening the same file twice gives two independent
  * projects that never share stored files. */
@@ -105,7 +114,7 @@ export function remapSources(p: Project, map: Map<string, string>): Project {
           ? { ...o, text: { ...o.text, font: `src:${to(o.text.font.slice(4))}` } }
           : o
     ),
-    audio: p.audio.map((a) => ({ ...a, sourceId: to(a.sourceId) })),
+    audio: p.audio.map((a) => ({ ...a, sourceId: to(a.sourceId), ...(a.clean ? { clean: { ...a.clean, sourceId: to(a.clean.sourceId) } } : {}) })),
     canvas: p.canvas.background.type === "image" ? { ...p.canvas, background: { ...p.canvas.background, sourceId: to(p.canvas.background.sourceId) } } : p.canvas,
     zooms: p.zooms?.map((z) => (z.sourceId ? { ...z, sourceId: to(z.sourceId) } : z)),
     masks: p.masks?.map((m) => (m.sourceId ? { ...m, sourceId: to(m.sourceId) } : m)),
@@ -113,9 +122,10 @@ export function remapSources(p: Project, map: Map<string, string>): Project {
 }
 
 export async function createProjectFile(info: { name: string; createdAt: number }, project: Project, sources: MediaSource[]): Promise<Blob> {
-  const used = referencedSources(project);
+  const used = new Set([...referencedSources(project), ...optionalSources(project)]);
   // Only what the project uses: undo history (and so unused AI-cleaned
-  // versions) isn't saved in the file.
+  // versions) isn't saved in the file. Cleaned audio copies are, or a
+  // reopened project would play the tracks uncleaned.
   const kept = sources.filter((s) => used.has(s.id));
   // Sources that stay on disk are read here, to go into the file.
   const entries = await Promise.all(kept.map(async (s) => ({ name: mediaPath(s), data: (await sourceFile(s)) as Blob })));
