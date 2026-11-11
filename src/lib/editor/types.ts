@@ -375,6 +375,12 @@ export interface MasterAudio {
    * (dBFS) and the mix's key (mix.ts mixKey), to tell when it's out of
    * date. Absent = not measured. */
   measured?: { lufs: number; peakDb: number; key: string };
+  /** Every audio part fades over a few ms at its edges (mix.ts EDGE_FADE),
+   * so a cut doesn't click. Absent = on. */
+  smoothCuts?: boolean;
+  /** Audio parts cut from one file stay back to back, like the video row
+   * (audioMagnet.ts). Absent = off. */
+  magnetic?: boolean;
 }
 
 /** Webcam background removal on a video layer (matte.ts). Absent = the

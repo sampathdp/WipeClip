@@ -126,7 +126,7 @@ import {
 import { ANALYSIS_RATE } from "@/lib/editor/audioAnalysis";
 import { renderProgramMix } from "@/lib/editor/programMix";
 import { LOUDNESS_TARGETS, measureLoudness, normalizationGain } from "@/lib/editor/loudness";
-import { liveSolo, masterOf, mixKey, toggleSolo, withCleanup } from "@/lib/editor/mix";
+import { liveSolo, masterOf, mixKey, smoothCutsOn, toggleSolo, withCleanup } from "@/lib/editor/mix";
 import { applyCamLayout, placeWebcam, relayoutWebcams, screenAspectOf, screenForLayout } from "@/lib/editor/webcamLayout";
 import MixerPanel from "./MixerPanel";
 import { saveTextFile } from "@/lib/platform";
@@ -1990,6 +1990,18 @@ export default function VideoEditor({
         setCaptionsGrouped((g) => !g);
         return;
       }
+      if (kind === "magnet") {
+        const on = !masterOf(project).magnetic;
+        apply((p) => ({ ...p, master: { ...masterOf(p), magnetic: on } }));
+        say(on ? "Magnetic audio on: parts from one file now sit back to back, and deleting or trimming one slides the rest. Undo puts them back." : "Magnetic audio off: parts move freely.");
+        return;
+      }
+      if (kind === "smooth") {
+        const on = !smoothCutsOn(project);
+        apply((p) => ({ ...p, master: { ...masterOf(p), smoothCuts: on } }));
+        say(on ? "Smooth cuts on: every audio part fades in and out over 20 ms, so cuts don't click." : "Smooth cuts off: audio parts start and stop exactly at their cuts.");
+        return;
+      }
       apply((p) => {
         if (track === "audio") {
           const on = p.audio.length > 0 && p.audio.every((a) => a.muted);
@@ -2001,7 +2013,7 @@ export default function VideoEditor({
         return { ...p, overlays: p.overlays.map((o) => (mine(o) ? { ...o, [field]: !on } : o)) };
       });
     },
-    [apply]
+    [apply, project, say]
   );
 
   /** Row-header delete: removes every item on a track (one undo step).
@@ -2843,7 +2855,11 @@ export default function VideoEditor({
       key: "audio",
       label: "Audio",
       tone: "border-emerald-500/40 bg-emerald-500/20",
-      toggles: [{ kind: "mute", on: project.audio.length > 0 && project.audio.every((a) => a.muted) }],
+      toggles: [
+        { kind: "mute", on: project.audio.length > 0 && project.audio.every((a) => a.muted) },
+        { kind: "magnet", on: !!project.master?.magnetic },
+        { kind: "smooth", on: smoothCutsOn({ master: project.master }) },
+      ],
       deletable: true,
       // Music beats: markers the clips and layers snap to.
       ticks: project.audio.flatMap((a) =>
@@ -2863,7 +2879,7 @@ export default function VideoEditor({
         sel: { kind: "audio" as const, id: a.id },
       })),
     }),
-    [project.audio, selection]
+    [project.audio, project.master, selection]
   );
   const layClips = lay.clips;
   const zoomTrack = useMemo<TimelineTrack | null>(() => {

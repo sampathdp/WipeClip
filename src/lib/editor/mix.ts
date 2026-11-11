@@ -32,14 +32,32 @@ export function playedSourceId(a: AudioClip, sources?: Record<string, MediaSourc
   return c.sourceId;
 }
 
+/** Seconds every audio part fades in and out over with smooth cuts on: a
+ * cut in the middle of a waveform clicks; 20 ms of fade can't be heard as
+ * one. */
+export const EDGE_FADE = 0.02;
+
+export function smoothCutsOn(project: Pick<Project, "master">): boolean {
+  return masterOf(project).smoothCuts !== false;
+}
+
+/** The fades a part plays with: its own, at least EDGE_FADE (never over a
+ * quarter of the part) when smooth cuts are on. The export sends these. */
+export function partFades(a: Pick<AudioClip, "fadeIn" | "fadeOut" | "duration">, smooth: boolean): { fadeIn: number; fadeOut: number } {
+  if (!smooth) return { fadeIn: a.fadeIn, fadeOut: a.fadeOut };
+  const edge = Math.min(EDGE_FADE, a.duration / 4);
+  return { fadeIn: Math.max(a.fadeIn, edge), fadeOut: Math.max(a.fadeOut, edge) };
+}
+
 /** An audio track's gain at timeline time `t`: volume (with a repaired
  * copy's make-up gain), volume curve, fades and ducking (the export's
  * chain in editor.py: volume, curve, duck, afade). 0 outside it. */
-export function trackGainAt(a: AudioClip, t: number): number {
+export function trackGainAt(a: AudioClip, t: number, smooth = false): number {
   const local = t - a.start;
   if (a.muted || local < 0 || local >= a.duration) return 0;
-  const fadeIn = a.fadeIn > 0 ? Math.min(1, local / a.fadeIn) : 1;
-  const fadeOut = a.fadeOut > 0 ? Math.min(1, (a.duration - local) / a.fadeOut) : 1;
+  const f = partFades(a, smooth);
+  const fadeIn = f.fadeIn > 0 ? Math.min(1, local / f.fadeIn) : 1;
+  const fadeOut = f.fadeOut > 0 ? Math.min(1, (a.duration - local) / f.fadeOut) : 1;
   return Math.max(0, a.volume * cleanGain(a) * envelopeGain(a, t) * breathGain(a, t) * fadeIn * fadeOut * duckGain(a, t));
 }
 

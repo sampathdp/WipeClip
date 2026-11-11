@@ -10,7 +10,7 @@
  * gain curves come from mix.ts, the same math the preview uses.
  */
 import { ANALYSIS_RATE } from "./audioAnalysis";
-import { clipMixVolume, playedSourceId, trackGainAt } from "./mix";
+import { clipMixVolume, playedSourceId, smoothCutsOn, trackGainAt } from "./mix";
 import { sourceName } from "./sourceFile";
 import { decodeSourceAudio } from "./sourceAudio";
 import { RAMP_SEGMENTS, activeRamp, rampSegments } from "./speed";
@@ -117,7 +117,7 @@ export async function renderProgramMix(lay: Layout, project: Project, sources: R
       const input = ctx.createGain();
       via = { input, output: (await connectTone(ctx, wire, input, 1)).output };
     }
-    play(buf, a.start, a.offset, a.duration, 1, (t) => trackGainAt(a, Math.min(t, a.start + a.duration - 1e-6)), via);
+    play(buf, a.start, a.offset, a.duration, 1, (t) => trackGainAt(a, Math.min(t, a.start + a.duration - 1e-6), smoothCutsOn(project)), via);
   }
 
   for (const o of project.overlays) {

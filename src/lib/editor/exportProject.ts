@@ -17,7 +17,7 @@ import { clipKeyTimeToLocal } from "./keyframes";
 import { activeRamp, rampSegments } from "./speed";
 import { ensureMatte, fullMatte, matteUnsupported } from "./matte";
 import { IS_DESKTOP } from "../platform/env";
-import { cleanGain, clipMixVolume, masterGainDb, playedSourceId } from "./mix";
+import { cleanGain, clipMixVolume, masterGainDb, partFades, playedSourceId, smoothCutsOn } from "./mix";
 
 /** What file the export makes: an MP4 (at a quality and, optionally, a
  * frame rate), an animated GIF, or the sound alone (M4A). */
@@ -143,8 +143,8 @@ export async function exportProject(
       duration: round(a.duration),
       // A repaired copy plays at its make-up gain (mix.ts cleanGain).
       volume: Math.round(a.volume * cleanGain(a) * 10000) / 10000,
-      fadeIn: a.fadeIn,
-      fadeOut: a.fadeOut,
+      // Smooth cuts: at least a few ms of fade at each edge (mix.ts).
+      ...partFades(a, smoothCutsOn(project)),
       ...(a.duck && a.duck.amount > 0 && a.duck.regions.length ? { duck: a.duck } : {}),
       ...(a.voice && a.voice !== "none" ? { voice: a.voice } : {}),
       ...(toneActive(a.tone) ? { tone: toneWire(a.tone) } : {}),

@@ -15,7 +15,7 @@ import { drawMasks } from "@/lib/editor/maskDraw";
 import { clipKeyTime, clipTransformAt } from "@/lib/editor/keyframes";
 import { sourceToLocal, speedAt } from "@/lib/editor/speed";
 import { previewMixer, type PreviewMixer } from "@/lib/editor/audioMixer";
-import { VIDEO_TRACK, cleanGain, heardWithSolo, masterGainDb, masterOf, playedSourceId, trackGainAt } from "@/lib/editor/mix";
+import { VIDEO_TRACK, cleanGain, heardWithSolo, masterGainDb, masterOf, playedSourceId, smoothCutsOn, trackGainAt } from "@/lib/editor/mix";
 import { dbToGain } from "@/lib/editor/loudness";
 import { shapeMaskUrl } from "@/lib/editor/shapeMask";
 import { LutRenderer, lutNow } from "@/lib/editor/lut";
@@ -308,7 +308,7 @@ export default function PreviewPlayer({
         letterbox: letterboxRef.current,
         source: loc ? els[loc.primary.index % 2]! : null,
       });
-      syncAudio(pool, audio, sources, t, playing && !stalled, rate, (a) => volume * (heardWithSolo(a.id, mix.solo) ? 1 : 0), ensureSrc, setLevel);
+      syncAudio(pool, audio, sources, t, playing && !stalled, rate, (a) => volume * (heardWithSolo(a.id, mix.solo) ? 1 : 0), ensureSrc, setLevel, smoothCutsOn(project ?? {}));
 
       clock.set(t);
     };
@@ -907,7 +907,9 @@ function syncAudio(
   /** The preview volume for a track (0 when another track is soloed). */
   volumeOf: (a: AudioClip) => number,
   ensureSrc: (el: HTMLMediaElement, url: string) => void,
-  setLevel: (el: HTMLMediaElement, key: string, level: number, fx: VoiceFx, tone?: VoiceTone) => void
+  setLevel: (el: HTMLMediaElement, key: string, level: number, fx: VoiceFx, tone?: VoiceTone) => void,
+  /** Smooth cuts (mix.ts partFades). */
+  smooth: boolean
 ) {
   const live = new Set<string>();
   for (const a of audio) {
@@ -932,7 +934,7 @@ function syncAudio(
     }
     const want = a.offset + local;
     if (el.readyState >= 1 && !el.seeking && Math.abs(el.currentTime - want) > (playing ? 0.25 : 0.05)) el.currentTime = want;
-    setLevel(el, a.id, volumeOf(a) * trackGainAt(a, t), a.voice ?? "none", a.tone);
+    setLevel(el, a.id, volumeOf(a) * trackGainAt(a, t, smooth), a.voice ?? "none", a.tone);
     el.playbackRate = rate;
     if (playing && el.paused) el.play().catch(() => {});
     if (!playing && !el.paused) el.pause();

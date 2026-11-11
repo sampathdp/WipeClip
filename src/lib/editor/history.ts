@@ -1,5 +1,6 @@
 import { useCallback, useReducer } from "react";
 import type { Project } from "./types";
+import { withMagnet } from "./audioMagnet.ts";
 
 const MAX_HISTORY = 200;
 
@@ -22,7 +23,11 @@ export type HistoryAction =
 export function historyReducer(state: HistoryState, action: HistoryAction): HistoryState {
   switch (action.type) {
     case "apply": {
-      const next = action.fn(state.present);
+      // Magnetic audio (audioMagnet.ts): every edit keeps the parts packed;
+      // a drag packs once, when it ends (each drag step is measured from
+      // where the part was, so packing mid-drag would compound a trim).
+      const raw = action.fn(state.present);
+      const next = state.gestureBase ? raw : withMagnet(state.present, raw);
       if (next === state.present) return state;
       // Inside a gesture, intermediate drag positions replace the present
       // without history entries; end() records the whole drag as one step.
@@ -42,7 +47,7 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
       if (base === state.present) return { ...state, gestureBase: null };
       return {
         past: [...state.past, base].slice(-MAX_HISTORY),
-        present: state.present,
+        present: withMagnet(base, state.present),
         future: [],
         gestureBase: null,
       };
