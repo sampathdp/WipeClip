@@ -1,13 +1,18 @@
 {
-  "next": [
-    "Smooth cuts: every audio part now fades in and out over a few milliseconds, so cuts in a voice or music track don't click. It's on by default; switch it off with the ∿ button on the Audio row.",
-    "Magnetic audio: turn on the ⊓ button on the Audio row and the parts you cut from one recording stay back to back, like the clips on the video row. Delete or trim a part and the rest slide along.",
-    "Fixed exports failing when a very short clip had a speed curve.",
-    "Fixed exports failing when an audio track used a voice tone preset.",
-    "Saved project files now keep your cleaned-up audio, so a reopened project sounds the same.",
-    "Fixed Clean up audio failing on files with certain characters in their name, such as curly quotes."
-  ],
+  "next": [],
   "releases": [
+    {
+      "version": "1.0.3",
+      "date": "2026-11-11",
+      "notes": [
+        "Smooth cuts: every audio part now fades in and out over a few milliseconds, so cuts in a voice or music track don't click. It's on by default; switch it off with the ∿ button on the Audio row.",
+        "Magnetic audio: turn on the ⊓ button on the Audio row and the parts you cut from one recording stay back to back, like the clips on the video row. Delete or trim a part and the rest slide along.",
+        "Fixed exports failing when a very short clip had a speed curve.",
+        "Fixed exports failing when an audio track used a voice tone preset.",
+        "Saved project files now keep your cleaned-up audio, so a reopened project sounds the same.",
+        "Fixed Clean up audio failing on files with certain characters in their name, such as curly quotes."
+      ]
+    },
     {
       "version": "1.0.2",
       "date": "2026-11-08",
