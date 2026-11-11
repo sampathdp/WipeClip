@@ -1,10 +1,15 @@
 {
-  "next": [
-    "Click the combined captions block on the timeline to style every caption at once: preset, font, size, color, outline, background and position.",
-    "The caption Style tab now starts from how your captions look, so changing one setting, like the size, keeps their font, letter case and animation.",
-    "Edit text has a new Full text view: all your captions as one list you can read top to bottom and fix in place. Click a time to jump to it. Detailed still shows each caption's timing."
-  ],
+  "next": [],
   "releases": [
+    {
+      "version": "1.0.4",
+      "date": "2026-11-11",
+      "notes": [
+        "Click the combined captions block on the timeline to style every caption at once: preset, font, size, color, outline, background and position.",
+        "The caption Style tab now starts from how your captions look, so changing one setting, like the size, keeps their font, letter case and animation.",
+        "Edit text has a new Full text view: all your captions as one list you can read top to bottom and fix in place. Click a time to jump to it. Detailed still shows each caption's timing."
+      ]
+    },
     {
       "version": "1.0.3",
       "date": "2026-11-11",
