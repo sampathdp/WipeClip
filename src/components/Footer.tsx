@@ -69,6 +69,18 @@ export default function Footer({ lang = "en" }: { lang?: Lang }) {
             {t.allTools}
           </Link>
           <span className="text-border">&middot;</span>
+          <Link href="/auto-captions" className="transition-colors hover:text-foreground">
+            Auto captions
+          </Link>
+          <span className="text-border">&middot;</span>
+          <Link href="/sinhala-subtitles" className="transition-colors hover:text-foreground">
+            Sinhala subtitles
+          </Link>
+          <span className="text-border">&middot;</span>
+          <Link href="/translate-video-to-english" className="transition-colors hover:text-foreground">
+            Translate video to English
+          </Link>
+          <span className="text-border">&middot;</span>
           <Link href="/whats-new" className="transition-colors hover:text-foreground">
             {t.whatsNew}
           </Link>

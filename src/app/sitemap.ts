@@ -41,6 +41,24 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.9,
     },
     {
+      url: `${siteUrl}/auto-captions`,
+      lastModified: "2026-11-12",
+      changeFrequency: "monthly",
+      priority: 0.8,
+    },
+    {
+      url: `${siteUrl}/sinhala-subtitles`,
+      lastModified: "2026-11-12",
+      changeFrequency: "monthly",
+      priority: 0.8,
+    },
+    {
+      url: `${siteUrl}/translate-video-to-english`,
+      lastModified: "2026-11-12",
+      changeFrequency: "monthly",
+      priority: 0.8,
+    },
+    {
       url: `${siteUrl}/whats-new`,
       lastModified: LATEST_RELEASE.date,
       changeFrequency: "weekly",

@@ -33,6 +33,9 @@ Key facts:
 ## Product
 
 ${page("/download", "Download the app", "features, system requirements and installers for Windows and macOS")}
+${page("/auto-captions", "Auto captions", "free on-device captions in 26 languages, six styles, SRT and WebVTT export")}
+${page("/sinhala-subtitles", "Sinhala subtitles", "automatic Sinhala captions that keep mixed-in English words in English letters")}
+${page("/translate-video-to-english", "Translate video to English", "Sinhala, Tamil, Hindi, Kannada or Telugu speech said again in English in the speaker's own voice")}
 ${page("/pricing", "Pricing", "free plan, one-time passes and what each includes")}
 ${page("/about", "About", "what WipeClip is, who makes it and how files are handled")}
 ${page("/whats-new", "What's new", "release notes for every desktop app version")}
