@@ -1,5 +1,18 @@
 {
-  "next": [],
+  "next": [
+    "Text, captions, music, voice and effects now move with the clip under them when you trim, move, split, speed up or delete clips, so nothing drifts out of sync. Lock a layer to keep it in place, or turn this off with the ⛓ button on the Video row.",
+    "Select several items at once: Shift or Ctrl+click, drag a box on an empty part of the timeline, or press Ctrl+A. Move, nudge (Alt+arrows), delete, copy and paste them together. Ctrl+G groups them so one click selects them all; Ctrl+Shift+G ungroups.",
+    "Quick trims: Q deletes everything before the playhead and W everything after it, in the selected layer or the clip under the playhead. Shift+Delete deletes and closes the gap it leaves.",
+    "Keyframes now show as diamonds on the timeline. Drag one to retime it, click it to jump there, Alt+click to remove it.",
+    "Each clip's own sound has its own Clip sound row: fade it in and out, draw a volume curve on it, mute it, or press Detach audio to move it to its own track. Video layers have their own Video 2 row, with Fill the frame and Fit in the frame.",
+    "Markers: press M to drop one, drag it to move it, double-click to rename it. Up and Down jump between cuts and markers.",
+    "Set a range with I and O, then cut it, loop it or export just that part.",
+    "Alt+drag a clip to slip it (another part of its video in the same place) and Alt+drag a cut to roll it between two clips. J, K and L control playback, and a slider zooms the timeline.",
+    "Any speed from 0.1x slow motion to 10x time-lapse.",
+    "Fade a clip's look or an effect in and out, or set how strongly it shows at any moment.",
+    "Duplicate a clip with Ctrl+D or the Duplicate button in the clip panel.",
+    "Captions keep English words in English when you speak Sinhala, Tamil, Hindi or other Indian languages, instead of spelling them out in that script. Switch it off in the Captions panel."
+  ],
   "releases": [
     {
       "version": "1.0.4",
