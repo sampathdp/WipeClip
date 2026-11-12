@@ -104,7 +104,7 @@ export function mixKey(project: Project): string {
   const m = masterOf(project);
   const parts: unknown[] = [
     m.videoMuted ? 0 : m.videoVolume,
-    project.clips.map((c) => [c.sourceId, c.start, c.end, c.speed, c.ramp ?? 0, c.reverse, c.freeze, c.volume, c.transition?.type ?? 0, c.transition?.duration ?? 0]),
+    project.clips.map((c) => [c.sourceId, c.start, c.end, c.speed, c.ramp ?? 0, c.reverse, c.freeze, c.volume, c.transition?.type ?? 0, c.transition?.duration ?? 0, c.fadeIn ?? 0, c.fadeOut ?? 0, c.envelope ?? 0]),
     project.audio
       .filter((a) => !a.muted && a.volume > 0)
       .map((a) => [playedSourceId(a), a.start, a.offset, a.duration, a.volume, a.fadeIn, a.fadeOut, a.duck?.amount ?? 0, a.duck?.regions.length ?? 0, a.voice ?? 0, ...(toneActive(a.tone) ? [toneKey(toneWire(a.tone))] : []), ...(a.envelope?.length ? [a.envelope] : []), ...(a.breaths?.length ? [a.breaths] : [])]),

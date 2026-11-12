@@ -1,7 +1,7 @@
 "use client";
 
 import { modKey, useShortcutKeys } from "@/lib/platform/keys";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import AppVersion from "@/components/AppVersion";
 import AuthStatus from "@/components/AuthStatus";
@@ -13,6 +13,15 @@ import { createClient } from "@/lib/supabase/client";
 import { apiFetch, confirmAction, EngineUnavailableError, IS_DESKTOP, openNotices, saveExportFile, showDesktopError, watchOpenedProjectFiles } from "@/lib/platform";
 import { createClock, useClockTime, type Clock } from "@/lib/editor/clock";
 import { useProjectHistory } from "@/lib/editor/history";
+import { followClips } from "@/lib/editor/follow";
+import { groupColors as groupColorsOf, groupOf as itemGroupOf, makeGroup, moveClipWithGroup, ungroup } from "@/lib/editor/groups";
+import { clipLookStrength, clipStrengthTime, effectStrength, setStrength } from "@/lib/editor/strength";
+import { addMarker, editPoints, moveMarker, nextPoint, rollCut, setRangePoint, type Range } from "@/lib/editor/timelineNav";
+import { rippleCut } from "@/lib/editor/ripple";
+import { highlightProject } from "@/lib/editor/highlights";
+import { clipFades, editClipCurve, visibleClipCurve } from "@/lib/editor/clipSound";
+import { deleteClosingGaps, trimClipAt, trimLayersAt, type TrimSide } from "@/lib/editor/trimEdit";
+import { allKeys, copyKeys, deleteKeys, existingKeys, keySelection, keysEnd, pasteCopy, selKey, shiftKeys, type LayerCopy } from "@/lib/editor/multiSelect";
 import {
   generateThumbnails,
   generateWaveform,
@@ -51,6 +60,7 @@ import {
   canvasSize as canvasSizeOf,
   clipVisualSpan,
   deleteClip,
+  duplicateClip,
   formatTime,
   layout,
   locate,
@@ -166,6 +176,7 @@ import {
   type CaptionOptions,
   LayersPanel,
   LookPanel,
+  StrengthSection,
   OverlayPanel,
   TextAddPanel,
   type Gesture,
@@ -178,7 +189,9 @@ import {
   clipKeyTime,
   clipKeyTimeToLocal,
   clipTransformAt,
+  moveKeyframe,
   overlayValues,
+  removeKeyframe,
 } from "@/lib/editor/keyframes";
 import { PremiumLocked, type KeyframeControls } from "./Panels";
 import { activeRamp } from "@/lib/editor/speed";
@@ -289,7 +302,13 @@ type Dialogs =
   /** Several highlights, each its own file (BatchExportDialog). */
   | { kind: "batch"; items: BatchItem[]; vertical: boolean }
   | null;
-type ClipboardItem = { kind: "overlay"; item: Overlay } | { kind: "audio"; item: AudioClip } | { kind: "effect"; item: EffectClip };
+type SingleCopy = Exclude<ClipboardItem, { kind: "many" }>;
+type ClipboardItem =
+  | { kind: "overlay"; item: Overlay }
+  | { kind: "audio"; item: AudioClip }
+  | { kind: "effect"; item: EffectClip }
+  /** Several items copied together (multiSelect.ts). */
+  | { kind: "many"; copy: LayerCopy; count: number };
 
 /** A finished screen recording to open (desktop app, see
  * desktop/app/page.tsx). `key` changes for every new request. */
@@ -315,6 +334,10 @@ const selIs = (sel: Selection, kind: string, id: string) => sel !== null && sel.
 const CAPTION_GROUP = "captions-group";
 const GROUP_KEY = "wipeclip.captionsGrouped";
 
+/** The timeline row a layer is on: text, video layers ("Video 2") or the
+ * other elements (stickers, images, shapes). */
+const layerRow = (o: Overlay): "text" | "videolayers" | "elements" => (o.kind === "text" ? "text" : o.kind === "video" ? "videolayers" : "elements");
+
 const layerToggles = (layers: Overlay[]): TrackToggle[] => [
   { kind: "hide", on: layers.length > 0 && layers.every((o) => o.hidden) },
   { kind: "lock", on: layers.length > 0 && layers.every((o) => o.locked) },
@@ -336,7 +359,13 @@ export default function VideoEditor({
   useToolView(TOOL);
   const keys = useShortcutKeys();
   const clock = useMemo(() => createClock(), []);
-  const { project, canUndo, canRedo, apply, beginGesture, endGesture, undo, redo, reset } = useProjectHistory(EMPTY);
+  // Layers follow the clips (follow.ts), laid out at the project's frame rate.
+  const fpsRef = useRef(30);
+  const followLayers = useCallback(
+    (prev: Project, next: Project) => followClips(prev, next, layout(prev, fpsRef.current), layout(next, fpsRef.current)),
+    []
+  );
+  const { project, canUndo, canRedo, apply, beginGesture, endGesture, undo, redo, reset } = useProjectHistory(EMPTY, followLayers);
 
   const [phase, setPhase] = useState<"loading" | "import" | "probing" | "edit">("loading");
   const [importError, setImportError] = useState<{ message: string; blocked?: boolean } | null>(null);
@@ -346,11 +375,18 @@ export default function VideoEditor({
   const [sources, setSources] = useState<Record<string, MediaSource>>({});
   const [originalId, setOriginalId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
+  // Items picked together with the selection (multiSelect.ts keys). Only
+  // counts while it holds the selection: selecting something else by any
+  // other means drops back to that one item.
+  const [pickedRaw, setPicked] = useState<string[]>([]);
   const [tool, setTool] = useState<Tool | null>(null);
   // Focus panel's "Compare with original": preview only, while the panel is open.
   const [comparingZooms, setComparingZooms] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
+  // In/out range (I / O) and whether playback loops inside it.
+  const [range, setRange] = useState<Range | null>(null);
+  const [loopRange, setLoopRange] = useState(false);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [thumbs, setThumbs] = useState<Record<string, ThumbnailStrip>>({});
@@ -371,8 +407,8 @@ export default function VideoEditor({
   }));
   useEffect(() => saveCaptionLanguage(captionOpts.language), [captionOpts.language]);
   useEffect(() => {
-    const { maxWords, style, y, look, hint, accurate } = captionOpts;
-    saveCaptionPrefs({ maxWords, style, y, look, hint, accurate });
+    const { maxWords, style, y, look, hint, accurate, keepEnglish } = captionOpts;
+    saveCaptionPrefs({ maxWords, style, y, look, hint, accurate, keepEnglish });
   }, [captionOpts]);
   const [captioning, setCaptioning] = useState(false);
   // Which tab the captions panel opens on; `n` remounts it on each opening.
@@ -409,6 +445,9 @@ export default function VideoEditor({
 
   const original = originalId ? sources[originalId] : undefined;
   const lay = useMemo(() => layout(project, original?.fps ?? 30), [project, original?.fps]);
+  useLayoutEffect(() => {
+    fpsRef.current = lay.fps;
+  }, [lay.fps]);
   const layRef = useRef(lay);
   useEffect(() => {
     layRef.current = lay;
@@ -847,6 +886,15 @@ export default function VideoEditor({
   }, [clock, lay.total]);
   const onEnded = useCallback(() => setPlaying(false), []);
 
+  // Looping the range: past its out point, playback goes back to its in.
+  useEffect(() => {
+    if (!playing || !loopRange || !range) return;
+    if (clock.get() < range.in || clock.get() >= range.out) clock.set(range.in);
+    return clock.subscribe(() => {
+      if (clock.get() >= range.out - 0.02) clock.set(range.in);
+    });
+  }, [playing, loopRange, range, clock]);
+
   // --- selection helpers ---------------------------------------------------
   const clipIndexAtPlayhead = useCallback(() => {
     const loc = locate(lay, clock.get());
@@ -854,6 +902,31 @@ export default function VideoEditor({
   }, [lay, clock]);
 
   const selectedClip = selection?.kind === "clip" ? lay.clips.find((c) => c.clip.id === selection.id) : undefined;
+  const picked = useMemo<ReadonlySet<string>>(() => {
+    const k = selKey(selection);
+    if (k && pickedRaw.includes(k)) return new Set(existingKeys(project, pickedRaw));
+    return new Set(k ? [k] : []);
+  }, [selection, pickedRaw, project]);
+  const multi = picked.size > 1;
+  const isPicked = useCallback((kind: string, id: string) => picked.has(`${kind}:${id}`), [picked]);
+  /** Picks `keys` (the combined captions block stands for every caption). */
+  const onPick = useCallback(
+    (keys: string[], mode: "replace" | "toggle" | "add") => {
+      const expand = keys.flatMap((k) => (k === `overlay:${CAPTION_GROUP}` ? project.overlays.filter((o) => o.caption).map((o) => `overlay:${o.id}`) : [k]));
+      const cur = [...picked];
+      let next: string[];
+      if (mode === "replace") next = expand;
+      else if (mode === "add") next = [...new Set([...cur, ...expand])];
+      else {
+        const off = expand.every((k) => cur.includes(k));
+        next = off ? cur.filter((k) => !expand.includes(k)) : [...new Set([...cur, ...expand])];
+      }
+      setPicked(next);
+      if (next.length) setSelection(keySelection(next[next.length - 1]));
+      else if (mode === "replace") setSelection(null);
+    },
+    [picked, project.overlays]
+  );
   const selectedOverlay = selection?.kind === "overlay" ? project.overlays.find((o) => o.id === selection.id) : undefined;
   const selectedAudio = selection?.kind === "audio" ? project.audio.find((a) => a.id === selection.id) : undefined;
   const selectedEffect = selection?.kind === "effect" ? project.effects.find((e) => e.id === selection.id) : undefined;
@@ -1055,6 +1128,37 @@ export default function VideoEditor({
     apply(() => next);
   }, [selection, project, lay, clock, apply, say]);
 
+  /** Q / W: removes everything before ("left") or after ("right") the
+   * playhead - of the picked layers the playhead is in, or else of the clip
+   * under it. */
+  const trimAt = useCallback(
+    (side: TrimSide) => {
+      const t = clock.get();
+      const layerKeys = [...picked].filter((k) => !k.startsWith("clip:"));
+      if (layerKeys.length) {
+        const r = trimLayersAt(project, layerKeys, t, side);
+        if (r.count) {
+          apply(() => r.project);
+          say(`Trimmed ${r.count === 1 ? "the layer" : `${r.count} layers`} ${side === "left" ? "up to" : "from"} the playhead.`);
+          return;
+        }
+        if (!picked.has(`clip:${selectedClip?.clip.id}`)) {
+          say("Move the playhead inside the selected layer to trim it there.");
+          return;
+        }
+      }
+      const r = trimClipAt(project, lay, t, side);
+      if (!r) {
+        say("Move the playhead inside a clip (not onto its edge or a transition) to trim there.");
+        return;
+      }
+      apply(() => r.project);
+      if (side === "left") clock.set(Math.max(0, t - r.removed));
+      say(`Removed ${formatTime(r.removed, true)} ${side === "left" ? "before" : "after"} the playhead. ${modKey()}+Z undoes it.`);
+    },
+    [clock, picked, project, lay, apply, say, selectedClip]
+  );
+
   const freezeFrame = useCallback(() => {
     setPlaying(false);
     const next = insertFreezeAt(project, lay, clock.get());
@@ -1068,6 +1172,19 @@ export default function VideoEditor({
   }, [project, lay, clock, apply, say]);
 
   const deleteSelection = useCallback(() => {
+    if (multi) {
+      const r = deleteKeys(project, picked, followLayers);
+      apply(() => r.project);
+      const n = picked.size - r.lockedKept - (r.clipKept ? 1 : 0);
+      say(
+        `Deleted ${n} item${n === 1 ? "" : "s"}.${r.lockedKept ? ` ${r.lockedKept} locked layer${r.lockedKept === 1 ? "" : "s"} kept.` : ""}${r.clipKept ? " A project needs at least one clip, so one stayed." : ""} ${modKey()}+Z undoes it.`
+      );
+      setPicked([]);
+      setSelection(null);
+      const total = layout(r.project, lay.fps).total;
+      if (clock.get() > total) clock.set(total);
+      return;
+    }
     if (selection?.kind === "mask") {
       apply((p) => ({ ...p, masks: (p.masks ?? []).filter((m) => m.id !== selection.id) }));
     } else if (selection?.kind === "chapter") {
@@ -1095,11 +1212,24 @@ export default function VideoEditor({
       if (clock.get() > total) clock.set(total);
     }
     setSelection(null);
-  }, [selection, project, lay, apply, say, clipIndexAtPlayhead, clock]);
+  }, [selection, project, lay, apply, say, clipIndexAtPlayhead, clock, multi, picked, followLayers]);
+
+  /** Shift+Delete: deletes the picked layers and closes the gaps they leave. */
+  const deleteClosing = useCallback(() => {
+    const r = deleteClosingGaps(project, picked);
+    if (!r.deleted) {
+      deleteSelection();
+      return;
+    }
+    apply(() => r.project);
+    setPicked([]);
+    setSelection(null);
+    say(`Deleted ${r.deleted === 1 ? "1 item" : `${r.deleted} items`} and closed the gap${r.deleted === 1 ? "" : "s"}: later items on the row moved back.`);
+  }, [project, picked, apply, say, deleteSelection]);
 
   /** Copy of the selected layer/audio/effect, optionally re-timed to start at `at`. */
   const cloneOf = useCallback(
-    (c: ClipboardItem, at?: number): ClipboardItem => {
+    (c: SingleCopy, at?: number): SingleCopy => {
       const shift = (start: number) => (at === undefined ? start : Math.min(at, Math.max(0, lay.total - 0.2)));
       if (c.kind === "overlay") {
         const len = c.item.end - c.item.start;
@@ -1115,7 +1245,7 @@ export default function VideoEditor({
   );
 
   const insertClone = useCallback(
-    (c: ClipboardItem) => {
+    (c: SingleCopy) => {
       if (c.kind === "overlay") {
         // Nudge a duplicate in place so it's visibly a second copy.
         const item = { ...c.item, x: c.item.x + 0.03, y: c.item.y + 0.03 };
@@ -1133,31 +1263,114 @@ export default function VideoEditor({
     [apply]
   );
 
-  const currentItem = useCallback((): ClipboardItem | null => {
+  const currentItem = useCallback((): SingleCopy | null => {
     if (selectedOverlay) return { kind: "overlay", item: selectedOverlay };
     if (selectedAudio) return { kind: "audio", item: selectedAudio };
     if (selectedEffect) return { kind: "effect", item: selectedEffect };
     return null;
   }, [selectedOverlay, selectedAudio, selectedEffect]);
 
+  /** Pastes several copied items with their spacing kept, and picks them. */
+  const pasteMany = useCallback(
+    (copy: LayerCopy, at: number) => {
+      const r = pasteCopy(project, copy, at);
+      apply(() => r.project);
+      setPicked(r.keys);
+      setSelection(keySelection(r.keys[r.keys.length - 1]));
+    },
+    [project, apply]
+  );
+
   const duplicate = useCallback(() => {
+    if (multi) {
+      const c = copyKeys(project, picked);
+      if (c) pasteMany(c, keysEnd(project, picked));
+      else say("Only layers can be duplicated together. Select one clip to duplicate it.");
+      return;
+    }
+    if (selection?.kind === "clip") {
+      const next = duplicateClip(project, selection.id);
+      if (!next) return;
+      apply(() => next.project);
+      setSelection({ kind: "clip", id: next.clipId });
+      return;
+    }
     const c = currentItem();
     if (c) insertClone(cloneOf(c));
-  }, [currentItem, insertClone, cloneOf]);
+  }, [selection, project, apply, currentItem, insertClone, cloneOf, multi, picked, pasteMany, say]);
 
   const copy = useCallback(() => {
+    if (multi) {
+      const many = copyKeys(project, picked);
+      if (!many) return false;
+      const count = many.overlays.length + many.audio.length + many.effects.length + many.masks.length;
+      clipboard.current = { kind: "many", copy: many, count };
+      say(`Copied ${count} items. Press ${modKey()}+V to paste them at the playhead, spaced as they are now.`);
+      return true;
+    }
     const c = currentItem();
     if (!c) return false;
     clipboard.current = c;
     say(`Copied. Press ${modKey()}+V to paste at the playhead.`);
     return true;
-  }, [currentItem, say]);
+  }, [currentItem, say, multi, project, picked]);
 
   const paste = useCallback(() => {
-    if (!clipboard.current) return false;
-    insertClone(cloneOf(clipboard.current, clock.get()));
+    const c = clipboard.current;
+    if (!c) return false;
+    if (c.kind === "many") pasteMany(c.copy, clock.get());
+    else insertClone(cloneOf(c, clock.get()));
     return true;
-  }, [insertClone, cloneOf, clock]);
+  }, [insertClone, cloneOf, clock, pasteMany]);
+
+  /** A click on the timeline: a grouped item picks its whole group. */
+  const selectOnTimeline = useCallback(
+    (s: Selection) => {
+      const g = itemGroupOf(project, selKey(s));
+      if (g) setPicked(g.keys);
+      select(s);
+    },
+    [project, select]
+  );
+  const groupColors = useMemo(() => groupColorsOf(project), [project]);
+  const selectedGroup = useMemo(() => itemGroupOf(project, selKey(selection)), [project, selection]);
+
+  /** Ctrl+G: the picked items become a group. */
+  const groupPicked = useCallback(() => {
+    const r = makeGroup(project, [...picked]);
+    if (!r) {
+      say("Select two or more items to group them: Shift or Ctrl+click, or drag a box on the timeline.");
+      return;
+    }
+    apply((p) => ({ ...p, groups: r.groups }));
+    say(`Grouped ${r.group.keys.length} items: clicking any of them selects them all, and they move together. ${modKey()}+Shift+G ungroups.`);
+  }, [project, picked, apply, say]);
+
+  /** Ctrl+Shift+G: ungroups the groups the picked items are in. */
+  const ungroupPicked = useCallback(() => {
+    const r = ungroup(project, [...picked]);
+    if (!r.count) {
+      say("Nothing selected is in a group.");
+      return;
+    }
+    apply((p) => ({ ...p, groups: r.groups.length ? r.groups : undefined }));
+    say(r.count === 1 ? "Ungrouped." : `Ungrouped ${r.count} groups.`);
+  }, [project, picked, apply, say]);
+
+  /** Every clip and layer picked (Ctrl+A). */
+  const selectAll = useCallback(() => {
+    const keys = allKeys(project);
+    if (!keys.length) return;
+    setPicked(keys);
+    setSelection(keySelection(keys[0]));
+    say(`${keys.length} items selected. Drag one to move the layers together, or press Delete to remove them.`);
+  }, [project, say]);
+
+  /** Moves the picked layers by `delta` seconds (Alt+arrows). */
+  const nudgePicked = useCallback(
+    (delta: number) => apply((p) => shiftKeys(p, picked, delta, layRef.current.total)),
+    [apply, picked]
+  );
 
   const moveSelected = useCallback(
     (dir: -1 | 1) => {
@@ -1305,7 +1518,11 @@ export default function VideoEditor({
     setBusy("Loading speech model…");
     let res;
     try {
-      res = await transcribe(samples, captionOpts.language, progress, { hint: captionOpts.hint, accurate: captionOpts.accurate });
+      res = await transcribe(samples, captionOpts.language, progress, {
+        hint: captionOpts.hint,
+        accurate: captionOpts.accurate,
+        keepEnglish: captionOpts.keepEnglish,
+      });
     } catch (e) {
       // "Auto" heard a language whose own model isn't downloaded: pick the
       // language so the panel offers that download (its own consent).
@@ -1314,7 +1531,7 @@ export default function VideoEditor({
     }
     stopIfCancelled();
     return { language: res.language, words: res.words, total: lay.total };
-  }, [lay, project, sources, captionOpts.language, captionOpts.hint, captionOpts.accurate]);
+  }, [lay, project, sources, captionOpts.language, captionOpts.hint, captionOpts.accurate, captionOpts.keepEnglish]);
 
   const runCaptions = useCallback(async () => {
     setPlaying(false);
@@ -1707,8 +1924,9 @@ export default function VideoEditor({
         offset: laid.clip.start,
         duration: laid.duration,
         volume: laid.clip.volume || 1,
-        fadeIn: 0,
-        fadeOut: 0,
+        // Its sound's fades and curve go with it (at 1x, source seconds are the file's).
+        ...clipFades(laid),
+        ...(laid.clip.envelope?.length ? { envelope: laid.clip.envelope } : {}),
         muted: false,
       };
       // One step: the clip goes silent and its sound becomes a separate,
@@ -1902,6 +2120,19 @@ export default function VideoEditor({
     [apply]
   );
 
+  /** A volume curve edit on a clip's own sound (clipSound.ts). */
+  const editClipSoundCurve = useCallback(
+    (clipId: string, edit: CurveEdit) => {
+      const laid = layRef.current.clips.find((c) => c.clip.id === clipId);
+      if (!laid) return;
+      apply((p) => {
+        const next = editClipCurve(laid, edit);
+        return updateClip(p, clipId, { envelope: next.length ? next : undefined });
+      });
+    },
+    [apply]
+  );
+
   /** A track's tone, set on every part of its file (a microphone split by
    * cuts keeps one sound), like noise reduction. */
   const setTrackTone = useCallback(
@@ -2010,6 +2241,22 @@ export default function VideoEditor({
         say(on ? "Magnetic audio on: parts from one file now sit back to back, and deleting or trimming one slides the rest. Undo puts them back." : "Magnetic audio off: parts move freely.");
         return;
       }
+      if (track === "videosound" && kind === "mute") {
+        const on = !masterOf(project).videoMuted;
+        apply((p) => ({ ...p, master: { ...masterOf(p), videoMuted: on } }));
+        say(on ? "Clip sound muted: the clips play silent. Audio tracks still play." : "Clip sound on.");
+        return;
+      }
+      if (kind === "link") {
+        const on = project.linkLayers === false;
+        apply((p) => ({ ...p, linkLayers: on }));
+        say(
+          on
+            ? "Layers linked: text, captions, audio and effects now move with the clip under them when you trim, move or delete clips. Lock a layer to keep it in place."
+            : "Layers unlinked: trimming, moving or deleting clips leaves every other track where it is."
+        );
+        return;
+      }
       if (kind === "smooth") {
         const on = !smoothCutsOn(project);
         apply((p) => ({ ...p, master: { ...masterOf(p), smoothCuts: on } }));
@@ -2021,7 +2268,7 @@ export default function VideoEditor({
           const on = p.audio.length > 0 && p.audio.every((a) => a.muted);
           return { ...p, audio: p.audio.map((a) => ({ ...a, muted: !on })) };
         }
-        const mine = (o: Overlay) => (track === "text" ? o.kind === "text" : o.kind !== "text");
+        const mine = (o: Overlay) => layerRow(o) === track;
         const field = kind === "lock" ? "locked" : "hidden";
         const on = p.overlays.filter(mine).every((o) => o[field]);
         return { ...p, overlays: p.overlays.map((o) => (mine(o) ? { ...o, [field]: !on } : o)) };
@@ -2030,12 +2277,121 @@ export default function VideoEditor({
     [apply, project, say]
   );
 
+  /** A keyframe diamond dragged on the timeline to timeline time `t`. */
+  const onKeyframeMove = useCallback(
+    (sel: Selection, index: number, t: number) => {
+      if (sel?.kind === "overlay") {
+        apply((p) => {
+          const o = p.overlays.find((x) => x.id === sel.id);
+          return o?.keyframes ? updateOverlay(p, o.id, { keyframes: moveKeyframe(o.keyframes, index, t - o.start) }) : p;
+        }, false);
+      } else if (sel?.kind === "clip") {
+        const laid = layRef.current.clips.find((c) => c.clip.id === sel.id);
+        if (!laid) return;
+        apply((p) => {
+          const c = p.clips.find((x) => x.id === sel.id);
+          return c?.keyframes ? updateClip(p, c.id, { keyframes: moveKeyframe(c.keyframes, index, clipKeyTime(laid, t)) }) : p;
+        }, false);
+      }
+    },
+    [apply]
+  );
+
+  /** Alt+click on a keyframe diamond. */
+  const onKeyframeDelete = useCallback(
+    (sel: Selection, index: number) => {
+      if (sel?.kind === "overlay") {
+        apply((p) => {
+          const o = p.overlays.find((x) => x.id === sel.id);
+          return o?.keyframes ? updateOverlay(p, o.id, { keyframes: removeKeyframe(o.keyframes, index) }) : p;
+        });
+      } else if (sel?.kind === "clip") {
+        apply((p) => {
+          const c = p.clips.find((x) => x.id === sel.id);
+          return c?.keyframes ? updateClip(p, c.id, { keyframes: removeKeyframe(c.keyframes, index) }) : p;
+        });
+      } else return;
+      say(`Keyframe removed. ${modKey()}+Z puts it back.`);
+    },
+    [apply, say]
+  );
+
+  // --- markers, range, jumping (timelineNav.ts) ------------------------------
+  const dropMarker = useCallback(() => {
+    const r = addMarker(project.markers, clock.get());
+    if (!r.added) {
+      say(`${r.marker.label} is already here. Double-click it on the ruler to rename it.`);
+      return;
+    }
+    apply((p) => ({ ...p, markers: r.markers }));
+    say(`${r.marker.label} added. Up/Down jump between markers and cuts; drag it on the ruler to move it, Alt+click to remove it.`);
+  }, [project.markers, clock, apply, say]);
+  const onMarkerMove = useCallback(
+    (id: string, t: number) => apply((p) => ({ ...p, markers: moveMarker(p.markers ?? [], id, t, layRef.current.total) }), false),
+    [apply]
+  );
+  const onMarkerDelete = useCallback(
+    (id: string) => {
+      apply((p) => ({ ...p, markers: (p.markers ?? []).filter((m) => m.id !== id) }));
+      say(`Marker removed. ${modKey()}+Z puts it back.`);
+    },
+    [apply, say]
+  );
+  const onMarkerRename = useCallback(
+    (id: string, label: string) => apply((p) => ({ ...p, markers: (p.markers ?? []).map((m) => (m.id === id ? { ...m, label } : m)) })),
+    [apply]
+  );
+  const jump = useCallback(
+    (dir: 1 | -1) => {
+      const t = nextPoint(editPoints(lay, project.markers, range), clock.get(), dir);
+      if (t !== null) seek(t);
+    },
+    [lay, project.markers, range, clock, seek]
+  );
+  const setRangeAt = useCallback(
+    (which: "in" | "out") => {
+      const next = setRangePoint(range, which, clock.get(), lay.total);
+      setRange(next);
+      if (next) say(`Range ${formatTime(next.in, true)} to ${formatTime(next.out, true)}. Cut it, loop it or export it from the toolbar.`);
+    },
+    [range, clock, lay.total, say]
+  );
+  const cutRange = useCallback(() => {
+    if (!range) return;
+    const r = rippleCut(project, lay, range.in, range.out);
+    if (!r.ok) {
+      say(r.error);
+      return;
+    }
+    apply(() => r.project);
+    setRange(null);
+    setLoopRange(false);
+    seek(range.in);
+    say(`Removed ${formatTime(r.removed, true)}; everything after it moved up. ${modKey()}+Z undoes it.`);
+  }, [range, project, lay, apply, seek, say]);
+  const exportRange = useCallback(() => {
+    if (!range) return;
+    const r = highlightProject(project, lay.fps, range.in, range.out);
+    if (!r.ok) {
+      say(r.error);
+      return;
+    }
+    setPlaying(false);
+    setDialog({ kind: "export", clip: { project: r.project, total: range.out - range.in, title: "Export range", nameSuffix: "range" } });
+  }, [range, project, lay.fps, say]);
+  /** Alt+drag on a cut: moves it between the two clips (one gesture). */
+  const onRoll = useCallback(
+    (index: number, dt: number) => apply((p) => rollCut(p, index, dt, (id) => sourcesRef.current[id]?.duration ?? Infinity) ?? p, false),
+    [apply]
+  );
+
   /** Row-header delete: removes every item on a track (one undo step).
    * Locked layers stay. */
   const onTrackDelete = useCallback(
     (track: string) => {
-      const mine = (o: Overlay) => (track === "text" ? o.kind === "text" : o.kind !== "text");
-      const layers = track === "text" || track === "elements";
+      const mine = (o: Overlay) => layerRow(o) === track;
+      const layers = track === "text" || track === "elements" || track === "videolayers";
+      if (track === "videosound") return;
       const kept = layers ? project.overlays.filter((o) => mine(o) && o.locked).length : 0;
       apply((p) => {
         if (layers) return { ...p, overlays: p.overlays.filter((o) => !mine(o) || o.locked) };
@@ -2054,6 +2410,22 @@ export default function VideoEditor({
 
   const onItemChange = useCallback(
     (track: string, id: string, mode: ItemMode, start: number, end: number) => {
+      // Dragging one of several picked layers moves them all together.
+      const kind = track === "audio" ? "audio" : track === "effects" ? "effect" : track === "privacy" ? "mask" : track === "text" || track === "elements" || track === "videolayers" ? "overlay" : null;
+      if (mode === "move" && kind && picked.size > 1 && picked.has(`${kind}:${id}`)) {
+        apply((p) => {
+          const cur =
+            kind === "audio"
+              ? p.audio.find((a) => a.id === id)?.start
+              : kind === "effect"
+                ? p.effects.find((x) => x.id === id)?.start
+                : kind === "mask"
+                  ? p.masks?.find((m) => m.id === id)?.start
+                  : p.overlays.find((o) => o.id === id)?.start;
+          return cur === undefined ? p : shiftKeys(p, picked, start - cur, layRef.current.total);
+        }, false);
+        return;
+      }
       if (track === "audio") {
         apply(
           (p) => {
@@ -2117,7 +2489,7 @@ export default function VideoEditor({
         }, false);
       }
     },
-    [apply]
+    [apply, picked]
   );
 
   // --- tutorial tools (Phase 3) ------------------------------------------------
@@ -2623,7 +2995,7 @@ export default function VideoEditor({
           (target.tagName === "INPUT" && !/^(range|checkbox|radio|color)$/.test((target as HTMLInputElement).type)));
       if (typing) return;
       const onSlider = target?.tagName === "INPUT" && (target as HTMLInputElement).type === "range";
-      if (onSlider && (e.key === "ArrowLeft" || e.key === "ArrowRight")) return;
+      if (onSlider && /^Arrow/.test(e.key)) return;
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
       if (mod && key === "z") {
@@ -2639,8 +3011,15 @@ export default function VideoEditor({
         if (!window.getSelection()?.toString() && copy()) e.preventDefault();
       } else if (mod && key === "v") {
         if (paste()) e.preventDefault();
+      } else if (mod && key === "g") {
+        e.preventDefault();
+        if (e.shiftKey) ungroupPicked();
+        else groupPicked();
+      } else if (mod && key === "a") {
+        e.preventDefault();
+        selectAll();
       } else if (mod && key === "d") {
-        if (currentItem()) {
+        if (multi || currentItem() || selection?.kind === "clip") {
           e.preventDefault();
           duplicate();
         }
@@ -2658,22 +3037,60 @@ export default function VideoEditor({
       } else if (key === "f" && !mod) {
         e.preventDefault();
         freezeFrame();
+      } else if ((e.key === "Delete" || e.key === "Backspace") && e.shiftKey) {
+        e.preventDefault();
+        deleteClosing();
       } else if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         deleteSelection();
+      } else if (key === "m") {
+        e.preventDefault();
+        dropMarker();
+      } else if (key === "i") {
+        e.preventDefault();
+        setRangeAt("in");
+      } else if (key === "o") {
+        e.preventDefault();
+        setRangeAt("out");
+      } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        jump(e.key === "ArrowUp" ? -1 : 1);
+      } else if (key === "k") {
+        e.preventDefault();
+        setPlaying(false);
+        setRate(1);
+      } else if (key === "l") {
+        // Play; again for faster (2x, then 4x).
+        e.preventDefault();
+        if (!playing) {
+          setRate(1);
+          togglePlay();
+        } else setRate((r) => Math.min(4, r * 2));
+      } else if (key === "j") {
+        // Back a second (held: keeps going back).
+        e.preventDefault();
+        seek(clock.get() - 1);
+      } else if (key === "q") {
+        e.preventDefault();
+        trimAt("left");
+      } else if (key === "w") {
+        e.preventDefault();
+        trimAt("right");
       } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
         const dir = e.key === "ArrowLeft" ? -1 : 1;
         e.preventDefault();
-        if (e.altKey) moveSelected(dir);
+        if (e.altKey && multi) nudgePicked(dir * (e.shiftKey ? 1 : 1 / lay.fps));
+        else if (e.altKey) moveSelected(dir);
         else seek(clock.get() + dir * (e.shiftKey ? 1 : 1 / lay.fps));
       } else if (e.key === "Escape") {
+        setPicked([]);
         setSelection(null);
         setTool(null);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase, dialog, showSignIn, suspended, undo, redo, copy, paste, duplicate, currentItem, togglePlay, split, freezeFrame, addText, deleteSelection, moveSelected, seek, clock, lay.fps]);
+  }, [phase, dialog, showSignIn, suspended, undo, redo, copy, paste, duplicate, currentItem, selection, togglePlay, split, freezeFrame, addText, deleteSelection, moveSelected, seek, clock, lay.fps, multi, selectAll, nudgePicked, deleteClosing, trimAt, dropMarker, setRangeAt, jump, playing, groupPicked, ungroupPicked]);
 
   const toggleFullscreen = () => {
     const el = stageRef.current;
@@ -2822,17 +3239,72 @@ export default function VideoEditor({
             end: o.end,
             label: o.kind === "text" ? o.text.content.split("\n")[0] || "Text" : "",
             glyph: "T",
+            keys: o.keyframes?.length ? o.keyframes.map((k) => o.start + k.t) : undefined,
             hidden: o.hidden,
             locked: o.locked,
-            selected: selIs(selection, "overlay", o.id),
+            selected: selIs(selection, "overlay", o.id) || isPicked("overlay", o.id),
             sel: { kind: "overlay", id: o.id },
           })
         ),
       ],
     };
-  }, [project.overlays, selection, captionsGrouped, tool]);
+  }, [project.overlays, selection, captionsGrouped, tool, isPicked]);
+  /** Video layers (picture in picture, a second video over the main one). */
+  const videoLayersTrack = useMemo<TimelineTrack>(() => {
+    const layers = project.overlays.filter((o) => o.kind === "video");
+    return {
+      key: "videolayers",
+      label: "Video 2",
+      tone: "border-indigo-400/50 bg-indigo-500/25",
+      toggles: layerToggles(layers),
+      deletable: true,
+      items: layers.map((o) => ({
+        id: o.id,
+        start: o.start,
+        end: o.end,
+        label: o.kind === "video" ? `${sources[o.sourceId]?.disk?.name ?? sources[o.sourceId]?.file?.name ?? "Video"}${o.volume === 0 ? " · muted" : ""}` : "Video",
+        thumb: o.kind === "video" ? (thumbs[o.sourceId]?.urls[0] ?? null) : null,
+        glyph: "▶",
+        wave: o.kind === "video" ? { sourceId: o.sourceId, offset: o.offset, duration: o.end - o.start, gain: o.volume } : undefined,
+        keys: o.keyframes?.length ? o.keyframes.map((k) => o.start + k.t) : undefined,
+        hidden: o.hidden,
+        locked: o.locked,
+        selected: selIs(selection, "overlay", o.id) || isPicked("overlay", o.id),
+        sel: { kind: "overlay" as const, id: o.id },
+      })),
+    };
+  }, [project.overlays, selection, sources, thumbs, isPicked]);
+  /** Each clip's own sound, under the video row: follows its clip, picked
+   * with it; its volume curve is drawn and edited here. */
+  const videoMuted = !!project.master?.videoMuted;
+  const videoVolume = project.master?.videoVolume ?? 1;
+  const soundTrack = useMemo<TimelineTrack | null>(() => {
+    const withSound = lay.clips.filter((c) => c.clip.freeze === null && sources[c.clip.sourceId]?.hasAudio);
+    if (!withSound.length) return null;
+    return {
+      key: "videosound",
+      label: "Clip sound",
+      tone: "border-teal-500/40 bg-teal-500/15",
+      toggles: [{ kind: "mute", on: videoMuted }],
+      items: withSound.map((c) => {
+        const silent = videoMuted || c.clip.volume === 0;
+        return {
+          id: c.clip.id,
+          start: c.start,
+          end: c.start + c.duration,
+          label: `${silent ? "🔇 " : ""}Clip ${c.index + 1}${c.clip.volume === 0 && !videoMuted ? " · silent (detached or muted)" : ""}`,
+          glyph: "♪",
+          wave: { sourceId: c.clip.sourceId, offset: Math.min(c.clip.start, c.clip.end), duration: Math.abs(c.clip.end - c.clip.start), gain: silent ? 0 : c.clip.volume * videoVolume },
+          curve: visibleClipCurve(c),
+          fixed: true,
+          selected: selIs(selection, "clip", c.clip.id) || isPicked("clip", c.clip.id),
+          sel: { kind: "clip" as const, id: c.clip.id },
+        };
+      }),
+    };
+  }, [lay.clips, sources, selection, isPicked, videoMuted, videoVolume]);
   const elementsTrack = useMemo<TimelineTrack>(() => {
-    const layers = project.overlays.filter((o) => o.kind !== "text");
+    const layers = project.overlays.filter((o): boolean => o.kind !== "text" && o.kind !== "video");
     return {
       key: "elements",
       label: "Elements",
@@ -2855,15 +3327,16 @@ export default function VideoEditor({
                   ? stickerThumbSrc(def)
                   : null,
           glyph: o.kind === "video" ? "▶" : def?.kind === "emoji" ? def.char : "★",
+          keys: o.keyframes?.length ? o.keyframes.map((k) => o.start + k.t) : undefined,
           wave: o.kind === "video" ? { sourceId: o.sourceId, offset: o.offset, duration: o.end - o.start, gain: o.volume } : undefined,
           hidden: o.hidden,
           locked: o.locked,
-          selected: selIs(selection, "overlay", o.id),
+          selected: selIs(selection, "overlay", o.id) || isPicked("overlay", o.id),
           sel: { kind: "overlay" as const, id: o.id },
         };
       }),
     };
-  }, [project.overlays, selection, sources, thumbs]);
+  }, [project.overlays, selection, sources, thumbs, isPicked]);
   const audioTrack = useMemo<TimelineTrack>(
     () => ({
       key: "audio",
@@ -2889,11 +3362,11 @@ export default function VideoEditor({
         glyph: "♪",
         wave: { sourceId: a.sourceId, offset: a.offset, duration: a.duration, gain: a.muted ? 0 : a.volume },
         curve: visibleCurve(a),
-        selected: selIs(selection, "audio", a.id),
+        selected: selIs(selection, "audio", a.id) || isPicked("audio", a.id),
         sel: { kind: "audio" as const, id: a.id },
       })),
     }),
-    [project.audio, project.master, selection]
+    [project.audio, project.master, selection, isPicked]
   );
   const layClips = lay.clips;
   const zoomTrack = useMemo<TimelineTrack | null>(() => {
@@ -2948,13 +3421,13 @@ export default function VideoEditor({
         end: e.end,
         label: EFFECT_LABELS[e.type],
         glyph: EFFECT_ICONS[e.type],
-        selected: selIs(selection, "effect", e.id),
+        selected: selIs(selection, "effect", e.id) || isPicked("effect", e.id),
         sel: { kind: "effect" as const, id: e.id },
       })),
     }),
-    [project.effects, selection]
+    [project.effects, selection, isPicked]
   );
-  const tracks = [textTrack, elementsTrack, audioTrack, ...(zoomTrack ? [zoomTrack] : []), effectsTrack];
+  const tracks = [...(soundTrack ? [soundTrack] : []), videoLayersTrack, textTrack, elementsTrack, audioTrack, ...(zoomTrack ? [zoomTrack] : []), effectsTrack];
 
   if (phase !== "edit" || !original) {
     const showRecents = phase === "import" && recents.length > 0;
@@ -3140,6 +3613,7 @@ export default function VideoEditor({
         gesture={gesture}
         premiumLocked={premiumLocked}
         onImportLut={(file) => void importLut(lookClip.id, file)}
+        strength={selectedClip && <LookStrength laid={selectedClip} clock={clock} apply={apply} gesture={gesture} />}
       />
     );
   } else if (tool === "text") {
@@ -3436,6 +3910,7 @@ export default function VideoEditor({
         source={src}
         onChange={change}
         onSplit={split}
+        onDuplicate={duplicate}
         onDelete={deleteSelection}
         onMove={moveSelected}
         onAiCleanup={openCleanup}
@@ -3487,6 +3962,20 @@ export default function VideoEditor({
         sourceDuration={selectedOverlay.kind === "video" ? sources[selectedOverlay.sourceId]?.duration : undefined}
         onChange={(patch) => changeOverlay(selectedOverlay.id, patch)}
         onCamLayout={selectedOverlay.kind === "video" ? (l) => setCamLayout(selectedOverlay.id, l) : undefined}
+        onFrame={
+          selectedOverlay.kind === "video"
+            ? (mode) => {
+                const src = sources[selectedOverlay.sourceId];
+                const srcAspect = src && src.height > 0 ? src.width / src.height : 16 / 9;
+                const canvasAspect = canvasSize.height > 0 ? canvasSize.width / canvasSize.height : 16 / 9;
+                // Width as a share of the canvas: its height follows the video's shape.
+                const ratio = srcAspect / canvasAspect;
+                const width = mode === "fill" ? Math.min(3, Math.max(1, ratio)) : Math.min(1, ratio);
+                apply((p) => updateOverlay(p, selectedOverlay.id, { x: 0.5, y: 0.5, rotation: 0, width, camLayout: undefined, mask: null } as Partial<Overlay>));
+                say(mode === "fill" ? "The video layer now covers the whole picture." : "The video layer now shows in full, as large as fits.");
+              }
+            : undefined
+        }
         background={
           selectedOverlay.kind === "video"
             ? {
@@ -3560,6 +4049,7 @@ export default function VideoEditor({
   } else if (selectedEffect) {
     selPanel = (
       <EffectPanel
+        strength={<EffectStrength effect={selectedEffect} clock={clock} apply={apply} gesture={gesture} />}
         effect={selectedEffect}
         total={lay.total}
         onChange={(patch) => apply((p) => updateEffect(p, selectedEffect.id, patch))}
@@ -3601,6 +4091,15 @@ export default function VideoEditor({
         <p className="mt-6 text-[11px] leading-relaxed text-muted">
           Shortcuts: Space play/pause · S split · F freeze frame · T text · Delete remove · {keys.mod}+C / {keys.mod}+V copy/paste · {keys.mod}+D duplicate · ←/→ frame step (Shift:
           1s) · {keys.alt}+←/→ move clip · {keys.mod}+Z / {keys.mod}+Shift+Z undo/redo
+        </p>
+        <p className="mt-2 text-[11px] leading-relaxed text-muted">
+          Timeline: Q / W delete before / after the playhead · Shift+Delete delete and close the gap · Shift or {keys.mod}+click, or drag on an empty row, to
+          select several · {keys.mod}+A select all · {keys.mod}+G group / {keys.mod}+Shift+G ungroup · Esc clear. Text, captions, music and effects move with the clip under them; ⛓ on the Video row turns that
+          off.
+        </p>
+        <p className="mt-2 text-[11px] leading-relaxed text-muted">
+          M marker · ↑/↓ previous / next cut or marker · I / O range in / out (then cut, loop or export it) · J back 1s · K pause · L play (again: faster) ·{" "}
+          {keys.alt}+drag a clip to slip it (another part of its video, same place) · {keys.alt}+drag a cut to roll it between two clips.
         </p>
       </PanelShell>
     );
@@ -3662,7 +4161,7 @@ export default function VideoEditor({
               label: m.label || { blur: "Blur", pixelate: "Pixelate", solid: "Mask" }[m.mode],
               glyph: "▦",
               hidden: !m.enabled,
-              selected: selIs(selection, "mask", m.id),
+              selected: selIs(selection, "mask", m.id) || isPicked("mask", m.id),
               sel: { kind: "mask" as const, id: m.id },
             })),
           },
@@ -3745,7 +4244,60 @@ export default function VideoEditor({
       <ToolButton label="Trim the clip at the playhead" onClick={openTrim} text="Trim">
         <TrimIcon width={16} height={16} />
       </ToolButton>
-      <ToolButton label="Delete selection (Delete)" onClick={deleteSelection} text="Delete">
+      <ToolButton label="Delete everything before the playhead in the selected layer, or the clip under it (Q)" onClick={() => trimAt("left")} text="Trim left">
+        <span aria-hidden className="text-sm leading-none">⇤</span>
+      </ToolButton>
+      <ToolButton label="Delete everything after the playhead in the selected layer, or the clip under it (W)" onClick={() => trimAt("right")} text="Trim right">
+        <span aria-hidden className="text-sm leading-none">⇥</span>
+      </ToolButton>
+      {selectedGroup ? (
+        <ToolButton label={`Ungroup (${modKey()}+Shift+G)`} onClick={ungroupPicked} text="Ungroup">
+          <span aria-hidden className="text-sm leading-none">⧈</span>
+        </ToolButton>
+      ) : (
+        multi && (
+          <ToolButton label={`Group the selected items, so they're selected and moved together (${modKey()}+G)`} onClick={groupPicked} text="Group">
+            <span aria-hidden className="text-sm leading-none">⧉</span>
+          </ToolButton>
+        )
+      )}
+      <ToolButton label="Drop a marker at the playhead (M). Up/Down jump between markers and cuts" onClick={dropMarker} text="Marker">
+        <span aria-hidden className="text-sm leading-none text-amber-400">⚑</span>
+      </ToolButton>
+      {range && (
+        <span className="flex shrink-0 items-center gap-0.5 rounded-lg border border-sky-400/50 bg-sky-400/10 px-1" role="group" aria-label="Range">
+          <span className="px-1 font-mono text-[11px] text-sky-300">
+            {formatTime(range.in, true)}–{formatTime(range.out, true)}
+          </span>
+          <ToolButton label="Remove the range from the timeline; everything after it moves up" onClick={cutRange} text="Cut">
+            <span aria-hidden className="text-sm leading-none">✂</span>
+          </ToolButton>
+          <ToolButton label="Loop playback inside the range" onClick={() => setLoopRange((v) => !v)} active={loopRange} text="Loop">
+            <span aria-hidden className="text-sm leading-none">⟲</span>
+          </ToolButton>
+          <ToolButton label="Export only the range as its own video" onClick={exportRange} text="Export">
+            <span aria-hidden className="text-sm leading-none">⤓</span>
+          </ToolButton>
+          <ToolButton
+            label="Clear the range"
+            onClick={() => {
+              setRange(null);
+              setLoopRange(false);
+            }}
+          >
+            <span aria-hidden className="text-sm leading-none">✕</span>
+          </ToolButton>
+        </span>
+      )}
+      <ToolButton
+        label="Move the selected clip's sound to its own audio track, to cut or move it separately"
+        onClick={() => selectedClip && extractAudio(selectedClip.clip.id)}
+        disabled={!selectedClip || selectedClip.clip.freeze !== null || !sources[selectedClip.clip.sourceId]?.hasAudio || selectedClip.clip.volume === 0}
+        text="Detach audio"
+      >
+        <span aria-hidden className="text-sm leading-none">♪</span>
+      </ToolButton>
+      <ToolButton label="Delete selection (Delete). Shift+Delete also closes the gap it leaves on its row" onClick={deleteSelection} text="Delete">
         <TrashIcon width={16} height={16} />
       </ToolButton>
       {AI_CLEANUP_ENABLED && (
@@ -3862,14 +4414,27 @@ export default function VideoEditor({
               selection={selection}
               clock={clock}
               playing={playing}
-              onSelect={select}
+              onSelect={selectOnTimeline}
               onSeek={seek}
               onClipChange={(id, patch) => apply((p) => updateClip(p, id, patch))}
               onItemChange={onItemChange}
-              onMoveClip={(from, to) => apply((p) => moveClip(p, from, to))}
+              onMoveClip={(from, to) => apply((p) => moveClipWithGroup(p, from, to))}
+              groupColors={groupColors}
               onTrackToggle={onTrackToggle}
+              videoToggles={[{ kind: "link", on: project.linkLayers !== false }]}
+              picked={picked}
+              onPick={onPick}
+              soundRow={!!soundTrack}
+              markers={project.markers}
+              onMarkerMove={onMarkerMove}
+              onMarkerDelete={onMarkerDelete}
+              onMarkerRename={onMarkerRename}
+              range={range}
+              onRoll={onRoll}
+              onKeyframeMove={onKeyframeMove}
+              onKeyframeDelete={onKeyframeDelete}
               onTrackDelete={onTrackDelete}
-              onCurveChange={(track, id, edit) => track === "audio" && editCurve(id, edit)}
+              onCurveChange={(track, id, edit) => (track === "audio" ? editCurve(id, edit) : track === "videosound" && editClipSoundCurve(id, edit))}
               actions={editActions}
               onGestureStart={beginGesture}
               onGestureEnd={endGesture}
@@ -4161,6 +4726,7 @@ function ClipPanelLive({
   source,
   onChange,
   onSplit,
+  onDuplicate,
   onDelete,
   onMove,
   onAiCleanup,
@@ -4173,6 +4739,7 @@ function ClipPanelLive({
   source: MediaSource;
   onChange: (patch: Partial<Clip>) => void;
   onSplit: () => void;
+  onDuplicate: () => void;
   onDelete: () => void;
   onMove: (dir: -1 | 1) => void;
   onAiCleanup: () => void;
@@ -4190,11 +4757,95 @@ function ClipPanelLive({
       playheadSourceTime={inside}
       onChange={onChange}
       onSplit={onSplit}
+      onDuplicate={onDuplicate}
       onDelete={onDelete}
       onMove={onMove}
       onAiCleanup={onAiCleanup}
       onClose={onClose}
       extra={extra}
+    />
+  );
+}
+
+type ApplyFn = (fn: (p: Project) => Project, record?: boolean) => void;
+
+/** A clip's look strength over time (strength.ts), kept live with the playhead. */
+function LookStrength({ laid, clock, apply, gesture }: { laid: LaidOutClip; clock: Clock; apply: ApplyFn; gesture: Gesture }) {
+  const t = useClockTime(clock);
+  const end = laid.start + laid.duration;
+  const inside = t >= laid.start && t < end;
+  const id = laid.clip.id;
+  const set = (fn: (pts: GainPoint[] | undefined) => GainPoint[] | undefined) =>
+    apply((p) => {
+      const c = p.clips.find((x) => x.id === id);
+      if (!c) return p;
+      const next = fn(c.lookMix);
+      return updateClip(p, id, { lookMix: next?.length ? next : undefined });
+    });
+  const d = Math.min(1, laid.duration / 2);
+  return (
+    <StrengthSection
+      title="Look strength over time"
+      what="The look"
+      gesture={gesture}
+      s={{
+        value: clipLookStrength(laid, inside ? t : laid.start),
+        points: laid.clip.lookMix?.length ?? 0,
+        inside,
+        onSet: (v) => set((pts) => setStrength(pts, clipStrengthTime(laid, t), v)),
+        onFade: (kind) => {
+          // In source time (a reversed clip runs it backwards), replacing
+          // any points in that second.
+          const [a, b] = kind === "in" ? [laid.start, laid.start + d] : [end - d, end - 1e-3];
+          const ta = clipStrengthTime(laid, a);
+          const tb = clipStrengthTime(laid, b);
+          const [lo, hi] = [Math.min(ta, tb), Math.max(ta, tb)];
+          set((pts) =>
+            [...(pts ?? []).filter((q) => q.t < lo - 0.02 || q.t > hi + 0.02), { t: ta, v: kind === "in" ? 0 : 1 }, { t: tb, v: kind === "in" ? 1 : 0 }].sort(
+              (x, y) => x.t - y.t
+            )
+          );
+        },
+        onClear: () => set(() => undefined),
+      }}
+    />
+  );
+}
+
+/** An effect's strength over time (strength.ts), kept live with the playhead. */
+function EffectStrength({ effect, clock, apply, gesture }: { effect: EffectClip; clock: Clock; apply: ApplyFn; gesture: Gesture }) {
+  const t = useClockTime(clock);
+  const inside = t >= effect.start && t < effect.end;
+  const id = effect.id;
+  const set = (fn: (pts: GainPoint[] | undefined) => GainPoint[] | undefined) =>
+    apply((p) => {
+      const e = p.effects.find((x) => x.id === id);
+      if (!e) return p;
+      const next = fn(e.mix);
+      return updateEffect(p, id, { mix: next?.length ? next : undefined });
+    });
+  const len = effect.end - effect.start;
+  const d = Math.min(1, len / 2);
+  return (
+    <StrengthSection
+      title="Strength over time"
+      what="The effect"
+      gesture={gesture}
+      s={{
+        value: effectStrength(effect, inside ? t : effect.start),
+        points: effect.mix?.length ?? 0,
+        inside,
+        onSet: (v) => set((pts) => setStrength(pts, t - effect.start, v)),
+        onFade: (kind) => {
+          const [a, b] = kind === "in" ? [0, d] : [len - d, len];
+          set((pts) =>
+            [...(pts ?? []).filter((q) => q.t < a - 0.02 || q.t > b + 0.02), { t: a, v: kind === "in" ? 0 : 1 }, { t: b, v: kind === "in" ? 1 : 0 }].sort(
+              (x, y) => x.t - y.t
+            )
+          );
+        },
+        onClear: () => set(() => undefined),
+      }}
     />
   );
 }

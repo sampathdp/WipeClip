@@ -123,9 +123,9 @@ export function rippleCut(project: Project, lay: Layout, from: number, to: numbe
       clips.push(c.clip);
       continue;
     }
-    if (t0 - s >= 1 / fps) clips.push({ ...clipPart(c.clip, 0, t0 - s), transition: null });
+    if (t0 - s >= 1 / fps) clips.push({ ...clipPart(c.clip, 0, t0 - s), transition: null, fadeOut: undefined });
     if (e - t1 >= 1 / fps) {
-      const right = clipPart(c.clip, t1 - s, c.duration);
+      const right = { ...clipPart(c.clip, t1 - s, c.duration), fadeIn: undefined };
       clips.push(t0 - s >= 1 / fps ? { ...right, id: newId("clip") } : right);
     }
   }
@@ -159,10 +159,13 @@ export function rippleCut(project: Project, lay: Layout, from: number, to: numbe
     words: project.transcript.words.map((w) => cutPlain(w, t0, t1)).filter((w): w is NonNullable<typeof w> => !!w),
   };
 
+  // Markers in the cut land at its start; later ones move up.
+  const markers = project.markers?.map((mk) => (mk.t < t0 ? mk : { ...mk, t: mk.t >= t1 ? mk.t - d : t0 }));
+
   return {
     ok: true,
     removed: d,
-    project: { ...project, clips, overlays, audio, effects, masks, suggestions, chapters, ...(transcript ? { transcript } : {}) },
+    project: { ...project, clips, overlays, audio, effects, masks, suggestions, chapters, ...(markers ? { markers } : {}), ...(transcript ? { transcript } : {}) },
   };
 }
 
@@ -192,7 +195,11 @@ export function rippleInsert(
       placed = true;
     }
     if (!placed && at < e - 1e-9) {
-      clips.push({ ...clipPart(c.clip, 0, at - s), transition: null }, ...inserted, { ...clipPart(c.clip, at - s, c.duration), id: newId("clip") });
+      clips.push(
+        { ...clipPart(c.clip, 0, at - s), transition: null, fadeOut: undefined },
+        ...inserted,
+        { ...clipPart(c.clip, at - s, c.duration), id: newId("clip"), fadeIn: undefined }
+      );
       placed = true;
       continue;
     }
@@ -227,6 +234,7 @@ export function rippleInsert(
       masks: (project.masks ?? []).map(shift),
       suggestions: (project.suggestions ?? []).map(shift),
       chapters: (project.chapters ?? []).map((c) => (c.t >= at ? { ...c, t: c.t + duration } : c)),
+      ...(project.markers ? { markers: project.markers.map((mk) => (mk.t >= at ? { ...mk, t: mk.t + duration } : mk)) } : {}),
       // The inserted material has no words yet; later words move along.
       ...(project.transcript
         ? { transcript: { ...project.transcript, total: project.transcript.total + duration, words: project.transcript.words.map(shift) } }

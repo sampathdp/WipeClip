@@ -169,6 +169,44 @@ Speech models often leave "aaa", "uhhh" or "mmm" out of the transcript, and outs
 
 **Not yet checked on real microphone recordings** of hesitations: that's the first manual test.
 
+## English words in Indic-language captions (12 November 2026)
+
+People speaking Sinhala, Tamil, Hindi and other Indian languages mix in English words. The speech models write some in English, but most come out in the language's script. On synthesized English speech the Sinhala model wrote "share" and "computer" in English, but "ෆෝන්" (phone), "ලින්ක්" (link) and "ස්ක්‍රීන්" (screen) in Sinhala. `src/lib/editor/englishWords.ts` writes those back in English after recognition. It runs in `transcribe` (captions.ts), so captions and the Transcript panel both get it, in the engine and in the browser. A Captions panel checkbox, **Keep English words in English** (on by default, hidden for English), turns it off.
+
+**How it decides:**
+1. Each word in one Brahmic script (Sinhala, Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam) is romanized. Text is NFC-normalized first, because Tamil ொ is also typed as ெ + ா. In Hindi, Bengali, Gujarati and Punjabi the last unwritten vowel is dropped.
+2. The result is compared by sound with about 400 English words common in this kind of speech, plus the Latin-script words of the names hint. The comparison ignores aspiration, long vowels, retroflex vs dental, and doubled letters. The match is a weighted edit distance:
+   - 0.5 for a vowel added or left out, a near vowel (a/e, a/o, e/i, o/u) or a near consonant (v/b, f/p, z/s/j);
+   - 1.5 for another vowel;
+   - more for another consonant.
+   - Tamil writes k/g, t/d, p/b and c/j with one letter each, so those count as the same there.
+3. **Allowed distance:** 0.5 up to 5 sounds, 1 up to 8, 1.5 from 9. In Tamil, words of up to 4 sounds must match exactly. An extra final vowel costs 0.5 more, because it's mostly a native ending: बताना ("to tell") isn't "button".
+4. **Words of up to 4 sounds must also look borrowed:**
+   - a bare final consonant in Sinhala, Telugu, Kannada and Oriya, or a final stop in Tamil;
+   - or a letter used mostly for English sounds: f (ෆ ఫ ಫ ഫ), Devanagari ॉ ॅ ज़ फ़, Tamil ஃ and the Grantha letters.
+   - So Hindi कर ("do") and बस ("enough") stay, while Sinhala බස් becomes "bus".
+5. Native words that still collide are listed in `NATIVE`, for example Hindi कमरा ("room", like "camera") and Tamil விரல் ("finger", like "viral").
+
+Only whole words are replaced. A loanword with a suffix joined on (වීඩියෝවක්, "a video") stays as it is.
+
+**Checked** against the 10,000 most common words of the OpenSubtitles frequency lists (FrequencyWords, used for testing only, not shipped):
+
+| Language | Words changed | Notes |
+|---|---|---|
+| Sinhala | 0 | Every word left as it is |
+| Hindi | 108 | Almost all English loanwords (कंप्यूटर, डाउनलोड, सेटिंग्स) |
+| Tamil | 60 | Almost all English loanwords |
+| Telugu | 170 | Almost all English loanwords |
+| Malayalam | 67 | Almost all English loanwords |
+| Bengali | 71 | Almost all English loanwords |
+
+The few wrong ones that were left are an English word that isn't listed, matched to a listed one that sounds close (Telugu పామ్, "palm", as "farm").
+
+**Known gaps:**
+- Short Hindi loanwords without a borrowed letter are left alone (लिंक, फोन without the nukta).
+- Short Tamil ones with an added vowel are left alone too (கிளிக், click).
+- Not yet checked on real code-mixed recordings.
+
 ## Safeguards
 
 - Nothing is cut without the user accepting it. Pauses are not all treated as dead time: those with speech in them, sound without words, and quiet stretches while working on screen or while the picture moves are all "review".
@@ -180,6 +218,7 @@ Speech models often leave "aaa", "uhhh" or "mmm" out of the transcript, and outs
 | Command | Result |
 |---|---|
 | `npm run desktop:test:js` (`tests/desktop/speechEdits.test.ts`, 7 tests) | Pass. Covered: fillers and repeats with ranges and confidence; a restarted sentence vs a later repeat; English-only fillers; uncertain timings; empty and overlapping words; quiet speech and sound-without-speech; applying accepted suggestions; perf |
+| `npm run desktop:test:js` (`tests/desktop/englishWords.test.ts`, 4 tests) | Pass. Covered: romanizing Sinhala, Devanagari and Tamil; 32 loanwords in Sinhala, Hindi, Tamil, Kannada and Telugu found; 118 common native words left alone; punctuation, Latin words and the names hint kept |
 | `node tests/desktop/manual/preview-transcript.mjs <url> <out>` | 10/10 in headless Chrome against a production build of the editor |
 
 What the apply test checks, through the review's own path (`acceptedCuts` then `rippleCut`):

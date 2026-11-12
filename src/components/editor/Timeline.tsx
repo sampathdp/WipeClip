@@ -12,9 +12,12 @@ import {
   formatTime,
   type Layout,
 } from "@/lib/editor/timeline";
-import type { Clip, MediaSource, Selection } from "@/lib/editor/types";
+import type { Clip, Marker, MediaSource, Selection } from "@/lib/editor/types";
+import { fineTrimBlocker, slipClip, type Range } from "@/lib/editor/timelineNav";
 import { ZoomInIcon, ZoomOutIcon } from "./icons";
 import { effectiveSpeed } from "@/lib/editor/speed";
+import { selKey } from "@/lib/editor/multiSelect";
+import { clipKeyTimeToLocal } from "@/lib/editor/keyframes";
 
 const PAD = 16; // px before t=0 so the first trim handle is reachable
 const GUTTER = 120; // sticky label column on the left of every row
@@ -40,7 +43,17 @@ type Gesture =
     }
   | { kind: "reorder"; index: number; x0: number; active: boolean }
   | { kind: "item"; track: string; id: string; mode: ItemMode; x0: number; start: number; end: number; targets: number[] }
-  | { kind: "seek" };
+  | { kind: "seek" }
+  /** Dragging on an empty part of a layer row: a box picking every item it touches. */
+  | { kind: "box"; x0: number; y0: number; add: boolean; moved: boolean }
+  /** A marker on the ruler: dragged to move it, clicked to go to it. */
+  | { kind: "marker"; id: string; x0: number; t0: number; moved: boolean }
+  /** Alt+drag on a clip: shows another part of its video in the same place. */
+  | { kind: "slip"; clipId: string; clip: Clip; x0: number; srcDur: number; speed: number }
+  /** Alt+drag on the cut after clip `index`: moves the cut between two clips. */
+  | { kind: "roll"; index: number; x0: number; last: number }
+  /** A keyframe diamond: dragged to retime it, clicked to go to it. */
+  | { kind: "key"; sel: Selection; index: number; x0: number; t0: number; min: number; max: number; moved: boolean };
 
 export type ItemMode = "move" | "start" | "end";
 
@@ -64,6 +77,11 @@ export interface TrackItem {
   locked?: boolean;
   selected: boolean;
   sel: Selection;
+  /** Keyframe times, timeline seconds (drawn as diamonds). */
+  keys?: number[];
+  /** Placed by something else (a clip's own sound follows its clip): picked
+   * by clicking, never dragged or trimmed. */
+  fixed?: boolean;
   /** An audio track's volume curve (envelope.ts visibleCurve), timeline
    * seconds; `index` null at the item's edges. Editable when selected. */
   curve?: { t: number; v: number; index: number | null }[];
@@ -83,8 +101,9 @@ interface ViewRange {
 /** A whole-track switch in the row header; `on` = every item has it. */
 export interface TrackToggle {
   /** group: show a track's many items (auto captions) as one block.
-   * magnet/smooth: the audio row's magnetic parts and smooth cuts. */
-  kind: "hide" | "lock" | "mute" | "group" | "magnet" | "smooth";
+   * magnet/smooth: the audio row's magnetic parts and smooth cuts.
+   * link: layers follow the video row's clips (follow.ts). */
+  kind: "hide" | "lock" | "mute" | "group" | "magnet" | "smooth" | "link";
   on: boolean;
 }
 
@@ -141,6 +160,8 @@ interface Props {
   onItemChange: (track: string, id: string, mode: ItemMode, start: number, end: number) => void;
   onMoveClip: (from: number, to: number) => void;
   onTrackToggle?: (track: string, kind: TrackToggle["kind"]) => void;
+  /** Switches in the Video row's header (track "video"). */
+  videoToggles?: TrackToggle[];
   /** Removes every item on a track. */
   onTrackDelete?: (track: string) => void;
   /** Edits an item's volume curve (TrackItem.curve). */
@@ -149,6 +170,28 @@ interface Props {
   actions?: React.ReactNode;
   onGestureStart: () => void;
   onGestureEnd: () => void;
+  /** A keyframe of a clip or layer dragged to timeline time `t` (index in
+   * its keyframe list), or removed (Alt+click). */
+  onKeyframeMove?: (sel: Selection, index: number, t: number) => void;
+  onKeyframeDelete?: (sel: Selection, index: number) => void;
+  /** Grouped items' stripe colors, by multiSelect.ts key (groups.ts). */
+  groupColors?: ReadonlyMap<string, string>;
+  /** The user's markers, drawn on the ruler. */
+  markers?: Marker[];
+  onMarkerMove?: (id: string, t: number) => void;
+  onMarkerDelete?: (id: string) => void;
+  onMarkerRename?: (id: string, label: string) => void;
+  /** The in/out range (I / O), shaded on the ruler. */
+  range?: Range | null;
+  /** Rolls the cut after clip `index` by `dt` more timeline seconds (Alt+drag). */
+  onRoll?: (index: number, dt: number) => void;
+  /** Clips' own sound has its own row (track "videosound"): the clip blocks
+   * leave their waveform out. */
+  soundRow?: boolean;
+  /** Items picked together (multiSelect.ts keys), the selection included. */
+  picked?: ReadonlySet<string>;
+  /** Picks items: "replace" the picked set, "toggle" them in or out, or "add" them. */
+  onPick?: (keys: string[], mode: "replace" | "toggle" | "add") => void;
 }
 
 export default function Timeline(props: Props) {
@@ -159,6 +202,9 @@ export default function Timeline(props: Props) {
   const [view, setView] = useState<ViewRange>({ from: -800, to: 2400 });
   const gesture = useRef<Gesture | null>(null);
   const [drag, setDrag] = useState<{ index: number; dx: number; target: number; markerX: number } | null>(null);
+  const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const content = useRef<HTMLDivElement>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
   const [trimLabel, setTrimLabel] = useState<{ x: number; text: string } | null>(null);
   const [snapOn, setSnapOn] = useState(true);
   const [snapAt, setSnapAt] = useState<number | null>(null); // timeline time of the active snap guide
@@ -274,7 +320,7 @@ export default function Timeline(props: Props) {
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     gesture.current = g;
-    if (g.kind === "trim" || g.kind === "item") props.onGestureStart();
+    if (g.kind === "trim" || g.kind === "item" || g.kind === "slip" || g.kind === "roll") props.onGestureStart();
   };
 
   const rowHandlers = {
@@ -282,15 +328,22 @@ export default function Timeline(props: Props) {
     gestureStart: () => props.onGestureStart(),
     gestureEnd: () => props.onGestureEnd(),
     rowDown: (e: React.PointerEvent) => {
-      startGesture(e, { kind: "seek" });
-      props.onSeek(tOf(e.clientX));
+      // A click seeks; a drag draws a box that picks the items it touches.
+      startGesture(e, { kind: "box", x0: e.clientX, y0: e.clientY, add: e.shiftKey || e.ctrlKey || e.metaKey, moved: false });
     },
     itemDown: (e: React.PointerEvent, track: string, it: TrackItem, mode: ItemMode) => {
+      // Shift/Ctrl/Cmd-click adds an item to the picked ones, or takes it out.
+      const key = selKey(it.sel);
+      if (key && (e.shiftKey || e.ctrlKey || e.metaKey)) {
+        e.stopPropagation();
+        props.onPick?.([key], "toggle");
+        return;
+      }
       props.onSelect(it.sel);
       if (mode === "move") {
         const now = clock.get();
         if (now < it.start || now >= it.end) props.onSeek(it.start);
-        if (it.locked) {
+        if (it.locked || it.fixed) {
           e.stopPropagation();
           return;
         }
@@ -298,6 +351,15 @@ export default function Timeline(props: Props) {
       startGesture(e, { kind: "item", track, id: it.id, mode, x0: e.clientX, start: it.start, end: it.end, targets: snapTargets(it.id) });
     },
     select: (s: Selection) => props.onSelect(s),
+    keyDown: (e: React.PointerEvent, sel: Selection, index: number, t: number, min: number, max: number) => {
+      e.stopPropagation();
+      if (e.altKey) {
+        props.onKeyframeDelete?.(sel, index);
+        return;
+      }
+      props.onSelect(sel);
+      startGesture(e, { kind: "key", sel, index, x0: e.clientX, t0: t, min, max, moved: false });
+    },
     toggle: (track: string, kind: TrackToggle["kind"]) => props.onTrackToggle?.(track, kind),
     remove: (track: string) => props.onTrackDelete?.(track),
   };
@@ -313,6 +375,7 @@ export default function Timeline(props: Props) {
       rowDown: (e) => handlers.current.rowDown(e),
       itemDown: (e, track, it, mode) => handlers.current.itemDown(e, track, it, mode),
       select: (s) => handlers.current.select(s),
+      keyDown: (e, sel, index, t, min, max) => handlers.current.keyDown(e, sel, index, t, min, max),
       toggle: (track, kind) => handlers.current.toggle(track, kind),
       remove: (track) => handlers.current.remove(track),
     }),
@@ -324,6 +387,49 @@ export default function Timeline(props: Props) {
     if (!g) return;
     if (g.kind === "seek") {
       props.onSeek(tOf(e.clientX));
+      return;
+    }
+    if (g.kind === "marker") {
+      if (!g.moved && Math.abs(e.clientX - g.x0) < 3) return;
+      if (!g.moved) props.onGestureStart();
+      g.moved = true;
+      let t = g.t0 + (e.clientX - g.x0) / scale;
+      t += snapShift(e, snapTargets(), [t]);
+      props.onMarkerMove?.(g.id, t);
+      setTrimLabel({ x: e.clientX, text: `Marker ${formatTime(Math.max(0, t), true)}` });
+      return;
+    }
+    if (g.kind === "slip") {
+      // The footage moves with the pointer: dragging right shows an earlier part.
+      const delta = (-(e.clientX - g.x0) / scale) * g.speed;
+      const next = slipClip(g.clip, delta, g.srcDur);
+      props.onClipChange(g.clipId, { start: next.start, end: next.end });
+      setTrimLabel({ x: e.clientX, text: `Slip: shows ${formatTime(next.start, true)} - ${formatTime(next.end, true)} of its video` });
+      return;
+    }
+    if (g.kind === "roll") {
+      const dt = (e.clientX - g.x0) / scale;
+      props.onRoll?.(g.index, dt - g.last);
+      g.last = dt;
+      setTrimLabel({ x: e.clientX, text: `Roll: cut ${dt >= 0 ? "+" : ""}${dt.toFixed(2)}s` });
+      return;
+    }
+    if (g.kind === "key") {
+      if (!g.moved && Math.abs(e.clientX - g.x0) < 3) return;
+      if (!g.moved) props.onGestureStart();
+      g.moved = true;
+      let t = g.t0 + (e.clientX - g.x0) / scale;
+      t += snapShift(e, [clock.get()], [t]);
+      t = Math.min(g.max, Math.max(g.min, t));
+      props.onKeyframeMove?.(g.sel, g.index, t);
+      setTrimLabel({ x: e.clientX, text: `Keyframe ${formatTime(t, true)}` });
+      return;
+    }
+    if (g.kind === "box") {
+      if (!g.moved && Math.hypot(e.clientX - g.x0, e.clientY - g.y0) < 5) return;
+      g.moved = true;
+      const r = content.current!.getBoundingClientRect();
+      setBox({ x0: g.x0 - r.left, y0: g.y0 - r.top, x1: e.clientX - r.left, y1: e.clientY - r.top });
       return;
     }
     if (g.kind === "trim") {
@@ -406,7 +512,37 @@ export default function Timeline(props: Props) {
     setTrimLabel(null);
     setSnapAt(null);
     if (!g) return;
-    if (g.kind === "trim" || g.kind === "item") props.onGestureEnd();
+    if (g.kind === "trim" || g.kind === "item" || g.kind === "slip" || g.kind === "roll") props.onGestureEnd();
+    if (g.kind === "marker") {
+      if (g.moved) props.onGestureEnd();
+      else props.onSeek(g.t0);
+      return;
+    }
+    if (g.kind === "key") {
+      if (g.moved) props.onGestureEnd();
+      else props.onSeek(g.t0);
+      return;
+    }
+    if (g.kind === "box") {
+      setBox(null);
+      if (!g.moved) {
+        props.onSeek(tOf(e.clientX));
+        if (!g.add) props.onPick?.([], "replace");
+        return;
+      }
+      // Every item or clip block the box touches.
+      const x0 = Math.min(g.x0, e.clientX);
+      const x1 = Math.max(g.x0, e.clientX);
+      const y0 = Math.min(g.y0, e.clientY);
+      const y1 = Math.max(g.y0, e.clientY);
+      const keys: string[] = [];
+      content.current?.querySelectorAll<HTMLElement>("[data-pick]").forEach((el) => {
+        const b = el.getBoundingClientRect();
+        if (b.right >= x0 && b.left <= x1 && b.bottom >= y0 && b.top <= y1) keys.push(el.dataset.pick!);
+      });
+      props.onPick?.([...new Set(keys)], g.add ? "add" : "replace");
+      return;
+    }
     if (g.kind === "reorder") {
       if (g.active && drag) {
         if (drag.target !== g.index) props.onMoveClip(g.index, drag.target);
@@ -441,6 +577,20 @@ export default function Timeline(props: Props) {
           </span>
         )}
         <div className="flex items-center gap-1">
+          {props.picked && props.picked.size > 1 && (
+            <span className="flex items-center gap-1 rounded-full border border-accent-2/50 bg-accent-2/10 py-0.5 pl-2 pr-1 text-[11px] font-semibold text-accent-2" role="status">
+              {props.picked.size} selected
+              <button
+                type="button"
+                className="flex h-4 w-4 items-center justify-center rounded-full text-[10px] hover:bg-accent-2/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2"
+                title="Clear the selection (Esc)"
+                aria-label="Clear the selection"
+                onClick={() => props.onPick?.([], "replace")}
+              >
+                ✕
+              </button>
+            </span>
+          )}
           <IconButton
             label={snapOn ? "Snapping on (hold Alt to bypass)" : "Snapping off"}
             pressed={snapOn}
@@ -451,6 +601,19 @@ export default function Timeline(props: Props) {
           <IconButton label="Zoom out timeline" onClick={() => zoom(1 / 1.5)}>
             <ZoomOutIcon width={16} height={16} />
           </IconButton>
+          <input
+            type="range"
+            aria-label="Timeline zoom"
+            title="Timeline zoom (Ctrl+scroll also zooms)"
+            className="hidden w-24 accent-[var(--accent)] sm:block"
+            min={0}
+            max={1000}
+            value={Math.round((1000 * Math.log(scale / fitPps)) / Math.log(Math.max(1.0001, 400 / fitPps)))}
+            onChange={(e) => {
+              const target = fitPps * Math.pow(Math.max(1.0001, 400 / fitPps), Number(e.target.value) / 1000);
+              zoom(target / scale);
+            }}
+          />
           <IconButton label="Fit timeline" onClick={() => setPps(null)}>
             <span className="px-1 text-[11px] font-semibold">Fit</span>
           </IconButton>
@@ -467,7 +630,7 @@ export default function Timeline(props: Props) {
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
-        <div className="relative select-none" style={{ width }}>
+        <div ref={content} className="relative select-none" style={{ width }}>
           {/* Ruler - click or drag to seek */}
           <div
             className="relative h-7 cursor-pointer border-b border-border/70"
@@ -477,6 +640,59 @@ export default function Timeline(props: Props) {
             }}
           >
             <RowGutter label="" />
+            {props.range && (
+              <div
+                aria-label={`Range ${formatTime(props.range.in, true)} to ${formatTime(props.range.out, true)}`}
+                className="pointer-events-none absolute inset-y-0 border-x-2 border-sky-400 bg-sky-400/20"
+                style={{ left: xOf(props.range.in), width: Math.max(2, (props.range.out - props.range.in) * scale) }}
+              />
+            )}
+            {props.markers?.map((m) =>
+              renaming === m.id ? (
+                <input
+                  key={m.id}
+                  autoFocus
+                  defaultValue={m.label}
+                  aria-label="Marker name"
+                  className="absolute top-0.5 z-30 h-6 w-32 rounded border border-amber-400 bg-surface px-1 text-[11px] text-foreground"
+                  style={{ left: xOf(m.t) }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === "Enter") e.currentTarget.blur();
+                    if (e.key === "Escape") setRenaming(null);
+                  }}
+                  onBlur={(e) => {
+                    if (renaming === m.id && e.currentTarget.value.trim()) props.onMarkerRename?.(m.id, e.currentTarget.value.trim().slice(0, 60));
+                    setRenaming(null);
+                  }}
+                />
+              ) : (
+                <span
+                  key={m.id}
+                  role="button"
+                  aria-label={`${m.label} at ${formatTime(m.t, true)}`}
+                  title={`${m.label} (${formatTime(m.t, true)}) - drag to move, click to go to it, double-click to rename, Alt+click to remove`}
+                  className="absolute top-0 z-20 flex h-full -translate-x-[1px] cursor-ew-resize items-start"
+                  style={{ left: xOf(m.t) }}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    if (e.altKey) {
+                      props.onMarkerDelete?.(m.id);
+                      return;
+                    }
+                    startGesture(e, { kind: "marker", id: m.id, x0: e.clientX, t0: m.t, moved: false });
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setRenaming(m.id);
+                  }}
+                >
+                  <span className="h-full w-0.5 bg-amber-400" />
+                  <span className="max-w-[9rem] truncate rounded-r bg-amber-400 px-1 text-[9px] font-bold leading-4 text-black">{m.label}</span>
+                </span>
+              )
+            )}
             {ticks.map((t) => (
               <div key={t} className="absolute top-0 h-full" style={{ left: xOf(t) }}>
                 <div className="h-2 w-px bg-muted/50" />
@@ -496,11 +712,15 @@ export default function Timeline(props: Props) {
               props.onSeek(tOf(e.clientX));
             }}
           >
-            <RowGutter label="Video" />
+            <RowGutter label="Video">
+              {props.videoToggles?.map((tg) => (
+                <TrackToggleButton key={tg.kind} toggle={tg} track="Video" onClick={() => props.onTrackToggle?.("video", tg.kind)} />
+              ))}
+            </RowGutter>
             {lay.clips.map((c, i) => {
               const span = clipVisualSpan(lay, i);
               const src = sources[c.clip.sourceId];
-              const selected = selection?.kind === "clip" && selection.id === c.clip.id;
+              const selected = (selection?.kind === "clip" && selection.id === c.clip.id) || !!props.picked?.has(`clip:${c.clip.id}`);
               const dragging = drag?.index === i;
               const frozen = c.clip.freeze !== null;
               // Source bounds a trim may reach: a freeze holds up to
@@ -519,6 +739,7 @@ export default function Timeline(props: Props) {
                   tabIndex={0}
                   aria-label={`Clip ${i + 1}${badges}, ${formatTime(c.clip.start, true)} to ${formatTime(c.clip.end, true)}${src?.kind === "cleaned" ? ", AI cleaned" : ""}`}
                   aria-pressed={selected}
+                  data-pick={`clip:${c.clip.id}`}
                   className={`group absolute top-1.5 overflow-hidden rounded-lg border-2 bg-surface-3 outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-accent-2 ${
                     selected ? "z-10 border-accent-2 shadow-[0_0_0_2px_rgba(34,211,238,0.25)]" : "border-border hover:border-accent/60"
                   } ${dragging ? "z-20 cursor-grabbing opacity-80 shadow-xl" : "cursor-grab"}`}
@@ -529,7 +750,16 @@ export default function Timeline(props: Props) {
                     transform: dragging ? `translateX(${drag.dx}px)` : undefined,
                   }}
                   onPointerDown={(e) => {
+                    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                      e.stopPropagation();
+                      props.onPick?.([`clip:${c.clip.id}`], "toggle");
+                      return;
+                    }
                     props.onSelect({ kind: "clip", id: c.clip.id });
+                    if (e.altKey && !fineTrimBlocker(c.clip)) {
+                      startGesture(e, { kind: "slip", clipId: c.clip.id, clip: c.clip, x0: e.clientX, srcDur: srcDur, speed: c.clip.speed || 1 });
+                      return;
+                    }
                     startGesture(e, { kind: "reorder", index: i, x0: e.clientX, active: false });
                   }}
                   onKeyDown={(e) => {
@@ -540,7 +770,7 @@ export default function Timeline(props: Props) {
                   }}
                 >
                   <ClipThumbs strip={thumbnails[c.clip.sourceId]} clip={c.clip} width={(span.to - span.from) * scale} x={xOf(span.from) + 1} view={view} />
-                  {waveforms[c.clip.sourceId] && !frozen && (
+                  {waveforms[c.clip.sourceId] && !frozen && !props.soundRow && (
                     <WaveCanvas
                       wave={waveforms[c.clip.sourceId]}
                       offset={c.clip.start}
@@ -554,6 +784,23 @@ export default function Timeline(props: Props) {
                       className="bottom-0 text-white/60"
                     />
                   )}
+                  {props.groupColors?.get(`clip:${c.clip.id}`) && (
+                    <span
+                      aria-hidden
+                      title="Grouped (Ctrl+Shift+G to ungroup)"
+                      className="pointer-events-none absolute inset-x-0 top-0 z-10 h-1"
+                      style={{ background: props.groupColors.get(`clip:${c.clip.id}`) }}
+                    />
+                  )}
+                  {!!c.clip.keyframes?.length && (
+                    <KeyDiamonds
+                      times={c.clip.keyframes.map((k) => c.start + clipKeyTimeToLocal(c.clip, k.t))}
+                      left={xOf(span.from) + 1}
+                      xOf={xOf}
+                      top={6}
+                      onDown={(e, index, t) => rowApi.keyDown(e, { kind: "clip", id: c.clip.id }, index, t, c.start, c.start + c.duration)}
+                    />
+                  )}
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/75 to-transparent px-2 pb-1 pt-4 text-[10px] font-semibold text-white">
                     <span className="truncate">
                       {src?.kind === "cleaned" ? "✨ AI cleaned" : `Clip ${i + 1}`}
@@ -563,9 +810,11 @@ export default function Timeline(props: Props) {
                   </div>
                   <TrimHandle
                     side="start"
-                    label={`Trim start of clip ${i + 1}`}
+                    label={`Trim start of clip ${i + 1} (Alt+drag: move the cut into the clip before)`}
                     onPointerDown={(e) =>
-                      startGesture(e, {
+                      e.altKey && i > 0
+                        ? startGesture(e, { kind: "roll", index: i - 1, x0: e.clientX, last: 0 })
+                        : startGesture(e, {
                         kind: "trim",
                         clipId: c.clip.id,
                         edge: "start",
@@ -582,9 +831,11 @@ export default function Timeline(props: Props) {
                   />
                   <TrimHandle
                     side="end"
-                    label={`Trim end of clip ${i + 1}`}
+                    label={`Trim end of clip ${i + 1} (Alt+drag: move the cut into the next clip)`}
                     onPointerDown={(e) =>
-                      startGesture(e, {
+                      e.altKey && i < lay.clips.length - 1
+                        ? startGesture(e, { kind: "roll", index: i, x0: e.clientX, last: 0 })
+                        : startGesture(e, {
                         kind: "trim",
                         clipId: c.clip.id,
                         edge: "end",
@@ -642,8 +893,16 @@ export default function Timeline(props: Props) {
           {props.tracks
             .filter((track) => track.items.length > 0)
             .map((track) => (
-              <TrackRow key={track.key} track={track} scale={scale} view={view} waveforms={waveforms} api={rowApi} />
+              <TrackRow key={track.key} track={track} scale={scale} view={view} waveforms={waveforms} api={rowApi} groupColors={props.groupColors} />
             ))}
+
+          {box && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute z-40 rounded-sm border border-accent-2 bg-accent-2/10"
+              style={{ left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1), width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0) }}
+            />
+          )}
 
           {snapAt !== null && (
             <div
@@ -693,8 +952,42 @@ interface RowApi {
   rowDown: (e: React.PointerEvent) => void;
   itemDown: (e: React.PointerEvent, track: string, it: TrackItem, mode: ItemMode) => void;
   select: (s: Selection) => void;
+  keyDown: (e: React.PointerEvent, sel: Selection, index: number, t: number, min: number, max: number) => void;
   toggle: (track: string, kind: TrackToggle["kind"]) => void;
   remove: (track: string) => void;
+}
+
+/** Keyframe diamonds on a clip or layer bar: drag one to retime it, click
+ * it to put the playhead there, Alt+click to remove it. `left` is the bar's
+ * left edge in content pixels. */
+function KeyDiamonds({
+  times,
+  left,
+  xOf,
+  top,
+  onDown,
+}: {
+  times: number[];
+  left: number;
+  xOf: (t: number) => number;
+  top: number;
+  onDown: (e: React.PointerEvent, index: number, t: number) => void;
+}) {
+  return (
+    <>
+      {times.map((t, index) => (
+        <span
+          key={index}
+          role="button"
+          aria-label={`Keyframe at ${formatTime(t, true)}. Drag to move it, Alt+click to remove it`}
+          title={`Keyframe ${formatTime(t, true)} - drag to move, click to go to it, Alt+click to remove`}
+          className="absolute z-20 h-2.5 w-2.5 -translate-x-1/2 rotate-45 cursor-ew-resize rounded-[2px] border border-black/60 bg-amber-300 shadow hover:scale-125 hover:bg-white"
+          style={{ left: xOf(t) - left, top }}
+          onPointerDown={(e) => onDown(e, index, t)}
+        />
+      ))}
+    </>
+  );
 }
 
 /** One layer track. Memoized: dragging an item on one track doesn't
@@ -705,12 +998,14 @@ const TrackRow = memo(function TrackRow({
   view,
   waveforms,
   api,
+  groupColors,
 }: {
   track: TimelineTrack;
   scale: number;
   view: ViewRange;
   waveforms: Record<string, Waveform>;
   api: RowApi;
+  groupColors?: ReadonlyMap<string, string>;
 }) {
   const xOf = (t: number) => GUTTER + PAD + t * scale;
   const lanes = laneLayout(track.items);
@@ -757,9 +1052,10 @@ const TrackRow = memo(function TrackRow({
             aria-label={`${track.label}: ${it.label}, ${formatTime(it.start, true)} to ${formatTime(it.end, true)}${it.locked ? ", locked" : ""}${it.hidden ? ", hidden" : ""}`}
             aria-pressed={it.selected}
             data-span={`${it.start} ${it.end}`}
+            data-pick={selKey(it.sel) ?? undefined}
             className={`absolute flex items-center gap-1 overflow-hidden border text-[10px] ${compact ? "rounded-sm px-0.5" : "rounded-md px-1.5"} font-semibold outline-none focus-visible:ring-2 focus-visible:ring-accent-2 ${
               it.selected ? "z-10 border-accent-2 ring-1 ring-accent-2 text-foreground" : `${track.tone} text-foreground`
-            } ${it.hidden ? "opacity-40" : ""} ${it.locked ? "cursor-not-allowed" : "cursor-grab"} data-live:brightness-125 data-live:saturate-150`}
+            } ${it.hidden ? "opacity-40" : ""} ${it.locked ? "cursor-not-allowed" : it.fixed ? "cursor-pointer" : "cursor-grab"} data-live:brightness-125 data-live:saturate-150`}
             style={{
               left: xOf(it.start),
               width: w,
@@ -796,6 +1092,12 @@ const TrackRow = memo(function TrackRow({
               />
             )}
             {it.curve && <CurveOverlay curve={it.curve} item={it} editable={it.selected && !it.locked} scale={scale} height={LANE_H - 6} onEdit={(edit) => api.curve(track.key, it.id, edit)} api={api} />}
+            {groupColors?.get(selKey(it.sel) ?? "") && (
+              <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5" style={{ background: groupColors.get(selKey(it.sel) ?? "") }} />
+            )}
+            {!!it.keys?.length && !it.locked && (
+              <KeyDiamonds times={it.keys} left={xOf(it.start)} xOf={xOf} top={(LANE_H - 6) / 2 - 6} onDown={(e, index, t) => api.keyDown(e, it.sel, index, t, it.start, it.end)} />
+            )}
             {compact ? null : it.thumb ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={it.thumb} alt="" className="h-4 w-4 shrink-0 object-contain" draggable={false} />
@@ -808,7 +1110,7 @@ const TrackRow = memo(function TrackRow({
                 🔒
               </span>
             )}
-            {!it.locked && !tiny && (
+            {!it.locked && !it.fixed && !tiny && (
               <>
                 <span
                   aria-hidden
@@ -918,6 +1220,14 @@ const TOGGLE_TEXT = {
   group: { on: "▭", off: "⧉", label: ["Show captions separately", "Combine captions into one block"] },
   magnet: { on: "⊓", off: "⊓", label: ["Magnetic on: parts from one file stay back to back. Click to let them move freely", "Keep parts from one file back to back, like the video row"] },
   smooth: { on: "∿", off: "∿", label: ["Smooth cuts on: a tiny fade at every cut. Click to turn off", "Smooth cuts: a tiny fade at every cut, so cuts don't click"] },
+  link: {
+    on: "⛓",
+    off: "⛓",
+    label: [
+      "Linked: text, captions, audio and effects move with the clip under them when you trim, move or delete clips. Click to unlink",
+      "Link layers to clips: they move with the clip under them when you trim, move or delete clips",
+    ],
+  },
 } as const;
 
 function TrackToggleButton({ toggle, track, onClick }: { toggle: TrackToggle; track: string; onClick: () => void }) {

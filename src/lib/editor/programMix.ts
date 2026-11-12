@@ -11,6 +11,7 @@
  */
 import { ANALYSIS_RATE } from "./audioAnalysis";
 import { clipMixVolume, playedSourceId, smoothCutsOn, trackGainAt } from "./mix";
+import { clipSoundGain } from "./clipSound";
 import { sourceName } from "./sourceFile";
 import { decodeSourceAudio } from "./sourceAudio";
 import { RAMP_SEGMENTS, activeRamp, rampSegments } from "./speed";
@@ -86,7 +87,7 @@ export async function renderProgramMix(lay: Layout, project: Project, sources: R
     const fadeOut = lc.transitionOut;
     const end = lc.start + lc.duration;
     const gain = (t: number) => {
-      let g = volume;
+      let g = volume * clipSoundGain(lc, Math.min(t, end - 1e-6));
       if (fadeIn > 0 && t < lc.start + fadeIn) g *= Math.max(0, (t - lc.start) / fadeIn);
       if (fadeOut > 0 && t > end - fadeOut) g *= Math.max(0, (end - t) / fadeOut);
       return g;

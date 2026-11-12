@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { clipSoundGain } from "@/lib/editor/clipSound";
+import { clipLookStrength, effectStrength } from "@/lib/editor/strength";
 import type { Clock } from "@/lib/editor/clock";
 import { gradeOf, isNeutralColor } from "@/lib/editor/look";
 import { DIP_AUDIO, frameShadow, locate, sourceTimeAt, videoBox, type Layout } from "@/lib/editor/timeline";
@@ -282,7 +284,9 @@ export default function PreviewPlayer({
           r.canvas.className = "pointer-events-none absolute";
           el.after(r.canvas);
         }
-        if (r && lut && lutRef && r.render(el, lut, lutRef.intensity / 100)) {
+        // The LUT fades with the look's strength over time (strength.ts).
+        const lutMix = need ? clipLookStrength(lay.clips[need.index], t) : 1;
+        if (r && lut && lutRef && r.render(el, lut, (lutRef.intensity / 100) * lutMix)) {
           // Same box, transform, crop and filters as the video, which hides.
           r.canvas.style.cssText = el.style.cssText;
           el.style.opacity = "0";
@@ -646,11 +650,22 @@ function applyComposite(
       }
     }
     const filters: string[] = [];
-    if (!isNeutralColor(clip.look) || g.sharpness > 0) filters.push(`url(#look-${clip.id})`);
+    if (!isNeutralColor(clip.look) || g.sharpness > 0) {
+      filters.push(`url(#look-${clip.id})`);
+      // Look strength over time: the filter's last step blends graded and original.
+      const mix = document.getElementById(`look-${clip.id}-mix`);
+      if (mix) {
+        const m = clipLookStrength(laid, t).toFixed(3);
+        if (mix.getAttribute("k2") !== m) {
+          mix.setAttribute("k2", m);
+          mix.setAttribute("k3", (1 - Number(m)).toFixed(3));
+        }
+      }
+    }
     if (g.blur > 0) filters.push(`blur(${(g.blur * H).toFixed(2)}px)`);
     if (extra[slot].filter) filters.push(extra[slot].filter);
     el.style.filter = filters.join(" ");
-    setLevel(el, Math.max(0, clip.volume * extra[slot].vol));
+    setLevel(el, Math.max(0, clip.volume * extra[slot].vol * clipSoundGain(laid, t)));
   }
 }
 
@@ -762,7 +777,11 @@ function applyEffects(
   let bars = 0;
   for (const e of effects) {
     if (t < e.start || t >= e.end) continue;
-    const k = Math.max(0, Math.min(1, e.intensity / 100));
+    // Strength over time (strength.ts) scales the intensity here; the
+    // export blends the effected picture with the original by it.
+    const m = effectStrength(e, t);
+    if (m < 0.02) continue;
+    const k = Math.max(0, Math.min(1, e.intensity / 100)) * m;
     switch (e.type) {
       case "blur":
         filters.push(`blur(${(H * (0.004 + 0.02 * k)).toFixed(2)}px)`);

@@ -172,6 +172,16 @@ export interface Clip {
   mask?: ShapeMask | null;
   /** Stabilization strength 1..100, applied by the export; absent = off. */
   stabilize?: number;
+  /** The clip's own sound fading in / out over these timeline seconds from
+   * its edges (clipSound.ts); absent = none. */
+  fadeIn?: number;
+  fadeOut?: number;
+  /** Volume curve of the clip's own sound, in source seconds (clipSound.ts);
+   * absent = flat. */
+  envelope?: GainPoint[];
+  /** How strongly its look shows over time, 0..1 at source seconds
+   * (strength.ts); absent = fully. */
+  lookMix?: GainPoint[];
 }
 
 // --- Overlays: stickers, text and images share one layer model ----------
@@ -451,6 +461,9 @@ export interface EffectClip {
   start: number;
   end: number;
   intensity: number; // 0..100
+  /** How strongly it shows over time, 0..1 at seconds from its start
+   * (strength.ts); absent = fully. */
+  mix?: GainPoint[];
 }
 
 // --- Canvas -----------------------------------------------------------------
@@ -639,6 +652,21 @@ export interface EditSuggestion {
   confidence: "low" | "medium" | "high";
 }
 
+/** Items picked and moved together (groups.ts): multiSelect.ts keys. */
+export interface Group {
+  id: string;
+  keys: string[];
+}
+
+/** A marker the user dropped on the timeline (M): a note on a moment,
+ * jumped to with Up/Down. Timeline seconds; follows the clips like
+ * chapters do (follow.ts, ripple.ts). */
+export interface Marker {
+  id: string;
+  t: number;
+  label: string;
+}
+
 export interface Chapter {
   id: string;
   /** Timeline seconds. */
@@ -773,6 +801,13 @@ export interface Project {
   highlights?: HighlightSet;
   /** Mix bus and loudness (mix.ts); absent = defaults. */
   master?: MasterAudio;
+  /** Layers follow the main video row when clips are trimmed, moved or
+   * deleted (follow.ts). Absent = on. */
+  linkLayers?: boolean;
+  /** The user's own timeline markers. */
+  markers?: Marker[];
+  /** Grouped items (groups.ts). */
+  groups?: Group[];
 }
 
 export interface TranscriptWord {
@@ -932,6 +967,11 @@ export function migrateProject(raw: unknown): Project {
     ...(validDraft(p.draft) ? { draft: p.draft } : {}),
     ...(validHighlights(p.highlights) ? { highlights: p.highlights } : {}),
     ...(p.master ? { master: { ...DEFAULT_MASTER, ...(p.master as Partial<MasterAudio>) } } : {}),
+    ...(p.linkLayers === false ? { linkLayers: false } : {}),
+    ...(Array.isArray(p.groups)
+      ? { groups: (p.groups as Group[]).filter((g) => g && typeof g.id === "string" && Array.isArray(g.keys) && g.keys.every((k) => typeof k === "string")) }
+      : {}),
+    ...(Array.isArray(p.markers) ? { markers: (p.markers as Marker[]).filter((m) => m && typeof m.id === "string" && Number.isFinite(m.t)) } : {}),
     ...(p.focus
       ? {
           focus: {

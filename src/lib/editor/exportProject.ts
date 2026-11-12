@@ -14,6 +14,8 @@ import { RING_SPRITE_R, pointerSprites } from "./pointerDraw";
 import type { Clip, MediaSource, Overlay, Project } from "./types";
 import { sourceInput } from "./sourceFile";
 import { clipKeyTimeToLocal } from "./keyframes";
+import { clipSoundWire } from "./clipSound";
+import { clipLookWire, effectMixWire } from "./strength";
 import { activeRamp, rampSegments } from "./speed";
 import { ensureMatte, fullMatte, matteUnsupported } from "./matte";
 import { IS_DESKTOP } from "../platform/env";
@@ -246,10 +248,20 @@ export async function exportProject(
       ...(c.stabilize && c.freeze === null ? { stabilize: c.stabilize } : {}),
       // Speed curve as its constant-speed pieces (speed.ts).
       ...(activeRamp(c) ? { ramp: rampSegments(activeRamp(c)!) } : {}),
+      // Its own sound's fades and volume curve (clipSound.ts).
+      ...(lay.clips[i] ? clipSoundWire(lay.clips[i]) : {}),
+      // Its look's strength over time (strength.ts).
+      ...(lay.clips[i] && clipLookWire(lay.clips[i]) ? { lookMix: clipLookWire(lay.clips[i]) } : {}),
     })),
     overlays: overlayPayload,
     audio: audioPayload,
-    effects: project.effects.map((e) => ({ type: e.type, start: round(e.start), end: round(e.end), intensity: e.intensity })),
+    effects: project.effects.map((e) => ({
+      type: e.type,
+      start: round(e.start),
+      end: round(e.end),
+      intensity: e.intensity,
+      ...(effectMixWire(e) ? { mix: effectMixWire(e) } : {}),
+    })),
     ...(pointer ? { pointer } : {}),
     ...(masks.length ? { masks } : {}),
     // Screen recordings are variable frame rate: the server's probe would

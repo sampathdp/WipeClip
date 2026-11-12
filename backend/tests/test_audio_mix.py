@@ -294,3 +294,120 @@ class TrackCleanupTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClipSoundTest(unittest.TestCase):
+    """A clip's own sound: fades and a volume curve (src/lib/editor/clipSound.ts),
+    in clip time after speed."""
+
+    def test_fades_and_curve(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "tone.mov")
+            subprocess.run(
+                [FF, "-y", "-loglevel", "error",
+                 "-f", "lavfi", "-i", f"color=black:s={W}x{H}:r={FPS}:d=8,format=yuv420p",
+                 "-f", "lavfi", "-i", f"aevalsrc='0.5*sin(2*PI*440*t)':s={RATE}:c=stereo:d=8",
+                 "-c:v", "libx264", "-g", "1", "-c:a", "pcm_s16le", src],
+                check=True,
+            )  # fmt: skip
+            out = os.path.join(d, "out.mp4")
+            # 6 s of source at 2x: 3 s on the timeline. Fade in over 0.5 s,
+            # out over 0.5 s; the curve drops to half (-6 dB) from 1.5 s.
+            c = clip(src, 0.0, 6.0, speed=2.0, fade_in=0.5, fade_out=0.5, gain_points=[(0.0, 1.0), (1.4, 1.0), (1.5, 0.5), (3.0, 0.5)])
+            render(editor.ExportPlan(width=W, height=H, fps=FPS, with_audio=True, clips=[c]), out)
+            x = audio_of(out)
+
+            def level(t0: float, t1: float) -> float:
+                part = x[int(t0 * RATE) : int(t1 * RATE)]
+                return float(np.sqrt(np.mean(part**2)))
+
+            full = level(0.8, 1.3)
+            self.assertGreater(full, 0.1)
+            self.assertLess(level(0.0, 0.05), full * 0.2)  # fading in
+            self.assertAlmostEqual(level(1.7, 2.3) / full, 0.5, delta=0.06)  # the curve's half
+            self.assertLess(level(2.95, 3.0), full * 0.1)  # faded out
+
+    def test_chain_without_shape_is_just_the_volume(self) -> None:
+        self.assertEqual(editor._clip_sound(clip("x", 0.0, 2.0, volume=0.8)), "volume=0.8")
+
+
+class WideSpeedTest(unittest.TestCase):
+    """Constant speeds from 0.1x to 10x (MIN_SPEED / MAX_SPEED in
+    src/lib/editor/timeline.ts): the clip lasts its source length / speed,
+    with sound for all of it."""
+
+    def test_slow_and_fast(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "tone.mov")
+            subprocess.run(
+                [FF, "-y", "-loglevel", "error",
+                 "-f", "lavfi", "-i", f"color=gray:s={W}x{H}:r={FPS}:d=6,format=yuv420p",
+                 "-f", "lavfi", "-i", f"aevalsrc='0.5*sin(2*PI*440*t)':s={RATE}:c=stereo:d=6",
+                 "-c:v", "libx264", "-g", "1", "-c:a", "pcm_s16le", src],
+                check=True,
+            )  # fmt: skip
+            for speed, source, expected in ((5.0, 5.0, 1.0), (0.25, 0.5, 2.0)):
+                out = os.path.join(d, f"out{speed}.mp4")
+                render(editor.ExportPlan(width=W, height=H, fps=FPS, with_audio=True, clips=[clip(src, 0.0, source, speed=speed)]), out)
+                x = audio_of(out)
+                self.assertAlmostEqual(len(x) / RATE, expected, delta=0.05, msg=f"{speed}x")
+                self.assertGreater(float(np.sqrt(np.mean(x[: int(0.8 * expected * RATE)] ** 2))), 0.1, f"{speed}x has sound")
+
+    def test_request_accepts_the_range(self) -> None:
+        self.assertEqual(main._EditorClip(source=0, start=0, end=1, speed=0.1).speed, 0.1)
+        self.assertEqual(main._EditorClip(source=0, start=0, end=1, speed=10).speed, 10)
+        with self.assertRaises(Exception):
+            main._EditorClip(source=0, start=0, end=1, speed=12)
+
+
+def frame_at(path: str, t: float) -> np.ndarray:
+    """The frame at `t` seconds as an RGB array."""
+    raw = subprocess.run(
+        [FF, "-loglevel", "error", "-ss", f"{t:.3f}", "-i", path, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, check=True
+    ).stdout
+    return np.frombuffer(raw, np.uint8).reshape(H, W, 3).astype(float)
+
+
+class StrengthTest(unittest.TestCase):
+    """Look and effect strength over time (src/lib/editor/strength.ts): the
+    graded / effected picture blended over the original by a curve."""
+
+    def test_mix_commands(self) -> None:
+        cmds = editor.mix_commands([(0.0, 0.0), (1.0, 1.0)], "blend@x", 10)
+        self.assertTrue(cmds.startswith("0.0000 blend@x all_opacity 0.0000"))
+        self.assertIn("0.5000 blend@x all_opacity 0.5000", cmds)
+        self.assertEqual(len(cmds.split(";")), 11)
+        self.assertAlmostEqual(editor.strength_at([(1.0, 0.2), (2.0, 0.8)], 0.0), 0.2)
+        self.assertAlmostEqual(editor.strength_at([(1.0, 0.2), (2.0, 0.8)], 1.5), 0.5)
+
+    def test_effect_and_look_fade_in(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            white = os.path.join(d, "white.mov")
+            red = os.path.join(d, "red.mov")
+            for path, color in ((white, "white"), (red, "red")):
+                subprocess.run(
+                    [FF, "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"color={color}:s={W}x{H}:r={FPS}:d=3,format=yuv420p", "-c:v", "libx264", "-g", "1", path],
+                    check=True,
+                )
+            # Invert fades in over 0-2 s: white, then grey, then nearly black.
+            out = os.path.join(d, "fx.mp4")
+            fx = editor.PlanEffect(type="invert", start=0.0, end=3.0, intensity=100, mix=[(0.0, 0.0), (2.0, 1.0)])
+            c = editor.PlanClip(source_path=white, source_has_audio=False, source_width=W, source_height=H, start=0.0, duration=3.0)
+            render(editor.ExportPlan(width=W, height=H, fps=FPS, with_audio=False, clips=[c], effects=[fx]), out)
+            self.assertGreater(frame_at(out, 0.05).mean(), 230)
+            self.assertAlmostEqual(frame_at(out, 1.0).mean(), 128, delta=25)
+            self.assertLess(frame_at(out, 2.5).mean(), 30)
+            # A black & white look fades in on red: saturated first, grey at the end.
+            out = os.path.join(d, "look.mp4")
+            c = editor.PlanClip(
+                source_path=red, source_has_audio=False, source_width=W, source_height=H, start=0.0, duration=3.0,
+                filter="bw", intensity=100, look_mix=[(0.0, 0.0), (2.0, 1.0)],
+            )  # fmt: skip
+            render(editor.ExportPlan(width=W, height=H, fps=FPS, with_audio=False, clips=[c]), out)
+
+            def chroma(f: np.ndarray) -> float:
+                return float((f.max(axis=2) - f.min(axis=2)).mean())
+
+            self.assertGreater(chroma(frame_at(out, 0.05)), 150)
+            self.assertLess(chroma(frame_at(out, 2.5)), 25)
+            self.assertLess(chroma(frame_at(out, 1.0)), chroma(frame_at(out, 0.05)) - 40)

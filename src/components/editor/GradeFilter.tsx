@@ -29,6 +29,9 @@ export default function GradeFilter({ id, look }: { id: string; look: Look }) {
           <feFuncB type="table" tableValues={curves[2].join(" ")} />
         </feComponentTransfer>
       )}
+      {/* Look strength (strength.ts): the graded picture over the original
+          by k2, set per frame by the preview (id `${id}-mix`). */}
+      <feComposite id={`${id}-mix`} in2="SourceGraphic" operator="arithmetic" k1={0} k2={1} k3={0} k4={0} />
       {a > 0 && <feConvolveMatrix order="3" preserveAlpha="true" kernelMatrix={`0 ${-a} 0 ${-a} ${1 + 4 * a} ${-a} 0 ${-a} 0`} />}
     </filter>
   );

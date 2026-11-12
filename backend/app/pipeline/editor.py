@@ -464,6 +464,14 @@ class PlanClip:
     # Transform animation: {t, x, y, scale, rotation, ease} in clip time;
     # replaces x/y/scale/rotation (see keyframe_expr).
     keyframes: list[dict] = field(default_factory=list)
+    # Its own sound (src/lib/editor/clipSound.ts): fades in clip seconds and
+    # a volume curve of (clip second, gain 0..2) - see _clip_sound.
+    fade_in: float = 0.0
+    fade_out: float = 0.0
+    gain_points: list[tuple[float, float]] = field(default_factory=list)
+    # Its look's strength over time (src/lib/editor/strength.ts): (clip
+    # second, 0..1). Empty = fully graded.
+    look_mix: list[tuple[float, float]] = field(default_factory=list)
     # Curves as [r, g, b] tables and an imported LUT (size^3 RGB, red
     # fastest) - both baked into the clip's LUT with the grade (look.py).
     curve: list[list[float]] = field(default_factory=list)
@@ -586,6 +594,9 @@ class PlanEffect:
     start: float
     end: float
     intensity: float  # 0..100
+    # Strength over time (src/lib/editor/strength.ts): (timeline second,
+    # 0..1). Empty = full.
+    mix: list[tuple[float, float]] = field(default_factory=list)
 
 
 @dataclass
@@ -1272,7 +1283,11 @@ def _clip_video_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int, inputs
         # Forward slashes + escaped drive colon so the path survives filter
         # graph parsing on Windows too.
         cube_arg = _filter_path(cube)
-        pre.append(f"lut3d=file='{cube_arg}'")
+        if clip.look_mix:
+            # Look strength over time: the graded picture over the original.
+            pre.append(mixed_chain(f"lut3d=file='{cube_arg}'", clip.look_mix, f"lk{i}", fps))
+        else:
+            pre.append(f"lut3d=file='{cube_arg}'")
     if clip.adjust["sharpness"] > 0:
         pre.append(f"unsharp=5:5:{_num(clip.adjust['sharpness'] / 100 * 1.5)}")
 
@@ -1443,8 +1458,26 @@ async def prepare_stabilization(plan: ExportPlan, tmp: str, cancel: "threading.E
             clip.stab_path = path
 
 
+def _clip_sound(clip: PlanClip) -> str:
+    """The clip's volume, then its own volume curve and fades
+    (clipSoundGain in src/lib/editor/clipSound.ts), on the clip-time audio
+    (after speed and reverse, before the padding to its length)."""
+    out = f"volume={_num(clip.volume)}"
+    if clip.gain_points:
+        out += f",volume='{envelope_expr(clip.gain_points, 't')}':eval=frame"
+    half = clip.duration / 2
+    fade_in = min(clip.fade_in, half)
+    fade_out = min(clip.fade_out, half)
+    if fade_in > 0:
+        out += f",afade=t=in:st=0:d={_num(fade_in)}"
+    if fade_out > 0:
+        out += f",afade=t=out:st={_num(clip.duration - fade_out)}:d={_num(fade_out)}"
+    return out
+
+
 def _clip_audio_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int) -> str:
     d = _num(clip.duration)
+    sound = _clip_sound(clip)
     if clip.ramp and clip.source_has_audio and clip.source_length / len(clip.ramp) < MIN_RAMP_AUDIO_PIECE:
         # Too short to split: atempo emits nothing for a piece under ~21 ms,
         # leaving the clip without sound, and the silence apad then makes
@@ -1455,7 +1488,7 @@ def _clip_audio_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int) -> str
         average = clip.source_length / sum(piece / s for s in clip.ramp)
         return (
             f"[{idx}:a:0]aresample={AUDIO_RATE},{_stereo(clip.source_mono)},{_atempo(average)},"
-            f"volume={_num(clip.volume)},apad,atrim=duration={d},asetpts=PTS-STARTPTS[a{i}]"
+            f"{sound},apad,atrim=duration={d},asetpts=PTS-STARTPTS[a{i}]"
         )
     if clip.ramp and clip.source_has_audio:
         # Each source piece at its own tempo, joined back together.
@@ -1470,14 +1503,14 @@ def _clip_audio_chain(plan: ExportPlan, clip: PlanClip, i: int, idx: int) -> str
                 f"[ra{i}_{n}]atrim=start={_num(n * piece)}:end={_num((n + 1) * piece)},asetpts=PTS-STARTPTS,{_atempo(s)}[rb{i}_{n}]"
             )
         tails = "".join(f"[rb{i}_{n}]" for n in range(k))
-        parts.append(f"{tails}concat=n={k}:v=0:a=1,volume={_num(clip.volume)},apad,atrim=duration={d},asetpts=PTS-STARTPTS[a{i}]")
+        parts.append(f"{tails}concat=n={k}:v=0:a=1,{sound},apad,atrim=duration={d},asetpts=PTS-STARTPTS[a{i}]")
         return ";".join(parts)
     src = f"[{idx}:a:0]" if clip.source_has_audio else f"anullsrc=r={AUDIO_RATE}:cl=stereo,"
     tempo = _atempo(clip.speed) if clip.source_has_audio else "anull"
     rev = "areverse," if clip.reverse and clip.source_has_audio else ""
     return (
         f"{src}aresample={AUDIO_RATE},{_stereo(clip.source_mono and clip.source_has_audio)},{rev}{tempo},"
-        f"volume={_num(clip.volume)},apad,atrim=duration={d},asetpts=PTS-STARTPTS[a{i}]"
+        f"{sound},apad,atrim=duration={d},asetpts=PTS-STARTPTS[a{i}]"
     )
 
 
@@ -1486,6 +1519,56 @@ def _full_at_50(k: float) -> float:
     invert): full from 50% intensity, half at 0. Same as fullAt50 in
     PreviewPlayer.tsx."""
     return min(1.0, 0.5 + k)
+
+
+# Most opacity changes sent to one blend (one a frame while the strength
+# changes); longer ramps are sampled less often.
+MAX_MIX_COMMANDS = 3000
+
+
+def strength_at(points: list[tuple[float, float]], t: float) -> float:
+    """strengthAt() in src/lib/editor/strength.ts: linear between points,
+    held outside them."""
+    if not points:
+        return 1.0
+    if t <= points[0][0]:
+        return points[0][1]
+    for (t0, v0), (t1, v1) in zip(points, points[1:]):
+        if t < t1:
+            return v0 + (v1 - v0) * (t - t0) / max(1e-9, t1 - t0)
+    return points[-1][1]
+
+
+def mix_commands(points: list[tuple[float, float]], target: str, fps: float) -> str:
+    """sendcmd commands setting `target`'s all_opacity to the strength at
+    every frame where it changes (once where it holds)."""
+    step = 1 / max(1.0, fps)
+    ramp_time = sum(t1 - t0 for (t0, v0), (t1, v1) in zip(points, points[1:]) if abs(v1 - v0) > 1e-6)
+    if ramp_time / step > MAX_MIX_COMMANDS:
+        step = ramp_time / MAX_MIX_COMMANDS
+    times = {0.0, *(p[0] for p in points)}
+    for (t0, v0), (t1, v1) in zip(points, points[1:]):
+        if abs(v1 - v0) > 1e-6:
+            k = 1
+            while t0 + k * step < t1:
+                times.add(t0 + k * step)
+                k += 1
+    cmds = [f"{max(0.0, t):.4f} {target} all_opacity {strength_at(points, t):.4f}" for t in sorted(times)]
+    return ";".join(cmds)
+
+
+def mixed_chain(filters: str, points: list[tuple[float, float]], name: str, fps: float) -> str:
+    """`filters` applied by the given strength over time: the picture split,
+    one copy through `filters`, then blended back over the original with an
+    opacity that changes per frame (sendcmd; a per-pixel expression would
+    be far slower). Usable inside a linear chain: it continues from the
+    blend's output."""
+    first = _num(strength_at(points, 0.0))
+    return (
+        f"split[{name}a][{name}b];[{name}b]{filters},"
+        f"sendcmd=c='{mix_commands(points, f'blend@{name}', fps)}'[{name}g];"
+        f"[{name}g][{name}a]blend@{name}=all_mode=normal:all_opacity={first}"
+    )
 
 
 def _effect_filters(e: PlanEffect, W: int, H: int) -> str:
@@ -1921,7 +2004,10 @@ def build_export_args(
         v_acc, a_acc = "vseg", "aseg"
 
     if plan.effects:
-        fx = ",".join(_effect_filters(e, plan.width, plan.height) for e in plan.effects)
+        fx = ",".join(
+            mixed_chain(_effect_filters(e, plan.width, plan.height), e.mix, f"fx{n}", plan.fps) if e.mix else _effect_filters(e, plan.width, plan.height)
+            for n, e in enumerate(plan.effects)
+        )
         graph.append(f"[{v_acc}]{fx}[vfx]")
         v_acc = "vfx"
 

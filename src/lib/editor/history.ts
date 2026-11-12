@@ -1,6 +1,10 @@
-import { useCallback, useReducer } from "react";
+import { useCallback, useLayoutEffect, useReducer, useRef } from "react";
 import type { Project } from "./types";
 import { withMagnet } from "./audioMagnet.ts";
+import { onlyClipsChanged } from "./follow.ts";
+
+/** Moves the layers of `prev` the way the clips moved in `next` (follow.ts). */
+export type FollowFn = (prev: Project, next: Project) => Project;
 
 const MAX_HISTORY = 200;
 
@@ -13,12 +17,33 @@ export interface HistoryState {
 }
 
 export type HistoryAction =
-  | { type: "apply"; fn: (p: Project) => Project; record: boolean }
+  | { type: "apply"; fn: (p: Project) => Project; record: boolean; follow?: FollowFn }
   | { type: "begin" }
   | { type: "end" }
   | { type: "undo" }
   | { type: "redo" }
   | { type: "reset"; project: Project };
+
+/** Layers following the clips: an edit that changed only the clips gets
+ * its layers moved by `follow`. Inside a drag each step is measured from
+ * where the drag started, so trimming a clip shorter and back gives the
+ * layers back too. */
+function withFollow(state: HistoryState, raw: Project, follow?: FollowFn): Project {
+  if (!follow || raw.linkLayers === false || !onlyClipsChanged(state.present, raw)) return raw;
+  const base = state.gestureBase;
+  if (!base) return follow(state.present, raw);
+  return follow(base, {
+    ...raw,
+    overlays: base.overlays,
+    audio: base.audio,
+    effects: base.effects,
+    masks: base.masks,
+    suggestions: base.suggestions,
+    chapters: base.chapters,
+    markers: base.markers,
+    transcript: base.transcript,
+  });
+}
 
 export function historyReducer(state: HistoryState, action: HistoryAction): HistoryState {
   switch (action.type) {
@@ -26,7 +51,7 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
       // Magnetic audio (audioMagnet.ts): every edit keeps the parts packed;
       // a drag packs once, when it ends (each drag step is measured from
       // where the part was, so packing mid-drag would compound a trim).
-      const raw = action.fn(state.present);
+      const raw = withFollow(state, action.fn(state.present), action.follow);
       const next = state.gestureBase ? raw : withMagnet(state.present, raw);
       if (next === state.present) return state;
       // Inside a gesture, intermediate drag positions replace the present
@@ -72,7 +97,11 @@ export function historyReducer(state: HistoryState, action: HistoryAction): Hist
  * brackets its many intermediate updates with beginGesture/endGesture so
  * one drag is one undo step.
  */
-export function useProjectHistory(initial: Project) {
+export function useProjectHistory(initial: Project, follow?: FollowFn) {
+  const followRef = useRef(follow);
+  useLayoutEffect(() => {
+    followRef.current = follow;
+  });
   const [state, dispatch] = useReducer(historyReducer, {
     past: [],
     present: initial,
@@ -81,7 +110,7 @@ export function useProjectHistory(initial: Project) {
   });
 
   const apply = useCallback(
-    (fn: (p: Project) => Project, record = true) => dispatch({ type: "apply", fn, record }),
+    (fn: (p: Project) => Project, record = true) => dispatch({ type: "apply", fn, record, follow: followRef.current }),
     []
   );
   const beginGesture = useCallback(() => dispatch({ type: "begin" }), []);

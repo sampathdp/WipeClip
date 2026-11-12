@@ -1294,7 +1294,7 @@ class _EditorClip(BaseModel):
     reverse: bool = False
     crop: _EditorCrop = Field(default_factory=_EditorCrop)
     transition: Optional[_EditorTransition] = None
-    speed: float = Field(1, ge=0.5, le=2)
+    speed: float = Field(1, ge=0.1, le=10)
     # The clip's own volume (0..2) times the video-sound track's (0..2,
     # src/lib/editor/mix.ts clipMixVolume).
     volume: float = Field(1, ge=0, le=4)
@@ -1308,6 +1308,14 @@ class _EditorClip(BaseModel):
     # Shape mask: index into `overlays` of its grayscale PNG.
     mask: Optional[int] = Field(None, ge=0, lt=EDITOR_MAX_STICKERS)
     stabilize: float = Field(0, ge=0, le=100)
+    # Its own sound (src/lib/editor/clipSound.ts): fades in clip seconds, and
+    # a volume curve as [clip second, gain 0..2], sorted.
+    fadeIn: float = Field(0, ge=0, le=10)
+    fadeOut: float = Field(0, ge=0, le=10)
+    gain: list[list[float]] = Field(default_factory=list, max_length=202)
+    # Its look's strength over time (src/lib/editor/strength.ts):
+    # [clip second, 0..1], sorted.
+    lookMix: list[list[float]] = Field(default_factory=list, max_length=40)
 
 
 class _EditorPointerCursor(BaseModel):
@@ -1573,6 +1581,8 @@ class _EditorEffect(BaseModel):
     type: str
     start: float = Field(ge=0)
     end: float = Field(gt=0)
+    # Strength over time (src/lib/editor/strength.ts): [timeline second, 0..1], sorted.
+    mix: list[list[float]] = Field(default_factory=list, max_length=40)
     intensity: float = Field(50, ge=0, le=100)
 
 
@@ -1998,6 +2008,10 @@ async def api_video_export(
                         ramp=list(c.ramp),
                         mask_path=overlay_images[c.mask][0] if c.mask is not None else None,
                         stabilize=c.stabilize if c.freeze is None else 0.0,
+                        fade_in=c.fadeIn,
+                        fade_out=c.fadeOut,
+                        gain_points=[(p[0], min(2.0, max(0.0, p[1]))) for p in c.gain if len(p) == 2],
+                        look_mix=[(p[0], min(1.0, max(0.0, p[1]))) for p in c.lookMix if len(p) == 2],
                     )
                 )
 
@@ -2099,7 +2113,11 @@ async def api_video_export(
             for e in spec.effects:
                 start, end = e.start, min(e.end, total)
                 if end - start >= 0.05:
-                    plan.effects.append(editor_pipeline.PlanEffect(type=e.type, start=start, end=end, intensity=e.intensity))
+                    plan.effects.append(
+                        editor_pipeline.PlanEffect(
+                            type=e.type, start=start, end=end, intensity=e.intensity, mix=[(p[0], min(1.0, max(0.0, p[1]))) for p in e.mix if len(p) == 2]
+                        )
+                    )
             for a in spec.audio:
                 if a.audio is not None:
                     path, src_duration, mono = audio_paths[a.audio], audio_durations[a.audio], audio_monos[a.audio]

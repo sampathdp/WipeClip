@@ -6,6 +6,7 @@
 import { memoryBudgetGb } from "@/lib/platform";
 import { engineSpeechModel, engineTranscribe, type EngineGpu } from "@/lib/toolsApi";
 import { applyHint, wrap } from "./captionEdit";
+import { keepEnglish } from "./englishWords";
 import { DEFAULT_TEXT } from "./textRaster";
 import { newId, type Layout } from "./timeline";
 import type { AnimIn, AudioClip, MediaSource, Overlay, Project, TextStyle } from "./types";
@@ -252,6 +253,7 @@ export interface CaptionPrefs {
   look?: CaptionLook;
   hint?: string;
   accurate?: boolean;
+  keepEnglish?: boolean;
 }
 
 export function savedCaptionPrefs(): CaptionPrefs {
@@ -728,13 +730,17 @@ export interface SpeechOptions {
   hint?: string;
   /** Slower, more careful decoding (desktop engine: beam search). */
   accurate?: boolean;
+  /** English words said in Sinhala, Tamil, Hindi... speech written in
+   * English instead of that language's script (keepEnglish). On unless false. */
+  keepEnglish?: boolean;
 }
 
 /** Word-timed transcript of `samples` (16 kHz mono, timeline time).
  * `language` is a code from CAPTION_LANGUAGES, or "auto" to let Whisper
  * detect it. Runs on WebGPU when available; if that fails, the run is
  * retried once on the CPU. `opts.hint` also corrects the spelling of the
- * words it lists (applyHint). */
+ * words it lists (applyHint), and English words spelled in an Indic script
+ * are written in English (keepEnglish) unless `opts.keepEnglish` is false. */
 export async function transcribe(
   samples: Float32Array,
   language: string,
@@ -742,7 +748,9 @@ export async function transcribe(
   opts: SpeechOptions = {}
 ): Promise<{ language: string; words: CaptionWord[] }> {
   const res = await transcribeRaw(samples, language, onProgress, opts);
-  return { language: res.language, words: applyHint(res.words, opts.hint ?? "") };
+  const hint = opts.hint ?? "";
+  const words = opts.keepEnglish === false ? res.words : keepEnglish(res.words, hint);
+  return { language: res.language, words: applyHint(words, hint) };
 }
 
 async function transcribeRaw(

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { useShortcutKeys } from "@/lib/platform/keys";
 import { STICKER_CATEGORIES, STICKERS, stickerThumbSrc, type StickerCategory } from "@/lib/editor/stickers";
 import {
   MAX_FREEZE_SECONDS,
@@ -140,6 +141,7 @@ export function ClipPanel({
   playheadSourceTime,
   onChange,
   onSplit,
+  onDuplicate,
   onDelete,
   onMove,
   onAiCleanup,
@@ -153,6 +155,7 @@ export function ClipPanel({
   playheadSourceTime: number | null;
   onChange: (patch: Partial<Clip>) => void;
   onSplit: () => void;
+  onDuplicate: () => void;
   onDelete: () => void;
   onMove: (dir: -1 | 1) => void;
   onAiCleanup: () => void;
@@ -161,6 +164,7 @@ export function ClipPanel({
   extra?: (section: ClipSection) => ReactNode;
 }) {
   const [tab, setTab] = useState<ClipSection>("basics");
+  const shortcutKeys = useShortcutKeys();
   const { clip, index } = laid;
   const canTrimHere = playheadSourceTime !== null;
   const p = playheadSourceTime ?? 0;
@@ -249,13 +253,18 @@ export function ClipPanel({
             </>
           )}
   
-          <div className="grid grid-cols-2 gap-2 border-t border-border pt-4">
+          <div className="grid grid-cols-3 gap-2 border-t border-border pt-4">
             <ActionButton onClick={onSplit} disabled={!canTrimHere}>
               <SplitIcon width={14} height={14} /> Split
+            </ActionButton>
+            <ActionButton onClick={onDuplicate} title={`Duplicate (${shortcutKeys.mod}+D)`}>
+              Duplicate
             </ActionButton>
             <ActionButton onClick={onDelete} disabled={count <= 1} tone="danger" title={count <= 1 ? "A project needs at least one clip" : undefined}>
               <TrashIcon width={14} height={14} /> Delete
             </ActionButton>
+          </div>
+          <div className="-mt-2 grid grid-cols-2 gap-2">
             <ActionButton onClick={() => onMove(-1)} disabled={index === 0}>
               <ChevronLeftIcon width={14} height={14} /> Move earlier
             </ActionButton>

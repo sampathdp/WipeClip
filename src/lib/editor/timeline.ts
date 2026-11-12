@@ -16,7 +16,10 @@ import { clipTimelineLength, localToSource, rampPart } from "./speed.ts";
 /** Shortest clip any trim/split can produce. */
 export const MIN_CLIP_SECONDS = 0.2;
 export const TRANSITION_DURATIONS = [0.2, 0.5, 1, 1.5, 2] as const;
-export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+export const SPEEDS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5] as const;
+/** Any constant speed from 0.1x (slow motion) to 10x (time-lapse). */
+export const MIN_SPEED = 0.1;
+export const MAX_SPEED = 10;
 /** Default and longest hold of a freeze frame. */
 export const FREEZE_SECONDS = 3;
 export const MAX_FREEZE_SECONDS = 30;
@@ -301,8 +304,9 @@ export function splitAt(project: Project, lay: Layout, time: number): Project | 
   const second = clip.reverse ? { start: clip.start, end: cut } : { start: cut, end: clip.end };
   // A speed curve is divided with the clip, each part keeping its piece.
   const frac = local / (clip.end - clip.start);
-  const left: Clip = { ...clip, ...first, transition: null, ...(clip.ramp ? { ramp: rampPart(clip.ramp, 0, frac) } : {}) };
-  const right: Clip = { ...clip, ...second, id: newId("clip"), ...(clip.ramp ? { ramp: rampPart(clip.ramp, frac, 1) } : {}) };
+  // Sound fades stay at the clip's outer edges, not at the cut.
+  const left: Clip = { ...clip, ...first, transition: null, fadeOut: undefined, ...(clip.ramp ? { ramp: rampPart(clip.ramp, 0, frac) } : {}) };
+  const right: Clip = { ...clip, ...second, id: newId("clip"), fadeIn: undefined, ...(clip.ramp ? { ramp: rampPart(clip.ramp, frac, 1) } : {}) };
   const clips = [...project.clips];
   clips.splice(index, 1, left, right);
   return { ...project, clips };
@@ -353,6 +357,18 @@ export function deleteClip(project: Project, clipId: string): Project | null {
   // Layers past the new end are kept (undo gives the time back); the
   // export skips anything outside the timeline.
   return { ...project, clips: project.clips.filter((c) => c.id !== clipId) };
+}
+
+/** Inserts a copy of a clip right after it. The copy takes over the
+ * outgoing transition, so the original cuts straight into its copy. */
+export function duplicateClip(project: Project, clipId: string): { project: Project; clipId: string } | null {
+  const i = project.clips.findIndex((c) => c.id === clipId);
+  if (i < 0) return null;
+  const clip = project.clips[i];
+  const copy: Clip = { ...clip, id: newId("clip") };
+  const clips = [...project.clips];
+  clips.splice(i, 1, { ...clip, transition: null }, copy);
+  return { project: { ...project, clips }, clipId: copy.id };
 }
 
 export function moveClip(project: Project, from: number, to: number): Project {

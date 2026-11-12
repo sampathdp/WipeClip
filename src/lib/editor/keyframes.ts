@@ -1,6 +1,6 @@
-import { sourceTimeAt, type LaidOutClip } from "./timeline";
-import { sourceToLocal } from "./speed";
-import type { Clip, Keyframe, KeyframeEase, Overlay, VideoTransform } from "./types";
+import { sourceTimeAt, type LaidOutClip } from "./timeline.ts";
+import { sourceToLocal } from "./speed.ts";
+import type { Clip, Keyframe, KeyframeEase, Overlay, VideoTransform } from "./types.ts";
 
 /** Keyframe animation of position, scale, rotation and opacity.
  *
@@ -156,4 +156,22 @@ function diff(a: VideoTransform, b: VideoTransform): Partial<VideoTransform> {
 
 export function addClipKeyframe(clip: Clip, s: number): Keyframe[] {
   return upsertKeyframe(clip.keyframes ?? [], s, { ...clipTransformAt(clip, s), opacity: 1 });
+}
+
+// --- retiming on the timeline -------------------------------------------------
+
+/** Keyframe `index` moved to time `t` (in the keyframes' own time base),
+ * held between its neighbors so the order - and so the animation's shape -
+ * stays the same. */
+export function moveKeyframe(kfs: Keyframe[], index: number, t: number): Keyframe[] {
+  const k = kfs[index];
+  if (!k) return kfs;
+  const lo = index > 0 ? kfs[index - 1].t + KEYFRAME_SNAP : -Infinity;
+  const hi = index < kfs.length - 1 ? kfs[index + 1].t - KEYFRAME_SNAP : Infinity;
+  const next = Math.round(Math.min(hi, Math.max(lo, t)) * 1e4) / 1e4;
+  return next === k.t ? kfs : kfs.map((x, i) => (i === index ? { ...x, t: next } : x));
+}
+
+export function removeKeyframe(kfs: Keyframe[], index: number): Keyframe[] {
+  return kfs.filter((_, i) => i !== index);
 }

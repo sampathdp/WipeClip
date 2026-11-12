@@ -18,6 +18,8 @@ import {
   EFFECT_LABELS,
   MAX_REVERSE_SECONDS,
   SPEEDS,
+  MIN_SPEED,
+  MAX_SPEED,
   formatTime,
 } from "@/lib/editor/timeline";
 import {
@@ -365,7 +367,28 @@ export function ClipExtras({
           <div>
             <SectionTitle>Speed</SectionTitle>
             {!clip.ramp && (
-              <Chips label="Speed" value={clip.speed} onChange={(speed) => onChange({ speed })} options={SPEEDS.map((s) => ({ value: s, label: `${s}×` }))} />
+              <>
+                <Chips label="Speed" value={clip.speed} onChange={(speed) => onChange({ speed })} options={SPEEDS.map((s) => ({ value: s, label: `${s}×` }))} />
+                <label className="mt-2 flex items-center gap-2 text-xs text-muted">
+                  Any speed
+                  <input
+                    type="number"
+                    className={`${inputCls} w-24`}
+                    min={MIN_SPEED}
+                    max={MAX_SPEED}
+                    step={0.05}
+                    defaultValue={clip.speed}
+                    key={clip.speed}
+                    aria-label="Speed (0.1 to 10)"
+                    onBlur={(e) => {
+                      const v = Number(e.currentTarget.value);
+                      if (Number.isFinite(v) && v > 0) onChange({ speed: Math.round(Math.min(MAX_SPEED, Math.max(MIN_SPEED, v)) * 100) / 100 });
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                  />
+                  × <span className="text-[11px]">(0.1 slow motion - 10 time-lapse)</span>
+                </label>
+              </>
             )}
             <SpeedCurve clip={clip} onChange={onChange} gesture={gesture} />
           </div>
@@ -379,6 +402,50 @@ export function ClipExtras({
             onChange={(v) => onChange({ volume: v / 100 })}
             gesture={gesture}
           />
+          {source.hasAudio && (
+            <>
+              {(() => {
+                const maxFade = Math.max(0.1, Math.min(5, clipTimelineLength(clip) / 2));
+                return (
+                  <>
+                    <SliderField
+                      label="Sound fade in"
+                      value={Math.min(maxFade, clip.fadeIn ?? 0)}
+                      min={0}
+                      max={maxFade}
+                      step={0.1}
+                      neutral={0}
+                      format={(v) => `${v.toFixed(1)}s`}
+                      onChange={(fadeIn) => onChange({ fadeIn: fadeIn > 0 ? fadeIn : undefined })}
+                      gesture={gesture}
+                    />
+                    <SliderField
+                      label="Sound fade out"
+                      value={Math.min(maxFade, clip.fadeOut ?? 0)}
+                      min={0}
+                      max={maxFade}
+                      step={0.1}
+                      neutral={0}
+                      format={(v) => `${v.toFixed(1)}s`}
+                      onChange={(fadeOut) => onChange({ fadeOut: fadeOut > 0 ? fadeOut : undefined })}
+                      gesture={gesture}
+                    />
+                  </>
+                );
+              })()}
+              <p className="-mt-2 text-[11px] leading-relaxed text-muted">
+                Volume curve: double-click this clip&apos;s sound in the Clip sound row of the timeline to add a point, drag a point up or down, double-click a point to remove it.
+                {clip.envelope?.length ? (
+                  <>
+                    {" "}
+                    <button type="button" className="font-semibold text-accent-2 hover:underline" onClick={() => onChange({ envelope: undefined })}>
+                      Clear the curve
+                    </button>
+                  </>
+                ) : null}
+              </p>
+            </>
+          )}
           {source.hasAudio && !clip.reverse && (
             <div className="flex flex-wrap gap-2">
               <ActionButton onClick={onExtractAudio} title="Move this clip's sound to its own audio track">
@@ -618,6 +685,60 @@ const ADJUST_FIELDS: { key: keyof Adjustments; label: string; min: number; max: 
   { key: "opacity", label: "Opacity", min: 0, max: 100, neutral: 100 },
 ];
 
+/** Strength of a look or effect over time (strength.ts): its strength at the
+ * playhead (setting it adds a point there), quick fades, and clearing. */
+export interface StrengthControls {
+  /** 0..1 at the playhead. */
+  value: number;
+  /** Points set so far (0 = full strength all along). */
+  points: number;
+  /** The playhead is inside the clip or effect. */
+  inside: boolean;
+  onSet: (v: number) => void;
+  onFade: (kind: "in" | "out") => void;
+  onClear: () => void;
+}
+
+export function StrengthSection({ title, what, s, gesture }: { title: string; what: string; s: StrengthControls; gesture: Gesture }) {
+  return (
+    <div className="space-y-3 border-t border-border pt-4">
+      <SectionTitle>{title}</SectionTitle>
+      <SliderField
+        label="Strength at the playhead"
+        value={Math.round(s.value * 100)}
+        min={0}
+        max={100}
+        neutral={100}
+        format={(v) => `${v}%`}
+        onChange={(v) => s.inside && s.onSet(v / 100)}
+        gesture={gesture}
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <ActionButton onClick={() => s.onFade("in")} title={`${what} goes from none to full over its first second`}>
+          Fade in
+        </ActionButton>
+        <ActionButton onClick={() => s.onFade("out")} title={`${what} goes from full to none over its last second`}>
+          Fade out
+        </ActionButton>
+      </div>
+      <p className="text-[11px] leading-relaxed text-muted">
+        {s.inside
+          ? `Move the playhead and set the strength to animate ${what.toLowerCase()}: it changes smoothly between the points you set.`
+          : `Move the playhead inside it to set its strength there.`}
+        {s.points > 0 && (
+          <>
+            {" "}
+            {s.points} point{s.points === 1 ? "" : "s"} set.{" "}
+            <button type="button" className="font-semibold text-accent-2 hover:underline" onClick={s.onClear}>
+              Back to full strength
+            </button>
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
+
 export function LookPanel({
   mode,
   look,
@@ -629,7 +750,10 @@ export function LookPanel({
   gesture,
   premiumLocked = false,
   onImportLut,
+  strength,
 }: {
+  /** The look's strength over time, at the bottom of the panel. */
+  strength?: React.ReactNode;
   mode: "filters" | "adjust";
   /** Imports a .cube file as this clip's LUT. */
   onImportLut: (file: File) => void;
@@ -724,6 +848,7 @@ export function LookPanel({
           Apply to all
         </ActionButton>
       </div>
+      {strength}
     </PanelShell>
   );
 }
@@ -1057,6 +1182,8 @@ export interface CaptionOptions {
   hint?: string;
   /** Slower, more careful speech recognition (desktop app). */
   accurate?: boolean;
+  /** English words in Indic-language speech written in English (on unless false). */
+  keepEnglish?: boolean;
 }
 
 /** One caption layer, as the caption list edits it. */
@@ -1543,6 +1670,21 @@ export function CaptionsPanel({
                 </span>
               </label>
             )}
+            {options.language !== "en" && (
+              <label className="flex items-start gap-2 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 accent-[var(--accent)]"
+                  checked={options.keepEnglish !== false}
+                  disabled={busy}
+                  onChange={(e) => set({ keepEnglish: e.target.checked })}
+                />
+                <span>
+                  <span className="font-medium text-foreground">Keep English words in English</span> - English words said in Sinhala, Tamil,
+                  Hindi and other Indian languages (video, link, download) are written in English, not spelled out in that script.
+                </span>
+              </label>
+            )}
             <SpeechGpuChoice gpu={model?.cuda} busy={busy} />
             {needsModel ? (
               <SpeechModelNotice model={model} busy={busy} onConsent={() => setConsent(true)} />
@@ -1738,9 +1880,13 @@ export function OverlayPanel({
   style,
   fonts,
   onCamLayout,
+  onFrame,
   background,
 }: {
   overlay: Overlay;
+  /** Video layers: centered over the whole picture, all of it showing ("fit")
+   * or covering it ("fill") - a second video track. */
+  onFrame?: (mode: "fit" | "fill") => void;
   /** Video layers: place as a webcam (webcamLayout.ts); null = by hand. */
   onCamLayout?: (layout: CamLayout | null) => void;
   /** Video layers: webcam background removal. */
@@ -1948,6 +2094,16 @@ export function OverlayPanel({
             <p className="text-[11px] text-muted">
               Plays from {formatTime(o.offset, true)} of its video. Drag the layer&apos;s left edge on the timeline to start later in the video.
             </p>
+            {onFrame && (
+              <div className="grid grid-cols-2 gap-2">
+                <ActionButton onClick={() => onFrame("fill")} title="Center it and cover the whole picture, like a second video track (edges may be cut off)">
+                  Fill the frame
+                </ActionButton>
+                <ActionButton onClick={() => onFrame("fit")} title="Center it and show all of it, as large as fits">
+                  Fit in the frame
+                </ActionButton>
+              </div>
+            )}
           </div>
         )}
         {o.kind === "video" && onCamLayout && <CamLayoutSection layout={o.camLayout} onChange={onCamLayout} />}
@@ -2902,7 +3058,10 @@ export function EffectPanel({
   onClose,
   gesture,
   premiumLocked = false,
+  strength,
 }: {
+  /** The effect's strength over time. */
+  strength?: React.ReactNode;
   effect: EffectClip;
   total: number;
   onChange: (patch: Partial<EffectClip>) => void;
@@ -2936,6 +3095,7 @@ export function EffectPanel({
             <SecondsInput value={e.end} min={e.start + 0.1} max={Math.max(total, e.start + 0.1)} onCommit={(end) => onChange({ end })} />
           </Field>
         </div>
+        {strength}
         <div className="flex gap-2 border-t border-border pt-4">
           <ActionButton onClick={onDuplicate}>Duplicate</ActionButton>
           <ActionButton onClick={onDelete} tone="danger">
