@@ -1,12 +1,17 @@
 {
-  "next": [
-    "The free plan now exports up to 1080p in the desktop app.",
-    "Voice translation is free to try on any length: the free plan exports up to 1 minute of translated voice, Lite up to 10 minutes, Starter up to 30 minutes and Pro any length.",
-    "Blurring your webcam background is free. Removing or replacing it is included from Lite.",
-    "The free plan includes one full Clean up audio per video and a Draft for recordings up to 5 minutes. Enhance voice stays free.",
-    "Plans changed: green screen, blend modes, speed curves, masks, LUTs, curves, stabilization, and GIF, audio-only, high-quality and 60 fps exports are now in Starter, and custom fonts in Pro. Lite passes bought before this update keep all of these until they end."
-  ],
+  "next": [],
   "releases": [
+    {
+      "version": "1.0.7",
+      "date": "2026-11-13",
+      "notes": [
+        "The free plan now exports up to 1080p in the desktop app.",
+        "Voice translation is free to try on any length: the free plan exports up to 1 minute of translated voice, Lite up to 10 minutes, Starter up to 30 minutes and Pro any length.",
+        "Blurring your webcam background is free. Removing or replacing it is included from Lite.",
+        "The free plan includes one full Clean up audio per video and a Draft for recordings up to 5 minutes. Enhance voice stays free.",
+        "Plans changed: green screen, blend modes, speed curves, masks, LUTs, curves, stabilization, and GIF, audio-only, high-quality and 60 fps exports are now in Starter, and custom fonts in Pro. Lite passes bought before this update keep all of these until they end."
+      ]
+    },
     {
       "version": "1.0.6",
       "date": "2026-11-13",
