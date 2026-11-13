@@ -2,40 +2,22 @@
  * English, in the speaker's own voice, over the video's own background.
  *
  * 1. The transcript's words are grouped into sentences (dubSentences).
- * 2. Their text is translated on the website (src/app/api/translate) - only
- *    the text leaves the device.
- * 3. The engine takes the voice out of the speech mix, says each English
- *    sentence in the speaker's voice and fits it into the original's time
- *    (backend/app/pipeline/dub.py).
+ * 2. The engine translates their text to English, takes the voice out of
+ *    the speech mix, says each English sentence in the speaker's voice and
+ *    fits it into the original's time (backend/app/pipeline/dub.py). All of
+ *    it on this computer: nothing goes online, the text included.
  * The editor then adds the English voice and the background as two audio
  * tracks and mutes the original speech, as one undo step (VideoEditor).
  */
-import { apiFetch } from "@/lib/platform";
 import { ApiError, engineDub, type DubStage } from "@/lib/toolsApi";
 import { buildSpeechMix } from "./captions";
 import type { Layout } from "./timeline";
-import { dubSentences, encodePcm, type DubSentence } from "./dubPlan.ts";
+import { dubSentences, encodePcm } from "./dubPlan.ts";
 import type { MediaSource, Project, TranscriptWord } from "./types";
 
 export const DUB_RATE = 44100;
-/** Languages the voice can be translated from (the translate route's list). */
+/** Languages the voice can be translated from (the engine's FROM_LANGUAGES). */
 export const DUB_FROM = new Set(["si", "ta", "hi", "kn", "te"]);
-
-/** The sentences' text in English, one per sentence, by the website. */
-export async function translateSentences(sentences: DubSentence[], from: string, signal?: AbortSignal): Promise<string[]> {
-  const res = await apiFetch("/api/translate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ from, to: "en", sentences: sentences.map((s) => s.text) }),
-    signal,
-  });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const detail = data?.detail;
-    throw new ApiError(detail?.message || `The translation failed (error ${res.status}).`, detail?.code);
-  }
-  return data.sentences as string[];
-}
 
 export interface DubResult {
   /** The English voice, mono WAV, timeline time from 0. */
@@ -46,7 +28,7 @@ export interface DubResult {
   tracks: string[];
 }
 
-export type DubProgress = { stage: "mix" | "translate" } | { stage: DubStage; value: number };
+export type DubProgress = { stage: "mix" } | { stage: DubStage; value: number };
 
 /** Runs the whole voice translation for the timeline. */
 export async function dubTimeline(
@@ -54,19 +36,15 @@ export async function dubTimeline(
   project: Project,
   sources: Record<string, MediaSource>,
   words: TranscriptWord[],
-  from: string,
   onProgress: (p: DubProgress) => void,
   signal: AbortSignal
 ): Promise<DubResult> {
-  const sentences = dubSentences(words);
+  const sentences = dubSentences(words).filter((s) => s.text.trim());
   if (sentences.length === 0) throw new ApiError("There's no speech in the transcript to translate.");
-  onProgress({ stage: "translate" });
-  const english = await translateSentences(sentences, from, signal);
   onProgress({ stage: "mix" });
   const mix = await buildSpeechMix(lay, project, sources, { rate: DUB_RATE, channels: 2, signal });
   if (!mix.channels) throw new ApiError("There's no sound on the timeline to translate.");
-  const said = sentences.map((s, i) => ({ ...s, text: english[i] })).filter((s) => s.text.trim());
-  const wav = await engineDub(mix.channels, said, (stage, value) => onProgress({ stage, value }), signal);
+  const wav = await engineDub(mix.channels, sentences, (stage, value) => onProgress({ stage, value }), signal);
   const buffer = await new OfflineAudioContext(1, 1, DUB_RATE).decodeAudioData(await wav.arrayBuffer());
   const voice = encodePcm([buffer.getChannelData(0)], DUB_RATE);
   const background = encodePcm([buffer.getChannelData(1), buffer.getChannelData(2)], DUB_RATE);

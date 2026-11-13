@@ -1,9 +1,13 @@
 """Voice translation for the desktop app: the speech of a video said again in
 English, in the speaker's own voice, over the video's own background sound.
-Runs in the engine on the user's machine; the English text comes from the
-editor (translated online, text only - src/app/api/translate).
+Runs entirely in the engine on the user's machine, the translation of the
+transcript's text included.
 
-Two models, downloaded once after the editor asks, into WIPECLIP_MODELS_DIR:
+Three models, downloaded once after the editor asks, into WIPECLIP_MODELS_DIR:
+
+- translator: Google's MADLAD-400 3B MT (Apache-2.0), as CTranslate2 int8.
+  Text from Sinhala, Tamil, Hindi, Kannada or Telugu to English, one
+  transcript sentence at a time.
 
 - separator: Meta's HT-Demucs (fine-tuned) vocals model (MIT), as ONNX. It
   takes the voice out; the background is what's left. On the 60 s test (a
@@ -15,8 +19,9 @@ Two models, downloaded once after the editor asks, into WIPECLIP_MODELS_DIR:
   "theft" as "debt"); 8-bit ran ten times slower on an i7-9750H. That mix
   says 7.5 s of speech in about 31 s on its 6 cores.
 
-Both run on onnxruntime with numpy; resampling and tempo changes go through
-the bundled ffmpeg. Nothing is uploaded.
+The translator runs on CTranslate2, the other two on onnxruntime with numpy;
+resampling and tempo changes go through the bundled ffmpeg. Nothing is
+uploaded.
 """
 
 from __future__ import annotations
@@ -57,7 +62,21 @@ VOICE = SpeechModel(
     ),
     converted=False,
 )
-MODELS = (SEPARATOR, VOICE)
+_MADLAD = ("Nextcloud-AI/madlad400-3b-mt-ct2-int8", "aa32bbdeba7880eff2096ec044cb155a340a9400")
+
+TRANSLATOR = SpeechModel(
+    "translator",
+    (
+        Download(*_MADLAD, "config.json", 224),
+        Download(*_MADLAD, "shared_vocabulary.json", 5_477_099),
+        Download(*_MADLAD, "tokenizer.json", 16_629_031),
+        Download(*_MADLAD, "model.bin", 2_950_208_329),
+    ),
+    converted=False,
+)
+MODELS = (TRANSLATOR, SEPARATOR, VOICE)
+# The languages the transcript can be translated from (the editor's DUB_FROM).
+FROM_LANGUAGES = {"si", "ta", "hi", "kn", "te"}
 
 
 def models_status() -> dict:
@@ -83,6 +102,42 @@ def _session(path, threads: int):
     opts = ort.SessionOptions()
     opts.intra_op_num_threads = threads
     return ort.InferenceSession(str(path), opts, providers=["CPUExecutionProvider"])
+
+
+# --- translation: the transcript's sentences in English ---------------------
+
+_TRANSLATE_BATCH = 8
+
+
+class NothingToSay(Exception):
+    """Every sentence translated to nothing."""
+
+
+def translate(texts: list[str], progress: Callable[[float], None]) -> list[str]:
+    """Each text in English, same order, by MADLAD-400 on the CPU. The
+    source language needs no tag: the model tells it from the text."""
+    import ctranslate2
+    from tokenizers import Tokenizer
+
+    path = speech.ensure_model(TRANSLATOR, lambda *_: None)
+    tokenizer = Tokenizer.from_file(str(path / "tokenizer.json"))
+    model = ctranslate2.Translator(str(path), device="cpu", compute_type="int8", intra_threads=speech._cpu_threads())
+    out: list[str] = []
+    try:
+        for i in range(0, len(texts), _TRANSLATE_BATCH):
+            progress(i / len(texts))
+            batch = texts[i : i + _TRANSLATE_BATCH]
+            tokens = [tokenizer.encode("<2en> " + re.sub(r"\s+", " ", t).strip()).tokens for t in batch]
+            results = model.translate_batch(
+                tokens, beam_size=2, max_decoding_length=256, repetition_penalty=1.1, no_repeat_ngram_size=4
+            )
+            for r in results:
+                ids = [tokenizer.token_to_id(t) for t in r.hypotheses[0]]
+                out.append(tokenizer.decode([x for x in ids if x is not None], skip_special_tokens=True).strip())
+    finally:
+        del model  # ~3 GB: gone before the voice models load
+    progress(1.0)
+    return out
 
 
 # --- ffmpeg: resampling and tempo -------------------------------------------
@@ -306,10 +361,15 @@ def fit(starts: list[float], spoken: list[np.ndarray], total: float) -> list[tup
 def render(mix: np.ndarray, sentences: list[dict], progress: Progress) -> tuple[np.ndarray, np.ndarray]:
     """English voice (mono) and background (stereo) for `mix` (2, n) at 44.1
     kHz. `sentences`: [{start, end, text}] - the source sentence's times
-    (seconds of `mix`) and its English text. Progress stages: "download",
-    "separate", "voice", "speak"."""
+    (seconds of `mix`) and its text in the source language. Progress
+    stages: "download", "translate", "separate", "voice", "speak"."""
     with _lock:
         _download_all(progress)
+        progress("translate", 0.0)
+        english_text = translate([s["text"] for s in sentences], lambda v: progress("translate", v))
+        sentences = [{**s, "text": t} for s, t in zip(sentences, english_text) if t]
+        if not sentences:
+            raise NothingToSay()
         progress("separate", 0.0)
         voice = separate(mix, lambda v: progress("separate", v))
         background = mix - voice

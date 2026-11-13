@@ -1,5 +1,7 @@
 {
-  "next": [],
+  "next": [
+    "Translate voice to English now works entirely on your computer: the transcript is translated on this machine too, so nothing is uploaded. The first time, it downloads the translation model once along with the voice models (about 5 GB in all)."
+  ],
   "releases": [
     {
       "version": "1.0.5",

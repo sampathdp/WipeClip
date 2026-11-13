@@ -1615,7 +1615,7 @@ export default function VideoEditor({
       const pct = "value" in p ? ` ${Math.round(p.value * 100)}%` : "";
       switch (p.stage) {
         case "translate":
-          return "Translating the transcript…";
+          return `Translating the transcript…${pct}`;
         case "mix":
           return "Preparing audio…";
         case "download":
@@ -1629,7 +1629,7 @@ export default function VideoEditor({
       }
     };
     try {
-      const res = await dubTimeline(lay, project, sources, transcript.words, transcript.language, (p) => setBusy(label(p)), abort.signal);
+      const res = await dubTimeline(lay, project, sources, transcript.words, (p) => setBusy(label(p)), abort.signal);
       const track = (file: File, label: string): { src: MediaSource; clip: AudioClip } => {
         const src: MediaSource = { id: newId("snd"), kind: "audio", file, url: URL.createObjectURL(file), duration: lay.total, width: 0, height: 0, fps: 0, hasAudio: true };
         const clip: AudioClip = { id: newId("aud"), sourceId: src.id, label, start: 0, offset: 0, duration: lay.total, volume: 1, fadeIn: 0, fadeOut: 0, muted: false };

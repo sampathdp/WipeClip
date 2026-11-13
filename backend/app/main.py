@@ -748,12 +748,13 @@ async def api_dub_render(
     """Desktop engine only: the speech in `audio` (raw 44.1 kHz stereo
     float32, interleaved - the editor's mix of the timeline's speech) said
     again in English in the speaker's voice (app/pipeline/dub.py).
-    `sentences`: JSON [{start, end, text}], the source sentences' times and
-    their English text. Answers a 16-bit WAV with three channels: the English
-    voice, then the background in stereo. Downloads the models first if
-    needed. Progress and cancel under `job_id`: phase "download",
-    "separate", "voice" or "speak". Runs on the user's own machine; nothing
-    is uploaded."""
+    `sentences`: JSON [{start, end, text}], the transcript's sentences: their
+    times and their text in the source language, translated here. Answers a
+    16-bit WAV with three channels: the English voice, then the background
+    in stereo. Downloads the models first if needed. Progress and cancel
+    under `job_id`: phase "download", "translate", "separate", "voice" or
+    "speak". Runs on the user's own machine; nothing is uploaded, the text
+    included."""
     if not LOCAL_MODE:
         raise HTTPException(status_code=404, detail="Not available here.")
     try:
@@ -789,6 +790,11 @@ async def api_dub_render(
         raise HTTPException(
             status_code=502,
             detail={"code": "model_download", "message": "The voice models couldn't be downloaded. Check your connection and try again."},
+        ) from exc
+    except dub.NothingToSay as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "nothing_to_say", "message": "The translation came out empty, so there was nothing to say."},
         ) from exc
     finally:
         progress.finish(job_id)

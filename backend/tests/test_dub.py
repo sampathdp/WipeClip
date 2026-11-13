@@ -141,7 +141,16 @@ class EndpointTest(unittest.TestCase):
     def test_models_status(self) -> None:
         with mock.patch.object(main, "LOCAL_MODE", True), mock.patch.object(dub.speech, "is_ready", lambda m: m.key == "separator"):
             res = self.client.get("/api/dub/models", headers=self.headers)
-        self.assertEqual(res.json(), {"ready": False, "sizeMb": dub.VOICE.size_mb})
+        self.assertEqual(res.json(), {"ready": False, "sizeMb": dub.VOICE.size_mb + dub.TRANSLATOR.size_mb})
+
+    def test_an_empty_translation_says_so(self) -> None:
+        def nothing(*_):
+            raise dub.NothingToSay()
+
+        with mock.patch.object(main, "LOCAL_MODE", True), mock.patch.object(dub, "render", nothing):
+            res = self.post(np.zeros((2, RATE), np.float32).T.tobytes(), [{"start": 0, "end": 1, "text": "a"}])
+        self.assertEqual(res.status_code, 422)
+        self.assertEqual(res.json()["detail"]["code"], "nothing_to_say")
 
 
 if __name__ == "__main__":

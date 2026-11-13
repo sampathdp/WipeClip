@@ -164,20 +164,20 @@ function DubSection({
       <p className="text-sm font-semibold text-foreground">Translate voice to English</p>
       <p className="text-[11px] text-muted">
         The speech is said again in English in the speaker&apos;s own voice, over the video&apos;s own music and sounds. It lands as two new audio tracks and the
-        original speech is muted; undo to go back. Only the transcript&apos;s text is sent to WipeClip to translate; the audio and the voice stay on this
-        computer. Use it only with voices you have the right to use.
+        original speech is muted; undo to go back. Everything happens on this computer, the translation included: nothing is uploaded. Use it only
+        with voices you have the right to use.
       </p>
       {dub.busy ? (
         <ActionButton onClick={dub.onCancel}>Cancel translation</ActionButton>
       ) : needsModels && !consent ? (
         <div className="space-y-2 rounded-xl border border-border bg-surface-2/60 p-3 text-xs text-muted">
-          <p className="font-semibold text-foreground">Voice models needed (one time)</p>
+          <p className="font-semibold text-foreground">Translation and voice models needed (one time)</p>
           <p>
             About {dub.models?.sizeMb} MB, downloaded once and kept on this computer. Translating takes a few minutes per minute of video on the processor and
-            around 3 GB of memory.
+            around 4 GB of memory.
           </p>
           <ActionButton tone="accent" onClick={onConsent} disabled={busy}>
-            Download voice models ({dub.models?.sizeMb} MB)
+            Download models ({dub.models?.sizeMb} MB)
           </ActionButton>
         </div>
       ) : (

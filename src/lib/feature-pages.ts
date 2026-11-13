@@ -2,7 +2,7 @@
  * people make for them ("sinhala subtitle generator", "translate video to
  * english"). English only. Every claim here is checked against the app:
  * caption languages (CAPTION_LANGUAGES in src/components/editor/Panels.tsx),
- * translation languages (src/app/api/translate/route.ts), the free export
+ * translation languages (FROM_LANGUAGES in backend/app/pipeline/dub.py), the free export
  * limit and the panel texts the screenshots show. No third-party names. */
 
 export type FeatureShot = { src: string; alt: string; caption: string };
@@ -54,7 +54,7 @@ const SHOTS = {
   translate: {
     src: "/features/translate-voice.webp",
     alt: "WipeClip Translate voice to English panel below the transcript",
-    caption: "Translate voice to English sits under the transcript. The voice models download once.",
+    caption: "Translate voice to English sits under the transcript. The models download once.",
   },
 } satisfies Record<string, FeatureShot>;
 
@@ -153,7 +153,7 @@ export const TRANSLATE_VIDEO: FeaturePage = {
   h1: "Translate your video to English,",
   h1Accent: "in your own voice",
   intro:
-    "Made a video in Sinhala, Tamil, Hindi, Kannada or Telugu? WipeClip says the speech again in English, in the speaker's own voice, over the video's own music and sounds. The voice is made on your computer: only the transcript's text is sent to translate.",
+    "Made a video in Sinhala, Tamil, Hindi, Kannada or Telugu? WipeClip says the speech again in English, in the speaker's own voice, over the video's own music and sounds. It all happens on your computer: nothing is uploaded.",
   hero: SHOTS.translate,
   steps: [
     {
@@ -162,7 +162,7 @@ export const TRANSLATE_VIDEO: FeaturePage = {
     },
     {
       title: "Translate voice to English",
-      text: "In the Transcript panel, choose Translate voice to English. The first time, the voice models download once (about 2 GB).",
+      text: "In the Transcript panel, choose Translate voice to English. The first time, the translation and voice models download once (about 5 GB).",
     },
     {
       title: "Check it and export",
@@ -183,16 +183,16 @@ export const TRANSLATE_VIDEO: FeaturePage = {
       text: "Sinhala, Tamil, Hindi, Kannada and Telugu speech, translated to English.",
     },
     {
-      title: "Your audio stays with you",
-      text: "Only the transcript's text is sent to WipeClip to translate. The audio and the voice stay on your computer.",
+      title: "Nothing is uploaded",
+      text: "The translation and the voice are both made on your computer. Your audio and your words never leave it.",
     },
     {
       title: "Undo in one step",
       text: "The translation is added as new tracks. Undo once and the original speech is back.",
     },
     {
-      title: "Up to about an hour",
-      text: "Translate up to about an hour of speech in one go.",
+      title: "Up to 30 minutes",
+      text: "Translate up to 30 minutes of speech in one go.",
     },
   ],
   shots: [SHOTS.transcript, SHOTS.language, SHOTS.edit],
@@ -203,11 +203,11 @@ export const TRANSLATE_VIDEO: FeaturePage = {
     },
     {
       q: "Is my audio uploaded?",
-      a: "No. Only the transcript's text is sent to WipeClip to translate. The audio and the voice stay on your computer. You need to be signed in to translate.",
+      a: "No. The translation and the voice are both made on your computer, so neither your audio nor the transcript is uploaded.",
     },
     {
       q: "How long does translating take?",
-      a: "A few minutes per minute of video on the processor, using around 3 GB of memory. The voice models, about 2 GB, download once the first time.",
+      a: "A few minutes per minute of video on the processor, using around 4 GB of memory. The translation and voice models, about 5 GB, download once the first time.",
     },
     {
       q: "What happens to the original speech?",

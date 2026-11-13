@@ -621,11 +621,12 @@ export async function engineDubModels(): Promise<{ ready: boolean; sizeMb: numbe
   return res?.ok ? ((await res.json()) as { ready: boolean; sizeMb: number }) : null;
 }
 
-export type DubStage = "download" | "separate" | "voice" | "speak";
+export type DubStage = "download" | "translate" | "separate" | "voice" | "speak";
 
 /** Desktop app: the speech in `channels` (44.1 kHz stereo, timeline time)
  * said again in English in the speaker's voice, by the engine. `sentences`:
- * each source sentence's times and its English text. Resolves to a WAV
+ * each transcript sentence's times and its text, which the engine
+ * translates on this computer. Resolves to a WAV
  * with three channels - the English voice, then the background in stereo.
  * `signal` stops it in the engine too. */
 export async function engineDub(
@@ -655,7 +656,7 @@ export async function engineDub(
     void fetch(job, { headers: engineHeaders(engine) })
       .then((r) => (r.ok ? r.json() : null))
       .then((p: { phase: string; progress: number | null } | null) => {
-        if (p && ["download", "separate", "voice", "speak"].includes(p.phase)) onProgress(p.phase as DubStage, p.progress ?? 0);
+        if (p && ["download", "translate", "separate", "voice", "speak"].includes(p.phase)) onProgress(p.phase as DubStage, p.progress ?? 0);
       })
       .catch(() => {});
   }, 700);
