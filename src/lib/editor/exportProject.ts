@@ -152,6 +152,8 @@ export async function exportProject(
       ...(toneActive(a.tone) ? { tone: toneWire(a.tone) } : {}),
       ...(envelopeWire(a) ? { envelope: envelopeWire(a) } : {}),
       ...(a.breaths?.length ? { breaths: a.breaths } : {}),
+      // For the plan check only (entitlements.ts dubSeconds); the renderer ignores it.
+      ...(a.dub ? { dub: true } : {}),
     });
   }
 

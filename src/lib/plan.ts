@@ -22,6 +22,26 @@ export function accessPlan(profile: { plan: string; plan_expires_at: string | nu
   return inTrial(profile.created_at) ? "pro" : effectivePlan(profile);
 }
 
+/** When Lite's editing tools were split with Starter (src/lib/entitlements.ts
+ * FEATURE_TIER). Lite passes paid before this keep everything they bought. */
+export const LITE_SPLIT_AT = "2026-11-14T00:00:00Z";
+
+/** `plan` as the editor and the export should treat it: a Lite pass paid
+ * before LITE_SPLIT_AT reads as Starter (the tools Lite had then, and a
+ * little more) until it runs out. Needs the service client: payment
+ * orders have no read policy. */
+export async function grandfatheredPlan(admin: SupabaseClient, userId: string, plan: string): Promise<string> {
+  if (plan !== "lite") return plan;
+  const { count } = await admin
+    .from("payment_orders")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("status", "paid")
+    .in("plan", ["lite", "lite_yearly"])
+    .lt("paid_at", LITE_SPLIT_AT);
+  return count ? "starter" : plan;
+}
+
 /** The desktop app signs its API calls with a bearer token; the website
  * uses the session cookie (getRequestAuth in src/lib/supabase/server.ts). */
 export function isAppRequest(request: Request): boolean {

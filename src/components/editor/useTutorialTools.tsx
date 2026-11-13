@@ -46,6 +46,10 @@ import { FOCUS_PRESETS, analyzeFocus } from "@/lib/editor/focus";
 import { eventsForSuggestions, focusPrefs } from "@/lib/editor/focusPrefs";
 
 interface Deps {
+  /** Longest timeline the plan makes a Draft for, in seconds (entitlements.ts); null = any. */
+  maxDraftSeconds: number | null;
+  /** The plan's name, for the upgrade message. */
+  planLabel: string;
   /** Opens Clean up audio (VideoEditor). */
   onOpenCleanup: () => void;
   project: Project;
@@ -85,7 +89,7 @@ export function mixKey(lay: Layout, project: Project, sources: Record<string, Me
 }
 
 export function useTutorialTools(d: Deps) {
-  const { project, lay, sources, recSource, clock, apply, say } = d;
+  const { project, lay, sources, recSource, clock, apply, say, maxDraftSeconds, planLabel } = d;
   const [tab, setTab] = useState<TutorialTab>("review");
   const [analysis, setAnalysis] = useState<string | null>(null);
   const analysisRun = useRef(0);
@@ -362,6 +366,12 @@ export function useTutorialTools(d: Deps) {
         say("The draft is up to date: nothing it's based on has changed.");
         return;
       }
+      if (maxDraftSeconds !== null && lay.total > maxDraftSeconds + 0.5) {
+        say(
+          `Your ${planLabel} plan makes a Draft for videos up to ${Math.round(maxDraftSeconds / 60)} minutes, and this one is ${Math.ceil(lay.total / 60)} minutes. Upgrade to Starter for any length, or trim it first.`
+        );
+        return;
+      }
       const run = ++analysisRun.current;
       analysisCtrl.current?.abort();
       const ctrl = new AbortController();
@@ -459,7 +469,7 @@ export function useTutorialTools(d: Deps) {
         if (analysisCtrl.current === ctrl) analysisCtrl.current = null;
       }
     },
-    [lay, project, sources, recSource, events, acts, reviewSuggestions, apply, say, runScene, annotationLayers, screenSource]
+    [lay, project, sources, recSource, events, acts, reviewSuggestions, apply, say, runScene, annotationLayers, screenSource, maxDraftSeconds, planLabel]
   );
 
   /** Frame previews for draft items (privacy: with the spot marked), from

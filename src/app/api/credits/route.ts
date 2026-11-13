@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestAuth, createServiceClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { accessPlan, effectivePlan, isAppRequest } from "@/lib/plan";
+import { accessPlan, effectivePlan, grandfatheredPlan, isAppRequest } from "@/lib/plan";
 import { inTrial, trialEndsAt } from "@/lib/launch";
 import { preflight, withCors } from "@/lib/cors";
 import { edgeCountry, rememberCountry } from "@/lib/geo";
@@ -59,7 +59,7 @@ async function handle(request: NextRequest) {
   return NextResponse.json({
     email: user.email,
     // The trial unlocks the desktop app only; the website sees what was bought.
-    plan: isAppRequest(request) ? accessPlan(profile) : effectivePlan(profile),
+    plan: await grandfatheredPlan(admin, user.id, isAppRequest(request) ? accessPlan(profile) : effectivePlan(profile)),
     trialEndsAt: inTrial(profile.created_at) ? trialEndsAt(profile.created_at).toISOString() : null,
     planExpiresAt: profile.plan_expires_at,
     freeCredits: profile.free_credits,

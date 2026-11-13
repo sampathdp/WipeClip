@@ -2,7 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { canExportAt, premiumFeaturesUsed, TIER_LABELS, TIER_LIMITS, tierForResolution, type Tier } from "@/lib/entitlements";
+import {
+  canExportAt,
+  featuresAboveTier,
+  maxResolutionFor,
+  TIER_LABELS,
+  TIER_LIMITS,
+  tierForFeatures,
+  tierForResolution,
+  type Tier,
+} from "@/lib/entitlements";
 import { trackEvent } from "@/lib/analytics";
 import { PLANS } from "@/lib/credits";
 import { DEFAULT_OUTPUT, exportProject, OUTPUT_EXT, type ExportOutput } from "@/lib/editor/exportProject";
@@ -124,15 +133,19 @@ export default function ExportDialog({
   const shortSide = Math.min(canvas.width, canvas.height);
   // A tier is only offered if it actually yields more pixels than the one below.
   const available = TIERS.filter((t, i) => i === 0 || shortSide > TIERS[i - 1].short);
-  const allowed = (r: Resolution) => (isSignedIn ? canExportAt(tier, r) : r === "720p");
+  const allowed = (r: Resolution) => (isSignedIn ? canExportAt(tier, r, IS_DESKTOP) : r === "720p");
   const [output, setOutput] = useState<ExportOutput>(DEFAULT_OUTPUT);
   const [resolution, setResolution] = useState<Resolution>(
     () => [...available].reverse().find((t) => allowed(t.key))?.key ?? "720p"
   );
   const limits = TIER_LIMITS[tier];
-  const premium = limits.premiumEffects
-    ? []
-    : premiumFeaturesUsed({ ...project, format: output.format, quality: output.quality, fps: output.fps ?? undefined, fpsChosen: output.fps !== null });
+  const maxResolution = maxResolutionFor(tier, IS_DESKTOP);
+  const locked = featuresAboveTier(
+    { ...project, format: output.format, quality: output.quality, fps: output.fps ?? undefined, fpsChosen: output.fps !== null },
+    tier
+  );
+  const premium = locked.map((f) => f.name);
+  const neededTier = tierForFeatures(locked);
   // The plan's export length in the desktop app; the website's cloud render
   // is capped at 10 minutes for everyone (MAX_VIDEO_DURATION_SECONDS).
   const maxSeconds = IS_DESKTOP ? limits.maxExportSeconds : 10 * 60;
@@ -257,7 +270,7 @@ export default function ExportDialog({
               {available.map((t) => {
                 const size = outputSize(canvas.width, canvas.height, t.short);
                 const locked = !allowed(t.key);
-                const lockLabel = !isSignedIn ? "sign in" : `${TIER_LABELS[tierForResolution(t.key)]} plan`;
+                const lockLabel = !isSignedIn ? "sign in" : `${TIER_LABELS[tierForResolution(t.key, IS_DESKTOP)]} plan`;
                 return (
                   <button
                     key={t.key}
@@ -286,13 +299,14 @@ export default function ExportDialog({
             <p className="mt-2 text-xs text-muted">
               Frame rate matches your original; the aspect ratio follows your canvas. Videos are never upscaled.
             </p>
-            {isSignedIn && limits.maxResolution !== "4k" && (
+            {isSignedIn && maxResolution !== "4k" && (
               <p className="mt-2 text-xs text-muted">
-                Your {TIER_LABELS[tier]} plan exports up to {limits.maxResolution}.{" "}
+                Your {TIER_LABELS[tier]} plan exports up to {maxResolution}
+                {IS_DESKTOP ? "" : " on the website"}.{" "}
                 <Link href="/pricing" className="font-semibold text-accent underline">
                   Upgrade
                 </Link>{" "}
-                for {tier === "free" ? "1080p or 4K" : "4K"}.
+                for {maxResolution === "720p" ? "1080p or 4K" : "4K"}.
               </p>
             )}
             {!isSignedIn && (
@@ -305,7 +319,7 @@ export default function ExportDialog({
               </p>
             )}
           </div>
-          <OutputOptions output={output} onChange={setOutput} total={total} locked={!limits.premiumEffects} />
+          <OutputOptions output={output} onChange={setOutput} total={total} locked={!limits.proTools} />
           {limits.exportBranding && premium.length === 0 && (
             <p className="text-xs text-muted">
               Free exports include a small &quot;Made with WipeClip&quot; mark in the corner.{" "}
@@ -325,7 +339,12 @@ export default function ExportDialog({
                   <li key={f}>{f}</li>
                 ))}
               </ul>
-              <p className="mt-2 text-muted">Any paid plan (from Lite, {PLANS.lite.priceLabel} for 30 days) exports them. Or swap them for free ones.</p>
+              <p className="mt-2 text-muted">
+                {neededTier === "lite"
+                  ? `Any paid plan (from Lite, ${PLANS.lite.priceLabel} for 30 days) exports them.`
+                  : `The ${TIER_LABELS[neededTier]} plan (${PLANS[neededTier === "starter" ? "starter" : "pro"].priceLabel} for 30 days) exports them.`}{" "}
+                Or swap them for free ones.
+              </p>
             </div>
           )}
           {tooLong && (

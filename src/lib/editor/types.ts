@@ -320,6 +320,9 @@ export interface AudioClip {
   envelope?: GainPoint[];
   /** Breaths turned down (breaths.ts): [start, end] in seconds of the file. */
   breaths?: [number, number][];
+  /** The English voice from voice translation (dub.ts). Its length counts
+   * against the plan's translation limit at export (entitlements.ts). */
+  dub?: true;
 }
 
 /** A point of a track's volume curve: seconds of the audio file, linear

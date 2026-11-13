@@ -154,7 +154,7 @@ import {
   type CaptionsProgress,
 } from "@/lib/editor/captions";
 import { editCaption, mergeCaptions, replaceInCaptions } from "@/lib/editor/captionEdit";
-import { TIER_LIMITS, toTier, type Tier } from "@/lib/entitlements";
+import { TIER_LABELS, TIER_LIMITS, toTier, type Tier } from "@/lib/entitlements";
 import AiCleanupDialog from "./AiCleanupDialog";
 import ExportDialog from "./ExportDialog";
 import BatchExportDialog, { type BatchFormat, type BatchItem } from "./BatchExportDialog";
@@ -1638,6 +1638,7 @@ export default function VideoEditor({
       const background = track(res.background, "Background (voice removed)");
       const voice = { ...track(res.voice, "English voice") };
       voice.clip.captions = "speech";
+      voice.clip.dub = true;
       background.clip.captions = "music";
       addSource(background.src);
       addSource(voice.src);
@@ -1648,7 +1649,14 @@ export default function VideoEditor({
         audio: [...p.audio.map((a) => (muted.has(a.id) ? { ...a, muted: true } : a)), background.clip, voice.clip],
       }));
       setSelection({ kind: "audio", id: voice.clip.id });
-      say("Added the English voice and the background as audio tracks; the original speech is muted. Undo to go back.");
+      const dubMax = TIER_LIMITS[tier].maxDubSeconds;
+      const overPlan = dubMax !== null && lay.total > dubMax + 0.5;
+      say(
+        "Added the English voice and the background as audio tracks; the original speech is muted. Undo to go back." +
+          (overPlan
+            ? ` Your ${TIER_LABELS[tier]} plan exports up to ${dubMax >= 60 ? `${Math.round(dubMax / 60)} min` : `${dubMax} s`} of translated voice; listen to it all here, and upgrade to export it.`
+            : "")
+      );
     } catch (e) {
       if ((e as Error)?.name === "AbortError") {
         say("Voice translation cancelled. Nothing was changed.");
@@ -1661,7 +1669,7 @@ export default function VideoEditor({
       setBusy(null);
       setDubbing(false);
     }
-  }, [project, lay, sources, addSource, apply, say]);
+  }, [project, lay, sources, addSource, apply, say, tier]);
 
   /** Cuts the transcript words `indices` out of the video (one undo step);
    * captions, if any, are rebuilt from the words that are left. */
@@ -2495,6 +2503,8 @@ export default function VideoEditor({
   // --- tutorial tools (Phase 3) ------------------------------------------------
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const tutorial = useTutorialTools({
+    maxDraftSeconds: TIER_LIMITS[tier].maxDraftSeconds,
+    planLabel: TIER_LABELS[tier],
     onOpenCleanup: () => setCleanupOpen(true),
     project,
     lay,
@@ -2538,17 +2548,45 @@ export default function VideoEditor({
     setCleanupBusy(null);
   }, []);
 
+  // Full Clean up audio runs per project on plans that limit them
+  // (entitlements.ts cleanupRuns). Kept per device outside the project, so
+  // undo doesn't give a run back.
+  const cleanupRunsKey = info ? `wipeclip:cleanup-runs:${info.id}` : null;
+  const cleanupRunsUsed = useCallback(() => {
+    if (!cleanupRunsKey) return 0;
+    try {
+      return Number(localStorage.getItem(cleanupRunsKey)) || 0;
+    } catch {
+      return 0;
+    }
+  }, [cleanupRunsKey]);
+
   const finishCleanup = useCallback(
     (job: CleanupJob, lufs: number | null) => {
       setCleanupBusy(null);
       setCleanupOpen(false);
+      if (cleanupRunsKey) {
+        try {
+          localStorage.setItem(cleanupRunsKey, String(cleanupRunsUsed() + 1));
+        } catch {
+          // Storage blocked: the run just isn't counted.
+        }
+      }
       say(cleanupSummary({ cleaned: job.cleaned, studio: job.studio, lufs, edit: job.edit }));
     },
-    [say]
+    [say, cleanupRunsKey, cleanupRunsUsed]
   );
 
   const runCleanup = useCallback(
     async (chosen: Set<CleanupOption>, echo: number) => {
+      const maxRuns = TIER_LIMITS[tier].cleanupRuns;
+      if (maxRuns !== null && cleanupRunsUsed() >= maxRuns) {
+        setCleanupOpen(false);
+        say(
+          `The ${TIER_LABELS[tier]} plan includes ${maxRuns === 1 ? "one full clean up" : `${maxRuns} full clean ups`} per video, and this video has used it. Upgrade to Lite to run it again; Enhance voice on an audio track stays free.`
+        );
+        return;
+      }
       setPlaying(false);
       const job: CleanupJob = { chosen, cleaned: [], studio: false, edit: null };
       const ctrl = new AbortController();
@@ -2593,7 +2631,7 @@ export default function VideoEditor({
       else if (chosen.has("normalize")) setCleanupStage({ stage: "measure", job });
       else finishCleanup(job, null);
     },
-    [cleanupVoices, cleanTrack, setTrackTone, finishCleanup]
+    [cleanupVoices, cleanTrack, setTrackTone, finishCleanup, tier, cleanupRunsUsed, say]
   );
 
   // The next stage runs once the last one's changes are in the project.

@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRequestAuth, isSupabaseConfigured } from "@/lib/supabase/server";
+import { createServiceClient, getRequestAuth, isSupabaseConfigured } from "@/lib/supabase/server";
 import { preflight, withCors } from "@/lib/cors";
 import { BACKEND_DISABLED, BACKEND_DISABLED_MESSAGE, type Resolution } from "@/lib/toolsApi";
 import { checkRateLimit, rateLimitKeyFor } from "@/lib/rateLimit";
 import { issueTicket, sha256Hex } from "@/lib/jobTicket";
-import { accessPlan, effectivePlan, isAppRequest } from "@/lib/plan";
+import { accessPlan, effectivePlan, grandfatheredPlan, isAppRequest } from "@/lib/plan";
 import {
   canExportAt,
-  premiumFeaturesUsed,
+  featuresAboveTier,
   TIER_LABELS,
   TIER_LIMITS,
+  tierForFeatures,
   tierForResolution,
   toTier,
   type PremiumCheckable,
@@ -59,7 +60,9 @@ async function handle(request: NextRequest) {
     }
     const { data: profile } = await supabase.from("profiles").select("plan, plan_expires_at, created_at").eq("id", user.id).single();
     // The trial counts in the desktop app only.
-    tier = profile ? toTier(isAppRequest(request) ? accessPlan(profile) : effectivePlan(profile)) : "free";
+    tier = profile
+      ? toTier(await grandfatheredPlan(createServiceClient(), user.id, isAppRequest(request) ? accessPlan(profile) : effectivePlan(profile)))
+      : "free";
   }
   const limits = TIER_LIMITS[tier];
 
@@ -78,8 +81,10 @@ async function handle(request: NextRequest) {
   if (!RESOLUTIONS.has(resolution)) {
     return errorResponse("bad_resolution", "Unknown resolution.", 400);
   }
-  if (!canExportAt(tier, resolution as Resolution)) {
-    const needed = TIER_LABELS[tierForResolution(resolution as Resolution)];
+  // The desktop app renders on the user's own computer, so its limit is higher.
+  const local = body.local === true;
+  if (!canExportAt(tier, resolution as Resolution, local)) {
+    const needed = TIER_LABELS[tierForResolution(resolution as Resolution, local)];
     return errorResponse("plan_required", `${resolution === "4k" ? "4K" : resolution} export needs the ${needed} plan.`, 403);
   }
 
@@ -91,15 +96,13 @@ async function handle(request: NextRequest) {
   } catch {
     return errorResponse("bad_project", "Invalid project data.", 400);
   }
-  if (!limits.premiumEffects) {
-    const premium = premiumFeaturesUsed(project);
-    if (premium.length) {
-      return errorResponse(
-        "plan_required",
-        `This project uses premium features (${premium.join(", ")}). Upgrade to any paid plan (from Lite) or remove them to export.`,
-        403
-      );
-    }
+  const locked = featuresAboveTier(project, tier);
+  if (locked.length) {
+    return errorResponse(
+      "plan_required",
+      `This project uses premium features (${locked.map((f) => f.name).join(", ")}). Upgrade to the ${TIER_LABELS[tierForFeatures(locked)]} plan or remove them to export.`,
+      403
+    );
   }
 
   // Counted only once the export is otherwise allowed, so a refused
@@ -121,7 +124,7 @@ async function handle(request: NextRequest) {
     projectHash: sha256Hex(projectJson),
     // The desktop app renders on its own engine.
     // Same plan rules either way, plus the plan's export length there.
-    ...(body.local === true ? { local: true, maxSeconds: limits.maxExportSeconds } : {}),
+    ...(local ? { local: true, maxSeconds: limits.maxExportSeconds } : {}),
   });
   return NextResponse.json({ ticket, resolution });
 }

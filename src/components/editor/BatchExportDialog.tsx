@@ -49,7 +49,7 @@ export default function BatchExportDialog({
 }) {
   const [format, setFormat] = useState<BatchFormat>(defaultFormat);
   const resolutions: Resolution[] = ["720p", "1080p"];
-  const allowed = (r: Resolution) => (isSignedIn ? canExportAt(tier, r) : r === "720p");
+  const allowed = (r: Resolution) => (isSignedIn ? canExportAt(tier, r, IS_DESKTOP) : r === "720p");
   const [resolution, setResolution] = useState<Resolution>(() => [...resolutions].reverse().find(allowed) ?? "720p");
   const [running, setRunning] = useState(false);
   const [statuses, setStatuses] = useState<Record<string, Status>>({});

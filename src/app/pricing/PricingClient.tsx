@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { initializePaddle, type Paddle } from "@paddle/paddle-js";
 import { formatCleanupLimit, formatLkr, FREE_DAILY_CREDITS, MAX_CLEANUP_SECONDS, PLANS, type PlanKey } from "@/lib/credits";
-import { TIER_LIMITS, TIERS as TIER_ORDER, toTier, type Tier } from "@/lib/entitlements";
+import { FEATURE_TIER, LOOK_COUNTS, TIER_LIMITS, TIERS as TIER_ORDER, tierAtLeast, toTier, type Tier } from "@/lib/entitlements";
 import { createClient } from "@/lib/supabase/client";
 import { landingPagePath, trackEvent } from "@/lib/analytics";
 import { AI_CLEANUP_ENABLED } from "@/lib/features";
@@ -135,9 +135,10 @@ function tierCards(t: PricingMessages): { tier: Tier; tagline: string; popular?:
     const features = [...(tier === "free" ? [t.trial.feature] : []), ...copy.features].map((f) =>
       fmt(f, {
         days: TRIAL_DAYS,
-        res: res(TIER_LIMITS[tier].maxResolution),
+        res: res(TIER_LIMITS[tier].maxDesktopResolution),
         daily: FREE_DAILY_CREDITS,
         credits: tier === "free" ? 0 : PLANS[tier].credits,
+        dub: Math.round((TIER_LIMITS[tier].maxDubSeconds ?? 0) / 60),
       }),
     );
     // The cleanup lines follow the credits line, which is last except on
@@ -159,29 +160,35 @@ function comparison(t: PricingMessages): { label: string; values: Record<Tier, s
   const r = t.rows;
   const all = (n: number) => fmt(r.all, { n });
   const tr = t.trial.rows;
-  const paid = { free: false, lite: true, starter: true, pro: true };
+  /** Included from `from` up, as FEATURE_TIER says. */
+  const from = (needed: Tier) => Object.fromEntries(TIER_ORDER.map((tier) => [tier, tierAtLeast(tier, needed)])) as Record<Tier, boolean>;
+  const per = (fn: (tier: Tier) => string) => Object.fromEntries(TIER_ORDER.map((tier) => [tier, fn(tier)])) as Record<Tier, string>;
+  const looks = (c: { all: number; free: number }) => per((tier) => (tier === "free" ? fmt(r.basic, { n: c.free }) : all(c.all)));
+  const minutes = (seconds: number | null) => (seconds === null ? r.noLimit : fmt(r.upToMinutes, { n: Math.round(seconds / 60) }));
   return [
   { label: fmt(tr.trial, { days: TRIAL_DAYS }), values: { free: true, lite: true, starter: true, pro: true } },
   { label: tr.recorder, values: { free: true, lite: true, starter: true, pro: true } },
   { label: r.trim, values: { free: true, lite: true, starter: true, pro: true } },
   { label: r.text, values: { free: true, lite: true, starter: true, pro: true } },
   { label: r.canvas, values: { free: true, lite: true, starter: true, pro: true } },
-  { label: r.basicTransitions, values: { free: true, lite: true, starter: true, pro: true } },
-  { label: r.premiumTransitions, values: { free: false, lite: true, starter: true, pro: true } },
-  { label: r.filters, values: { free: fmt(r.basic, { n: 4 }), lite: all(10), starter: all(10), pro: all(10) } },
-  { label: r.effects, values: { free: fmt(r.basic, { n: 3 }), lite: all(11), starter: all(11), pro: all(11) } },
-  { label: tr.powerTools, values: paid },
-  { label: tr.proTools, values: paid },
-  { label: tr.outputs, values: paid },
+  { label: r.transitions, values: looks(LOOK_COUNTS.transitions) },
+  { label: r.filters, values: looks(LOOK_COUNTS.filters) },
+  { label: r.effects, values: looks(LOOK_COUNTS.effects) },
+  { label: tr.powerTools, values: from(FEATURE_TIER.karaoke) },
+  { label: tr.proTools, values: from(FEATURE_TIER.chromaKey) },
+  { label: tr.outputs, values: from(FEATURE_TIER.gif) },
+  { label: tr.customFonts, values: from(FEATURE_TIER.customFont) },
+  { label: tr.translate, values: per((tier) => minutes(TIER_LIMITS[tier].maxDubSeconds)) },
   {
-    label: r.resolution,
-    values: {
-      free: res(TIER_LIMITS.free.maxResolution),
-      lite: res(TIER_LIMITS.lite.maxResolution),
-      starter: res(TIER_LIMITS.starter.maxResolution),
-      pro: res(TIER_LIMITS.pro.maxResolution),
-    },
+    label: tr.cleanup,
+    values: per((tier) => {
+      const n = TIER_LIMITS[tier].cleanupRuns;
+      return n === null ? tr.unlimited : fmt(tr.perVideo, { n });
+    }),
   },
+  { label: tr.draft, values: per((tier) => minutes(TIER_LIMITS[tier].maxDraftSeconds)) },
+  { label: r.resolution, values: per((tier) => res(TIER_LIMITS[tier].maxDesktopResolution)) },
+  { label: r.webResolution, values: per((tier) => res(TIER_LIMITS[tier].maxResolution)) },
   {
     label: r.exports,
     values: {

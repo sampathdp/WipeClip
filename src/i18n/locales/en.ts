@@ -534,7 +534,7 @@ const en = {
       },
       {
         q: "What do paid plans add?",
-        a: "Premium transitions, filters and effects; pro tools like green screen, blend modes, speed curves, LUTs, curves, karaoke captions, auto-ducking, voice effects, stabilization and custom fonts; GIF, audio-only, high-quality and 60 fps exports; resolutions up to 4K; and more credits for the AI tools. Recording, keyframes, voiceovers, sound effects and everyday editing stay free.",
+        a: "Premium transitions, filters and effects, karaoke captions, voice effects, auto-ducking and webcam background replace (from Lite); green screen, blend modes, speed curves, masks, LUTs, curves, stabilization, and GIF, audio-only, high-quality and 60 fps exports (from Starter); 4K and custom fonts (Pro); longer voice translation, unlimited audio clean up, Draft for long recordings and more credits for the AI tools. Recording, captions in every language, 1080p exports in the desktop app, keyframes, voiceovers, sound effects and everyday editing stay free.",
       },
       {
         q: "What happens if I buy again before my plan ends?",
