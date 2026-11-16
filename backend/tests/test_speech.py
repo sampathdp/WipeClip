@@ -169,6 +169,51 @@ class FetchTest(unittest.TestCase):
         self.assertEqual(sum(got), len(body))
 
 
+class IntegrityTest(unittest.TestCase):
+    """Pinned model files are checked against the hashes their revision
+    published; a damaged one is deleted, not kept."""
+
+    def test_sha256_and_git_blob_ids(self) -> None:
+        import hashlib
+
+        body = b"model weights" * 100
+        sha = hashlib.sha256(body).hexdigest()
+        oid = hashlib.sha1(b"blob %d\0" % len(body) + body).hexdigest()
+        with tempfile.TemporaryDirectory() as d:
+            path = speech.Path(d) / "f.bin"
+            for good in (speech.Download("r", "v", "f.bin", len(body), sha256=sha), speech.Download("r", "v", "f.bin", len(body), git_oid=oid)):
+                path.write_bytes(body)
+                speech._check_file(good, path)  # no error
+                self.assertTrue(path.is_file())
+            path.write_bytes(body[:-1] + b"X")
+            with self.assertRaises(speech.DownloadDamaged):
+                speech._check_file(speech.Download("r", "v", "f.bin", len(body), sha256=sha), path)
+            self.assertFalse(path.exists())
+
+    def test_ready_needs_every_file_at_its_size(self) -> None:
+        model = speech.SpeechModel("t", (speech.Download("r", "v", "a.bin", 4, sha256="x" * 64),), converted=False)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(speech, "models_dir", lambda: speech.Path(d)):
+            folder = speech.Path(d) / "t"
+            folder.mkdir()
+            (folder / "ready").write_text("1")
+            self.assertFalse(speech.is_ready(model))  # the file is missing
+            (folder / "a.bin").write_bytes(b"abc")
+            self.assertFalse(speech.is_ready(model))  # cut short
+            (folder / "a.bin").write_bytes(b"abcd")
+            self.assertTrue(speech.is_ready(model))
+
+    def test_too_little_disk_space_is_said_before_downloading(self) -> None:
+        model = speech.SpeechModel("t", (speech.Download("r", "v", "a.bin", 4_000_000_000),), converted=False)
+        free = mock.Mock(free=1_000_000_000)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(speech, "models_dir", lambda: speech.Path(d)), mock.patch.object(
+            speech.shutil, "disk_usage", lambda p: free
+        ), mock.patch.object(speech, "_fetch") as fetch:
+            with self.assertRaises(speech.NotEnoughSpace) as ctx:
+                speech.ensure_model(model, lambda *a: None)
+        fetch.assert_not_called()
+        self.assertIn("5 GB", str(ctx.exception))
+
+
 class LoopsTest(unittest.TestCase):
     def test_drops_what_a_loop_leaves(self) -> None:
         w = lambda text: {"start": 0.0, "end": 0.1, "text": text}  # noqa: E731

@@ -1,5 +1,12 @@
 {
-  "next": [],
+  "next": [
+    "Translate voice to English leaves far fewer words out of long sentences (about 1 in 100, down from about 1 in 9 in our tests): the English is now spoken in shorter parts.",
+    "Translated speech no longer gets cut off at the end of the video: the last sentences are sped up a little and moved into the silence before them.",
+    "Translated sentences now play at an even volume: none comes out much quieter or louder than the ones around it, and nothing clips.",
+    "After translating, a short note tells you which sentences to check, if any came out empty, looked wrong or didn't fit.",
+    "Translation is faster on most videos and leaves more of your computer free for editing while it runs. Removing the voice from the background is faster too.",
+    "Clearer messages when translation can't run: not enough disk space, not enough memory, a damaged download, or which step failed."
+  ],
   "releases": [
     {
       "version": "1.0.7",

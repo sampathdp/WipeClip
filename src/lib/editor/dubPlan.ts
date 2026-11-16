@@ -32,6 +32,51 @@ export function dubSentences(words: TranscriptWord[]): DubSentence[] {
   return out;
 }
 
+/** What the engine found while translating (its X-Dub-Report header):
+ * what the editor tells the user beside the new tracks. Sentence numbers
+ * count from 0, in the order sent. */
+export interface DubReport {
+  /** Sentences sent. */
+  sentences: number;
+  /** Sentences that got English speech. */
+  spoken: number;
+  /** Sentences whose translation came out empty, even after a retry. */
+  empty: number[];
+  /** Sentences whose translation still looks wrong after a retry, and why
+   * ("short", "long", "repeated", "untranslated", "number", "term",
+   * "encoding", "glossary"). */
+  flagged: { index: number; flags: string[] }[];
+  /** Sentences whose English speech came out much shorter than its text,
+   * even after a retry (words may be missing). */
+  shortSpeech: number[];
+  /** Sentences sped up to fit. */
+  spedUp: number;
+  /** Seconds of English that still don't fit before the end of the video,
+   * after moving the last sentences earlier into silence. */
+  overflowSeconds: number;
+  /** Seconds of the speaker used to learn the voice. */
+  sampleSeconds: number;
+}
+
+/** A sentence or a few for the user about what the report found, or ""
+ * when nothing needs saying. Sentence numbers are shown from 1. */
+export function dubReportMessage(report: DubReport | null): string {
+  if (!report) return "";
+  const list = (xs: number[]) => {
+    const shown = xs.slice(0, 5).map((i) => i + 1);
+    return shown.join(", ") + (xs.length > shown.length ? ` and ${xs.length - shown.length} more` : "");
+  };
+  const s = (xs: number[]) => (xs.length > 1 ? "s" : "");
+  const parts: string[] = [];
+  const unsure = [...new Set([...report.flagged.map((f) => f.index), ...report.shortSpeech])].sort((a, b) => a - b);
+  if (report.empty.length) parts.push(`Sentence${s(report.empty)} ${list(report.empty)} couldn't be translated and stay${report.empty.length > 1 ? "" : "s"} silent.`);
+  if (unsure.length) parts.push(`Check sentence${s(unsure)} ${list(unsure)}: the English may have missing or wrong words.`);
+  if (report.overflowSeconds >= 0.1)
+    parts.push(`The last ${report.overflowSeconds.toFixed(1)} s of English runs past the end of the video and isn't heard.`);
+  if (report.sampleSeconds > 0 && report.sampleSeconds < 3) parts.push("There was little clear speech to learn the voice from, so it may sound less like the speaker.");
+  return parts.join(" ");
+}
+
 /** 16-bit PCM WAV of the given channels (all the same length). */
 export function encodePcm(channels: Float32Array[], rate: number): Blob {
   const n = channels[0].length;

@@ -2,6 +2,33 @@
 
 Newest phase first.
 
+## Voice translation 2.0 (16 November 2026)
+
+Details and every measurement: [DUB.md](DUB.md), "Voice translation 2.0".
+
+**Done and verified by tests and the benchmark** (`backend/bench/dub_bench.py`, 8 cases, 1.0 and 2.0 back to back):
+- Long English said in pieces of 160 characters (was 240): on long sentences the voice left out 11.3% of the words, now 1.0%, and speaks 30% faster.
+- Translation output put back as plain English (`&apos;s`, `nuclei ,`), the source lightly cleaned (the transcript unchanged), each translation checked and only suspicious ones tried again.
+- The last sentences move earlier into silence instead of being cut at the end of the video; what still doesn't fit is reported.
+- Levels within 4 dB under / 3 dB over the speaker's median and 3 dB of neighbours, peaks at -1 dBFS: on Tamil the largest jump between sentences went from 25.7 dB to 3.1 dB.
+- Speaker sample from clear, unclipped sentences; speech much too short or babbling said again, then cut at a pause.
+- Separator overlap an eighth (21% less separating, cleaner joins); language model on 4 threads (same speed, two cores left free).
+- The editor gets a report (`X-Dub-Report`): sentences that stayed silent, look wrong or came out short, overflow, sample length; shown as a short note. Progress has 11 named stages.
+- Model files checked against their published hashes, free disk space checked first; voice and separator sessions kept 5 minutes between jobs when memory allows.
+- Clear errors: unsupported language, disk space, memory, a damaged download, which step failed.
+- All 8 cases: 2518 s -> 2401 s in total; words missing lower or equal in every case.
+
+**Measured and not used:** batching sentences in the voice model (this export ignores its attention mask, so output changes), KV cache in onnxruntime (no gain), fp32/fp16 decoder and fp32 separator, saved optimised graphs (slower), beam 1 and 4, translating with the sentence before (Sinhala worse, 2.7x slower).
+
+**Not done.**
+- Processor only; DirectML/CUDA not tried.
+- One voice for the whole video; overlapping speakers aren't detected.
+- No glossary in the editor yet (the engine takes one).
+- Not measured: a 30-minute recording, a low-end machine.
+
+**Manual tests still required.**
+- In the app: translate a real video, read the report note, cancel mid-way, undo, export.
+
 ## Scene analysis and a preview fix (7 November 2026)
 
 Details: [SCENE-ANALYSIS.md](SCENE-ANALYSIS.md).

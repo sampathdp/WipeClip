@@ -22,6 +22,7 @@ Audio never leaves the machine; only the model files are downloaded.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -45,7 +46,9 @@ class Download:
     repo: str
     revision: str  # pinned, so a changed upload can't change what users get
     name: str
-    size: int  # bytes, for progress before the server says
+    size: int  # bytes, for progress before the server says (exact when a hash is given)
+    sha256: str = ""  # a Git LFS file's hash at that revision: checked after download
+    git_oid: str = ""  # a small (non-LFS) file's git blob id: checked after download
 
 
 @dataclass(frozen=True)
@@ -146,8 +149,51 @@ def _model_path(model: SpeechModel) -> Path:
 
 
 def is_ready(model: SpeechModel) -> bool:
-    """Downloaded (and converted) completely: the marker is written last."""
-    return (_model_path(model) / "ready").is_file()
+    """Downloaded (and converted) completely: the marker is written last.
+    A model used as downloaded also needs each of its files there at its
+    published size (a file deleted or cut short since doesn't count)."""
+    path = _model_path(model)
+    if not (path / "ready").is_file():
+        return False
+    if model.converted:
+        return True
+    for f in model.files:
+        try:
+            size = (path / f.name).stat().st_size
+        except OSError:
+            return False
+        if (f.sha256 or f.git_oid) and size != f.size:
+            return False
+    return True
+
+
+class NotEnoughSpace(OSError):
+    """Too little free disk space for a model download."""
+
+
+class DownloadDamaged(OSError):
+    """A downloaded file isn't what the pinned revision published."""
+
+
+def _check_file(d: Download, path: Path) -> None:
+    """Raises DownloadDamaged (and deletes the file) unless `path` is the
+    file the pinned revision published: its size, and its sha256 or git
+    blob id, when known."""
+    if not (d.sha256 or d.git_oid):
+        return
+    size = path.stat().st_size
+    if size == d.size:
+        h = hashlib.sha256() if d.sha256 else hashlib.sha1(b"blob %d\0" % size)
+        with open(path, "rb") as f:
+            while chunk := f.read(1 << 22):
+                h.update(chunk)
+        if h.hexdigest() == (d.sha256 or d.git_oid):
+            return
+    path.unlink(missing_ok=True)
+    raise DownloadDamaged(f"The download of {Path(d.name).name} was damaged. Try again.")
+
+
+_SPACE_MARGIN = 500_000_000  # bytes left free after a download
 
 
 Progress = Callable[[str, float], None]  # (stage, 0..1); raises to cancel
@@ -172,6 +218,7 @@ def _fetch(d: Download, dest: Path, on_bytes: Callable[[int], None]) -> None:
         except urllib.error.HTTPError as exc:
             if exc.code != 416:  # 416: the .part is already whole
                 raise
+            _check_file(d, part)
             os.replace(part, dest)
             return
         with res:
@@ -184,6 +231,7 @@ def _fetch(d: Download, dest: Path, on_bytes: Callable[[int], None]) -> None:
                     have += len(chunk)
                     on_bytes(len(chunk))
         if total is None or have >= int(total):
+            _check_file(d, part)
             os.replace(part, dest)
             return
     raise OSError(f"The download of {d.name} keeps breaking off. Check your connection and try again.")
@@ -200,6 +248,17 @@ def ensure_model(model: SpeechModel, progress: Progress) -> Path:
     raw.mkdir(parents=True, exist_ok=True)
     total = sum(f.size for f in model.files)
     done = 0
+    need = 0
+    for f in model.files:
+        dest = raw / f.name
+        if not dest.is_file():
+            part = dest.with_name(dest.name + ".part")
+            need += max(0, f.size - (part.stat().st_size if part.is_file() else 0))
+    free = shutil.disk_usage(raw).free
+    if need and free < need + _SPACE_MARGIN:
+        raise NotEnoughSpace(
+            f"There isn't enough free disk space for the download: it needs {ceil((need + _SPACE_MARGIN) / 1e9)} GB and {free / 1e9:.1f} GB is free."
+        )
 
     def on_bytes(n: int) -> None:
         nonlocal done
@@ -209,9 +268,10 @@ def ensure_model(model: SpeechModel, progress: Progress) -> Path:
     for f in model.files:
         dest = raw / f.name  # may be in a subfolder ("onnx/...")
         dest.parent.mkdir(parents=True, exist_ok=True)
-        if dest.is_file():  # kept from an earlier, interrupted run
+        if dest.is_file() and (not (f.sha256 or f.git_oid) or dest.stat().st_size == f.size):  # kept from an earlier, interrupted run
             on_bytes(f.size)
             continue
+        dest.unlink(missing_ok=True)
         _fetch(f, dest, on_bytes)
 
     if model.converted:

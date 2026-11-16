@@ -1,5 +1,6 @@
 import { apiFetch, EngineUnavailableError, localEngine, type LocalEngine } from "@/lib/platform";
 import type { DiskMedia } from "@/lib/editor/types";
+import type { DubReport } from "@/lib/editor/dubPlan";
 import { readDiskFile } from "@/lib/platform/media";
 
 export const TOOLS_API_URL =
@@ -621,20 +622,24 @@ export async function engineDubModels(): Promise<{ ready: boolean; sizeMb: numbe
   return res?.ok ? ((await res.json()) as { ready: boolean; sizeMb: number }) : null;
 }
 
-export type DubStage = "download" | "translate" | "separate" | "voice" | "speak";
+export type DubStage = "download" | "load" | "translate" | "separate" | "voice" | "speak" | "fit";
+const DUB_STAGES: readonly string[] = ["download", "load", "translate", "separate", "voice", "speak", "fit"];
+
 
 /** Desktop app: the speech in `channels` (44.1 kHz stereo, timeline time)
  * said again in English in the speaker's voice, by the engine. `sentences`:
  * each transcript sentence's times and its text, which the engine
- * translates on this computer. Resolves to a WAV
- * with three channels - the English voice, then the background in stereo.
- * `signal` stops it in the engine too. */
+ * translates on this computer; `language`: the transcript's language.
+ * Resolves to a WAV with three channels - the English voice, then the
+ * background in stereo - and the engine's report. `signal` stops it in the
+ * engine too. */
 export async function engineDub(
   channels: Float32Array[],
   sentences: { start: number; end: number; text: string }[],
+  language: string,
   onProgress: (stage: DubStage, value: number) => void,
   signal?: AbortSignal
-): Promise<Blob> {
+): Promise<{ wav: Blob; report: DubReport | null }> {
   const engine = await localEngine();
   if (!engine) throw new EngineUnavailableError();
   const n = channels[0].length;
@@ -648,6 +653,7 @@ export async function engineDub(
   const body = new FormData();
   body.append("audio", new Blob([interleaved], { type: "application/octet-stream" }), "mix.f32");
   body.append("sentences", JSON.stringify(sentences));
+  body.append("language", language);
   body.append("job_id", jobId);
   const job = `${engine.url}/api/jobs/${jobId}`;
   const cancel = () => void fetch(`${job}/cancel`, { method: "POST", headers: engineHeaders(engine) }).catch(() => {});
@@ -656,7 +662,7 @@ export async function engineDub(
     void fetch(job, { headers: engineHeaders(engine) })
       .then((r) => (r.ok ? r.json() : null))
       .then((p: { phase: string; progress: number | null } | null) => {
-        if (p && ["download", "translate", "separate", "voice", "speak"].includes(p.phase)) onProgress(p.phase as DubStage, p.progress ?? 0);
+        if (p && DUB_STAGES.includes(p.phase)) onProgress(p.phase as DubStage, p.progress ?? 0);
       })
       .catch(() => {});
   }, 700);
@@ -664,7 +670,14 @@ export async function engineDub(
     const res = await fetch(`${engine.url}/api/dub/render`, { method: "POST", body, headers: engineHeaders(engine), signal });
     if (res.status === 409) throw new DOMException("Voice translation cancelled", "AbortError");
     if (!res.ok) await throwApiError(res, "Voice translation failed.");
-    return await res.blob();
+    let report: DubReport | null = null;
+    try {
+      const raw = res.headers.get("X-Dub-Report");
+      report = raw ? (JSON.parse(raw) as DubReport) : null;
+    } catch {
+      report = null; // an older engine, or a header the browser dropped
+    }
+    return { wav: await res.blob(), report };
   } finally {
     clearInterval(poll);
     signal?.removeEventListener("abort", cancel);
