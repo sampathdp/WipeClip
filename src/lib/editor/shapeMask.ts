@@ -74,6 +74,52 @@ export function drawShapeMask(m: ShapeMask, aspect: number): HTMLCanvasElement {
   return canvas;
 }
 
+/** A video layer's whole mask: its shape mask (if any) inside rounded
+ * corners of `radius` (LayerFrame.radius; 0 = square). null when it has
+ * neither. One PNG for the preview and the export, like any mask. */
+export function layerMask(mask: ShapeMask | null | undefined, radius: number): { key: string; draw: (aspect: number) => HTMLCanvasElement } | null {
+  const r = Math.min(1, Math.max(0, radius || 0));
+  if (!mask && r <= 0) return null;
+  if (r <= 0) return { key: maskKey(mask), draw: (aspect) => drawShapeMask(mask!, aspect) };
+  const corners: ShapeMask = { shape: "rect", x: 0.5, y: 0.5, w: 1, h: 1, rotation: 0, feather: 0, invert: false, radius: r };
+  if (!mask) return { key: maskKey(corners), draw: (aspect) => drawShapeMask(corners, aspect) };
+  return {
+    key: `${maskKey(mask)}&${maskKey(corners)}`,
+    draw: (aspect) => {
+      const canvas = drawShapeMask(mask, aspect);
+      const ctx = canvas.getContext("2d")!;
+      // Alpha times alpha; the gray (what the export reads) follows it.
+      ctx.globalCompositeOperation = "destination-in";
+      ctx.drawImage(drawShapeMask(corners, aspect), 0, 0);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < img.data.length; i += 4) img.data[i] = img.data[i + 1] = img.data[i + 2] = img.data[i + 3];
+      ctx.globalCompositeOperation = "source-over";
+      ctx.putImageData(img, 0, 0);
+      return canvas;
+    },
+  };
+}
+
+export function layerMaskUrl(mask: ShapeMask | null | undefined, radius: number, aspect: number): string | null {
+  const m = layerMask(mask, radius);
+  if (!m) return null;
+  const key = `${m.key}@${aspect.toFixed(3)}`;
+  let url = urls.get(key);
+  if (!url) {
+    url = m.draw(aspect).toDataURL("image/png");
+    if (urls.size > 60) urls.delete(urls.keys().next().value!);
+    urls.set(key, url);
+  }
+  return url;
+}
+
+export async function layerMaskBlob(mask: ShapeMask | null | undefined, radius: number, aspect: number): Promise<Blob | null> {
+  const m = layerMask(mask, radius);
+  if (!m) return null;
+  const canvas = m.draw(aspect);
+  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not draw the mask"))), "image/png"));
+}
+
 const urls = new Map<string, string>();
 
 /** The mask as a data URL, cached - for CSS mask-image. */

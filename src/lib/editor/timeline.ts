@@ -408,6 +408,19 @@ export function restackOverlay(project: Project, id: string, dir: 1 | -1): Proje
   return { ...project, overlays };
 }
 
+/** Moves an overlay right above or below another in the stacking order
+ * (the list is bottom to top). */
+export function stackOverlay(project: Project, id: string, targetId: string, where: "above" | "below"): Project {
+  const moving = project.overlays.find((o) => o.id === id);
+  if (!moving || id === targetId) return project;
+  const rest = project.overlays.filter((o) => o.id !== id);
+  const at = rest.findIndex((o) => o.id === targetId);
+  if (at < 0) return project;
+  const overlays = [...rest];
+  overlays.splice(where === "above" ? at + 1 : at, 0, moving);
+  return overlays.every((o, i) => o === project.overlays[i]) ? project : { ...project, overlays };
+}
+
 /** Timing of any timed item (overlay, audio, effect) as [start, end]. */
 export function itemSpan(item: Overlay | AudioClip | EffectClip): { start: number; end: number } {
   return "duration" in item ? { start: item.start, end: item.start + item.duration } : { start: item.start, end: item.end };

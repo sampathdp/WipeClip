@@ -4,7 +4,9 @@ import { exportEditorProject, type RenderedFile, type RenderProgress, type Resol
 import { loadRaster, rasterKey } from "./rasters";
 import { overlayWidth } from "./textRaster";
 import { canvasSize, layout, videoBox } from "./timeline";
-import { shapeMaskBlob } from "./shapeMask";
+import { layerMaskBlob, shapeMaskBlob } from "./shapeMask";
+import { FRAME_PAD, frameActive, frameBlobs } from "./layerFrame";
+import { isCropped, layerAspect } from "./layerGeometry";
 import { curveTables, curvesActive } from "./curves";
 import { EXPORT_LUT_SIZE, loadLut, resampleLut } from "./lut";
 import { sourceFile } from "./sourceFile";
@@ -79,6 +81,11 @@ export async function exportProject(
     if (o.kind === "video") {
       // Sent as a source video; the backend plays it (and its sound) itself.
       if (!sources[o.sourceId]) continue;
+      // The box's proportions in canvas pixels (cropped, or stretched): the
+      // mask and the frame are drawn for it, as the preview draws them.
+      const boxAspect = layerAspect(o, sources[o.sourceId]);
+      const mask = await layerMaskBlob(o.mask, o.frame?.radius ?? 0, boxAspect);
+      const art = frameActive(o.frame) ? await frameBlobs(o.frame, boxAspect) : null;
       overlayPayload.push({
         video: addSourceRef(o.sourceId),
         offset: round(o.offset),
@@ -97,8 +104,19 @@ export async function exportProject(
         ...(await mattePayload(o, sources, imageBlobs, addSourceRef)),
         ...overlayKeyframes(o),
         ...planHints(o),
-        // Shape mask as a PNG at the layer's proportions.
-        ...(o.mask ? { mask: imageBlobs.push(await shapeMaskBlob(o.mask, sources[o.sourceId].width / Math.max(1, sources[o.sourceId].height))) - 1 } : {}),
+        // Shape mask and rounded corners as one PNG at the box's proportions.
+        ...(mask ? { mask: imageBlobs.push(mask) - 1 } : {}),
+        ...(o.crop && isCropped(o.crop) ? { crop: o.crop } : {}),
+        ...(o.aspect ? { aspect: o.aspect } : {}),
+        // Shadow under the picture, border over it (layerFrame.ts).
+        ...(art && (art.under || art.over)
+          ? {
+              frame: {
+                ...(art.under ? { under: imageBlobs.push(art.under) - 1, pad: FRAME_PAD } : {}),
+                ...(art.over ? { over: imageBlobs.push(art.over) - 1 } : {}),
+              },
+            }
+          : {}),
       });
       continue;
     }

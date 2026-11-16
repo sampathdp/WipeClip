@@ -7,9 +7,9 @@ import { useClockTime, type Clock } from "@/lib/editor/clock";
 import { voiceoverSupported } from "@/lib/editor/voiceover";
 import { DEFAULT_KEY } from "@/lib/editor/chromaKey";
 import { DEFAULT_MATTE, MATTE_MODE_LABELS, fullMatte, type MatteJob } from "@/lib/editor/matte";
-import { EASE_LABELS, KEYFRAME_SNAP, clipTransformAt, keyframeAt, overlayValues, upsertKeyframe, type KeyValues } from "@/lib/editor/keyframes";
+import { EASE_LABELS, KEYFRAME_SNAP, clipTransformAt, keyframeAt, upsertKeyframe, type KeyValues } from "@/lib/editor/keyframes";
 import { FILTERS, FILTER_ORDER } from "@/lib/editor/look";
-import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
+import { getStickerDef } from "@/lib/editor/stickers";
 import { TEXT_FONTS, TEXT_TEMPLATES } from "@/lib/editor/textRaster";
 import {
   ANIM_IN_LABELS,
@@ -79,7 +79,8 @@ import GradeFilter from "./GradeFilter";
 import PremiumBadge from "./PremiumBadge";
 import { ActionButton, Field, PanelShell, SecondsInput, StickerLibrary, type ClipSection } from "./Inspector";
 import { TrashIcon } from "./icons";
-import { sourceName } from "@/lib/editor/sourceFile";
+import { ArrangeBar, LayerFrameSection, LayerTransformSection, type ArrangeControls, type LayerEdit } from "./LayerPanels";
+import type { Size } from "@/lib/editor/layerGeometry";
 
 /** Brackets a continuous control (slider drag, color picker) as one undo step. */
 export interface Gesture {
@@ -1880,13 +1881,23 @@ export function OverlayPanel({
   style,
   fonts,
   onCamLayout,
-  onFrame,
   background,
+  natural,
+  canvas,
+  onEdit,
+  arrange,
+  defaultName,
 }: {
   overlay: Overlay;
-  /** Video layers: centered over the whole picture, all of it showing ("fit")
-   * or covering it ("fill") - a second video track. */
-  onFrame?: (mode: "fit" | "fill") => void;
+  /** The layer's picture size (raster or video frame); null until loaded. */
+  natural: Size | null;
+  canvas: Size;
+  /** Changes the layer as a whole (crop, stretch, fit, frame, name). */
+  onEdit: LayerEdit;
+  /** Align / distribute over the picked layers. */
+  arrange: ArrangeControls;
+  /** What the layer is called until it's renamed. */
+  defaultName: string;
   /** Video layers: place as a webcam (webcamLayout.ts); null = by hand. */
   onCamLayout?: (layout: CamLayout | null) => void;
   /** Video layers: webcam background removal. */
@@ -1928,6 +1939,25 @@ export function OverlayPanel({
   return (
     <PanelShell title={title} onClose={onClose}>
       <div className="space-y-4">
+        {!o.caption && (
+          <Field label="Layer name">
+            <input
+              // Remounted when the name changes elsewhere (the Layers list), so it shows it.
+              key={`${o.id}:${o.name ?? ""}`}
+              type="text"
+              defaultValue={o.name ?? ""}
+              placeholder={defaultName}
+              maxLength={60}
+              aria-label="Layer name"
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (v !== (o.name ?? "")) onEdit((cur) => ({ ...cur, name: v || undefined }) as Overlay);
+              }}
+              onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+              className={inputCls}
+            />
+          </Field>
+        )}
         {o.kind === "shape" && (
           <div className="mb-4 space-y-3">
             <ColorField label="Color" value={o.shape.color} onChange={(color) => setShape({ color })} gesture={gesture} />
@@ -2094,16 +2124,6 @@ export function OverlayPanel({
             <p className="text-[11px] text-muted">
               Plays from {formatTime(o.offset, true)} of its video. Drag the layer&apos;s left edge on the timeline to start later in the video.
             </p>
-            {onFrame && (
-              <div className="grid grid-cols-2 gap-2">
-                <ActionButton onClick={() => onFrame("fill")} title="Center it and cover the whole picture, like a second video track (edges may be cut off)">
-                  Fill the frame
-                </ActionButton>
-                <ActionButton onClick={() => onFrame("fit")} title="Center it and show all of it, as large as fits">
-                  Fit in the frame
-                </ActionButton>
-              </div>
-            )}
           </div>
         )}
         {o.kind === "video" && onCamLayout && <CamLayoutSection layout={o.camLayout} onChange={onCamLayout} />}
@@ -2111,7 +2131,9 @@ export function OverlayPanel({
           <BackgroundSection matte={o.matte ?? null} controls={background} onChange={(matte) => onChange({ matte } as Partial<Overlay>)} gesture={gesture} />
         )}
 
-        <OverlayTransformFields overlay={o} onChange={onChange} gesture={gesture} keys={keys} />
+        <OverlayTransformFields overlay={o} onChange={onChange} gesture={gesture} keys={keys} natural={natural} canvas={canvas} onEdit={onEdit} />
+        {o.kind === "video" && <LayerFrameSection frame={o.frame} onChange={(frame) => onEdit((cur) => ({ ...cur, frame }) as Overlay)} gesture={gesture} />}
+        {!o.locked && <ArrangeBar controls={arrange} />}
 
         <div className="space-y-3">
           <SectionTitle>
@@ -2177,23 +2199,27 @@ export function OverlayPanel({
   );
 }
 
-function OverlayTransformFields({ overlay: o, onChange, gesture, keys }: { overlay: Overlay; onChange: (patch: Partial<Overlay>) => void; gesture: Gesture; keys: KeyframeControls }) {
+function OverlayTransformFields({
+  overlay: o,
+  onChange,
+  gesture,
+  keys,
+  natural,
+  canvas,
+  onEdit,
+}: {
+  overlay: Overlay;
+  onChange: (patch: Partial<Overlay>) => void;
+  gesture: Gesture;
+  keys: KeyframeControls;
+  natural: Size | null;
+  canvas: Size;
+  onEdit: LayerEdit;
+}) {
   const time = useClockTime(keys.clock);
-  const v = overlayValues(o, time);
   return (
     <div className="space-y-3">
-      <SectionTitle>Transform</SectionTitle>
-      <SliderField label="X" value={Math.round(v.x * 100)} min={-30} max={130} neutral={50} format={(n) => `${n}%`} onChange={(n) => onChange({ x: n / 100 })} gesture={gesture} />
-      <SliderField label="Y" value={Math.round(v.y * 100)} min={-30} max={130} neutral={50} format={(n) => `${n}%`} onChange={(n) => onChange({ y: n / 100 })} gesture={gesture} />
-      {o.kind !== "text" ? (
-        <SliderField label="Size" value={Math.round(o.width * v.scale * 100)} min={3} max={200} format={(n) => `${n}%`} onChange={(n) => onChange({ width: n / 100 })} gesture={gesture} />
-      ) : (
-        o.keyframes?.length ? (
-          <SliderField label="Scale" value={Math.round(v.scale * 100)} min={5} max={400} neutral={100} format={(n) => `${n}%`} onChange={(n) => onChange({ text: { ...o.text, size: (o.text.size * n) / 100 } } as Partial<Overlay>)} gesture={gesture} />
-        ) : null
-      )}
-      <SliderField label="Rotation" value={Math.round(v.rotation)} min={-180} max={180} neutral={0} format={(n) => `${n}°`} onChange={(n) => onChange({ rotation: n })} gesture={gesture} />
-      <SliderField label="Opacity" value={Math.round(v.opacity * 100)} min={0} max={100} neutral={100} format={(n) => `${n}%`} onChange={(n) => onChange({ opacity: n / 100 })} gesture={gesture} />
+      <LayerTransformSection overlay={o} natural={natural} canvas={canvas} clock={keys.clock} onChange={onChange} onEdit={onEdit} gesture={gesture} />
       <KeyframeBar time={time} keys={keys} />
     </div>
   );
@@ -3320,82 +3346,3 @@ function framePreset(f: CanvasFrame | undefined): "none" | "custom" | keyof type
 }
 
 // --- Layers ---------------------------------------------------------------------
-
-export function LayersPanel({
-  overlays,
-  selectedId,
-  sources,
-  onSelect,
-  onChange,
-  onRestack,
-  onDelete,
-  onClose,
-}: {
-  overlays: Overlay[];
-  selectedId: string | null;
-  sources: Record<string, MediaSource>;
-  onSelect: (id: string) => void;
-  onChange: (id: string, patch: Partial<Overlay>) => void;
-  onRestack: (id: string, dir: 1 | -1) => void;
-  onDelete: (id: string) => void;
-  onClose: () => void;
-}) {
-  const topFirst = [...overlays].reverse();
-  const btn = "rounded p-1 text-xs text-muted hover:bg-surface-3 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2";
-  return (
-    <PanelShell title="Layers" onClose={onClose}>
-      <p className="mb-3 text-[11px] text-muted">Top of the list is drawn on top. Video and background are always underneath.</p>
-      {topFirst.length === 0 && <p className="text-xs text-muted">No layers yet. Add text, stickers or images.</p>}
-      <ul className="space-y-1.5">
-        {topFirst.map((o, i) => {
-          const name =
-            o.kind === "text"
-              ? `“${o.text.content.split("\n")[0].slice(0, 24) || "Text"}”`
-              : o.kind === "sticker"
-                ? (getStickerDef(o.stickerId)?.label ?? "Sticker")
-                : o.kind === "shape"
-                  ? SHAPE_LABELS[o.shape.type]
-                  : ((sources[o.sourceId] ? sourceName(sources[o.sourceId]) : undefined) ?? (o.kind === "video" ? "Video" : "Image"));
-          const thumb = o.kind === "sticker" ? stickerThumbSrc(getStickerDef(o.stickerId)!) : o.kind === "image" ? sources[o.sourceId]?.url : null;
-          return (
-            <li
-              key={o.id}
-              className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${o.id === selectedId ? "border-accent-2 bg-accent-2/10" : "border-border bg-surface"}`}
-            >
-              <button type="button" onClick={() => onSelect(o.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded bg-surface-3 text-xs font-bold">
-                  {thumb ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={thumb} alt="" className="h-full w-full object-contain" />
-                  ) : o.kind === "sticker" ? (
-                    getStickerDef(o.stickerId)?.kind === "emoji" ? (getStickerDef(o.stickerId) as { char: string }).char : "★"
-                  ) : o.kind === "video" ? (
-                    "▶"
-                  ) : (
-                    "T"
-                  )}
-                </span>
-                <span className={`truncate text-xs font-semibold ${o.hidden ? "text-muted line-through" : "text-foreground"}`}>{name}</span>
-              </button>
-              <button type="button" className={btn} title="Bring forward" aria-label="Bring forward" disabled={i === 0} onClick={() => onRestack(o.id, 1)}>
-                ↑
-              </button>
-              <button type="button" className={btn} title="Send backward" aria-label="Send backward" disabled={i === topFirst.length - 1} onClick={() => onRestack(o.id, -1)}>
-                ↓
-              </button>
-              <button type="button" className={btn} title={o.hidden ? "Show" : "Hide"} aria-label={o.hidden ? "Show layer" : "Hide layer"} onClick={() => onChange(o.id, { hidden: !o.hidden })}>
-                {o.hidden ? "◌" : "◉"}
-              </button>
-              <button type="button" className={btn} title={o.locked ? "Unlock" : "Lock"} aria-label={o.locked ? "Unlock layer" : "Lock layer"} onClick={() => onChange(o.id, { locked: !o.locked })}>
-                {o.locked ? "🔒" : "🔓"}
-              </button>
-              <button type="button" className={btn} title="Delete" aria-label="Delete layer" onClick={() => onDelete(o.id)}>
-                <TrashIcon width={13} height={13} />
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </PanelShell>
-  );
-}

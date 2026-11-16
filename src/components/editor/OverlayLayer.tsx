@@ -8,24 +8,56 @@ import { overlayWidth } from "@/lib/editor/textRaster";
 import { overlayFrame } from "@/lib/editor/timeline";
 import { overlayValues } from "@/lib/editor/keyframes";
 import { spriteIndex } from "@/lib/editor/textAnim";
-import { shapeMaskUrl } from "@/lib/editor/shapeMask";
+import { layerMaskUrl } from "@/lib/editor/shapeMask";
+import { FRAME_PAD, frameActive, frameUrls } from "@/lib/editor/layerFrame";
+import { CANVAS_BOUNDS, cropEdge, layerRect, rectBounds, snapBounds, unionBounds, type Bounds, type Edge, type LayerRect, type Size, type VideoLayer } from "@/lib/editor/layerGeometry";
 import { drawKeyedFrame } from "@/lib/editor/chromaKey";
 import { previewMixer } from "@/lib/editor/audioMixer";
 import { bgVideoTime, drawMatteFrame, fullMatte, matteJobKey, useMatteJob } from "@/lib/editor/matte";
-import type { ChromaKey, MediaSource, Overlay, WebcamMatte } from "@/lib/editor/types";
+import type { ChromaKey, Crop, MediaSource, Overlay, WebcamMatte } from "@/lib/editor/types";
+
+type Sign = -1 | 1;
 
 type Drag =
-  | { kind: "move"; id: string; px: number; py: number; x: number; y: number }
-  | { kind: "resize"; id: string; cx: number; cy: number; dist: number; start: number }
-  | { kind: "rotate"; id: string; cx: number; cy: number; a0: number; r0: number };
+  | {
+      kind: "move";
+      /** Every layer that moves, with where it was. */
+      items: { id: string; x: number; y: number }[];
+      px: number;
+      py: number;
+      /** The rectangle around them when the drag started, and what it snaps to. */
+      bounds: Bounds;
+      targets: Bounds[];
+    }
+  | { kind: "resize"; id: string; ax: number; ay: number; cx: number; cy: number; dist: number; start: number }
+  | { kind: "rotate"; id: string; cx: number; cy: number; a0: number; r0: number }
+  | { kind: "crop"; id: string; edge: Edge; px: number; py: number; layer: VideoLayer; natural: Size; time: number };
 
-const SNAP = 0.015; // fraction of canvas - center/edge guides pull within this
-const GUIDES = [0.5, 0.1, 0.9]; // center + safe-area lines
+/** Guides pull within this many pixels of the preview. */
+const SNAP_PX = 6;
+const NO_GUIDES: { x: number[]; y: number[] } = { x: [], y: [] };
+const CORNERS: { sx: Sign; sy: Sign; cls: string }[] = [
+  { sx: -1, sy: -1, cls: "-left-2 -top-2 cursor-nwse-resize" },
+  { sx: 1, sy: -1, cls: "-right-2 -top-2 cursor-nesw-resize" },
+  { sx: -1, sy: 1, cls: "-bottom-2 -left-2 cursor-nesw-resize" },
+  { sx: 1, sy: 1, cls: "-bottom-2 -right-2 cursor-nwse-resize" },
+];
+const EDGES: { edge: Edge; cls: string }[] = [
+  { edge: "left", cls: "-left-1 top-1/2 h-6 w-2 -translate-y-1/2 cursor-ew-resize" },
+  { edge: "right", cls: "-right-1 top-1/2 h-6 w-2 -translate-y-1/2 cursor-ew-resize" },
+  { edge: "top", cls: "-top-1 left-1/2 h-2 w-6 -translate-x-1/2 cursor-ns-resize" },
+  { edge: "bottom", cls: "-bottom-1 left-1/2 h-2 w-6 -translate-x-1/2 cursor-ns-resize" },
+];
 
 /** Stickers, text, images and video layers drawn over the preview in
  * canvas-relative units (fractions of the canvas), bottom to top in project
  * order, using the same PNG (or video) the export composites - so position,
  * size, rotation, opacity and animation land the same in both.
+ *
+ * Layers are picked, moved, resized, cropped (video layers, by their edges)
+ * and turned here. Several picked layers move together. A move snaps to the
+ * canvas's edges and centre and to the other layers' (layerGeometry.ts),
+ * with guides; Alt holds snapping off.
  */
 export default function OverlayLayer({
   clock,
@@ -35,8 +67,13 @@ export default function OverlayLayer({
   sources,
   playback,
   selectedId,
+  picked,
+  labels,
+  snapping = true,
   onSelect,
+  onPick,
   onChange,
+  onChangeRaw,
   onGestureStart,
   onGestureEnd,
   onEditText,
@@ -50,8 +87,18 @@ export default function OverlayLayer({
   /** Player state the video layers follow. */
   playback: { playing: boolean; rate: number; volume: number; muted: boolean };
   selectedId: string | null;
+  /** Layers picked together with the selected one (ids). */
+  picked?: ReadonlySet<string>;
+  /** Layer names, shown on the selected layer. */
+  labels?: Record<string, string>;
+  /** Moves snap to the canvas and the other layers. */
+  snapping?: boolean;
   onSelect: (id: string | null) => void;
+  /** Shift/Ctrl+click: adds the layer to the picked ones, or takes it out. */
+  onPick?: (id: string) => void;
   onChange: (id: string, patch: Partial<Overlay>) => void;
+  /** A change that isn't a keyframe even on an animated layer (its crop). */
+  onChangeRaw?: (id: string, patch: Partial<Overlay>) => void;
   onGestureStart: () => void;
   onGestureEnd: () => void;
   onEditText: (id: string) => void;
@@ -60,8 +107,10 @@ export default function OverlayLayer({
   const outerRef = useRef<HTMLDivElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
+  const [guides, setGuides] = useState(NO_GUIDES);
   const drag = useRef<Drag | null>(null);
+  // Every shown layer's box, for snapping and for moving several together.
+  const rects = useRef(new Map<string, LayerRect>());
 
   useEffect(() => {
     const el = outerRef.current;
@@ -90,30 +139,69 @@ export default function OverlayLayer({
     onGestureStart();
   };
 
-  const snap = (v: number) => {
-    const g = GUIDES.find((line) => Math.abs(v - line) < SNAP);
-    return g === undefined ? { v, g: null } : { v: g, g };
+  /** A press on a layer: picks it, and starts moving it - with the other
+   * picked layers when it's one of several. */
+  const press = (e: React.PointerEvent, o: Overlay) => {
+    if ((e.shiftKey || e.ctrlKey || e.metaKey) && onPick) {
+      e.stopPropagation();
+      e.preventDefault();
+      onPick(o.id);
+      return;
+    }
+    const together = !!picked && picked.size > 1 && picked.has(o.id);
+    if (!together) onSelect(o.id);
+    const ids = together ? overlays.filter((x) => picked.has(x.id) && !x.locked && rects.current.has(x.id)).map((x) => x.id) : [o.id];
+    const boxes = ids.map((id) => rects.current.get(id)).filter((r): r is LayerRect => !!r);
+    if (!boxes.length) return;
+    const moving = new Set(ids);
+    const p = toCanvas(e);
+    begin(e, {
+      kind: "move",
+      items: boxes.map((r) => ({ id: r.id, x: r.x, y: r.y })),
+      px: p.x,
+      py: p.y,
+      bounds: unionBounds(boxes.map((r) => rectBounds(r, canvasSize))),
+      targets: [CANVAS_BOUNDS, ...[...rects.current.values()].filter((r) => !moving.has(r.id)).map((r) => rectBounds(r, canvasSize))],
+    });
   };
 
   const onMove = (e: React.PointerEvent) => {
     const d = drag.current;
     if (!d) return;
     const p = toCanvas(e);
+    if (d.kind === "move") {
+      let dx = p.x - d.px;
+      let dy = p.y - d.py;
+      if (snapping && !e.altKey) {
+        const b = { l: d.bounds.l + dx, t: d.bounds.t + dy, r: d.bounds.r + dx, b: d.bounds.b + dy };
+        const s = snapBounds(b, d.targets, { x: SNAP_PX / Math.max(1, p.r.width), y: SNAP_PX / Math.max(1, p.r.height) });
+        dx += s.dx;
+        dy += s.dy;
+        setGuides(s.x.length || s.y.length ? { x: s.x, y: s.y } : NO_GUIDES);
+      } else setGuides(NO_GUIDES);
+      for (const it of d.items) onChange(it.id, { x: Math.min(1.3, Math.max(-0.3, it.x + dx)), y: Math.min(1.3, Math.max(-0.3, it.y + dy)) });
+      return;
+    }
     const o = overlays.find((x) => x.id === d.id);
     if (!o) return;
-    if (d.kind === "move") {
-      const sx = snap(d.x + (p.x - d.px));
-      const sy = snap(d.y + (p.y - d.py));
-      setGuides({ x: sx.g, y: sy.g });
-      onChange(d.id, { x: Math.min(1.3, Math.max(-0.3, sx.v)), y: Math.min(1.3, Math.max(-0.3, sy.v)) });
-    } else if (d.kind === "resize") {
-      const dist = Math.hypot((p.x - d.cx) * p.r.width, (p.y - d.cy) * p.r.height);
-      const ratio = dist / Math.max(1, d.dist);
-      if (o.kind === "text") {
-        onChange(d.id, { text: { ...o.text, size: Math.min(0.5, Math.max(0.015, d.start * ratio)) } } as Partial<Overlay>);
-      } else {
-        onChange(d.id, { width: Math.min(2, Math.max(0.03, d.start * ratio)) });
-      }
+    if (d.kind === "resize") {
+      // The opposite corner stays where it is.
+      const dist = Math.hypot((p.x - d.ax) * p.r.width, (p.y - d.ay) * p.r.height);
+      const lo = o.kind === "text" ? 0.015 : 0.03;
+      const hi = o.kind === "text" ? 0.5 : 2;
+      const next = Math.min(hi, Math.max(lo, (d.start * dist) / Math.max(1, d.dist)));
+      const ratio = next / d.start;
+      const centre = { x: d.ax + (d.cx - d.ax) * ratio, y: d.ay + (d.cy - d.ay) * ratio };
+      if (o.kind === "text") onChange(d.id, { ...centre, text: { ...o.text, size: next } } as Partial<Overlay>);
+      else onChange(d.id, { ...centre, width: next });
+    } else if (d.kind === "crop") {
+      // How far the edge moved outward, along the layer's own axis.
+      const a = (rects.current.get(d.id)?.rotation ?? 0) * (Math.PI / 180);
+      const mx = (p.x - d.px) * p.r.width;
+      const my = (p.y - d.py) * p.r.height;
+      const along = d.edge === "left" || d.edge === "right" ? (mx * Math.cos(a) + my * Math.sin(a)) / p.r.width : (-mx * Math.sin(a) + my * Math.cos(a)) / p.r.height;
+      const out = d.edge === "left" || d.edge === "top" ? -along : along;
+      (onChangeRaw ?? onChange)(d.id, cropEdge(d.layer, d.natural, canvasSize, d.edge, out, d.time) as Partial<Overlay>);
     } else {
       // Relative to where the drag started, so the handle can sit anywhere.
       const angle = (Math.atan2((p.y - d.cy) * p.r.height, (p.x - d.cx) * p.r.width) * 180) / Math.PI;
@@ -128,9 +216,181 @@ export default function OverlayLayer({
   const onUp = () => {
     if (!drag.current) return;
     drag.current = null;
-    setGuides({ x: null, y: null });
+    setGuides(NO_GUIDES);
     onGestureEnd();
   };
+
+  const shown = new Map<string, LayerRect>();
+  const chrome: React.ReactNode[] = [];
+  const layers = overlays.map((o) => {
+    if (o.hidden) return null;
+    const v = overlayValues(o, time);
+    const frame = overlayFrame({ ...o, opacity: v.opacity }, time);
+    const img = rasters.byKey[rasterKey(o)] ?? rasters.byId[o.id];
+    if (!frame || !img) return null;
+    const rect = layerRect(o, overlayWidth(o, img, canvasSize), img, canvasSize, time);
+    shown.set(o.id, rect);
+    const selected = o.id === selectedId;
+    const also = !selected && !!picked?.has(o.id);
+    const w = rect.w * size.width;
+    const h = rect.h * size.height;
+    const hover = selected || also ? "" : "hover:outline hover:outline-1 hover:outline-white/60";
+    const video = o.kind === "video" ? o : null;
+    const frameArt = video && frameActive(video.frame) ? frameUrls(video.frame, w / Math.max(1, h)) : null;
+    const pad = FRAME_PAD * Math.min(w, h);
+    const el = (
+      <div
+        key={o.id}
+        className="absolute"
+        style={{
+          left: v.x * size.width,
+          top: v.y * size.height,
+          width: w,
+          height: h,
+          transform: `translate(-50%, -50%) translate(${frame.dx * size.width}px, ${frame.dy * size.height}px) rotate(${v.rotation + frame.rotate}deg) scale(${frame.scale})`,
+          opacity: frame.opacity,
+          mixBlendMode: o.blend && o.blend !== "normal" ? (o.blend === "add" ? "plus-lighter" : o.blend) : undefined,
+          pointerEvents: o.locked ? "none" : undefined,
+        }}
+      >
+        {frameArt?.under && (
+          // eslint-disable-next-line @next/next/no-img-element -- the shadow's own PNG, as the export composites it
+          <img src={frameArt.under} alt="" aria-hidden draggable={false} className="pointer-events-none absolute max-w-none" style={{ left: -pad, top: -pad, width: w + 2 * pad, height: h + 2 * pad }} />
+        )}
+        {video ? (
+          <OverlayVideo
+            layerId={o.id}
+            url={img.url}
+            sourceTime={video.offset + (time - o.start)}
+            layerTime={time - o.start}
+            gain={video.volume}
+            playback={playback}
+            chromaKey={o.key ?? null}
+            matte={video.matte ? fullMatte(video.matte) : null}
+            matteKey={video.matte ? matteJobKey(sources[video.sourceId], fullMatte(video.matte).detail) : null}
+            bgSource={video.matte?.bgSourceId ? (sources[video.matte.bgSourceId] ?? null) : null}
+            mask={layerMaskUrl(o.mask, video.frame?.radius ?? 0, w / Math.max(1, h))}
+            crop={video.crop ?? null}
+            className={`cursor-move ${hover}`}
+            onPointerDown={(e) => press(e, o)}
+          />
+        ) : img.sprite ? (
+          <SpriteCell
+            url={img.url}
+            sprite={img.sprite}
+            index={spriteIndex(img.sprite.times, time - o.start)}
+            className={`h-full w-full cursor-move ${hover}`}
+            onDoubleClick={() => o.kind === "text" && onEditText(o.id)}
+            onPointerDown={(e) => press(e, o)}
+          />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={img.url}
+            alt=""
+            draggable={false}
+            className={`h-full w-full cursor-move ${hover}`}
+            onDoubleClick={() => o.kind === "text" && onEditText(o.id)}
+            onPointerDown={(e) => press(e, o)}
+          />
+        )}
+        {frameArt?.over && (
+          // eslint-disable-next-line @next/next/no-img-element -- the border's own PNG, as the export composites it
+          <img src={frameArt.over} alt="" aria-hidden draggable={false} className="pointer-events-none absolute inset-0 h-full w-full" />
+        )}
+      </div>
+    );
+    // Outline and handles go above every layer (pushed to `chrome`, drawn
+    // last): a layer on top would otherwise cover them, and they'd fade,
+    // blend and mask with their own layer. Same box and turn as the layer.
+    if (selected || also) {
+      chrome.push(
+        <div
+          key={o.id}
+          // A locked layer shows its outline but can't be dragged by its handles.
+          className={`pointer-events-none absolute ${o.locked ? "" : "[&_button]:pointer-events-auto"}`}
+          style={{
+            left: v.x * size.width,
+            top: v.y * size.height,
+            width: w,
+            height: h,
+            transform: `translate(-50%, -50%) translate(${frame.dx * size.width}px, ${frame.dy * size.height}px) rotate(${v.rotation + frame.rotate}deg) scale(${frame.scale})`,
+          }}
+        >
+          {also && <div className="pointer-events-none absolute -inset-0.5 rounded-sm border border-dashed border-accent-2" />}
+          {selected && (
+            <>
+              <div className="pointer-events-none absolute -inset-0.5 rounded-sm border-2 border-accent-2 shadow-[0_0_0_1px_rgba(0,0,0,0.4)]" />
+              {labels?.[o.id] && (
+                <span
+                  className="pointer-events-none absolute left-0 max-w-full truncate rounded bg-accent-2 px-1 text-[10px] font-semibold leading-4 text-black"
+                  style={rect.y - rect.h / 2 < 0.08 ? { top: 4, left: 4 } : { bottom: "100%", marginBottom: 4 }}
+                >
+                  {labels[o.id]}
+                </span>
+              )}
+              {CORNERS.map((c) => (
+                <button
+                  key={`${c.sx}${c.sy}`}
+                  type="button"
+                  aria-label="Resize layer"
+                  title="Drag to resize"
+                  className={`absolute h-4 w-4 rounded-full border-2 border-accent-2 bg-white shadow ${c.cls}`}
+                  onPointerDown={(e) => {
+                    // The opposite corner, on the canvas, in the layer's own turn.
+                    const a = (v.rotation * Math.PI) / 180;
+                    const ox = (-c.sx * rect.w * canvasSize.width) / 2;
+                    const oy = (-c.sy * rect.h * canvasSize.height) / 2;
+                    const ax = v.x + (ox * Math.cos(a) - oy * Math.sin(a)) / canvasSize.width;
+                    const ay = v.y + (ox * Math.sin(a) + oy * Math.cos(a)) / canvasSize.height;
+                    const p = toCanvas(e);
+                    const dist = Math.hypot((p.x - ax) * p.r.width, (p.y - ay) * p.r.height);
+                    begin(e, { kind: "resize", id: o.id, ax, ay, cx: v.x, cy: v.y, dist, start: (o.kind === "text" ? o.text.size : o.width) * v.scale });
+                  }}
+                />
+              ))}
+              {video &&
+                EDGES.map((g) => (
+                  <button
+                    key={g.edge}
+                    type="button"
+                    aria-label={`Crop the ${g.edge} edge`}
+                    title="Drag to crop"
+                    className={`absolute rounded-sm border border-accent-2 bg-white shadow ${g.cls}`}
+                    onPointerDown={(e) => {
+                      const p = toCanvas(e);
+                      begin(e, { kind: "crop", id: o.id, edge: g.edge, px: p.x, py: p.y, layer: video, natural: { width: img.width, height: img.height }, time });
+                    }}
+                  />
+                ))}
+              {/* Above the box, or below it for a layer at the top of the stage,
+                  where a handle above would be cut off. */}
+              <button
+                type="button"
+                aria-label="Rotate layer"
+                title="Drag to rotate (Shift snaps to 15°)"
+                className="absolute left-1/2 flex h-5 w-5 -translate-x-1/2 cursor-grab items-center justify-center rounded-full border-2 border-accent-2 bg-white text-[10px] font-bold leading-none text-accent shadow"
+                style={rect.y - rect.h / 2 < 0.12 ? { top: "100%", marginTop: 10 } : { bottom: "100%", marginBottom: 10 }}
+                onPointerDown={(e) => {
+                  const r = boxRef.current!.getBoundingClientRect();
+                  const p = toCanvas(e);
+                  const a0 = (Math.atan2((p.y - v.y) * r.height, (p.x - v.x) * r.width) * 180) / Math.PI;
+                  begin(e, { kind: "rotate", id: o.id, cx: v.x, cy: v.y, a0, r0: v.rotation });
+                }}
+              >
+                ↻
+              </button>
+            </>
+          )}
+        </div>
+      );
+    }
+    return el;
+  });
+  // Kept for the next press: read only in the pointer handlers.
+  useEffect(() => {
+    rects.current = shown;
+  });
 
   return (
     // No z-index: it stacks above the masks and pointer by DOM order, and
@@ -145,120 +405,14 @@ export default function OverlayLayer({
         onPointerUp={onUp}
         onPointerCancel={onUp}
       >
-        {guides.x !== null && (
-          <div className="pointer-events-none absolute inset-y-0 z-50 w-px bg-accent-2/90" style={{ left: `${guides.x * 100}%` }} />
-        )}
-        {guides.y !== null && (
-          <div className="pointer-events-none absolute inset-x-0 z-50 h-px bg-accent-2/90" style={{ top: `${guides.y * 100}%` }} />
-        )}
-        {overlays.map((o) => {
-          if (o.hidden) return null;
-          const v = overlayValues(o, time);
-          const frame = overlayFrame({ ...o, opacity: v.opacity }, time);
-          const img = rasters.byKey[rasterKey(o)] ?? rasters.byId[o.id];
-          if (!frame || !img) return null;
-          const selected = o.id === selectedId;
-          const w = overlayWidth(o, img, canvasSize) * size.width * v.scale;
-          const h = (w * img.height) / img.width;
-          return (
-            <div
-              key={o.id}
-              className="absolute"
-              style={{
-                left: v.x * size.width,
-                top: v.y * size.height,
-                width: w,
-                height: h,
-                transform: `translate(-50%, -50%) translate(${frame.dx * size.width}px, ${frame.dy * size.height}px) rotate(${v.rotation + frame.rotate}deg) scale(${frame.scale})`,
-                opacity: frame.opacity,
-                mixBlendMode: o.blend && o.blend !== "normal" ? (o.blend === "add" ? "plus-lighter" : o.blend) : undefined,
-                pointerEvents: o.locked ? "none" : undefined,
-              }}
-            >
-              {o.kind === "video" ? (
-                <OverlayVideo
-                  layerId={o.id}
-                  url={img.url}
-                  sourceTime={o.offset + (time - o.start)}
-                  layerTime={time - o.start}
-                  gain={o.volume}
-                  playback={playback}
-                  chromaKey={o.key ?? null}
-                  matte={o.matte ? fullMatte(o.matte) : null}
-                  matteKey={o.matte ? matteJobKey(sources[o.sourceId], fullMatte(o.matte).detail) : null}
-                  bgSource={o.matte?.bgSourceId ? (sources[o.matte.bgSourceId] ?? null) : null}
-                  mask={o.mask ? shapeMaskUrl(o.mask, w / Math.max(1, h)) : null}
-                  className={`h-full w-full cursor-move object-fill ${selected ? "" : "hover:outline hover:outline-1 hover:outline-white/60"}`}
-                  onPointerDown={(e) => {
-                    onSelect(o.id);
-                    const p = toCanvas(e);
-                    begin(e, { kind: "move", id: o.id, px: p.x, py: p.y, x: v.x, y: v.y });
-                  }}
-                />
-              ) : img.sprite ? (
-                <SpriteCell
-                  url={img.url}
-                  sprite={img.sprite}
-                  index={spriteIndex(img.sprite.times, time - o.start)}
-                  className={`h-full w-full cursor-move ${selected ? "" : "hover:outline hover:outline-1 hover:outline-white/60"}`}
-                  onDoubleClick={() => o.kind === "text" && onEditText(o.id)}
-                  onPointerDown={(e) => {
-                    onSelect(o.id);
-                    const p = toCanvas(e);
-                    begin(e, { kind: "move", id: o.id, px: p.x, py: p.y, x: v.x, y: v.y });
-                  }}
-                />
-              ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={img.url}
-                  alt=""
-                  draggable={false}
-                  className={`h-full w-full cursor-move ${selected ? "" : "hover:outline hover:outline-1 hover:outline-white/60"}`}
-                  onDoubleClick={() => o.kind === "text" && onEditText(o.id)}
-                  onPointerDown={(e) => {
-                    onSelect(o.id);
-                    const p = toCanvas(e);
-                    begin(e, { kind: "move", id: o.id, px: p.x, py: p.y, x: v.x, y: v.y });
-                  }}
-                />
-              )}
-              {selected && (
-                <>
-                  <div className="pointer-events-none absolute -inset-1 rounded-sm border-2 border-accent-2 shadow-[0_0_0_1px_rgba(0,0,0,0.4)]" />
-                  <button
-                    type="button"
-                    aria-label="Resize layer"
-                    title="Drag to resize"
-                    className="absolute -bottom-3 -right-3 h-5 w-5 cursor-nwse-resize rounded-full border-2 border-accent-2 bg-white shadow"
-                    onPointerDown={(e) => {
-                      const r = boxRef.current!.getBoundingClientRect();
-                      const p = toCanvas(e);
-                      const dist = Math.hypot((p.x - v.x) * r.width, (p.y - v.y) * r.height);
-                      begin(e, { kind: "resize", id: o.id, cx: v.x, cy: v.y, dist, start: (o.kind === "text" ? o.text.size : o.width) * v.scale });
-                    }}
-                  />
-                  {/* Corner handle, not one floating above the box: that got clipped
-                      by the stage for layers near the top edge. */}
-                  <button
-                    type="button"
-                    aria-label="Rotate layer"
-                    title="Drag to rotate (Shift snaps to 15°)"
-                    className="absolute -left-3 -top-3 flex h-5 w-5 cursor-grab items-center justify-center rounded-full border-2 border-accent-2 bg-white text-[10px] font-bold leading-none text-accent shadow"
-                    onPointerDown={(e) => {
-                      const r = boxRef.current!.getBoundingClientRect();
-                      const p = toCanvas(e);
-                      const a0 = (Math.atan2((p.y - v.y) * r.height, (p.x - v.x) * r.width) * 180) / Math.PI;
-                      begin(e, { kind: "rotate", id: o.id, cx: v.x, cy: v.y, a0, r0: v.rotation });
-                    }}
-                  >
-                    ↻
-                  </button>
-                </>
-              )}
-            </div>
-          );
-        })}
+        {guides.x.map((x) => (
+          <div key={`x${x}`} className="pointer-events-none absolute inset-y-0 z-50 w-px bg-accent-2/90" style={{ left: `${x * 100}%` }} />
+        ))}
+        {guides.y.map((y) => (
+          <div key={`y${y}`} className="pointer-events-none absolute inset-x-0 z-50 h-px bg-accent-2/90" style={{ top: `${y * 100}%` }} />
+        ))}
+        {layers}
+        {chrome}
       </div>
     </div>
   );
@@ -313,11 +467,14 @@ function OverlayVideo({
   matteKey,
   bgSource,
   mask,
+  crop,
   className,
   onPointerDown,
 }: {
   /** Shape mask image (data URL) over the layer. */
   mask: string | null;
+  /** The part of the frame shown; null = all of it. */
+  crop: Crop | null;
   layerId: string;
   url: string;
   sourceTime: number;
@@ -412,27 +569,27 @@ function OverlayVideo({
   }, [matteUrl, bgIsVideo]);
 
   const maskStyle = mask ? { maskImage: `url("${mask}")`, WebkitMaskImage: `url("${mask}")`, maskSize: "100% 100%", WebkitMaskSize: "100% 100%" } : undefined;
-  const video = (
-    <video
-      ref={ref}
-      src={url}
-      // With CORS from the start: a keyed layer (chroma key) reads its pixels
-      // on a canvas, and a disk file (asset protocol, another origin) would
-      // taint it otherwise. The preview mixer needs the same for its sound.
-      crossOrigin={cors(url)}
-      playsInline
-      preload="auto"
-      draggable={false}
-      aria-hidden
-      className={drawn ? HIDDEN : className}
-      style={drawn ? undefined : maskStyle}
-      onPointerDown={drawn ? undefined : onPointerDown}
-    />
-  );
-  if (!drawn) return video;
+  // The whole picture, larger than the box and shifted so the kept part
+  // fills it; the box (which also carries the mask) cuts the rest off.
+  const picture = crop
+    ? { position: "absolute" as const, left: `${(-crop.x / crop.w) * 100}%`, top: `${(-crop.y / crop.h) * 100}%`, width: `${100 / crop.w}%`, height: `${100 / crop.h}%`, maxWidth: "none" }
+    : { width: "100%", height: "100%" };
   return (
-    <>
-      {video}
+    <div className={`absolute inset-0 overflow-hidden ${className}`} style={maskStyle} onPointerDown={onPointerDown}>
+      <video
+        ref={ref}
+        src={url}
+        // With CORS from the start: a keyed layer (chroma key) reads its pixels
+        // on a canvas, and a disk file (asset protocol, another origin) would
+        // taint it otherwise. The preview mixer needs the same for its sound.
+        crossOrigin={cors(url)}
+        playsInline
+        preload="auto"
+        draggable={false}
+        aria-hidden
+        className={drawn ? HIDDEN : "block object-fill"}
+        style={drawn ? undefined : picture}
+      />
       {matteUrl && <video ref={matted} src={matteUrl} crossOrigin={cors(matteUrl)} muted playsInline preload="auto" aria-hidden className={HIDDEN} />}
       {matteUrl && bg && (bgIsVideo ? (
         <video ref={bgVideo} src={bg.url} crossOrigin={cors(bg.url)} muted playsInline preload="auto" aria-hidden className={HIDDEN} />
@@ -440,8 +597,8 @@ function OverlayVideo({
         // eslint-disable-next-line @next/next/no-img-element -- drawn onto the canvas, never shown
         <img ref={bgImage} src={bg.url} crossOrigin={cors(bg.url)} alt="" aria-hidden className={HIDDEN} />
       ))}
-      <canvas ref={keyed} className={`relative ${className}`} style={maskStyle} onPointerDown={onPointerDown} aria-hidden />
-    </>
+      {drawn && <canvas ref={keyed} className="block" style={picture} aria-hidden />}
+    </div>
   );
 }
 

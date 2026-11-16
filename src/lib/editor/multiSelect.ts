@@ -136,7 +136,7 @@ export function pasteCopy(p: Project, copy: LayerCopy, at: number): { project: P
   const starts = [...copy.overlays, ...copy.effects, ...copy.masks].map((x) => x.start).concat(copy.audio.map((a) => a.start));
   const d = at - Math.min(...starts);
   const r = (t: number) => Math.max(0, Math.round((t + d) * 1e6) / 1e6);
-  const overlays = copy.overlays.map((o) => ({ ...o, id: newId("ovl"), start: r(o.start), end: r(o.end), locked: false }));
+  const overlays = copy.overlays.map((o) => ({ ...structuredClone(o), id: newId("ovl"), start: r(o.start), end: r(o.end), locked: false }));
   const audio = copy.audio.map((a) => ({ ...a, id: newId("aud"), start: r(a.start) }));
   const effects = copy.effects.map((e) => ({ ...e, id: newId("fx"), start: r(e.start), end: r(e.end) }));
   const masks = copy.masks.map((m) => ({ ...m, id: newId("mask"), start: r(m.start), end: r(m.end) }));
@@ -154,6 +154,42 @@ export function pasteCopy(p: Project, copy: LayerCopy, at: number): { project: P
       ...effects.map((e) => `effect:${e.id}`),
       ...masks.map((m) => `mask:${m.id}`),
     ],
+  };
+}
+
+/** Copies of the picked layers where the originals are: same time, place,
+ * size, crop, look and animation, each with its own id. A layer's copy goes
+ * right above it in the stacking order. Copies share nothing with their
+ * originals but the source file they play (never copied), so changing one
+ * leaves the other as it was. A group picked whole gives a group of the
+ * copies. Clips and captions aren't copied (as with copy/paste); locked
+ * layers' copies are unlocked. null when there's nothing to copy. */
+export function duplicateKeys(p: Project, keys: Iterable<string>): { project: Project; keys: string[] } | null {
+  const all = [...keys];
+  const copy = copyKeys(p, all);
+  if (!copy) return null;
+  const made = new Map<string, string>(); // original key -> copy's key
+  const fresh = <T extends { id: string }>(kind: PickKind, prefix: string, item: T): T => {
+    const id = newId(prefix);
+    made.set(`${kind}:${item.id}`, `${kind}:${id}`);
+    return { ...structuredClone(item), id };
+  };
+  const picked = new Set(copy.overlays.map((o) => o.id));
+  const overlays = p.overlays.flatMap((o) => (picked.has(o.id) ? [o, { ...fresh("overlay", "ovl", o), locked: false }] : [o]));
+  const audio = copy.audio.map((a) => fresh("audio", "aud", a));
+  const effects = copy.effects.map((e) => fresh("effect", "fx", e));
+  const masks = copy.masks.map((m) => fresh("mask", "mask", m));
+  const groups = (p.groups ?? []).filter((g) => g.keys.length >= 2 && g.keys.every((k) => made.has(k))).map((g) => ({ id: newId("grp"), keys: g.keys.map((k) => made.get(k)!) }));
+  return {
+    project: {
+      ...p,
+      overlays,
+      audio: [...p.audio, ...audio],
+      effects: [...p.effects, ...effects],
+      ...(masks.length ? { masks: [...(p.masks ?? []), ...masks] } : {}),
+      ...(groups.length ? { groups: [...(p.groups ?? []), ...groups] } : {}),
+    },
+    keys: [...made.values()],
   };
 }
 

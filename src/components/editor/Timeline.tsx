@@ -79,6 +79,9 @@ export interface TrackItem {
   sel: Selection;
   /** Keyframe times, timeline seconds (drawn as diamonds). */
   keys?: number[];
+  /** The row it's drawn on within its track (0 = top), when the rows mean
+   * something (video layers: the stacking order). Absent: packed by time. */
+  lane?: number;
   /** Placed by something else (a clip's own sound follows its clip): picked
    * by clicking, never dragged or trimmed. */
   fixed?: boolean;
@@ -129,6 +132,12 @@ const TINY_ITEM_W = 16;
 
 /** Greedy lane packing so overlapping items stack instead of hiding each other. */
 function laneLayout(items: TrackItem[]) {
+  // Rows given by the track (every item has one): used as they are.
+  if (items.length && items.every((it) => it.lane !== undefined)) {
+    const lane: Record<string, number> = {};
+    for (const it of items) lane[it.id] = it.lane!;
+    return { lane, count: Math.max(1, ...items.map((it) => it.lane! + 1)) };
+  }
   const sorted = [...items].sort((a, b) => a.start - b.start);
   const laneEnds: number[] = [];
   const lane: Record<string, number> = {};

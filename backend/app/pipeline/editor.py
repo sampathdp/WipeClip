@@ -540,6 +540,18 @@ class PlanOverlay:
     # Webcam background removal (video layers; app/pipeline/matte.py): the
     # matted file (picture on top, mask below) replaces the layer's picture.
     matte: PlanMatte | None = None
+    # Video layers (src/lib/editor/layerGeometry.ts): the part of the frame
+    # shown (x, y, w, h as fractions of it), and the box's width / height in
+    # output pixels when the picture is stretched instead of keeping its own.
+    crop: tuple[float, float, float, float] | None = None
+    box_aspect: float | None = None
+    # A frame around a video layer (src/lib/editor/layerFrame.ts): the
+    # shadow's PNG goes under the picture and is larger than the box by
+    # `frame_pad` of the box's short side on every side; the border's PNG
+    # goes over it at the box's size.
+    frame_under: str | None = None
+    frame_over: str | None = None
+    frame_pad: float = 0.0
 
 
 @dataclass
@@ -1730,8 +1742,25 @@ def _matte_head(m: PlanMatte, src: str, n: int, plan: ExportPlan, start: float, 
     return ";".join(graph)
 
 
+def layer_crop(o: "PlanOverlay") -> tuple[float, float, float, float]:
+    """A layer's crop held inside the frame: (x, y, w, h) as fractions of it."""
+    if not o.crop:
+        return 0.0, 0.0, 1.0, 1.0
+    x = min(0.95, max(0.0, o.crop[0]))
+    y = min(0.95, max(0.0, o.crop[1]))
+    return x, y, min(1.0 - x, max(0.05, o.crop[2])), min(1.0 - y, max(0.05, o.crop[3]))
+
+
 def _overlay_filters(
-    o: PlanOverlay, src: str, n: int, plan: ExportPlan, base_label: str, mask_idx: int | None = None, bg_idx: int | None = None
+    o: PlanOverlay,
+    src: str,
+    n: int,
+    plan: ExportPlan,
+    base_label: str,
+    mask_idx: int | None = None,
+    bg_idx: int | None = None,
+    under_idx: int | None = None,
+    over_idx: int | None = None,
 ) -> tuple[str, str]:
     """Filter chain for one overlay (the pad `src`, e.g. "[3:v:0]") plus the
     overlay onto `base_label`; returns (chain, output label). Same geometry and
@@ -1739,6 +1768,12 @@ def _overlay_filters(
     W, H = plan.width, plan.height
     target_w = max(2, round(o.width * W))
     target_h = max(2, round(target_w * o.image_height / o.image_width))
+    crop_x, crop_y, crop_w, crop_h = layer_crop(o)
+    if o.crop or o.box_aspect:
+        # The box follows the cropped picture's proportions, or the stretch
+        # (layerGeometry.ts layerAspect).
+        aspect = o.box_aspect if o.box_aspect else (o.image_width * crop_w) / (o.image_height * crop_h)
+        target_h = max(2, round(target_w / aspect))
     anim = min(ANIM_SECONDS, (o.end - o.start) / 2)
     s, a = _num(o.start), _num(anim)
     pin = f"min(1,max(0,(t-{s})/{a}))"
@@ -1762,7 +1797,17 @@ def _overlay_filters(
             f"colorkey=0x{o.key_color.lstrip('#')}:{_num(max(0.01, min(1.0, o.key_similarity / 100)))}:"
             f"{_num(max(0.0, min(1.0, o.key_smoothness / 100)))}"
         )
+    if o.crop:
+        # Before the size: the kept part of the frame fills the box.
+        parts.insert(1, f"crop=w='iw*{_num(crop_w)}':h='ih*{_num(crop_h)}':x='iw*{_num(crop_x)}':y='ih*{_num(crop_y)}'")
     parts.append(f"scale={target_w}:{target_h}:flags=lanczos")
+    if o.video and not o.key_color and not o.sprite_times:
+        # A plain video layer is cut and sized as decoded, and only then
+        # given an alpha channel: converting every full-size frame to RGBA
+        # first cost more than everything after it (measured on 1080p and
+        # 1440p layers shown at a quarter of the canvas). A keyed layer
+        # keeps the old order: its key reads the full-size picture.
+        parts.append(parts.pop(0))
     # Shift the input (a video layer's trimmed range, or a still looped for
     # the layer's length) to start at the layer's timeline position, so the
     # time-based fades/animations and `enable` below see timeline time.
@@ -1771,8 +1816,16 @@ def _overlay_filters(
         # The matted file in place of the video (src is its input), composed
         # at the layer's size; the rest of the chain (opacity, rotation,
         # animation, shape mask, placement) runs on the result as on any layer.
-        src = _matte_head(o.matte, src, n, plan, o.start, o.end, target_w, target_h, bg_idx) + f"[mto{n}];[mto{n}]"
+        # A cropped layer is composed whole (its background is placed in
+        # the whole frame, as the preview draws it) and cut afterwards.
+        full_w = max(target_w, round(target_w / crop_w)) if o.crop else target_w
+        full_h = max(target_h, round(target_h / crop_h)) if o.crop else target_h
+        src = _matte_head(o.matte, src, n, plan, o.start, o.end, full_w, full_h, bg_idx) + f"[mto{n}];[mto{n}]"
         parts = ["null"]
+        if o.crop:
+            cut_x = min(full_w - target_w, max(0, round(crop_x * full_w)))
+            cut_y = min(full_h - target_h, max(0, round(crop_y * full_h)))
+            parts = [f"crop={target_w}:{target_h}:{cut_x}:{cut_y}"]
     sized = len(parts)  # filters up to here run before the shape mask
     opacities = keyframe_values(kfs, "opacity") if kfs else [o.opacity]
     if len(set(opacities)) > 1:
@@ -1829,18 +1882,32 @@ def _overlay_filters(
         x_expr, y_expr = (x_expr + term, y_expr) if axis == "x" else (x_expr, y_expr + term)
 
     in_label, out_label = f"ol{n}", f"oo{n}"
+    # The picture at its size, then (in the layer's own frame) its shape
+    # mask and its frame, then everything that moves, turns or fades it.
+    stages = [f"{src}{','.join(parts[:sized])}"]
     if mask_idx is not None:
-        # Shape mask, in the layer's own frame: its alpha times the mask.
-        head = (
-            f"{src}{','.join(parts[:sized])}[olp{n}];"
-            f"[{mask_idx}:v]setpts=PTS-STARTPTS+{s}/TB,scale={target_w}:{target_h}:flags=bicubic,format=gray[olm{n}];"
-            f"[olp{n}]split[olq{n}][olr{n}];[olq{n}]alphaextract[ola{n}];"
-            f"[ola{n}][olm{n}]blend=all_mode=multiply[olb{n}];[olr{n}][olb{n}]alphamerge"
+        # Shape mask: its alpha times the mask.
+        stages[-1] += f"[olp{n}]"
+        stages.append(f"[{mask_idx}:v]setpts=PTS-STARTPTS+{s}/TB,scale={target_w}:{target_h}:flags=bicubic,format=gray[olm{n}]")
+        stages.append(f"[olp{n}]split[olq{n}][olr{n}];[olq{n}]alphaextract[ola{n}]")
+        stages.append(f"[ola{n}][olm{n}]blend=all_mode=multiply[olb{n}];[olr{n}][olb{n}]alphamerge")
+    pad = max(0, round(o.frame_pad * min(target_w, target_h))) if under_idx is not None else 0
+    if under_idx is not None:
+        # The shadow's picture is the base: the layer goes on it, inside the
+        # pad. Its centre is the box's centre, so the placement is unchanged.
+        stages[-1] += f"[olf{n}]"
+        stages.append(
+            f"[{under_idx}:v]setpts=PTS-STARTPTS+{s}/TB,format=rgba,scale={target_w + 2 * pad}:{target_h + 2 * pad}:flags=bicubic[olu{n}]"
         )
-        rest = parts[sized:]
-        source = head + ("," + ",".join(rest) if rest else "")
-    else:
-        source = f"{src}{','.join(parts)}"
+        stages.append(f"[olu{n}][olf{n}]overlay=x={pad}:y={pad}:format=rgb,format=rgba")
+    if over_idx is not None:
+        stages[-1] += f"[olg{n}]"
+        stages.append(f"[{over_idx}:v]setpts=PTS-STARTPTS+{s}/TB,format=rgba,scale={target_w}:{target_h}:flags=bicubic[olw{n}]")
+        stages.append(f"[olg{n}][olw{n}]overlay=x={pad}:y={pad}:format=rgb,format=rgba")
+    rest = parts[sized:]
+    if rest:
+        stages[-1] += ("," if len(stages) > 1 or sized else "") + ",".join(rest)
+    source = ";".join(stages)
     place = f"overlay=x='{x_expr}-overlay_w/2':y='{y_expr}-overlay_h/2':enable='between(t,{s},{_num(o.end)})':eval=frame"
     if o.blend != "normal":
         # Layer on a neutral full canvas (see BLEND_MODES), blended in RGB -
@@ -2050,8 +2117,11 @@ def build_export_args(
                 f"setpts=N/({_num(fps)}*TB)[oli{n}]"
             )
             src = f"[oli{n}]"
-        mask_idx = inputs.add("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end - o.start + 0.1), "-i", o.mask_path) if o.mask_path else None
-        chain, v_acc = _overlay_filters(o, src, n, plan, v_acc, mask_idx, bg_idx)
+        still = ("-loop", "1", "-framerate", _num(fps), "-t", _num(o.end - o.start + 0.1), "-i")
+        mask_idx = inputs.add(*still, o.mask_path) if o.mask_path else None
+        under_idx = inputs.add(*still, o.frame_under) if o.frame_under and o.video else None
+        over_idx = inputs.add(*still, o.frame_over) if o.frame_over and o.video else None
+        chain, v_acc = _overlay_filters(o, src, n, plan, v_acc, mask_idx, bg_idx, under_idx, over_idx)
         graph.append(chain)
     if plan.output_format == "gif":
         # A shared palette from the whole clip, at GIF size and frame rate.

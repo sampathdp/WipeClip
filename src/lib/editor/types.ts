@@ -225,8 +225,37 @@ export interface TextStyle {
   highlight?: string;
 }
 
+/** A border, rounded corners and a drop shadow on a video layer
+ * (layerFrame.ts). Sizes are relative to the layer's box, so they scale
+ * with it; the preview and the export draw them from the same PNGs. */
+export interface LayerFrame {
+  /** Corner radius, 0..1 of half the box's short side. */
+  radius: number;
+  /** Border width, 0..0.1 of the box's short side; 0 = none. */
+  border: number;
+  borderColor: string;
+  /** Shadow strength, 0..1; 0 = none. */
+  shadow: number;
+}
+
+/** One screen of a split-screen layout (layouts.ts): its rectangle as
+ * fractions of the canvas (left, top, width, height) and how the picture
+ * was put in it. Kept on what fills it so it can be placed again when the
+ * canvas size changes - only while it still sits where the layout put it. */
+export interface LayoutSlot {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** "fill": cropped to the screen's shape; "fit": all of it, inside. */
+  fit: "fill" | "fit";
+}
+
 interface OverlayBase {
   id: string;
+  /** The user's own name for the layer (Layers panel); absent = named
+   * after what it shows. */
+  name?: string;
   start: number; // timeline seconds
   end: number;
   x: number; // center, fraction of canvas width
@@ -282,7 +311,23 @@ export type Overlay =
   | (OverlayBase & { kind: "text"; text: TextStyle })
   /** Picture-in-picture: a video playing from `offset` (source seconds)
    * for the layer's time range, with its own sound at `volume` (0..2). */
-  | (OverlayBase & { kind: "video"; sourceId: string; offset: number; volume: number; camLayout?: CamLayout; matte?: WebcamMatte | null })
+  | (OverlayBase & {
+      kind: "video";
+      sourceId: string;
+      offset: number;
+      volume: number;
+      camLayout?: CamLayout;
+      matte?: WebcamMatte | null;
+      /** Part of the video's frame shown; absent = all of it. */
+      crop?: Crop;
+      /** Stretch: the box's width / height in canvas pixels, instead of the
+       * (cropped) picture's own. Absent = the picture's proportions. */
+      aspect?: number;
+      /** Rounded corners, border and shadow; absent = none. */
+      frame?: LayerFrame;
+      /** The split-screen screen it fills (layouts.ts). */
+      slot?: LayoutSlot;
+    })
   /** Arrow, highlight circle, rectangle, numbered step, callout, focus outline. */
   | (OverlayBase & { kind: "shape"; shape: ShapeStyle });
 
@@ -811,6 +856,9 @@ export interface Project {
   markers?: Marker[];
   /** Grouped items (groups.ts). */
   groups?: Group[];
+  /** The split-screen screen the main video row fills (layouts.ts);
+   * absent = the whole canvas. */
+  mainSlot?: LayoutSlot;
 }
 
 export interface TranscriptWord {
@@ -974,6 +1022,7 @@ export function migrateProject(raw: unknown): Project {
     ...(Array.isArray(p.groups)
       ? { groups: (p.groups as Group[]).filter((g) => g && typeof g.id === "string" && Array.isArray(g.keys) && g.keys.every((k) => typeof k === "string")) }
       : {}),
+    ...(validSlot(p.mainSlot) ? { mainSlot: p.mainSlot } : {}),
     ...(Array.isArray(p.markers) ? { markers: (p.markers as Marker[]).filter((m) => m && typeof m.id === "string" && Number.isFinite(m.t)) } : {}),
     ...(p.focus
       ? {
@@ -987,6 +1036,11 @@ export function migrateProject(raw: unknown): Project {
         }
       : {}),
   };
+}
+
+function validSlot(raw: unknown): raw is LayoutSlot {
+  const s = raw as Partial<LayoutSlot> | null | undefined;
+  return !!s && [s.x, s.y, s.w, s.h].every(Number.isFinite) && s.w! > 0 && s.h! > 0 && (s.fit === "fill" || s.fit === "fit");
 }
 
 const DRAFT_KINDS = new Set<DraftItemKind>(["zoom", "highlights", "cut", "chapter", "review", "annotation", "privacy"]);

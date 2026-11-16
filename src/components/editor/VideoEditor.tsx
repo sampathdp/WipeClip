@@ -21,7 +21,7 @@ import { rippleCut } from "@/lib/editor/ripple";
 import { highlightProject } from "@/lib/editor/highlights";
 import { clipFades, editClipCurve, visibleClipCurve } from "@/lib/editor/clipSound";
 import { deleteClosingGaps, trimClipAt, trimLayersAt, type TrimSide } from "@/lib/editor/trimEdit";
-import { allKeys, copyKeys, deleteKeys, existingKeys, keySelection, keysEnd, pasteCopy, selKey, shiftKeys, type LayerCopy } from "@/lib/editor/multiSelect";
+import { allKeys, copyKeys, deleteKeys, duplicateKeys, existingKeys, keySelection, pasteCopy, selKey, shiftKeys, type LayerCopy } from "@/lib/editor/multiSelect";
 import {
   generateThumbnails,
   generateWaveform,
@@ -50,7 +50,7 @@ import {
   type ProjectSummary,
 } from "@/lib/editor/projectStore";
 import { createProjectFile, PROJECT_FILE_EXT, ProjectFileError, projectFileName, readProjectFile } from "@/lib/editor/projectFile";
-import { useOverlayRasters } from "@/lib/editor/rasters";
+import { rasterKey, useOverlayRasters } from "@/lib/editor/rasters";
 import { sourceFile, sourceInput, sourceName, sourceSize } from "@/lib/editor/sourceFile";
 import { chooseVideoOnDisk, diskMediaUrl, matteUrl, openDiskMedia } from "@/lib/platform/media";
 import { getStickerDef, stickerThumbSrc } from "@/lib/editor/stickers";
@@ -67,6 +67,7 @@ import {
   moveClip,
   newId,
   restackOverlay,
+  stackOverlay,
   splitAt,
   insertFreezeAt,
   splitAudioAt,
@@ -160,6 +161,10 @@ import ExportDialog from "./ExportDialog";
 import BatchExportDialog, { type BatchFormat, type BatchItem } from "./BatchExportDialog";
 import { ActionButton, ClipPanel, PanelShell, TransitionPanel, type ClipSection } from "./Inspector";
 import OverlayLayer from "./OverlayLayer";
+import { ArrangeBar, LayersPanel, LayoutPanel, layerName, type ArrangeControls, type LayerEdit, type LayoutChoice } from "./LayerPanels";
+import { alignRects, distributeRects, equalSize, fitToCanvas, layerRect, sizePatch, type AlignOp, type LayerRect, type Move } from "@/lib/editor/layerGeometry";
+import { applyLayout, insetCells, layoutCandidates, relayoutSlots, releaseMain } from "@/lib/editor/layouts";
+import { overlayWidth } from "@/lib/editor/textRaster";
 import RecentProjects from "./RecentProjects";
 import TranscriptPanel from "./TranscriptPanel";
 import { cutWords, transcriptCurrent } from "@/lib/editor/wordEdit";
@@ -174,7 +179,6 @@ import {
   ElementsPanel,
   CaptionsPanel,
   type CaptionOptions,
-  LayersPanel,
   LookPanel,
   StrengthSection,
   OverlayPanel,
@@ -245,7 +249,7 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const EMPTY: Project = { clips: [], overlays: [], audio: [], effects: [], canvas: DEFAULT_CANVAS };
 const RATES = [0.5, 1, 1.5, 2];
 
-type Tool = "text" | "captions" | "transcript" | "elements" | "audio" | "effects" | "filters" | "adjust" | "transition" | "canvas" | "layers" | "focus" | "tutorial" | "highlights";
+type Tool = "text" | "captions" | "transcript" | "elements" | "audio" | "effects" | "filters" | "adjust" | "transition" | "canvas" | "layout" | "layers" | "focus" | "tutorial" | "highlights";
 type GroupTab = { id: Tool; label: string; hint: string };
 /** The left rail: each button opens a group, whose tools show as tabs on
  * top of its panel. */
@@ -267,7 +271,7 @@ const TOOL_GROUPS: { id: string; label: string; icon: (p: React.SVGProps<SVGSVGE
     icon: ElementsIcon,
     tabs: [
       { id: "elements", label: "Add", hint: "Stickers, shapes, images and videos" },
-      { id: "layers", label: "Layers", hint: "Layer order, hide and lock" },
+      { id: "layers", label: "Layers", hint: "Every layer: order, rename, duplicate, hide and lock" },
     ],
   },
   {
@@ -281,7 +285,15 @@ const TOOL_GROUPS: { id: string; label: string; icon: (p: React.SVGProps<SVGSVGE
       { id: "transition", label: "Transition", hint: "Transition between clips" },
     ],
   },
-  { id: "canvas", label: "Canvas", icon: CanvasIcon, tabs: [{ id: "canvas", label: "Canvas", hint: "Canvas size and background" }] },
+  {
+    id: "canvas",
+    label: "Canvas",
+    icon: CanvasIcon,
+    tabs: [
+      { id: "canvas", label: "Canvas", hint: "Canvas size and background" },
+      { id: "layout", label: "Split screen", hint: "Several videos at once: side by side, grids, picture in picture" },
+    ],
+  },
   {
     id: "smart",
     label: "Smart",
@@ -334,9 +346,24 @@ const selIs = (sel: Selection, kind: string, id: string) => sel !== null && sel.
 const CAPTION_GROUP = "captions-group";
 const GROUP_KEY = "wipeclip.captionsGrouped";
 
-/** The timeline row a layer is on: text, video layers ("Video 2") or the
+/** The timeline row a layer is on: text, video layers ("Videos") or the
  * other elements (stickers, images, shapes). */
 const layerRow = (o: Overlay): "text" | "videolayers" | "elements" => (o.kind === "text" ? "text" : o.kind === "video" ? "videolayers" : "elements");
+
+/** Rows for video layers that show the stacking order: of two layers on
+ * screen at the same time, the one drawn on top is on the higher row.
+ * `layers` is bottom to top; rows count from the top. */
+function stackLanes(layers: Overlay[]): Map<string, number> {
+  const lanes = new Map<string, number>();
+  const placed: Overlay[] = [];
+  for (const o of [...layers].reverse()) {
+    let lane = 0;
+    for (const above of placed) if (above.start < o.end - 1e-3 && o.start < above.end - 1e-3) lane = Math.max(lane, lanes.get(above.id)! + 1);
+    lanes.set(o.id, lane);
+    placed.push(o);
+  }
+  return lanes;
+}
 
 const layerToggles = (layers: Overlay[]): TrackToggle[] => [
   { kind: "hide", on: layers.length > 0 && layers.every((o) => o.hidden) },
@@ -380,6 +407,10 @@ export default function VideoEditor({
   // other means drops back to that one item.
   const [pickedRaw, setPicked] = useState<string[]>([]);
   const [tool, setTool] = useState<Tool | null>(null);
+  const toolRef = useRef(tool);
+  useEffect(() => {
+    toolRef.current = tool;
+  });
   // Focus panel's "Compare with original": preview only, while the panel is open.
   const [comparingZooms, setComparingZooms] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -946,6 +977,17 @@ export default function VideoEditor({
       }),
     [apply, clock]
   );
+  /** A change that's never a keyframe: a name, hidden, locked, a crop. */
+  const patchOverlay = useCallback((id: string, patch: Partial<Overlay>) => apply((p) => updateOverlay(p, id, patch)), [apply]);
+  /** A layer changed as a whole, given the playhead (LayerPanels.tsx LayerEdit). */
+  const editOverlay = useCallback(
+    (id: string, fn: (o: Overlay, t: number) => Overlay) =>
+      apply((p) => {
+        const t = clock.get();
+        return { ...p, overlays: p.overlays.map((o) => (o.id === id ? fn(o, t) : o)) };
+      }),
+    [apply, clock]
+  );
   // --- webcam background removal (matte.ts) ----------------------------------
   useEffect(() => {
     if (IS_DESKTOP) setMatteEngine({ render: engineMatte, url: matteUrl });
@@ -1281,23 +1323,42 @@ export default function VideoEditor({
     [project, apply]
   );
 
+  /** Copies of the given items where the originals are (multiSelect.ts
+   * duplicateKeys): same time, place and settings, picked afterwards. */
+  const duplicateInPlace = useCallback(
+    (keys: string[]) => {
+      const r = duplicateKeys(project, keys);
+      if (!r) return false;
+      apply(() => r.project);
+      setPicked(r.keys);
+      setSelection(keySelection(r.keys[r.keys.length - 1]));
+      const layers = r.keys.filter((k) => k.startsWith("overlay:")).length;
+      say(
+        layers
+          ? `Duplicated${r.keys.length > 1 ? ` ${r.keys.length} items` : ""}: the ${layers > 1 ? "copies are" : "copy is"} selected, exactly on top of the original${layers > 1 ? "s" : ""}. Drag to move ${layers > 1 ? "them" : "it"}.`
+          : "Duplicated at the same time."
+      );
+      return true;
+    },
+    [project, apply, say]
+  );
+
   const duplicate = useCallback(() => {
-    if (multi) {
-      const c = copyKeys(project, picked);
-      if (c) pasteMany(c, keysEnd(project, picked));
-      else say("Only layers can be duplicated together. Select one clip to duplicate it.");
-      return;
-    }
-    if (selection?.kind === "clip") {
+    if (selection?.kind === "clip" && !multi) {
       const next = duplicateClip(project, selection.id);
       if (!next) return;
       apply(() => next.project);
       setSelection({ kind: "clip", id: next.clipId });
       return;
     }
-    const c = currentItem();
-    if (c) insertClone(cloneOf(c));
-  }, [selection, project, apply, currentItem, insertClone, cloneOf, multi, picked, pasteMany, say]);
+    if (duplicateInPlace([...picked])) return;
+    if (multi) say("Only layers can be duplicated together. Select one clip to duplicate it.");
+    else {
+      // What duplicateKeys leaves out (an auto caption): a nudged copy, as before.
+      const c = currentItem();
+      if (c) insertClone(cloneOf(c));
+    }
+  }, [selection, project, apply, multi, picked, duplicateInPlace, say, currentItem, insertClone, cloneOf]);
 
   const copy = useCallback(() => {
     if (multi) {
@@ -1333,6 +1394,12 @@ export default function VideoEditor({
     [project, select]
   );
   const groupColors = useMemo(() => groupColorsOf(project), [project]);
+  // Layers: the picked ones' ids, names, group colors and a frame of each video.
+  const pickedLayers = useMemo<ReadonlySet<string>>(() => new Set([...picked].filter((k) => k.startsWith("overlay:")).map((k) => k.slice(8))), [picked]);
+  const layerLabels = useMemo(() => Object.fromEntries(project.overlays.filter((o) => !o.caption).map((o) => [o.id, layerName(o, sources)])), [project.overlays, sources]);
+  const layerGroupColors = useMemo(() => new Map([...groupColors].filter(([k]) => k.startsWith("overlay:")).map(([k, c]) => [k.slice(8), c])), [groupColors]);
+  const selectedRaster = selectedOverlay ? (rasters.byKey[rasterKey(selectedOverlay)] ?? rasters.byId[selectedOverlay.id]) : undefined;
+  const layerThumbs = useMemo(() => Object.fromEntries(Object.entries(thumbs).map(([id, strip]) => [id, strip.urls[0]])), [thumbs]);
   const selectedGroup = useMemo(() => itemGroupOf(project, selKey(selection)), [project, selection]);
 
   /** Ctrl+G: the picked items become a group. */
@@ -1356,6 +1423,107 @@ export default function VideoEditor({
     apply((p) => ({ ...p, groups: r.groups.length ? r.groups : undefined }));
     say(r.count === 1 ? "Ungrouped." : `Ungrouped ${r.count} groups.`);
   }, [project, picked, apply, say]);
+
+  // --- arranging layers on the canvas (layerGeometry.ts) ------------------------
+  const [snapping, setSnapping] = useState(true);
+  /** The picked layers that can move, with their boxes at the playhead.
+   * The selected one first, so "equal size" matches it. */
+  const arrangeRects = useCallback((): { rects: LayerRect[]; byId: Map<string, Overlay> } => {
+    const t = clock.get();
+    const byId = new Map<string, Overlay>();
+    const rects: LayerRect[] = [];
+    for (const o of project.overlays) {
+      if (!picked.has(`overlay:${o.id}`) || o.locked) continue;
+      const raster = rasters.byKey[rasterKey(o)] ?? rasters.byId[o.id];
+      if (!raster) continue;
+      byId.set(o.id, o);
+      rects.push(layerRect(o, overlayWidth(o, raster, canvasSize), raster, canvasSize, t));
+    }
+    return { rects, byId };
+  }, [clock, project.overlays, picked, rasters, canvasSize]);
+
+  /** Applies layer changes computed for the playhead as one undo step;
+   * animated layers get them as a keyframe there. */
+  const applyLayerPatches = useCallback(
+    (patches: Map<string, Partial<Overlay>>) => {
+      if (!patches.size) return;
+      const t = clock.get();
+      apply((p) => ({ ...p, overlays: p.overlays.map((o) => (patches.has(o.id) ? ({ ...o, ...animateOverlayPatch(o, patches.get(o.id)!, t) } as Overlay) : o)) }));
+    },
+    [apply, clock]
+  );
+  const moveLayers = useCallback((m: Move) => applyLayerPatches(new Map([...m].map(([id, at]) => [id, at as Partial<Overlay>]))), [applyLayerPatches]);
+
+  const arrangeCount = useMemo(() => project.overlays.filter((o) => picked.has(`overlay:${o.id}`) && !o.locked).length, [project.overlays, picked]);
+  const arrange: ArrangeControls = {
+    count: arrangeCount,
+    snapping,
+    onSnapping: setSnapping,
+    onAlign: (op: AlignOp) => moveLayers(alignRects(arrangeRects().rects, op, canvasSize)),
+    onDistribute: (axis, mode) => {
+      const { rects } = arrangeRects();
+      if (rects.length < 3) say("Select three or more layers to distribute them.");
+      else moveLayers(distributeRects(rects, axis, mode, canvasSize));
+    },
+    onEqual: (dim) => {
+      const { rects, byId } = arrangeRects();
+      const t = clock.get();
+      const key = selection?.kind === "overlay" ? selection.id : undefined;
+      const out = new Map<string, Partial<Overlay>>();
+      for (const [id, f] of equalSize(rects, dim, key)) if (Math.abs(f - 1) > 1e-6) out.set(id, sizePatch(byId.get(id)!, f, t));
+      applyLayerPatches(out);
+    },
+    onFit: () => {
+      const { rects, byId } = arrangeRects();
+      const t = clock.get();
+      const out = new Map<string, Partial<Overlay>>();
+      for (const r of rects) {
+        const f = fitToCanvas(r, canvasSize);
+        out.set(r.id, { ...sizePatch(byId.get(r.id)!, f.factor, t), x: f.x, y: f.y });
+      }
+      applyLayerPatches(out);
+    },
+    onCenter: () => moveLayers(new Map(arrangeRects().rects.map((r) => [r.id, { x: 0.5, y: 0.5 }]))),
+  };
+
+  /** Ctrl+arrows: moves the picked layers on the canvas (Shift: further). */
+  const nudgeOnCanvas = useCallback(
+    (dx: number, dy: number) => {
+      const { rects } = arrangeRects();
+      if (!rects.length) return false;
+      moveLayers(new Map(rects.map((r) => [r.id, { x: Math.min(1.3, Math.max(-0.3, r.x + dx)), y: Math.min(1.3, Math.max(-0.3, r.y + dy)) }])));
+      return true;
+    },
+    [arrangeRects, moveLayers]
+  );
+
+  // --- split-screen layouts (layouts.ts) -----------------------------------------
+  // The last layout chosen, to place again when a video is added from its panel.
+  const lastLayout = useRef<LayoutChoice | null>(null);
+  const placeLayout = useCallback(
+    (choice: LayoutChoice, quiet = false) => {
+      lastLayout.current = choice;
+      const t = clock.get();
+      const cells = choice.over ? choice.cells : insetCells(choice.cells, choice.gap, canvasSize);
+      const layerIds = layoutCandidates(project, t).map((o) => o.id);
+      const r = applyLayout(project, sources, canvasSize, cells, { fit: choice.fit, main: choice.main, layerIds, time: t });
+      apply(() => r.project);
+      if (quiet) return;
+      const parts = [
+        r.empty
+          ? `${choice.label}: ${r.filled} of ${cells.length} screens filled. Add ${r.empty === 1 ? "a video" : `${r.empty} videos`} for the rest (or move the playhead to where more video layers show).`
+          : `${choice.label}: ${r.filled} screens placed. Each is still its own layer: drag, resize or crop any of them.`,
+      ];
+      if (r.animatedClips) parts.push(`${r.animatedClips === 1 ? "An animated clip was" : `${r.animatedClips} animated clips were`} left where ${r.animatedClips === 1 ? "it is" : "they are"}, to keep ${r.animatedClips === 1 ? "its" : "their"} keyframes.`);
+      say(parts.join(" "));
+    },
+    [clock, project, sources, canvasSize, apply, say]
+  );
+  // Read after a video is added, when the project it was added to is current.
+  const placeLayoutRef = useRef(placeLayout);
+  useEffect(() => {
+    placeLayoutRef.current = placeLayout;
+  });
 
   /** Every clip and layer picked (Ctrl+A). */
   const selectAll = useCallback(() => {
@@ -1446,14 +1614,14 @@ export default function VideoEditor({
   /** Imports a video as a picture-in-picture layer at the playhead: same
    * browser decode check and server screening as the main import. */
   const uploadVideoLayer = useCallback(
-    async (file: File) => {
+    async (file: File, keepTool = false): Promise<boolean> => {
       if (!file.type.startsWith("video/")) {
         say("Please choose a video file (MP4, MOV or WebM).");
-        return;
+        return false;
       }
       if (file.size > MAX_BYTES) {
         say("That video is over the 300MB limit.");
-        return;
+        return false;
       }
       setBusy("Adding video layer…");
       const url = URL.createObjectURL(file);
@@ -1475,12 +1643,16 @@ export default function VideoEditor({
         const aspect = canvasSize.width / canvasSize.height;
         // 40% of the canvas on the video's long side, like an image layer.
         const width = src.width / src.height > aspect ? 0.4 : (0.4 * (src.width / src.height)) / aspect;
+        const tab = toolRef.current;
         addOverlay({ ...baseOverlay(meta.duration), width, kind: "video", sourceId: src.id, offset: 0, volume: 1 });
+        if (keepTool) setTool(tab);
+        return true;
       } catch (e) {
         URL.revokeObjectURL(url);
         if (e instanceof ContentBlockedError || e instanceof ApiError || e instanceof EngineUnavailableError) say(e.message);
         else if (e instanceof Error && e.message === "media_error") say("Your browser can't play this video's format. Try an MP4 (H.264) file.");
         else say("Couldn't add this video. Check your connection and try again.");
+        return false;
       } finally {
         setBusy(null);
       }
@@ -2221,15 +2393,21 @@ export default function VideoEditor({
         const screen = screenAspectOf(p, sources);
         const placement = placeWebcam(l, aspect, camAspect, screen);
         const clips = placement.screen || wasSplit ? screenForLayout(p.clips, placement) : p.clips;
-        return { ...p, clips, overlays: p.overlays.map((x) => (x.id === id ? applyCamLayout(o, l, aspect, camAspect, screen) : x)) };
+        // A webcam layout places the whole frame: a crop, stretch or split-screen slot gives way.
+        const whole = { ...o, crop: undefined, aspect: undefined, slot: undefined };
+        return { ...p, clips, overlays: p.overlays.map((x) => (x.id === id ? applyCamLayout(whole, l, aspect, camAspect, screen) : x)) };
       }),
     [apply, sources, canvasSize]
   );
 
   // Webcam layouts follow canvas size changes. Not its own undo step: undoing
   // the canvas change brings back the layout that went with it.
+  // Split-screen screens (layouts.ts) do the same, measured from the size before.
+  const lastCanvas = useRef(canvasSize);
   useEffect(() => {
-    apply((p) => relayoutWebcams(p, sources, canvasSize.width / Math.max(1, canvasSize.height)), false);
+    const from = lastCanvas.current;
+    lastCanvas.current = canvasSize;
+    apply((p) => relayoutSlots(relayoutWebcams(p, sources, canvasSize.width / Math.max(1, canvasSize.height)), sources, from, canvasSize), false);
   }, [apply, sources, canvasSize]);
 
   const solo = useMemo(() => liveSolo(soloRaw, project), [soloRaw, project]);
@@ -3071,6 +3249,18 @@ export default function VideoEditor({
           e.preventDefault();
           duplicate();
         }
+      } else if (mod && /^Arrow/.test(e.key)) {
+        // Moves the picked layers on the canvas: 0.5% a press, 5% with Shift.
+        const step = e.shiftKey ? 0.05 : 0.005;
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        if (nudgeOnCanvas(dx, dy)) e.preventDefault();
+      } else if (mod && (e.key === "]" || e.key === "[")) {
+        if (selection?.kind === "overlay") {
+          e.preventDefault();
+          const id = selection.id;
+          apply((p) => restackOverlay(p, id, e.key === "]" ? 1 : -1));
+        }
       } else if (mod) {
         return;
       } else if (e.key === " " && target?.tagName !== "BUTTON") {
@@ -3138,7 +3328,7 @@ export default function VideoEditor({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase, dialog, showSignIn, suspended, undo, redo, copy, paste, duplicate, currentItem, selection, togglePlay, split, freezeFrame, addText, deleteSelection, moveSelected, seek, clock, lay.fps, multi, selectAll, nudgePicked, deleteClosing, trimAt, dropMarker, setRangeAt, jump, playing, groupPicked, ungroupPicked]);
+  }, [phase, dialog, showSignIn, suspended, undo, redo, copy, paste, duplicate, currentItem, selection, togglePlay, split, freezeFrame, addText, deleteSelection, moveSelected, seek, clock, lay.fps, multi, selectAll, nudgePicked, deleteClosing, trimAt, dropMarker, setRangeAt, jump, playing, groupPicked, ungroupPicked, nudgeOnCanvas, apply]);
 
   const toggleFullscreen = () => {
     const el = stageRef.current;
@@ -3300,9 +3490,10 @@ export default function VideoEditor({
   /** Video layers (picture in picture, a second video over the main one). */
   const videoLayersTrack = useMemo<TimelineTrack>(() => {
     const layers = project.overlays.filter((o) => o.kind === "video");
+    const lanes = stackLanes(layers);
     return {
       key: "videolayers",
-      label: "Video 2",
+      label: "Videos",
       tone: "border-indigo-400/50 bg-indigo-500/25",
       toggles: layerToggles(layers),
       deletable: true,
@@ -3310,7 +3501,8 @@ export default function VideoEditor({
         id: o.id,
         start: o.start,
         end: o.end,
-        label: o.kind === "video" ? `${sources[o.sourceId]?.disk?.name ?? sources[o.sourceId]?.file?.name ?? "Video"}${o.volume === 0 ? " · muted" : ""}` : "Video",
+        label: o.kind === "video" ? `${layerName(o, sources)}${o.volume === 0 ? " · muted" : ""}` : "Video",
+        lane: lanes.get(o.id),
         thumb: o.kind === "video" ? (thumbs[o.sourceId]?.urls[0] ?? null) : null,
         glyph: "▶",
         wave: o.kind === "video" ? { sourceId: o.sourceId, offset: o.offset, duration: o.end - o.start, gain: o.volume } : undefined,
@@ -3857,16 +4049,53 @@ export default function VideoEditor({
       <LayersPanel
         overlays={project.overlays}
         selectedId={selectedOverlay?.id ?? null}
+        picked={pickedLayers}
         sources={sources}
+        thumbs={layerThumbs}
+        groupColors={layerGroupColors}
+        arrange={arrangeCount > 0 ? <ArrangeBar controls={arrange} /> : null}
         onSelect={(id) => {
-          setSelection({ kind: "overlay", id });
+          selectOnTimeline({ kind: "overlay", id });
+          // Stays on the list: picking a layer here is for working down it.
+          setTool("layers");
           const o = project.overlays.find((x) => x.id === id);
           if (o && (clock.get() < o.start || clock.get() >= o.end)) seek(o.start);
         }}
-        onChange={changeOverlay}
-        onRestack={(id, dir) => apply((p) => restackOverlay(p, id, dir))}
-        onDelete={(id) => apply((p) => ({ ...p, overlays: p.overlays.filter((o) => o.id !== id) }))}
+        onPick={(id) => {
+          onPick([`overlay:${id}`], "toggle");
+          setTool("layers");
+        }}
+        onPatch={patchOverlay}
+        onStack={(id, target, where) => apply((p) => stackOverlay(p, id, target, where))}
+        onDuplicate={(id) => {
+          duplicateInPlace([`overlay:${id}`]);
+          setTool("layers");
+        }}
+        onDelete={(id) => apply((p) => ({ ...p, overlays: p.overlays.filter((o) => o.id !== id || o.locked) }))}
+        onOpenCaptions={() => openTab("captions")}
         onClose={() => setTool(null)}
+      />
+    );
+  } else if (tool === "layout") {
+    toolPanel = (
+      <LayoutPanel
+        canvas={canvasSize}
+        clock={clock}
+        layersAt={(t) => layoutCandidates(project, t).map((o) => layerName(o, sources))}
+        mainPlaced={!!project.mainSlot}
+        onApply={(choice) => placeLayout(choice)}
+        onAddVideo={(f) =>
+          void uploadVideoLayer(f, true).then((ok) => {
+            // Once the new layer is in the project: the same layout again, now with it.
+            if (ok && lastLayout.current) setTimeout(() => lastLayout.current && placeLayoutRef.current(lastLayout.current), 0);
+          })
+        }
+        onReleaseMain={() => {
+          apply((p) => releaseMain(p));
+          say("The main video is back over the whole canvas.");
+        }}
+        onClose={() => setTool(null)}
+        gesture={gesture}
       />
     );
   } else if (tool === "transition" && selectedTransition >= 0 && selectedTransition < lay.clips.length - 1) {
@@ -4010,20 +4239,11 @@ export default function VideoEditor({
         sourceDuration={selectedOverlay.kind === "video" ? sources[selectedOverlay.sourceId]?.duration : undefined}
         onChange={(patch) => changeOverlay(selectedOverlay.id, patch)}
         onCamLayout={selectedOverlay.kind === "video" ? (l) => setCamLayout(selectedOverlay.id, l) : undefined}
-        onFrame={
-          selectedOverlay.kind === "video"
-            ? (mode) => {
-                const src = sources[selectedOverlay.sourceId];
-                const srcAspect = src && src.height > 0 ? src.width / src.height : 16 / 9;
-                const canvasAspect = canvasSize.height > 0 ? canvasSize.width / canvasSize.height : 16 / 9;
-                // Width as a share of the canvas: its height follows the video's shape.
-                const ratio = srcAspect / canvasAspect;
-                const width = mode === "fill" ? Math.min(3, Math.max(1, ratio)) : Math.min(1, ratio);
-                apply((p) => updateOverlay(p, selectedOverlay.id, { x: 0.5, y: 0.5, rotation: 0, width, camLayout: undefined, mask: null } as Partial<Overlay>));
-                say(mode === "fill" ? "The video layer now covers the whole picture." : "The video layer now shows in full, as large as fits.");
-              }
-            : undefined
-        }
+        natural={selectedRaster ? { width: selectedRaster.width, height: selectedRaster.height } : null}
+        canvas={canvasSize}
+        onEdit={((fn) => editOverlay(selectedOverlay.id, fn)) as LayerEdit}
+        arrange={arrange}
+        defaultName={layerName({ ...selectedOverlay, name: undefined }, sources)}
         background={
           selectedOverlay.kind === "video"
             ? {
@@ -4142,7 +4362,7 @@ export default function VideoEditor({
         </p>
         <p className="mt-2 text-[11px] leading-relaxed text-muted">
           Timeline: Q / W delete before / after the playhead · Shift+Delete delete and close the gap · Shift or {keys.mod}+click, or drag on an empty row, to
-          select several · {keys.mod}+A select all · {keys.mod}+G group / {keys.mod}+Shift+G ungroup · Esc clear. Text, captions, music and effects move with the clip under them; ⛓ on the Video row turns that
+          select several · {keys.mod}+A select all · {keys.mod}+G group / {keys.mod}+Shift+G ungroup · {keys.mod}+arrows move the selected layers on the canvas (Shift: further) · {keys.mod}+] / {keys.mod}+[ bring forward / send backward · Esc clear. Text, captions, music and effects move with the clip under them; ⛓ on the Video row turns that
           off.
         </p>
         <p className="mt-2 text-[11px] leading-relaxed text-muted">
@@ -4407,11 +4627,16 @@ export default function VideoEditor({
                 sources={sources}
                 playback={{ playing, rate, volume, muted: muted || solo.size > 0 }}
                 selectedId={selectedOverlay?.id ?? null}
+                picked={pickedLayers}
+                labels={layerLabels}
+                snapping={snapping}
                 onSelect={(id) => {
-                  if (id) select({ kind: "overlay", id });
+                  if (id) selectOnTimeline({ kind: "overlay", id });
                   else if (selection?.kind === "overlay") setSelection(null);
                 }}
+                onPick={(id) => onPick([`overlay:${id}`], "toggle")}
                 onChange={changeOverlay}
+                onChangeRaw={patchOverlay}
                 onGestureStart={beginGesture}
                 onGestureEnd={endGesture}
                 onEditText={(id) => {

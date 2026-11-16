@@ -1543,6 +1543,16 @@ class _EditorSprite(BaseModel):
     times: list[float] = Field(min_length=1, max_length=EDITOR_MAX_SPRITE_STATES)
 
 
+class _EditorLayerFrame(BaseModel):
+    """A video layer's shadow (`under`) and border (`over`): indexes into
+    `overlays` of their PNGs. The shadow's is larger than the layer's box
+    by `pad` of the box's short side on every side."""
+
+    under: Optional[int] = Field(None, ge=0, lt=EDITOR_MAX_STICKERS)
+    over: Optional[int] = Field(None, ge=0, lt=EDITOR_MAX_STICKERS)
+    pad: float = Field(0, ge=0, le=0.5)
+
+
 class _EditorOverlay(BaseModel):
     # Exactly one of: a PNG (index into `overlays`), or a video source
     # (index into `sources`) for a picture-in-picture layer.
@@ -1565,6 +1575,12 @@ class _EditorOverlay(BaseModel):
     sprite: Optional[_EditorSprite] = None
     mask: Optional[int] = Field(None, ge=0, lt=EDITOR_MAX_STICKERS)  # video layers: mask PNG index
     matte: Optional[_EditorMatte] = None  # video layers: background removal
+    # Video layers (src/lib/editor/layerGeometry.ts, layerFrame.ts): the part
+    # of the frame shown, the box's width / height in canvas pixels when
+    # stretched, and the frame's PNGs.
+    crop: Optional[_EditorCrop] = None
+    aspect: Optional[float] = Field(None, ge=0.05, le=20)
+    frame: Optional[_EditorLayerFrame] = None
 
 
 class _EditorCompressor(BaseModel):
@@ -1863,6 +1879,12 @@ async def api_video_export(
         _check_keyframes(o.keyframes)
         if o.mask is not None and (o.video is None or o.mask >= len(overlays)):
             raise HTTPException(status_code=400, detail="Layer mask is missing")
+        if (o.crop or o.aspect or o.frame) and o.video is None:
+            raise HTTPException(status_code=400, detail="Invalid layer")
+        if o.crop and (o.crop.x + o.crop.w > 1.0001 or o.crop.y + o.crop.h > 1.0001):
+            raise HTTPException(status_code=400, detail="Invalid layer crop")
+        if o.frame and any(i is not None and i >= len(overlays) for i in (o.frame.under, o.frame.over)):
+            raise HTTPException(status_code=400, detail="Layer frame is missing")
         mt = o.matte
         if mt and (
             o.video is None
@@ -2134,6 +2156,12 @@ async def api_video_export(
                         sprite_times=list(o.sprite.times) if o.sprite else [],
                         mask_path=overlay_images[o.mask][0] if o.mask is not None else None,
                         matte=_plan_matte(o.matte, overlay_images, source_paths, source_infos) if o.matte and o.video is not None else None,
+                        crop=(o.crop.x, o.crop.y, o.crop.w, o.crop.h) if o.crop else None,
+                        # Canvas pixels are square at any output size.
+                        box_aspect=o.aspect,
+                        frame_under=overlay_images[o.frame.under][0] if o.frame and o.frame.under is not None else None,
+                        frame_over=overlay_images[o.frame.over][0] if o.frame and o.frame.over is not None else None,
+                        frame_pad=o.frame.pad if o.frame else 0.0,
                     )
                 )
             if branding:
