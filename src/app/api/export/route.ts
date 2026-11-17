@@ -126,5 +126,11 @@ async function handle(request: NextRequest) {
     // Same plan rules either way, plus the plan's export length there.
     ...(local ? { local: true, maxSeconds: limits.maxExportSeconds } : {}),
   });
+  // Counted for the admin panel's exports per day. A failed write only
+  // misses a count; it never stops the export.
+  const { error: countErr } = await createServiceClient()
+    .from("export_events")
+    .insert({ user_id: user?.id ?? null, plan: tier, resolution, desktop: local });
+  if (countErr) console.error("Could not record the export", countErr.message);
   return NextResponse.json({ ticket, resolution });
 }

@@ -20,7 +20,7 @@ export default async function AdminOverview() {
   const { now, today, yesterday, monthAgo } = timeWindow();
 
   const count = (q: PromiseLike<{ count: number | null }>) => Promise.resolve(q).then((r) => r.count ?? 0);
-  const [users, paid, optedOut, openFeedback, newUsers, activeToday, activeYesterday, downloads, paidOrders, recent] = await Promise.all([
+  const [users, paid, optedOut, openFeedback, newUsers, activeToday, activeYesterday, exportsToday, exportsYesterday, downloads, paidOrders, recent] = await Promise.all([
     count(admin.from("profiles").select("id", { count: "exact", head: true })),
     count(admin.from("profiles").select("id", { count: "exact", head: true }).neq("plan", "free").or(`plan_expires_at.is.null,plan_expires_at.gt.${now}`)),
     count(admin.from("profiles").select("id", { count: "exact", head: true }).eq("marketing_opt_out", true)),
@@ -28,6 +28,8 @@ export default async function AdminOverview() {
     count(admin.from("profiles").select("id", { count: "exact", head: true }).gte("created_at", monthAgo)),
     count(admin.from("daily_active_users").select("user_id", { count: "exact", head: true }).eq("day", today)),
     count(admin.from("daily_active_users").select("user_id", { count: "exact", head: true }).eq("day", yesterday)),
+    count(admin.from("export_events").select("id", { count: "exact", head: true }).gte("created_at", today)),
+    count(admin.from("export_events").select("id", { count: "exact", head: true }).gte("created_at", yesterday).lt("created_at", today)),
     getDownloadCounts(),
     admin.from("payment_orders").select("amount_cents, currency").eq("status", "paid").gte("paid_at", monthAgo),
     admin
@@ -54,6 +56,19 @@ export default async function AdminOverview() {
           label="Active accounts today"
           value={activeToday.toLocaleString()}
           hint={`${activeYesterday.toLocaleString()} yesterday (UTC days, signed-in only)`}
+          tone="info"
+        />
+        <Stat
+          label="Exports today"
+          value={exportsToday.toLocaleString()}
+          hint={
+            <>
+              {exportsYesterday.toLocaleString()} yesterday (UTC days, exports started).{" "}
+              <Link href="/admin/analytics" className={link}>
+                Per day →
+              </Link>
+            </>
+          }
           tone="info"
         />
         <Stat

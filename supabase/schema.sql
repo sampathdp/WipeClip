@@ -187,6 +187,23 @@ create table if not exists daily_active_users (
 );
 alter table daily_active_users enable row level security;
 
+-- One row per export the plan check let through (/api/export issued its
+-- ticket), for the exports-per-day counts in the admin panel. The render
+-- itself happens after this - on the user's computer in the desktop app -
+-- so a row is an export started, not one finished. user_id is null for
+-- signed-out website exports. Written by /api/export with the service-role
+-- key; nothing else reads or writes it.
+create table if not exists export_events (
+  id bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  user_id uuid references profiles (id) on delete set null,
+  plan text not null,
+  resolution text not null,
+  desktop boolean not null default false
+);
+create index if not exists export_events_created_at_idx on export_events (created_at);
+alter table export_events enable row level security;
+
 -- New auth user -> profile row, so every signed-up account has a balance
 -- from the start without a separate onboarding step.
 create or replace function handle_new_user()
@@ -537,6 +554,20 @@ as $$
       left join (
         select day, count(*) as n from daily_active_users, bounds where day >= bounds.since group by 1
       ) a on a.day = days.day
+    ),
+    'exports', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'day', days.day, 'count', coalesce(e.n, 0), 'desktop', coalesce(e.desktop, 0), 'accounts', coalesce(e.accounts, 0)
+      ) order by days.day), '[]')
+      from days
+      left join (
+        select created_at::date as day, count(*) as n, count(*) filter (where desktop) as desktop, count(distinct user_id) as accounts
+        from export_events, bounds where created_at >= bounds.since group by 1
+      ) e on e.day = days.day
+    ),
+    'exports_by_resolution', (
+      select coalesce(jsonb_agg(jsonb_build_object('resolution', r.resolution, 'count', r.n) order by r.n desc), '[]')
+      from (select resolution, count(*) as n from export_events, bounds where created_at >= bounds.since group by 1) r
     ),
     'users_by_country', (
       select coalesce(jsonb_agg(jsonb_build_object('country', u.country, 'count', u.n) order by u.n desc), '[]')

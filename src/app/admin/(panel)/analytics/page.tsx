@@ -16,7 +16,13 @@ type Stats = {
   /** Missing until schema.sql is run again after daily_active_users was added. */
   active_users?: { day: string; count: number }[];
   users_by_country: { country: string; count: number }[];
+  /** Exports started (plan check passed). Missing until schema.sql is run
+   * again after export_events was added. */
+  exports?: { day: string; count: number; desktop: number; accounts: number }[];
+  exports_by_resolution?: { resolution: string; count: number }[];
 };
+
+const RESOLUTION_LABEL: Record<string, string> = { "720p": "720p", "1080p": "1080p", "4k": "4K" };
 
 /** "22 Oct" from "2026-10-22". */
 const dayLabel = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
@@ -48,6 +54,10 @@ export default async function AdminAnalytics({ searchParams }: { searchParams: S
   const active = stats.active_users ?? [];
   const activeAvg = active.length ? Math.round(active.reduce((n, d) => n + d.count, 0) / active.length) : 0;
   const activePeak = Math.max(0, ...active.map((d) => d.count));
+  const exportDays = stats.exports ?? [];
+  const exportsTotal = exportDays.reduce((n, d) => n + d.count, 0);
+  const exportsDesktop = exportDays.reduce((n, d) => n + d.desktop, 0);
+  const exportsPeak = Math.max(0, ...exportDays.map((d) => d.count));
 
   // Revenue per currency: one chart each, since LKR and USD don't share a scale.
   const currencies = [...new Set(stats.revenue.map((r) => r.currency))].sort();
@@ -73,7 +83,7 @@ export default async function AdminAnalytics({ searchParams }: { searchParams: S
     <>
       <PageHeader
         title="Analytics"
-        description="Sign-ups, checkouts and where buyers are. Days are in UTC."
+        description="Sign-ups, exports, checkouts and where buyers are. Days are in UTC."
         actions={
           <div className="flex gap-1 rounded-lg border border-border bg-background p-1">
             {RANGES.map((r) => (
@@ -108,6 +118,35 @@ export default async function AdminAnalytics({ searchParams }: { searchParams: S
           }
         >
           <ColumnChart data={active.map((d) => ({ label: dayLabel(d.day), value: d.count }))} />
+        </Card>
+        <Card
+          title="Exports per day"
+          description={
+            stats.exports
+              ? `Exports started: ${exportsTotal.toLocaleString()} in this period (${exportsDesktop.toLocaleString()} in the desktop app), peak ${exportsPeak.toLocaleString()} a day. The solid part is the desktop app.`
+              : "Run supabase/schema.sql again to start counting exports."
+          }
+        >
+          <ColumnChart
+            legend={["All", "Desktop app"]}
+            data={exportDays.map((d) => ({
+              label: dayLabel(d.day),
+              value: d.count,
+              overlay: d.desktop,
+              title: `${dayLabel(d.day)}: ${d.count} exports (${d.desktop} desktop, ${d.count - d.desktop} website), ${d.accounts} accounts`,
+            }))}
+          />
+        </Card>
+        <Card title="Exports by resolution" description="Exports started in this period, by the size picked.">
+          <BarList
+            empty="No exports in this period."
+            rows={(stats.exports_by_resolution ?? []).map((r) => ({
+              key: r.resolution,
+              label: RESOLUTION_LABEL[r.resolution] ?? r.resolution,
+              value: r.count,
+              detail: pct(r.count, exportsTotal),
+            }))}
+          />
         </Card>
         <Card title="New accounts per day">
           <ColumnChart data={stats.signups.map((d) => ({ label: dayLabel(d.day), value: d.count }))} />
