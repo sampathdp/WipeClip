@@ -19,7 +19,7 @@ import { clipLookStrength, clipStrengthTime, effectStrength, setStrength } from 
 import { addMarker, editPoints, moveMarker, nextPoint, rollCut, setRangePoint, type Range } from "@/lib/editor/timelineNav";
 import { rippleCut } from "@/lib/editor/ripple";
 import { highlightProject } from "@/lib/editor/highlights";
-import { clipFades, editClipCurve, visibleClipCurve } from "@/lib/editor/clipSound";
+import { clipFades, editClipCurve } from "@/lib/editor/clipSound";
 import { deleteClosingGaps, trimClipAt, trimLayersAt, type TrimSide } from "@/lib/editor/trimEdit";
 import { allKeys, copyKeys, deleteKeys, duplicateKeys, existingKeys, keySelection, pasteCopy, selKey, shiftKeys, type LayerCopy } from "@/lib/editor/multiSelect";
 import {
@@ -2437,7 +2437,7 @@ export default function VideoEditor({
         say(on ? "Magnetic audio on: parts from one file now sit back to back, and deleting or trimming one slides the rest. Undo puts them back." : "Magnetic audio off: parts move freely.");
         return;
       }
-      if (track === "videosound" && kind === "mute") {
+      if ((track === "video" || track === "videosound") && kind === "mute") {
         const on = !masterOf(project).videoMuted;
         apply((p) => ({ ...p, master: { ...masterOf(p), videoMuted: on } }));
         say(on ? "Clip sound muted: the clips play silent. Audio tracks still play." : "Clip sound on.");
@@ -3514,35 +3514,10 @@ export default function VideoEditor({
       })),
     };
   }, [project.overlays, selection, sources, thumbs, isPicked]);
-  /** Each clip's own sound, under the video row: follows its clip, picked
-   * with it; its volume curve is drawn and edited here. */
+  // A clip's own sound has no row of its own: it's part of the clip (its
+  // waveform is drawn inside the clip block), so deleting a clip is done on
+  // the Video row only. The Video row's header mutes every clip's sound.
   const videoMuted = !!project.master?.videoMuted;
-  const videoVolume = project.master?.videoVolume ?? 1;
-  const soundTrack = useMemo<TimelineTrack | null>(() => {
-    const withSound = lay.clips.filter((c) => c.clip.freeze === null && sources[c.clip.sourceId]?.hasAudio);
-    if (!withSound.length) return null;
-    return {
-      key: "videosound",
-      label: "Clip sound",
-      tone: "border-teal-500/40 bg-teal-500/15",
-      toggles: [{ kind: "mute", on: videoMuted }],
-      items: withSound.map((c) => {
-        const silent = videoMuted || c.clip.volume === 0;
-        return {
-          id: c.clip.id,
-          start: c.start,
-          end: c.start + c.duration,
-          label: `${silent ? "🔇 " : ""}Clip ${c.index + 1}${c.clip.volume === 0 && !videoMuted ? " · silent (detached or muted)" : ""}`,
-          glyph: "♪",
-          wave: { sourceId: c.clip.sourceId, offset: Math.min(c.clip.start, c.clip.end), duration: Math.abs(c.clip.end - c.clip.start), gain: silent ? 0 : c.clip.volume * videoVolume },
-          curve: visibleClipCurve(c),
-          fixed: true,
-          selected: selIs(selection, "clip", c.clip.id) || isPicked("clip", c.clip.id),
-          sel: { kind: "clip" as const, id: c.clip.id },
-        };
-      }),
-    };
-  }, [lay.clips, sources, selection, isPicked, videoMuted, videoVolume]);
   const elementsTrack = useMemo<TimelineTrack>(() => {
     const layers = project.overlays.filter((o): boolean => o.kind !== "text" && o.kind !== "video");
     return {
@@ -3667,7 +3642,7 @@ export default function VideoEditor({
     }),
     [project.effects, selection, isPicked]
   );
-  const tracks = [...(soundTrack ? [soundTrack] : []), videoLayersTrack, textTrack, elementsTrack, audioTrack, ...(zoomTrack ? [zoomTrack] : []), effectsTrack];
+  const tracks = [videoLayersTrack, textTrack, elementsTrack, audioTrack, ...(zoomTrack ? [zoomTrack] : []), effectsTrack];
 
   if (phase !== "edit" || !original) {
     const showRecents = phase === "import" && recents.length > 0;
@@ -4694,10 +4669,12 @@ export default function VideoEditor({
               onMoveClip={(from, to) => apply((p) => moveClipWithGroup(p, from, to))}
               groupColors={groupColors}
               onTrackToggle={onTrackToggle}
-              videoToggles={[{ kind: "link", on: project.linkLayers !== false }]}
+              videoToggles={[
+                { kind: "link", on: project.linkLayers !== false },
+                ...(lay.clips.some((c) => c.clip.freeze === null && sources[c.clip.sourceId]?.hasAudio) ? [{ kind: "mute" as const, on: videoMuted }] : []),
+              ]}
               picked={picked}
               onPick={onPick}
-              soundRow={!!soundTrack}
               markers={project.markers}
               onMarkerMove={onMarkerMove}
               onMarkerDelete={onMarkerDelete}

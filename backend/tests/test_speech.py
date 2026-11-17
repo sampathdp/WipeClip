@@ -247,6 +247,22 @@ class UnfinishedTest(unittest.TestCase):
         self.assertEqual(speech.unfinished(audio, [(0, 10 * RATE)], words), [])  # only silence after
         self.assertEqual(speech.unfinished(audio, [(0, 10 * RATE)], []), [])  # no words: not speech
 
+    def test_speech_skipped_before_and_between_words_is_decoded_again(self) -> None:
+        audio = tone(12)
+        clips = [(0, 12 * RATE)]
+        words = [{"start": 3.6, "end": 4.0, "text": "a"}, {"start": 8.0, "end": 11.9, "text": "b"}]
+        rest = speech.unfinished(audio, clips, words)
+        self.assertEqual(len(rest), 2)
+        self.assertEqual(rest[0][0], 0)
+        self.assertAlmostEqual(rest[0][1] / RATE, 3.5, places=2)
+        self.assertAlmostEqual(rest[1][0] / RATE, 4.1, places=2)
+        self.assertAlmostEqual(rest[1][1] / RATE, 7.9, places=2)
+
+    def test_short_gaps_between_words_are_left(self) -> None:
+        audio = tone(12)
+        words = [{"start": t, "end": t + 0.8, "text": "a"} for t in range(12)]
+        self.assertEqual(speech.unfinished(audio, [(0, 12 * RATE)], words), [])
+
 
 class LanguageTest(unittest.TestCase):
     """Turbo can't tell Sinhala, Kannada or Telugu from Tamil; the
@@ -398,6 +414,11 @@ class DecodingOptionsTest(unittest.TestCase):
     def test_accurate_uses_beam_search(self) -> None:
         self.assertEqual(speech._decoding(speech.MODELS["general"], "", True)["beam_size"], speech._BEAM)
 
+    def test_own_models_use_beam_search_on_the_gpu(self) -> None:
+        self.assertEqual(speech._decoding(speech.MODELS["si"], "", False, gpu=True)["beam_size"], speech._BEAM)
+        self.assertEqual(speech._decoding(speech.MODELS["si"], "", False, gpu=False), {})
+        self.assertEqual(speech._decoding(speech.MODELS["general"], "", False, gpu=True), {})
+
     def test_hint_is_the_general_models_prompt(self) -> None:
         opts = speech._decoding(speech.MODELS["general"], "  Ruwan,\n Kandy  ", False)
         self.assertEqual(opts["initial_prompt"], "Ruwan, Kandy")
@@ -408,3 +429,15 @@ class DecodingOptionsTest(unittest.TestCase):
     def test_long_hint_is_cut(self) -> None:
         opts = speech._decoding(speech.MODELS["general"], "word " * 500, False)
         self.assertLessEqual(len(opts["initial_prompt"]), speech._MAX_HINT_CHARS)
+
+
+class BrokenCharacterTest(unittest.TestCase):
+    def test_a_word_cut_inside_a_character_keeps_what_is_whole(self) -> None:
+        from types import SimpleNamespace as NS
+
+        def word(text, start):
+            return NS(word=text, start=start, end=start + 0.3, probability=0.9)
+
+        seg = NS(compression_ratio=1.2, end=2.0, words=[word(" එක", 0.0), word(" ව�", 0.4), word(" වෙන�", 0.8)])
+        texts = [w["text"] for w in speech._words([seg], 10.0, lambda t: None)]
+        self.assertEqual(texts, ["එක", "වෙන"])

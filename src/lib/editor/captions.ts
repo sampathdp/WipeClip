@@ -95,6 +95,10 @@ export async function buildSpeechMix(
   // uploaded file is whatever the user set, or detected from its sound.
   const speech = new Set<string>();
   const undecided: string[] = [];
+  // A file cut into pieces (silence removed, split) is judged once, on all
+  // its pieces together: a 1 s piece of a voice note alone can pass for
+  // noise, and leaving it out left holes in the captions.
+  const auto = new Map<string, AudioClip[]>();
   for (const a of project.audio) {
     const src = sources[a.sourceId];
     if (a.muted || a.volume === 0 || !src) continue;
@@ -102,10 +106,16 @@ export async function buildSpeechMix(
     const mode = src.kind !== "audio" || recorded ? "speech" : (a.captions ?? "auto");
     if (mode === "speech") speech.add(a.id);
     if (mode !== "auto") continue;
-    const buf = await decode(src);
+    auto.set(a.sourceId, [...(auto.get(a.sourceId) ?? []), a]);
+  }
+  for (const [sourceId, parts] of auto) {
+    const buf = await decode(sources[sourceId]);
     abort();
-    if (buf && (await isSpeechTrack(buf, a, opts.probe))) speech.add(a.id);
-    else undecided.push(a.id);
+    const isSpeech = !!buf && (await isSpeechTrack(buf, parts, opts.probe));
+    for (const a of parts) {
+      if (isSpeech) speech.add(a.id);
+      else undecided.push(a.id);
+    }
     abort();
   }
 
@@ -119,18 +129,24 @@ export async function buildSpeechMix(
   return second.samples ? { ...second, tracks: [...all], skipped } : { ...first, tracks: [...speech], skipped };
 }
 
-/** Whether an uploaded track's part on the timeline is speech: the
- * signal's verdict, checked by the speech model when there's one
- * (speechDetect.ts speechVerdict). */
-async function isSpeechTrack(buf: AudioBuffer, a: AudioClip, probe?: SpeechProbe): Promise<boolean> {
+/** Whether an uploaded file's parts on the timeline (one or more pieces of
+ * it, joined in file order) are speech: the signal's verdict, checked by
+ * the speech model when there's one (speechDetect.ts speechVerdict). */
+async function isSpeechTrack(buf: AudioBuffer, parts: AudioClip[], probe?: SpeechProbe): Promise<boolean> {
   const rate = buf.sampleRate;
-  const from = Math.max(0, Math.floor(a.offset * rate));
-  const to = Math.min(buf.length, Math.ceil((a.offset + a.duration) * rate));
-  if (to <= from) return false;
-  const mono = new Float32Array(to - from);
+  const ranges = parts
+    .map((a) => [Math.max(0, Math.floor(a.offset * rate)), Math.min(buf.length, Math.ceil((a.offset + a.duration) * rate))] as const)
+    .filter(([from, to]) => to > from)
+    .sort((x, y) => x[0] - y[0]);
+  const length = ranges.reduce((n, [from, to]) => n + to - from, 0);
+  if (length === 0) return false;
+  const mono = new Float32Array(length);
   for (let c = 0; c < buf.numberOfChannels; c++) {
     const data = buf.getChannelData(c);
-    for (let i = 0; i < mono.length; i++) mono[i] += data[from + i] / buf.numberOfChannels;
+    let at = 0;
+    for (const [from, to] of ranges) {
+      for (let i = from; i < to; i++) mono[at++] += data[i] / buf.numberOfChannels;
+    }
   }
   const signal = detectSpeech(mono);
   // A clear voice needs no second opinion; anything else might be a voice

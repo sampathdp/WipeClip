@@ -851,12 +851,18 @@ _BEAM = 5
 _MAX_HINT_CHARS = 400
 
 
-def _decoding(spec: SpeechModel, hint: str, accurate: bool) -> dict:
+def _decoding(spec: SpeechModel, hint: str, accurate: bool, gpu: bool = False) -> dict:
     """Decoding options for the user's settings. The prompt goes to the
     general model only: the languages' own models were fine-tuned without
-    one and may echo it back."""
+    one and may echo it back. On the graphics card the languages' own
+    (small) models always use beam search: on a code-mixed Sinhala voice
+    note it got the names right where greedy didn't ("නිව්සිලන්වල අනර්කා
+    ආයුරේදික්" for New Zealand's Anarka Ayurvedic, not "New seal වල අනර්
+    ආයුර් දෙක") in the same time (41 s of audio, GTX 1650: 16.3 s vs
+    15.8 s). On the CPU it took 1.7 times as long (31.5 s vs 18.8 s) for
+    less gain, so there it's left to `accurate`."""
     opts: dict = {}
-    if accurate:
+    if accurate or (gpu and spec.key != "general"):
         opts["beam_size"] = _BEAM
     hint = " ".join(hint.split())[:_MAX_HINT_CHARS]
     if hint and spec.key == "general":
@@ -883,7 +889,7 @@ def _transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool,
     model = _whisper(spec, progress, gpu)
     progress("transcribe", 0.0)
     batch = _BATCH.get(spec.key, 8)
-    opts = _decoding(spec, hint, accurate)
+    opts = _decoding(spec, hint, accurate, gpu)
     looped: list[tuple[int, int]] = []
     words = _words(_decode(model, audio, language, clips, batch, opts=opts), total, lambda t: progress("transcribe", min(0.95, t / total)), looped=looped)
     words += _retry(model, audio, language, looped, total, opts=opts)
@@ -943,7 +949,10 @@ def _words(
             on_time(seg.end)
             continue
         for wd in seg.words or []:
-            text = wd.word.strip()
+            # A word cut inside a character (Sinhala "ව�") keeps what's whole.
+            text = wd.word.replace("�", "").strip()
+            if len(text) < 2 and wd.word.strip() != text:
+                continue
             if not text or wd.probability < min_probability:
                 continue
             start = max(0.0, float(wd.start))
@@ -967,17 +976,27 @@ def _loud_seconds(a: np.ndarray, level: float) -> float:
 
 
 def unfinished(audio: np.ndarray, clips: list[tuple[int, int]], words: list[dict]) -> list[tuple[int, int]]:
-    """The part of each clip after its last recognized word, when it's at
-    least 3 s long with 1 s of sound in it (not just a word's tail before
-    a pause). Clips with no words at all are left out: that's sound Whisper
-    didn't take for speech (music, noise)."""
+    """The stretches of each clip with no recognized word - after its last
+    word, before its first, or between two - when one is at least 3 s long
+    with 1 s of sound in it (not just a word's tail before a pause). Greedy
+    decoding mostly ends a clip early, but it also skips a sentence in the
+    middle or at the start (seen on a code-mixed Sinhala voice note). Clips
+    with no words at all are left out: that's sound Whisper didn't take for
+    speech (music, noise)."""
     out = []
     for a, b in clips:
-        ends = [w["end"] for w in words if a / RATE <= w["start"] < b / RATE]
-        start = max(a, int((max(ends) + 0.1) * RATE)) if ends else a
-        if not ends or b - start < _MIN_REST:
+        inside = sorted((w["start"], w["end"]) for w in words if a / RATE <= w["start"] < b / RATE)
+        if not inside:
             continue
         level = _sound_level(audio[a:b])  # as loud as the clip's own speech
-        if level is not None and _loud_seconds(audio[start:b], level) >= 1.0:
-            out.append((start, b))
+        if level is None:
+            continue
+        # Gaps: clip start to first word, between words, last word to clip end.
+        edges = [(a, int((inside[0][0] - 0.1) * RATE))]
+        edges += [(int((e + 0.1) * RATE), int((s - 0.1) * RATE)) for (_, e), (s, _) in zip(inside, inside[1:])]
+        edges.append((int((max(e for _, e in inside) + 0.1) * RATE), b))
+        for start, end in edges:
+            start, end = max(a, start), min(b, end)
+            if end - start >= _MIN_REST and _loud_seconds(audio[start:end], level) >= 1.0:
+                out.append((start, end))
     return out

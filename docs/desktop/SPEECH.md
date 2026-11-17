@@ -187,7 +187,7 @@ People speaking Sinhala, Tamil, Hindi and other Indian languages mix in English 
    - So Hindi कर ("do") and बस ("enough") stay, while Sinhala බස් becomes "bus".
 5. Native words that still collide are listed in `NATIVE`, for example Hindi कमरा ("room", like "camera") and Tamil விரல் ("finger", like "viral").
 
-Only whole words are replaced. A loanword with a suffix joined on (වීඩියෝවක්, "a video") stays as it is.
+Whole words are replaced. In Sinhala, a loanword with a common ending joined on is too: වීඩියෝවක් ("a video") becomes "video එකක්", ෆෝන්එකේ becomes "phone එකේ" (17 November 2026).
 
 **Checked** against the 10,000 most common words of the OpenSubtitles frequency lists (FrequencyWords, used for testing only, not shipped):
 
@@ -254,3 +254,14 @@ What the headless script checks:
 - **Language detection:** in the browser (website), auto-detect uses the first speech segment. In the desktop app, see "auto" above.
 - **Low-resource languages (Sinhala, and others with little training data):** Whisper is far less accurate in them, and more likely to get stuck in a loop ("ත්ත්ත්…" filling a whole caption). Each segment is now checked the way Whisper does it (zlib compression ratio over 2.4), retried with sampling at temperature 0.4 and then 0.8, and what's still looped is dropped (`captions.worker.ts`). This removes the junk, but it doesn't make the recognition itself accurate.
 - **Not measured:** transcription time on representative long recordings in this phase (needs the model on this machine).
+
+## Code-mixed Sinhala voice note (17 November 2026)
+
+A 41 s WhatsApp voice note (Sinhala with English words and names), on the Sinhala model:
+
+- **Beam search on the GPU:** greedy wrote "New seal වල අනර් ආයුර් දෙක සෙන්ට් එක"; beam size 5 wrote "නිව්සිලන්වල අනර්කා ආයුරේදික් සෙන්ට් එක" (New Zealand's Anarka Ayurvedic center), and "ආයුර්වේද" instead of "ආයුර් ආයුර් රියද". GTX 1650: 16.3 s vs 15.8 s. On the CPU, beam took 31.5 s vs 18.8 s and fixed less, so the languages' own models use beam search on the GPU only; on the CPU it stays behind the "accurate" setting.
+- **Broken characters:** beam search once ended a word inside a Sinhala character ("ව�"). Words lose the replacement character, and are dropped when less than 2 characters are left.
+- **Skipped speech:** speech left out before a clip's first word or between two words (3 s or more, with 1 s of sound) is now decoded again, like speech after the last word already was.
+- **English words:** web, center, concept, ayurvedic, digital, marketing, brand, social, media, New Zealand, Australia and Canada were added. The plural ending වල is split off a long enough loanword ("නිව්සිලන්වල" becomes "New Zealand වල"; "ගම්වල" stays).
+- **Split files:** a file cut into pieces on the Audio row is judged speech or music once, on all its pieces together, so a short piece is no longer left out of the captions.
+- Still wrong: the model's own mistakes in Sinhala words ("ඉකුතුමත්" for "එකතු උනොත්"). That's the model's limit on compressed phone audio.

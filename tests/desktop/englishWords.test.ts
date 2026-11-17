@@ -80,3 +80,15 @@ test("keepEnglish keeps punctuation, Latin words and the hint", () => {
   const out = keepEnglish([w("ෆෝන්,"), w("එක"), w("share"), w("“ලින්ක්”"), w("රුවන්")], "Ruwan, Kandy").map((x) => x.text);
   assert.deepEqual(out, ["phone,", "එක", "share", "“link”", "Ruwan"]);
 });
+
+test("keepEnglish writes a Sinhala loanword with an ending joined on in English", () => {
+  const w = (text: string) => ({ start: 0, end: 1, text });
+  const out = keepEnglish([w("වීඩියෝවක්"), w("වීඩියෝව"), w("ෆෝන්එකේ"), w("ලින්ක්එක."), w("කොම්පියුටර්එකට")]).map((x) => x.text);
+  assert.deepEqual(out, ["video එකක්", "video", "phone එකේ", "link එක.", "computer එකට"]);
+  // From a real code-mixed voice note (the Sinhala model's own spelling).
+  const note = keepEnglish(["වෙබ්", "නිව්සිලන්වල", "ආයුරේදික්", "සෙන්ටර්", "කොන්සෙප්ට්", "ඩිජිටල්", "මාකටින්"].map(w)).map((x) => x.text);
+  assert.deepEqual(note, ["web", "New Zealand වල", "ayurvedic", "center", "concept", "digital", "marketing"]);
+  // Native words ending the same way stay as they are.
+  const native = ["ගෙවල්", "කාලවල", "පොත්වල", "ගම්වල", "දෙව", "ජීවිතේ", "අම්මාව", "ගෙදරට", "කාලෙක", "පාරේ", "ඒකට", "එකක්", "හිතට", "වැඩේ", "ළමයාව", "පොතක්", "රටේ", "නංගිව"];
+  assert.deepEqual(keepEnglish(native.map(w)).map((x) => x.text), native);
+});

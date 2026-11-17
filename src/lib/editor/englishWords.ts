@@ -9,8 +9,8 @@
  * Each word in a Brahmic script is romanized and compared by sound with a
  * list of English words that are commonly said in those languages (and the
  * Latin-script words of the names hint). A close enough match replaces it.
- * Only whole words are replaced: a loanword with a suffix glued on
- * ("වීඩියෝවක්", "a video") is left as it is.
+ * Whole words are replaced; in Sinhala, so is a loanword with a common
+ * ending joined on ("වීඩියෝවක්", "a video", becomes "video එකක්").
  *
  * Pure (no model), so it is tested on its own: tests/desktop/englishWords.test.ts. */
 
@@ -306,6 +306,8 @@ cool=kul push=pus love=lav think=tink sit soup=sup wash=vas case=kes keys=kis ro
 mine=main men kick=kik store=stor coat=kot off=af intent chair=ceyar fund=fand form=fom farm=fam fan=fen
 expert=ekspat sweet=svit star guys=gais hell=hel look=luk fine=fain fun=fan south=saut set pack=pyak mean=min
 shoot=sut shooter=sutar site=sait tape=tep pen
+web=veb concept=konsept center=sentar ayurvedic=ayurvedik digital=dijital marketing=maketin brand=brend
+logo=logo social=sosal media=midiya New_Zealand=nyusilan Australia=ostreliya Canada=kanada
 `;
 
 interface Candidate {
@@ -319,7 +321,7 @@ function candidates(list: string): Candidate[] {
     .filter(Boolean)
     .map((e) => {
       const [word, spoken] = e.split("=");
-      return { word, key: soundKey(spoken ?? word) };
+      return { word: word.replace(/_/g, " "), key: soundKey(spoken ?? word) };
     });
 }
 
@@ -397,6 +399,44 @@ export function englishFor(word: string, extra: Candidate[] = []): string | null
   return best;
 }
 
+/** Sinhala endings joined onto a loanword, longest first, with how they're
+ * written after an English word: "වීඩියෝවක්" (a video) is "video එකක්",
+ * "ෆෝන්එකේ" (in the phone) "phone එකේ". After a vowel the ending starts
+ * with ව, after a consonant with එ. The plural වල ("in", "of the")
+ * follows either: "නිව්සිලන්වල" is "New Zealand වල". */
+const SINHALA_ENDINGS: [string, string][] = [
+  ["වලින්", "වලින්"], ["වලට", "වලට"], ["වල", "වල"],
+  ["වකට", "එකකට"], ["වකින්", "එකකින්"], ["වෙන්", "එකෙන්"], ["වක්", "එකක්"], ["වටත්", "එකටත්"], ["වට", "එකට"],
+  ["වත්", "එකත්"], ["වේ", "එකේ"], ["ව", "එක"],
+  ["එකකට", "එකකට"], ["එකකින්", "එකකින්"], ["එකෙන්", "එකෙන්"], ["එකක්", "එකක්"], ["එකටත්", "එකටත්"], ["එකට", "එකට"],
+  ["එකත්", "එකත්"], ["එකේ", "එකේ"], ["එක", "එක"],
+];
+const SINHALA_VOWEL_SIGN = /[ා-ෟෲෳ]$/u;
+
+/** A Sinhala word that is an English word with an ending joined on, as
+ * the English word and the ending ("වීඩියෝවක්" -> "video එකක්"), or null.
+ * The part before the ending has to be a whole, long enough loanword. */
+function englishWithEnding(word: string, extra: Candidate[]): string | null {
+  word = word.normalize("NFC");
+  for (const [ending, written] of SINHALA_ENDINGS) {
+    if (!word.endsWith(ending)) continue;
+    const stem = word.slice(0, -ending.length);
+    // ව follows a vowel sign (වීඩියෝ+ව); එ follows a bare consonant
+    // (ෆෝන්+එක); වල follows either.
+    const vowelEnd = SINHALA_VOWEL_SIGN.test(stem);
+    const bareEnd = stem.endsWith("්");
+    const fits = ending.startsWith("වල") ? vowelEnd || bareEnd : ending.startsWith("ව") ? vowelEnd : bareEnd;
+    if (!fits) continue;
+    const r = romanize(stem);
+    // වල ends many native nouns too (ගම්වල, "in villages", isn't "game"),
+    // so before it only a longer word counts.
+    if (!r || r.script !== "sinhala" || soundKey(r.text).length < (ending.startsWith("වල") ? 5 : 3)) continue;
+    const en = englishFor(stem, extra);
+    if (en) return `${en} ${written}`;
+  }
+  return null;
+}
+
 export interface TextWord {
   text: string;
 }
@@ -418,7 +458,7 @@ export function keepEnglish<T extends TextWord>(words: T[], hint = ""): T[] {
     if (!m || !m[2] || /[A-Za-z0-9]/.test(m[2])) return w;
     let en = seen.get(m[2]);
     if (en === undefined) {
-      en = englishFor(m[2], extra);
+      en = englishFor(m[2], extra) ?? englishWithEnding(m[2], extra);
       seen.set(m[2], en);
     }
     return en ? { ...w, text: `${m[1]}${en}${m[3]}` } : w;
