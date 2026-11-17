@@ -1,5 +1,8 @@
 {
-  "next": [],
+  "next": [
+    "Fixed exports failing with \"Invalid project data\" when an audio track was cut into more than 12 pieces, for example a voice recording with its pauses removed.",
+    "When a project can't be exported, the message now says why, for example how many layers or effects are over the limit."
+  ],
   "releases": [
     {
       "version": "1.0.10",
