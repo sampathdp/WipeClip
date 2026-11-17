@@ -97,6 +97,17 @@ class LocalPathExportTest(unittest.TestCase):
         self.assertGreater(b, 150)
         self.assertTrue(os.path.exists(self.on_disk), "the file on disk is left in place")
 
+    def test_a_size_above_the_video_is_scaled_up(self) -> None:
+        # A 320x180 video exported at 1080p comes out 1920x1080, not 320x180:
+        # the size the user picks is the size they get.
+        res = self.export({"source_paths": json.dumps([self.on_disk])}, [], project(1), resolution="1080p")
+        self.assertEqual(res.status_code, 200, res.text[:300])
+        out = os.path.join(self.dir.name, "up.mp4")
+        with open(out, "wb") as f:
+            f.write(res.content)
+        info = subprocess.run([get_ffmpeg_path(), "-hide_banner", "-i", out], capture_output=True, text=True).stderr
+        self.assertIn("1920x1080", info)
+
     def test_export_rejects_mismatched_lists(self) -> None:
         res = self.export({"source_paths": json.dumps([self.on_disk, None])}, [])
         self.assertEqual(res.status_code, 400)

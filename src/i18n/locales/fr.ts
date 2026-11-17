@@ -537,7 +537,7 @@ const fr: Dict = {
       { title: "Montez sur votre ordinateur", desc: "Une application gratuite pour Windows et Mac. Enregistrez, coupez, montez, sous-titrez et exportez : vos projets restent sur votre ordinateur." },
       { title: "Votre propre contenu", desc: "Conçu pour les créateurs qui montent des vidéos et photos qu'ils ont créées ou qu'ils ont le droit de modifier." },
       { title: "Rien n'est conservé", desc: "Les fichiers envoyés pour l'export ou les outils photo sont traités dans un stockage temporaire et supprimés à la fin du traitement." },
-      { title: "Qualité d'origine", desc: "Les exports conservent votre format et votre fréquence d'images, sans agrandissement artificiel." },
+      { title: "Qualité d'origine", desc: "Les exports conservent votre format et votre fréquence d'images, sans agrandissement, sauf si vous choisissez une résolution plus élevée." },
     ],
     onThisPage: "Sur cette page",
     sectionPrivacy: "Confidentialité",

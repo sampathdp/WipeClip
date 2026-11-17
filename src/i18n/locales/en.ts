@@ -182,7 +182,7 @@ const en = {
       { title: "Edit on your desktop", desc: "A free app for Windows and Mac. Record, trim, cut, caption and export, and your projects stay on your computer." },
       { title: "Your own content", desc: "Built for creators editing video and photos they made themselves or have the rights to edit." },
       { title: "Nothing kept", desc: "Files uploaded for export or the photo tools are processed in temporary storage and deleted when the job finishes." },
-      { title: "Original quality", desc: "Exports keep your aspect ratio and frame rate, and nothing is upscaled." },
+      { title: "Original quality", desc: "Exports keep your aspect ratio and frame rate, and nothing is upscaled unless you pick a larger size." },
     ],
     onThisPage: "On this page",
     sectionPrivacy: "Privacy",

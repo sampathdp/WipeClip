@@ -537,7 +537,7 @@ const de: Dict = {
       { title: "Am Desktop schneiden", desc: "Eine kostenlose App für Windows und Mac. Aufnehmen, kürzen, schneiden, untertiteln und exportieren – deine Projekte bleiben auf deinem Computer." },
       { title: "Deine eigenen Inhalte", desc: "Gemacht für Creator, die Videos und Fotos bearbeiten, die sie selbst erstellt haben oder bearbeiten dürfen." },
       { title: "Nichts wird gespeichert", desc: "Für Export oder Foto-Tools hochgeladene Dateien werden in temporärem Speicher verarbeitet und nach dem Auftrag gelöscht." },
-      { title: "Originalqualität", desc: "Exporte behalten Seitenverhältnis und Bildrate, und nichts wird hochskaliert." },
+      { title: "Originalqualität", desc: "Exporte behalten Seitenverhältnis und Bildrate, und nichts wird hochskaliert, außer du wählst eine größere Auflösung." },
     ],
     onThisPage: "Auf dieser Seite",
     sectionPrivacy: "Datenschutz",

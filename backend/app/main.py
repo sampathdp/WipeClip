@@ -1989,8 +1989,10 @@ async def api_video_export(
 
             # Output canvas: the original's frame rate; its display size, or the
             # chosen aspect ratio at the original's short side. The short side is
-            # then capped (never upscaled) at the requested resolution, and both
-            # sides rounded down to even numbers for yuv420p.
+            # then set to the requested resolution - scaled up too, when the
+            # user picks a size above the original's (a 720p phone video
+            # exported at 1080p or 4K) - and both sides rounded down to even
+            # numbers for yuv420p. The plan's cap is checked on the ticket.
             base = source_infos[0]
             short_side = min(base.width, base.height)
             if canvas.aspect == "original":
@@ -1998,7 +2000,7 @@ async def api_video_export(
             else:
                 ar = _CANVAS_ASPECTS[canvas.aspect]
                 cw, ch = (short_side * ar, float(short_side)) if ar >= 1 else (float(short_side), short_side / ar)
-            scale = min(1.0, RESOLUTION_HEIGHTS[resolution] / min(cw, ch)) if short_side > 0 else 1.0
+            scale = RESOLUTION_HEIGHTS[resolution] / min(cw, ch) if short_side > 0 else 1.0
             out_w = max(2, int(cw * scale) // 2 * 2)
             out_h = max(2, int(ch * scale) // 2 * 2)
             fps = base.fps if 1 <= base.fps <= EDITOR_MAX_FPS else (EDITOR_MAX_FPS if base.fps > EDITOR_MAX_FPS else 30.0)

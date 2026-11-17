@@ -92,11 +92,12 @@ function OutputOptions({ output, onChange, total, locked }: { output: ExportOutp
   );
 }
 
-/** Output size for a tier - mirrors api_video_export: short side capped
- * at the tier, never upscaled, even dimensions.
+/** Output size for a tier - mirrors api_video_export: short side set to
+ * the tier (scaled up when the tier is above the video's own size), even
+ * dimensions.
  */
 function outputSize(w: number, h: number, short: number) {
-  const scale = Math.min(1, short / Math.min(w, h));
+  const scale = short / Math.min(w, h);
   return { w: Math.floor((w * scale) / 2) * 2, h: Math.floor((h * scale) / 2) * 2 };
 }
 
@@ -131,12 +132,17 @@ export default function ExportDialog({
   // Output follows the canvas (its aspect at the original's short side).
   const canvas = canvasSize(project.canvas.aspect, original.width, original.height);
   const shortSide = Math.min(canvas.width, canvas.height);
-  // A tier is only offered if it actually yields more pixels than the one below.
-  const available = TIERS.filter((t, i) => i === 0 || shortSide > TIERS[i - 1].short);
+  // Every size is offered; one above the video's own is scaled up. The
+  // video's own size is the smallest tier that holds it (a 720p phone video
+  // is 720p), and the export starts there, or at the plan's highest below it.
+  const available = TIERS;
+  const native = TIERS.find((t) => shortSide <= t.short) ?? TIERS[TIERS.length - 1];
+  /** More pixels than the video has (a few rows of slack: 1078 is 1080p). */
+  const upscaled = (t: (typeof TIERS)[number]) => t.short > shortSide + 8;
   const allowed = (r: Resolution) => (isSignedIn ? canExportAt(tier, r, IS_DESKTOP) : r === "720p");
   const [output, setOutput] = useState<ExportOutput>(DEFAULT_OUTPUT);
   const [resolution, setResolution] = useState<Resolution>(
-    () => [...available].reverse().find((t) => allowed(t.key))?.key ?? "720p"
+    () => [...available].reverse().find((t) => t.short <= native.short && allowed(t.key))?.key ?? "720p"
   );
   const limits = TIER_LIMITS[tier];
   const maxResolution = maxResolutionFor(tier, IS_DESKTOP);
@@ -290,14 +296,16 @@ export default function ExportDialog({
                       </span>
                     </span>
                     <span className="text-xs text-muted">
-                      {locked ? lockLabel : isSignedIn ? "included" : "free preview"}
+                      {locked ? lockLabel : isSignedIn ? (upscaled(t) ? "upscaled" : "included") : "free preview"}
                     </span>
                   </button>
                 );
               })}
             </div>
             <p className="mt-2 text-xs text-muted">
-              Frame rate matches your original; the aspect ratio follows your canvas. Videos are never upscaled.
+              Frame rate matches your original; the aspect ratio follows your canvas.
+              {available.some(upscaled) &&
+                ` Your video is ${shortSide}p: a larger size is scaled up to fill a bigger screen, but it can't add detail the video doesn't have.`}
             </p>
             {isSignedIn && maxResolution !== "4k" && (
               <p className="mt-2 text-xs text-muted">

@@ -11,7 +11,7 @@ const tiles = [
   },
   {
     title: "Original quality",
-    desc: "Resolution, frame rate and audio stay as they were. Nothing is upscaled.",
+    desc: "Resolution, frame rate and audio stay as they were. Nothing is upscaled unless you pick a larger size.",
     span: "",
     icon: <path d="M4 7V4h3M17 4h3v3M20 17v3h-3M7 20H4v-3M9 12l2 2 4-4" />,
   },

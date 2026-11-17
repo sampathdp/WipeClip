@@ -537,7 +537,7 @@ const es: Dict = {
       { title: "Edita en tu ordenador", desc: "Una app gratis para Windows y Mac. Graba, recorta, corta, subtitula y exporta: tus proyectos se quedan en tu ordenador." },
       { title: "Tu propio contenido", desc: "Hecho para creadores que editan vídeos y fotos que han hecho ellos mismos o que tienen derecho a editar." },
       { title: "No guardamos nada", desc: "Los archivos subidos para exportar o para las herramientas de foto se procesan en almacenamiento temporal y se borran al terminar." },
-      { title: "Calidad original", desc: "Las exportaciones mantienen tu relación de aspecto y fotogramas por segundo, y nada se reescala." },
+      { title: "Calidad original", desc: "Las exportaciones mantienen tu relación de aspecto y fotogramas por segundo, y nada se reescala salvo que elijas una resolución mayor." },
     ],
     onThisPage: "En esta página",
     sectionPrivacy: "Privacidad",
