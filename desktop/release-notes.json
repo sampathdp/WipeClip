@@ -1,5 +1,8 @@
 {
-  "next": [],
+  "next": [
+    "Export at any size your plan includes - 720p, 1080p or 4K - whatever the size of your video. Before, a 720p phone video could only be exported at 720p, even on Pro. A size above your video's own is marked \"upscaled\": it fills a bigger screen, but can't add detail the video doesn't have.",
+    "The export starts at the size closest to your video's own, so nothing gets bigger unless you choose it."
+  ],
   "releases": [
     {
       "version": "1.0.9",
