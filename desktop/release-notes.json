@@ -1,13 +1,18 @@
 {
-  "next": [
-    "The separate Clip sound row is gone from the timeline: each clip's sound now shows inside the clip on the Video row, so deleting sound there can no longer delete the video with it. Mute every clip's sound with the 🔊 button on the Video row.",
-    "Captions no longer skip parts of a voice recording that was cut into pieces on the Audio row: short pieces were sometimes taken for noise and left out.",
-    "Fewer missed words in captions: speech that was skipped at the start or in the middle of a sentence is now listened to again.",
-    "More accurate Sinhala, Tamil, Hindi, Kannada and Telugu captions on computers with a supported graphics card: names and places come out right more often, at the same speed.",
-    "More English words stay in English in Sinhala captions, also with an ending joined on: \"video එකක්\", \"phone එකේ\", \"New Zealand වල\". Words like web, center, concept, digital, marketing, brand and social media are now recognised too.",
-    "Fixed captions sometimes showing a broken character at the end of a word."
-  ],
+  "next": [],
   "releases": [
+    {
+      "version": "1.0.9",
+      "date": "2026-11-17",
+      "notes": [
+        "The separate Clip sound row is gone from the timeline: each clip's sound now shows inside the clip on the Video row, so deleting sound there can no longer delete the video with it. Mute every clip's sound with the 🔊 button on the Video row.",
+        "Captions no longer skip parts of a voice recording that was cut into pieces on the Audio row: short pieces were sometimes taken for noise and left out.",
+        "Fewer missed words in captions: speech that was skipped at the start or in the middle of a sentence is now listened to again.",
+        "More accurate Sinhala, Tamil, Hindi, Kannada and Telugu captions on computers with a supported graphics card: names and places come out right more often, at the same speed.",
+        "More English words stay in English in Sinhala captions, also with an ending joined on: \"video එකක්\", \"phone එකේ\", \"New Zealand වල\". Words like web, center, concept, digital, marketing, brand and social media are now recognised too.",
+        "Fixed captions sometimes showing a broken character at the end of a word."
+      ]
+    },
     {
       "version": "1.0.8",
       "date": "2026-11-16",
