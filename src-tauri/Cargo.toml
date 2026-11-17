@@ -1,6 +1,6 @@
 [package]
 name = "wipeclip"
-version = "1.0.9"
+version = "1.0.10"
 description = "WipeClip desktop video editor"
 authors = ["WipeClip"]
 edition = "2021"
