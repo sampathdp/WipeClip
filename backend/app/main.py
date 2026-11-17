@@ -62,6 +62,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import traceback
@@ -85,6 +86,7 @@ from app.config import (
     EDITOR_COMPACT_CRF,
     EDITOR_MAX_AUDIO,
     EDITOR_MAX_AUDIO_BYTES,
+    EDITOR_MAX_AUDIO_PARTS,
     EDITOR_MAX_LOCAL_AUDIO_BYTES,
     EDITOR_MAX_CAMERA_ROWS,
     EDITOR_MAX_CLIPS,
@@ -1665,7 +1667,7 @@ class _EditorCanvas(BaseModel):
 class _EditorProject(BaseModel):
     clips: list[_EditorClip] = Field(min_length=1, max_length=EDITOR_MAX_CLIPS)
     overlays: list[_EditorOverlay] = Field(default_factory=list, max_length=EDITOR_MAX_STICKERS)
-    audio: list[_EditorAudio] = Field(default_factory=list, max_length=EDITOR_MAX_AUDIO)
+    audio: list[_EditorAudio] = Field(default_factory=list, max_length=EDITOR_MAX_AUDIO_PARTS)
     effects: list[_EditorEffect] = Field(default_factory=list, max_length=EDITOR_MAX_EFFECTS)
     canvas: _EditorCanvas = Field(default_factory=_EditorCanvas)
     pointer: Optional[_EditorPointer] = None
@@ -1682,6 +1684,26 @@ class _EditorProject(BaseModel):
     # Loudness normalization, dB, measured by the editor (loudness.ts) so
     # the preview plays the same level; the export's limiter follows it.
     masterGain: float = Field(0, ge=-editor_pipeline.MAX_MASTER_GAIN_DB, le=editor_pipeline.MAX_MASTER_GAIN_DB)
+
+
+_PROJECT_PARTS = {"clips": "clips", "overlays": "text, caption and image layers", "audio": "audio parts", "effects": "effects", "masks": "privacy masks"}
+
+
+def _project_error(exc: ValidationError) -> str:
+    """A rejected project, said so people (and support) can act on it: a
+    list over its limit by name ("This project has 15 audio parts; up to
+    12 can be exported together"), anything else with where it is
+    ("Invalid project data (audio 3: volume)"). Logged in full."""
+    errors = exc.errors()
+    print(f"export: invalid project: {errors[:3]}", file=sys.stderr)
+    first = errors[0] if errors else {}
+    loc = [str(p) for p in first.get("loc", ())]
+    if first.get("type") == "too_long" and len(loc) == 1 and loc[0] in _PROJECT_PARTS:
+        limit = (first.get("ctx") or {}).get("max_length")
+        found = (first.get("ctx") or {}).get("actual_length")
+        return f"This project has {found} {_PROJECT_PARTS[loc[0]]}; up to {limit} can be exported together."
+    where = " ".join(loc[:2]) + (": " + ".".join(loc[2:]) if len(loc) > 2 else "")
+    return f"Invalid project data ({where})" if where else "Invalid project data"
 
 
 _VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
@@ -1843,12 +1865,14 @@ async def api_video_export(
             detail=f"This project has {len(overlays)} text, caption and image layers; up to {EDITOR_MAX_STICKERS} can be exported together. Export it in parts, or remove some.",
         )
     if len(audio_items) > EDITOR_MAX_AUDIO:
-        raise HTTPException(status_code=400, detail=f"Up to {EDITOR_MAX_AUDIO} audio tracks can be exported together.")
+        raise HTTPException(status_code=400, detail=f"Up to {EDITOR_MAX_AUDIO} audio files can be exported together.")
 
     try:
         spec = _EditorProject.model_validate(json.loads(project))
-    except (json.JSONDecodeError, ValidationError) as exc:
+    except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail="Invalid project data") from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=_project_error(exc)) from exc
 
     for c in spec.clips:
         if c.source >= len(source_items):

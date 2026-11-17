@@ -112,6 +112,25 @@ class LocalPathExportTest(unittest.TestCase):
         res = self.export({"source_paths": json.dumps([self.on_disk, None])}, [])
         self.assertEqual(res.status_code, 400)
 
+    def test_a_file_cut_into_many_parts_exports(self) -> None:
+        # One voice note cut into 15 pieces (pauses removed) failed with
+        # "Invalid project data": parts were capped like files, at 12.
+        wav = os.path.join(self.dir.name, "voice note.wav")
+        subprocess.run(
+            [get_ffmpeg_path(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=4", wav],
+            check=True,
+        )
+        parts = [{"audio": 0, "start": i * 0.06, "offset": i * 0.2, "duration": 0.05, "volume": 1, "fadeIn": 0.01, "fadeOut": 0.01} for i in range(15)]
+        with open(wav, "rb") as f:
+            res = self.export({"source_paths": json.dumps([self.on_disk])}, [("audios", ("voice note.wav", f, "audio/wav"))], project(1) | {"audio": parts})
+        self.assertEqual(res.status_code, 200, res.text[:300])
+
+    def test_a_list_over_its_limit_says_so(self) -> None:
+        proj = project(1) | {"effects": [{"type": "shake", "start": 0, "end": 0.5}] * 31}
+        res = self.export({"source_paths": json.dumps([self.on_disk])}, [], proj)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("This project has 31 effects; up to 30 can be exported together.", res.text)
+
     def test_export_rejects_missing_path(self) -> None:
         res = self.export({"source_paths": json.dumps([self.on_disk, os.path.join(self.dir.name, "gone.mp4")])}, [])
         self.assertEqual(res.status_code, 400)

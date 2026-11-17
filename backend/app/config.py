@@ -297,7 +297,12 @@ EDITOR_MAX_STICKER_BYTES: int = (32 if LOCAL_MODE else 4) * 1024 * 1024
 EDITOR_MAX_STICKER_DIMENSION: int = 2048
 EDITOR_MAX_TRANSITION_SECONDS: float = 2.0
 EDITOR_MAX_FPS: float = 60.0
-EDITOR_MAX_AUDIO: int = 12  # audio clips (and uploaded audio files) per export
+EDITOR_MAX_AUDIO: int = 12  # uploaded audio files per export
+# Audio parts on the timeline per export. A file cut into pieces (silence
+# removed, magnetic audio) is one part per piece, each a short read of the
+# same file, so far more parts than files are fine: a 3-minute voice note
+# with its pauses cut was 15 parts and failed against the old shared cap of 12.
+EDITOR_MAX_AUDIO_PARTS: int = 600 if LOCAL_MODE else 60
 EDITOR_MAX_AUDIO_BYTES: int = 50 * 1024 * 1024
 # The desktop engine takes audio the app made itself on the user's machine:
 # voice translation's full-length WAVs (44.1 kHz stereo, about 10 MB a
