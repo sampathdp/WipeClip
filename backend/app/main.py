@@ -646,7 +646,14 @@ def api_speech_model(language: str = "auto") -> dict:
     if not LOCAL_MODE:
         raise HTTPException(status_code=404, detail="Not available here.")
     model = speech.model_for(language)
-    return {"ready": speech.is_ready(model), "sizeMb": model.size_mb, "gpu": speech.gpu_status(), "own": model.key != "general"}
+    return {
+        "ready": speech.is_ready(model),
+        "sizeMb": model.size_mb,
+        "gpu": speech.gpu_status(),
+        "own": model.key != "general",
+        # What stays on disk: a converted model is kept in 8 bits.
+        "keptMb": 250 if model.converted else model.size_mb,
+    }
 
 
 @app.post("/api/speech/transcribe")
@@ -733,12 +740,15 @@ def api_audio_models() -> dict:
 
 
 @app.get("/api/dub/models")
-def api_dub_models() -> dict:
+def api_dub_models(voice: Optional[str] = None, target: str = "en") -> dict:
     """Desktop engine only: whether the voice translation models are on this
-    machine yet (app/pipeline/dub.py), and what's left to download."""
+    machine yet (app/pipeline/dub.py), and what's left to download - for
+    `voice` ("accurate" or "fast"; default: the one this machine is
+    recommended) saying `target`, and for each voice that speaks `target`
+    under "voices"."""
     if not LOCAL_MODE:
         raise HTTPException(status_code=404, detail="Not available here.")
-    return dub.models_status()
+    return dub.models_status(voice, target)
 
 
 @app.post("/api/dub/render")
@@ -747,17 +757,22 @@ async def api_dub_render(
     sentences: str = Form(...),
     language: Optional[str] = Form(None),
     glossary: Optional[str] = Form(None),
+    voice: Optional[str] = Form(None),
+    target: str = Form("en"),
     job_id: Optional[str] = Form(None),
 ):
     """Desktop engine only: the speech in `audio` (raw 44.1 kHz stereo
     float32, interleaved - the editor's mix of the timeline's speech) said
-    again in English in the speaker's voice (app/pipeline/dub.py).
+    again in `target` (English by default; one of dub.TO_LANGUAGES) in the
+    speaker's voice (app/pipeline/dub.py).
     `sentences`: JSON [{start, end, text}], the transcript's sentences: their
     times and their text in the source language, translated here.
     `language`: the transcript's language (one of dub.FROM_LANGUAGES), which
     sets what counts as an unusually short or long translation. `glossary`:
     optional JSON [{source, target}] - names and terms whose English a
-    translation is checked for (and tried again without). Answers a 16-bit
+    translation is checked for (and tried again without). `voice`: "accurate"
+    or "fast" (dub.VOICES; default: the one recommended here, if it speaks
+    `target`). Answers a 16-bit
     WAV with three channels: the English voice, then the background in
     stereo; the X-Dub-Report header holds what was found (the editor's
     DubReport, sentence numbers counting `sentences` as sent). Downloads the
@@ -773,7 +788,17 @@ async def api_dub_render(
     except (ValueError, TypeError, KeyError) as exc:
         raise HTTPException(status_code=400, detail="Invalid sentences") from exc
     if language is not None and language not in dub.FROM_LANGUAGES:
-        raise HTTPException(status_code=400, detail={"code": "language", "message": "Voice translation works from Sinhala, Tamil, Hindi, Kannada or Telugu."})
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "language", "message": "Voice translation works from English, French, German, Spanish, Italian, Sinhala, Tamil, Hindi, Kannada or Telugu."},
+        )
+    if target not in dub.TO_LANGUAGES:
+        raise HTTPException(status_code=400, detail={"code": "target", "message": "Voice translation says English, French, German, Spanish or Italian."})
+    if language == target:
+        raise HTTPException(status_code=400, detail={"code": "target", "message": "The video is already in that language."})
+    if voice is not None and target not in dub.VOICES.get(voice, {}):
+        raise HTTPException(status_code=400, detail={"code": "voice", "message": "That voice doesn't speak this language."})
+    voice = voice or dub.voice_for(None, target)
     limit = MAX_DUB_SECONDS * dub.RATE * 2 * 4
     raw = await audio.read(limit + 1)
     if not raw or len(raw) % 8 or len(raw) > limit:
@@ -797,7 +822,7 @@ async def api_dub_render(
     texts = [{k: x[k] for k in ("start", "end", "text")} for x in items]
     try:
         async with _speech_lock:
-            english, background, found = await asyncio.to_thread(dub.render, mix, texts, report, language, terms)
+            english, background, found = await asyncio.to_thread(dub.render, mix, texts, report, language, terms, voice, target)
     except progress.Cancelled as exc:
         raise HTTPException(status_code=409, detail={"code": "cancelled", "message": "Voice translation cancelled."}) from exc
     except speech.NotEnoughSpace as exc:
@@ -818,7 +843,7 @@ async def api_dub_render(
         ) from exc
     except Exception as exc:  # a model that failed to run: say which step
         traceback.print_exc()
-        step = {"load": "loading the translator", "translate": "translating", "separate": "separating the voice", "voice": "learning the voice", "speak": "speaking in English", "fit": "mixing"}.get(stage_now[0], "preparing")
+        step = {"load": "loading the translator", "translate": "translating", "separate": "separating the voice", "voice": "learning the voice", "speak": "speaking the translation", "fit": "mixing"}.get(stage_now[0], "preparing")
         raise HTTPException(status_code=500, detail={"code": "dub_failed", "message": f"Voice translation failed while {step}. Try again."}) from exc
     finally:
         progress.finish(job_id)

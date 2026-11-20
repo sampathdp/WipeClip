@@ -96,6 +96,29 @@ def _vistaar(language: str, repo: str, revision: str) -> SpeechModel:
     )
 
 
+# European languages: NVIDIA's Parakeet TDT 0.6B v3 (CC-BY-4.0), Ilya
+# Stupakov's ONNX export, 8-bit encoder (parakeet.py). On FLEURS test clips
+# through this pipeline it beat large-v3-turbo in each of these, at about a
+# fifth of the time (0.11x real time against 0.46-0.60x): word errors French
+# 7.4% / 8.6%, German 7.3% / 8.2%, Spanish 4.4% / 5.6%, Italian 3.5% / 6.1%
+# (SPEECH.md). 671 MB, against turbo's 1.6 GB.
+_PARAKEET = ("istupakov/parakeet-tdt-0.6b-v3-onnx", "8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce")
+EUROPE = SpeechModel(
+    "europe",
+    (
+        Download(*_PARAKEET, "config.json", 97, git_oid="02a773005666393de591dfd55230b778da1653d8"),
+        Download(*_PARAKEET, "vocab.txt", 93_939, git_oid="fc43e1c723e262df60b70e1919614417162d1fe2"),
+        Download(*_PARAKEET, "nemo128.onnx", 139_764, sha256="a9fde1486ebfcc08f328d75ad4610c67835fea58c73ba57e3209a6f6cf019e9f"),
+        Download(*_PARAKEET, "decoder_joint-model.int8.onnx", 18_202_004, sha256="eea7483ee3d1a30375daedc8ed83e3960c91b098812127a0d99d1c8977667a70"),
+        Download(*_PARAKEET, "encoder-model.int8.onnx", 652_183_999, sha256="6139d2fa7e1b086097b277c7149725edbab89cc7c7ae64b23c741be4055aff09"),
+    ),
+    converted=False,
+)
+# The languages it transcribes (it tells them apart itself). Not English:
+# 9.4% against turbo's 8.2%, mostly British spellings and numbers in words,
+# and English users have turbo already.
+EUROPEAN = {"fr", "de", "es", "it"}
+
 MODELS = {
     "general": SpeechModel(
         "general",
@@ -126,6 +149,8 @@ LANGUAGE_NAMES = {"si": "Sinhala", "kn": "Kannada", "ta": "Tamil", "hi": "Hindi"
 
 
 def model_for(language: str) -> SpeechModel:
+    if language in EUROPEAN:
+        return EUROPE
     return MODELS.get(language) or MODELS["general"]
 
 
@@ -629,6 +654,11 @@ def _max_word_seconds(text: str) -> float:
 # and Tamil did best at 12 s too. With the short encoder window (_decode) the
 # shorter clips cost no more time.
 _CLIP_SECONDS = 12
+# The European model reads whole sentences better: French word errors were
+# 8.0% on 12 s clips, 7.4% on 30 s (the same as each test clip whole).
+_EUROPE_CLIP_SECONDS = 30
+_EUROPE_LEVEL = 0.1  # RMS each clip is brought to
+_EUROPE_MAX_GAIN = 1000.0
 _BATCH = {"general": 4}  # the small models: 8
 _SEARCH = 6 * RATE  # look this far back from a clip's end for a quiet spot
 _FRAME = RATE // 10  # 100 ms loudness frames
@@ -883,9 +913,11 @@ def _transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool,
         if model_for(language).key != "general" and not is_ready(model_for(language)):
             raise ModelNeeded(language, model_for(language))
     spec = model_for(language)
-    clips = speech_clips(audio, _CLIP_SECONDS * RATE)
+    clips = speech_clips(audio, (_EUROPE_CLIP_SECONDS if spec is EUROPE else _CLIP_SECONDS) * RATE)
     if not clips:
         return {"language": language, "words": []}
+    if spec is EUROPE:
+        return {"language": language, "words": _parakeet_words(audio, clips, progress)}
     model = _whisper(spec, progress, gpu)
     progress("transcribe", 0.0)
     batch = _BATCH.get(spec.key, 8)
@@ -905,6 +937,45 @@ def _transcribe(audio: np.ndarray, language: str, progress: Progress, gpu: bool,
     words.sort(key=lambda w: w["start"])
     progress("transcribe", 1.0)
     return {"language": language, "words": drop_loops(words)}
+
+
+def _parakeet(progress: Progress):
+    from .parakeet import Parakeet
+
+    with _load_lock:
+        hit = _loaded.get(("europe", "cpu"))
+        if hit is None:
+            path = ensure_model(EUROPE, progress)
+            progress("prepare", 0.0)
+            _loaded.clear()  # one model in memory at a time
+            hit = Parakeet(path, _cpu_threads())
+            _loaded[("europe", "cpu")] = hit
+        return hit
+
+
+def _parakeet_words(audio: np.ndarray, clips: list[tuple[int, int]], progress: Progress) -> list[dict]:
+    """The words of each clip (speech_clips), by the European model, in
+    audio time. It decodes without loops or early stops (a transducer reads
+    every frame), so nothing is decoded again."""
+    model = _parakeet(progress)
+    progress("transcribe", 0.0)
+    total = len(audio) / RATE
+    words: list[dict] = []
+    for a, b in clips:
+        clip = audio[a:b]
+        level = float(np.sqrt(np.mean(clip**2))) if len(clip) else 0.0
+        if level > 0:
+            # It drops quiet speech: French test clips turned down to RMS
+            # 0.0009 had 21% word errors; brought to 0.1, 6.5% (7.2% as
+            # recorded, at about 0.04).
+            clip = clip * min(_EUROPE_MAX_GAIN, _EUROPE_LEVEL / level)
+        for w in model.words(clip):
+            start = max(0.0, a / RATE + w["start"])
+            end = min(total, a / RATE + w["end"], start + _max_word_seconds(w["text"]))
+            words.append({"start": round(start, 3), "end": round(max(end, start + 0.05), 3), "text": w["text"]})
+        progress("transcribe", min(0.95, b / len(audio)))
+    progress("transcribe", 1.0)
+    return words
 
 
 # Whisper's own sign of a decoding stuck in a loop: its text compresses

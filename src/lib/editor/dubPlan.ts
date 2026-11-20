@@ -70,9 +70,9 @@ export function dubReportMessage(report: DubReport | null): string {
   const parts: string[] = [];
   const unsure = [...new Set([...report.flagged.map((f) => f.index), ...report.shortSpeech])].sort((a, b) => a - b);
   if (report.empty.length) parts.push(`Sentence${s(report.empty)} ${list(report.empty)} couldn't be translated and stay${report.empty.length > 1 ? "" : "s"} silent.`);
-  if (unsure.length) parts.push(`Check sentence${s(unsure)} ${list(unsure)}: the English may have missing or wrong words.`);
+  if (unsure.length) parts.push(`Check sentence${s(unsure)} ${list(unsure)}: the translation may have missing or wrong words.`);
   if (report.overflowSeconds >= 0.1)
-    parts.push(`The last ${report.overflowSeconds.toFixed(1)} s of English runs past the end of the video and isn't heard.`);
+    parts.push(`The last ${report.overflowSeconds.toFixed(1)} s of the translation runs past the end of the video and isn't heard.`);
   if (report.sampleSeconds > 0 && report.sampleSeconds < 3) parts.push("There was little clear speech to learn the voice from, so it may sound less like the speaker.");
   return parts.join(" ");
 }

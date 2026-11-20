@@ -119,6 +119,36 @@ class TextTest(unittest.TestCase):
         self.assertIn("long", dub.check_translation("a b c d", " ".join(["word"] * 3 + ["x", "y", "z", "w", "v", "u", "t", "s"]), ratio))
         self.assertIn("glossary", dub.check_translation("WipeClip එක", "WipeClip app.", ratio, [{"source": "එක", "target": "one"}]))
 
+    def test_checks_from_a_latin_script_source(self) -> None:
+        ratio = (0.5, 2.5)
+        fr = "Le prix est passé de 250 euros à presque 400 euros."
+        # Accented letters are Latin; source words aren't "terms" to keep.
+        self.assertEqual(dub.check_translation(fr, "The price went from 250 euros to almost 400 euros.", ratio, latin_source=True), [])
+        self.assertEqual(dub.check_translation("The price rose.", "Le prix a augmenté à Zürich.", ratio, latin_source=True), [])
+        self.assertIn("untranslated", dub.check_translation(fr, fr, ratio, latin_source=True))
+        self.assertIn("number", dub.check_translation(fr, "The price went from 250 euros to almost euros.", ratio, latin_source=True))
+        # A non-Latin source still counts accented Latin letters as Latin.
+        self.assertEqual(dub.check_translation("ලොව විශාලතම", "Le plus grand du monde, à Zürich.", ratio), [])
+
+    def test_french_and_italian_elisions(self) -> None:
+        self.assertEqual(dub.clean_output("l' homme d' affaires , c' est &apos;ça&apos; .", "fr"), "l'homme d'affaires, c'est 'ça'.")
+        self.assertEqual(dub.clean_output("dell' anno", "it"), "dell'anno")
+        self.assertEqual(dub.clean_output("do n't", "fr"), "do n't")  # English contractions only in English
+
+    def test_the_target_language_tag(self) -> None:
+        seen = []
+
+        class FakeModel:
+            def translate_batch(self, tokens, beam_size, **kw):
+                seen.extend(t[0] for t in tokens)
+                return [mock.Mock(hypotheses=[["Bonjour", "à", "tous", "et", "bienvenue."]]) for _ in tokens]
+
+        tokenizer = mock.Mock(encode=lambda text: mock.Mock(tokens=[text]), token_to_id=lambda t: t, decode=lambda ids, skip_special_tokens=True: " ".join(ids))
+        with mock.patch.object(dub, "_load_translator", lambda: (FakeModel(), tokenizer)):
+            res = dub.translate(["Hello everyone and welcome."], lambda v: None, language="en", target="fr")
+        self.assertEqual(seen, ["<2fr> Hello everyone and welcome."])
+        self.assertEqual(res[0].flags, [])
+
     def test_only_suspicious_translations_are_tried_again(self) -> None:
         calls = []
 
@@ -207,6 +237,155 @@ class EmbeddingTest(unittest.TestCase):
         np.testing.assert_array_equal(v._speech([12, 5, 12])[:, 0], [12, 5, 12])
         v._speech([5, 12])
         self.assertEqual(v.embed.calls, [(2, 1)])  # one run, for the two new ids
+
+
+class FastVoiceTest(unittest.TestCase):
+    """The fast voice's decoding loop, on stand-in graphs: one latent per
+    step until the end-of-speech logit, then 3 more frames; the codec
+    decodes 12 frames per run with its state carried along."""
+
+    class Input:
+        def __init__(self, name, shape, type_):
+            self.name, self.shape, self.type = name, shape, type_
+
+    class FakeLM:
+        def __init__(self, end_at: int):
+            self.end_at, self.steps = end_at, 0
+
+        def get_inputs(self):
+            I = FastVoiceTest.Input
+            return [I("sequence", [1, 0, 4], "tensor(float)"), I("text_embeddings", [1, 0, 8], "tensor(float)"), I("state_0", [1, 3, 2], "tensor(float16)"), I("state_1", [1], "tensor(int64)")]
+
+        def run(self, _, feed):
+            frame = feed["sequence"].shape[1] == 1
+            if frame:
+                self.steps += 1
+            eos = 1.0 if frame and self.steps > self.end_at else -9.0
+            return [np.zeros(8, np.float32), np.array([eos], np.float32), feed["state_0"], feed["state_1"] + 1]
+
+    class FakeFlow:
+        def run(self, _, feed):
+            return [np.ones_like(feed["x"])]
+
+    class FakeDecoder:
+        def __init__(self):
+            self.runs = []
+
+        def get_inputs(self):
+            I = FastVoiceTest.Input
+            return [I("latent", [1, "n", 4], "tensor(float)"), I("state_0", [1], "tensor(bool)"), I("state_1", [1, 2, 0], "tensor(float)")]
+
+        def run(self, _, feed):
+            self.runs.append((feed["latent"].shape[1], bool(feed["state_0"][0])))
+            return [np.zeros((1, 1, feed["latent"].shape[1] * 1920), np.float32), np.array([False]), feed["state_1"]]
+
+    def voice(self, end_at: int = 5, tokens: int = 10) -> dub.FastVoice:
+        v = dub.FastVoice.__new__(dub.FastVoice)
+        v.bundle = {"frame_rate": 12.5, "default_temperature": 0.3, "max_token_per_chunk": 50, "replace_characters": {"’": "'"}}
+        v.lm, v.flow, v.decoder = self.FakeLM(end_at), self.FakeFlow(), self.FakeDecoder()
+        v.text = mock.Mock(run=lambda _, feed: [np.zeros((1, feed["token_ids"].shape[1], 8), np.float32)])
+        v.tokenizer = mock.Mock(encode=lambda text: list(range(tokens if len(text) > 12 else 3)))
+        v.latent, v.width = 4, 8
+        v.lm_state = ["state_0", "state_1"]
+        v.dec_state = ["state_0", "state_1"]
+        v.base = dub._fresh(v.lm, 2)
+        return v
+
+    def test_fresh_state(self) -> None:
+        state = dub._fresh(self.FakeDecoder(), 1)
+        self.assertEqual(state["state_0"].dtype, bool)
+        self.assertTrue(state["state_0"].all())  # "first" flags start true
+        self.assertEqual(state["state_1"].shape, (1, 2, 0))
+        lm = dub._fresh(self.FakeLM(0), 2)
+        self.assertEqual((lm["state_0"].dtype, lm["state_1"].dtype), (np.float16, np.int64))
+        self.assertFalse(lm["state_0"].any())
+
+    def test_stops_three_frames_after_the_end(self) -> None:
+        v = self.voice(end_at=20)
+        calls = []
+        wav = v._one("A sentence of some length", lambda: calls.append(1))
+        # The end is seen on step 20: that frame and 2 more are kept (23).
+        self.assertEqual(len(wav), 23 * 1920)
+        self.assertEqual(v.decoder.runs, [(12, True), (11, False)])  # state carried from run to run
+        self.assertEqual(len(calls), 24)  # cancel checked every step
+
+    def test_runaway_is_cut_at_the_frame_limit(self) -> None:
+        v = self.voice(end_at=10_000, tokens=30)
+        wav = v._one("A sentence that never ends", lambda: None)
+        self.assertEqual(len(wav), int((30 / 3 + 2) * 12.5) * 1920)
+
+    def test_too_many_tokens_are_said_in_halves(self) -> None:
+        v = self.voice(tokens=60)  # over the 50 a chunk takes
+        texts = []
+        real = dub.FastVoice._one
+
+        def spy(self, text, cancelled):
+            texts.append(text)
+            return real(self, text, cancelled)
+
+        with mock.patch.object(dub.FastVoice, "_one", spy), mock.patch.object(v.tokenizer, "encode", lambda t: list(range(60 if len(t) > 30 else 10))):
+            v._one("The first half of it here. And the second half there.", lambda: None)
+        self.assertEqual(texts[1:], ["The first half of it here.", "And the second half there."])
+
+    def test_text_is_prepared_and_repeatable(self) -> None:
+        v = self.voice()
+        self.assertEqual(v._prepare("  it’s   done"), "It's done.")
+        self.assertEqual(v._prepare("Really?"), "Really?")
+        a, b = v._one("Same words here", lambda: None), self.voice()._one("Same words here", lambda: None)
+        np.testing.assert_array_equal(a, b)
+
+
+class RenderVoiceTest(unittest.TestCase):
+    """render() downloads and speaks with the voice it's given."""
+
+    def run_with(self, voice: str) -> tuple[list, dict]:
+        used, downloaded = [], []
+
+        class Fake:
+            def __init__(self, sample, target):
+                used.append(type(self).__name__)
+
+            def say_all(self, texts, cancelled, progress):
+                return [np.zeros(dub.VOICE_RATE // 2, np.float32) for _ in texts], []
+
+        fast, accurate = type("FastVoice", (Fake,), {}), type("Voice", (Fake,), {})
+        mix = np.zeros((2, 2 * RATE), np.float32)
+        with (
+            mock.patch.object(dub, "_download_all", lambda progress, v, target: downloaded.append(v)),
+            mock.patch.object(dub, "translate", lambda texts, *a, **k: [dub.Translation("Hello there.", []) for _ in texts]),
+            mock.patch.object(dub, "separate", lambda m, p: m * 0.5),
+            mock.patch.object(dub, "voice_sample", lambda *a: (np.zeros(RATE, np.float32), 1.0)),
+            mock.patch.object(dub, "_ffmpeg", lambda samples, rate, out_rate, **kw: samples),
+            mock.patch.object(dub, "FastVoice", fast),
+            mock.patch.object(dub, "Voice", accurate),
+        ):
+            _, _, report = dub.render(mix, [{"start": 0.2, "end": 1.0, "text": "a"}], lambda *a: None, voice=voice)
+        return used + downloaded, report
+
+    def test_each_voice(self) -> None:
+        # (the voice class used, the voice downloaded for), and the report
+        for voice, cls in (("fast", "FastVoice"), ("accurate", "Voice")):
+            with self.subTest(voice=voice):
+                used, report = self.run_with(voice)
+                self.assertEqual(used, [cls, voice])
+                self.assertEqual(report["voice"], voice)
+
+    def test_unknown_voice(self) -> None:
+        with self.assertRaises(ValueError):
+            dub.render(np.zeros((2, RATE), np.float32), [], lambda *a: None, voice="loud")
+
+
+class RecommendedVoiceTest(unittest.TestCase):
+    def check(self, memory, cores) -> str:
+        with mock.patch.object(dub, "total_memory", lambda: memory), mock.patch.object(dub.speech, "_cpu_threads", lambda: cores):
+            return dub.recommended_voice()
+
+    def test_by_memory_and_cores(self) -> None:
+        need_memory, need_cores = dub._ACCURATE_NEEDS
+        self.assertEqual(self.check(need_memory - (1 << 30), 8), "fast")
+        self.assertEqual(self.check(need_memory, need_cores - 1), "fast")
+        self.assertEqual(self.check(need_memory, need_cores), "accurate")
+        self.assertEqual(self.check(None, need_cores), "accurate")  # memory unknown: judged by cores
 
 
 class KeptSessionsTest(unittest.TestCase):
@@ -358,7 +537,7 @@ class EndpointTest(unittest.TestCase):
         mix = np.stack([tone(2), tone(2, 0.05)])
         seen = {}
 
-        def fake(m, sentences, progress, language=None, glossary=None):
+        def fake(m, sentences, progress, language=None, glossary=None, voice="accurate", target="en"):
             seen["mix"], seen["sentences"], seen["language"] = m, sentences, language
             progress("speak", 0.5)
             return np.full(m.shape[1], 0.25, np.float32), m, self.report()
@@ -391,7 +570,7 @@ class EndpointTest(unittest.TestCase):
     def test_report_counts_sentences_as_the_editor_sent_them(self) -> None:
         # Sent out of time order, with one past the end that's dropped: the
         # engine's numbers (time order, valid only) are mapped back.
-        def fake(m, sentences, progress, language=None, glossary=None):
+        def fake(m, sentences, progress, language=None, glossary=None, voice="accurate", target="en"):
             self.assertEqual([s["text"] for s in sentences], ["first", "second"])
             return np.zeros(m.shape[1], np.float32), m, self.report(empty=[0], flagged=[{"index": 1, "flags": ["number"]}], shortSpeech=[1])
 
@@ -407,19 +586,19 @@ class EndpointTest(unittest.TestCase):
     def test_unsupported_language_and_glossary(self) -> None:
         seen = {}
 
-        def fake(m, sentences, progress, language=None, glossary=None):
+        def fake(m, sentences, progress, language=None, glossary=None, voice="accurate", target="en"):
             seen["glossary"] = glossary
             return np.zeros(m.shape[1], np.float32), m, self.report()
 
         audio = np.zeros((2, RATE), np.float32).T.tobytes()
         with mock.patch.object(main, "LOCAL_MODE", True), mock.patch.object(dub, "render", fake):
-            self.assertEqual(self.post(audio, [{"start": 0, "end": 1, "text": "a"}], language="fr").status_code, 400)
+            self.assertEqual(self.post(audio, [{"start": 0, "end": 1, "text": "a"}], language="ru").status_code, 400)
             res = self.post(audio, [{"start": 0, "end": 1, "text": "a"}], glossary=json.dumps([{"source": "ලංකා", "target": "Lanka"}]))
         self.assertEqual(res.status_code, 200, res.text)
         self.assertEqual(seen["glossary"], [{"source": "ලංකා", "target": "Lanka"}])
 
     def test_a_failing_model_says_which_step(self) -> None:
-        def broken(m, sentences, progress, language=None, glossary=None):
+        def broken(m, sentences, progress, language=None, glossary=None, voice="accurate", target="en"):
             progress("separate", 0.2)
             raise RuntimeError("onnxruntime: bad allocation")
 
@@ -429,9 +608,50 @@ class EndpointTest(unittest.TestCase):
         self.assertIn("separating the voice", res.json()["detail"]["message"])
 
     def test_models_status(self) -> None:
-        with mock.patch.object(main, "LOCAL_MODE", True), mock.patch.object(dub.speech, "is_ready", lambda m: m.key == "separator"):
-            res = self.client.get("/api/dub/models", headers=self.headers)
-        self.assertEqual(res.json(), {"ready": False, "sizeMb": dub.VOICE.size_mb + dub.TRANSLATOR.size_mb})
+        with mock.patch.object(main, "LOCAL_MODE", True), mock.patch.object(dub.speech, "is_ready", lambda m: m.key == "separator"), mock.patch.object(dub, "recommended_voice", lambda: "fast"):
+            res = self.client.get("/api/dub/models", headers=self.headers).json()
+            chosen = self.client.get("/api/dub/models?voice=accurate", headers=self.headers).json()
+        accurate = {"ready": False, "sizeMb": dub.VOICE.size_mb + dub.TRANSLATOR.size_mb}
+        fast = {"ready": False, "sizeMb": dub.FAST_VOICE.size_mb + dub.TRANSLATOR.size_mb}
+        self.assertEqual(res, {**fast, "voice": "fast", "target": "en", "recommended": "fast", "voices": {"accurate": accurate, "fast": fast}})
+        self.assertEqual((chosen["voice"], chosen["sizeMb"]), ("accurate", accurate["sizeMb"]))
+
+    def test_target_language(self) -> None:
+        seen = {}
+
+        def fake(m, sentences, progress, language=None, glossary=None, voice="accurate", target="en"):
+            seen["voice"], seen["target"] = voice, target
+            return np.zeros(m.shape[1], np.float32), m, self.report()
+
+        audio = np.zeros((2, RATE), np.float32).T.tobytes()
+        one = [{"start": 0, "end": 1, "text": "a"}]
+        with mock.patch.object(main, "LOCAL_MODE", True), mock.patch.object(dub, "render", fake), mock.patch.object(dub, "recommended_voice", lambda: "accurate"):
+            self.assertEqual(self.post(audio, one, language="en", target="fr").status_code, 200)
+            self.assertEqual(seen, {"voice": "fast", "target": "fr"})  # the accurate voice speaks English only
+            self.assertEqual(self.post(audio, one, language="fr", target="en").status_code, 200)
+            self.assertEqual(seen, {"voice": "accurate", "target": "en"})
+            self.assertEqual(self.post(audio, one, language="fr", target="fr").status_code, 400)  # already French
+            self.assertEqual(self.post(audio, one, language="fr", target="ru").status_code, 400)
+            self.assertEqual(self.post(audio, one, language="en", target="de", voice="accurate").status_code, 400)
+            status = self.client.get("/api/dub/models?target=it", headers=self.headers).json()
+        self.assertEqual((status["voice"], status["target"], list(status["voices"])), ("fast", "it", ["fast"]))
+        self.assertEqual(status["recommended"], "fast")
+
+    def test_the_voice_is_passed_on(self) -> None:
+        seen = {}
+
+        def fake(m, sentences, progress, language=None, glossary=None, voice="accurate", target="en"):
+            seen["voice"] = voice
+            return np.zeros(m.shape[1], np.float32), m, self.report()
+
+        audio = np.zeros((2, RATE), np.float32).T.tobytes()
+        one = [{"start": 0, "end": 1, "text": "a"}]
+        with mock.patch.object(main, "LOCAL_MODE", True), mock.patch.object(dub, "render", fake), mock.patch.object(dub, "recommended_voice", lambda: "fast"):
+            self.assertEqual(self.post(audio, one, voice="loud").status_code, 400)
+            self.assertEqual(self.post(audio, one, voice="accurate").status_code, 200)
+            self.assertEqual(seen["voice"], "accurate")
+            self.assertEqual(self.post(audio, one).status_code, 200)
+            self.assertEqual(seen["voice"], "fast")  # the machine's recommendation
 
     def test_an_empty_translation_says_so(self) -> None:
         def nothing(*_):

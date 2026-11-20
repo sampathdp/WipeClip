@@ -556,7 +556,9 @@ export async function enginePeaks(path: string, signal?: AbortSignal): Promise<{
  * yet, its size, the graphics card support, and whether it's a model of
  * the language's own (Sinhala, Tamil, ...) rather than the general one. Null without an engine
  * (the website), or when it can't start - captions then run in the browser. */
-export async function engineSpeechModel(language: string): Promise<{ ready: boolean; sizeMb: number; gpu: EngineGpu; own?: boolean } | null> {
+export async function engineSpeechModel(
+  language: string
+): Promise<{ ready: boolean; sizeMb: number; gpu: EngineGpu; own?: boolean; keptMb?: number } | null> {
   const engine = await optionalEngine().catch(() => null);
   if (!engine) return null;
   const res = await fetch(`${engine.url}/api/speech/model?language=${encodeURIComponent(language)}`, { headers: engineHeaders(engine) }).catch(() => null);
@@ -612,14 +614,32 @@ export async function engineTranscribe(
   }
 }
 
-/** Desktop app: whether the engine's voice translation models are
- * downloaded (backend/app/pipeline/dub.py), and what's left to download.
- * Null without an engine (the website). */
-export async function engineDubModels(): Promise<{ ready: boolean; sizeMb: number } | null> {
+/** The voice that says the translation: "fast" (small, for any computer)
+ * or "accurate" (larger, for computers with memory and cores to spare). */
+export type DubVoice = "fast" | "accurate";
+
+export interface DubModels {
+  /** The models of `voice` (the one asked for, else the recommended one)
+   * saying `target`. */
+  ready: boolean;
+  sizeMb: number;
+  /** Missing from an engine older than the choice of voice. */
+  voice?: DubVoice;
+  target?: string;
+  recommended?: DubVoice;
+  /** The voices that speak `target`. */
+  voices?: Partial<Record<DubVoice, { ready: boolean; sizeMb: number }>>;
+}
+
+/** Desktop app: whether the engine's voice translation models for saying
+ * `target` are downloaded (backend/app/pipeline/dub.py), and what's left to
+ * download, for each voice that speaks it and the one this computer is
+ * recommended. Null without an engine (the website). */
+export async function engineDubModels(target = "en"): Promise<DubModels | null> {
   const engine = await optionalEngine().catch(() => null);
   if (!engine) return null;
-  const res = await fetch(`${engine.url}/api/dub/models`, { headers: engineHeaders(engine) }).catch(() => null);
-  return res?.ok ? ((await res.json()) as { ready: boolean; sizeMb: number }) : null;
+  const res = await fetch(`${engine.url}/api/dub/models?target=${encodeURIComponent(target)}`, { headers: engineHeaders(engine) }).catch(() => null);
+  return res?.ok ? ((await res.json()) as DubModels) : null;
 }
 
 export type DubStage = "download" | "load" | "translate" | "separate" | "voice" | "speak" | "fit";
@@ -627,18 +647,22 @@ const DUB_STAGES: readonly string[] = ["download", "load", "translate", "separat
 
 
 /** Desktop app: the speech in `channels` (44.1 kHz stereo, timeline time)
- * said again in English in the speaker's voice, by the engine. `sentences`:
+ * said again in `target` (English by default) in the speaker's voice, by
+ * the engine. `sentences`:
  * each transcript sentence's times and its text, which the engine
  * translates on this computer; `language`: the transcript's language.
- * Resolves to a WAV with three channels - the English voice, then the
- * background in stereo - and the engine's report. `signal` stops it in the
- * engine too. */
+ * Resolves to a WAV with three channels - the translated voice, then the
+ * background in stereo - and the engine's report. `voice`: which voice
+ * says it (the engine's recommendation when left out). `signal` stops it in
+ * the engine too. */
 export async function engineDub(
   channels: Float32Array[],
   sentences: { start: number; end: number; text: string }[],
   language: string,
   onProgress: (stage: DubStage, value: number) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  voice?: DubVoice,
+  target = "en"
 ): Promise<{ wav: Blob; report: DubReport | null }> {
   const engine = await localEngine();
   if (!engine) throw new EngineUnavailableError();
@@ -654,6 +678,8 @@ export async function engineDub(
   body.append("audio", new Blob([interleaved], { type: "application/octet-stream" }), "mix.f32");
   body.append("sentences", JSON.stringify(sentences));
   body.append("language", language);
+  if (voice) body.append("voice", voice);
+  body.append("target", target);
   body.append("job_id", jobId);
   const job = `${engine.url}/api/jobs/${jobId}`;
   const cancel = () => void fetch(`${job}/cancel`, { method: "POST", headers: engineHeaders(engine) }).catch(() => {});

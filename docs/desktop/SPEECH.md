@@ -106,6 +106,38 @@ The word error rates of the Dravidian languages are high mostly because their wo
 - `av` (FFmpeg bindings, about 70 MB) isn't bundled. faster_whisper imports it but only uses it to decode files, so `pyi_rth_av_stub.py` stands in.
 - onnxruntime (voice detection) stays excluded.
 
+## European languages (20 November 2026)
+
+French, German, Spanish and Italian captions and transcripts now use NVIDIA's **Parakeet TDT 0.6B v3** (CC-BY-4.0, 25 European languages, with punctuation and capitals). It runs in Ilya Stupakov's ONNX export (`istupakov/parakeet-tdt-0.6b-v3-onnx`), pinned, with the 8-bit encoder: a 671 MB download, all of it kept, against turbo's 1.6 GB. Code: `backend/app/pipeline/parakeet.py`, used by `speech.py` for `EUROPEAN`.
+
+**How it runs** (numpy and onnxruntime, no PyTorch):
+1. The export's own feature graph (`nemo128.onnx`) turns the audio into 128 log-mel bands every 10 ms.
+2. The encoder makes one vector per 80 ms frame.
+3. Greedy token-and-duration decoding, the way onnx-asr (MIT) does it. At each frame, the joint network gives a token (or blank) and how many frames to move on (0-4), with at most 10 tokens per frame. The prediction network's state moves only on a token.
+4. A token starting with "▁" starts a word, so word times come straight from the frames, with no alignment step.
+
+**Clips and level.** The audio is cut at quiet points into clips of up to 30 s (12 s for the Whisper models), and each clip is brought to RMS 0.1 first.
+- French word errors were 8.0% on 12 s clips and 7.4% on 30 s, the same as each test clip whole.
+- It drops quiet speech: French test clips turned down to RMS 0.0009 had 21% word errors. Brought back to 0.1 they had 6.5%, against 7.2% as recorded.
+
+**Measured** on FLEURS test clips (60-80 per language, 12-15 minutes each), through the app's own pipeline. Punctuation and case are ignored; numbers count as written. i7-9750H CPU, 4 threads.
+
+| Language | Parakeet word errors | Turbo word errors | Parakeet time | Turbo time |
+|---|---|---|---|---|
+| French | **7.3%** | 8.6% | 0.12x real time | 0.60x |
+| German | **6.0%** | 8.2% | 0.12x | 0.55x |
+| Spanish | **4.3%** | 5.6% | 0.12x | 0.58x |
+| Italian | **3.4%** | 6.1% | 0.12x | 0.46x |
+| English | 9.4% (before the level change) | **8.2%** | 0.12x | 0.42x |
+
+- **English stays on turbo:** Parakeet's extra English errors were mostly British spellings ("harbour") and numbers written as words. English users already have turbo.
+- **Memory:** 1.0 GB peak on 133 s of French, against about 2 GB for turbo.
+- **Auto-detect** still uses turbo to tell the language. Picking French, German, Spanish or Italian in the Language list needs only the European model.
+- **Not yet routed:** Parakeet also knows Portuguese, Dutch, Polish, Russian, Ukrainian and 15 other languages, but they aren't measured, so they stay on turbo.
+- **Synthetic speech:** on a very quiet synthesized French voice (a dub), turbo read every sentence and Parakeet missed one and misheard some words. Real speech is what it's for; a benchmark that reads dubs back should use turbo.
+
+**Download notice:** the engine reports what's kept (`keptMb`), so the notice says "kept on this computer" for this model, instead of "about 250 MB kept".
+
 ## New in this phase
 
 **Transcript suggestions** (`src/lib/editor/speechEdits.ts`), used only while the transcript still matches the edit (`transcriptCurrent`):

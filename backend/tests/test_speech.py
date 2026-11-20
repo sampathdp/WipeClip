@@ -388,7 +388,7 @@ class EndpointTest(unittest.TestCase):
             mock.patch.object(speech, "gpu_status", lambda: gpu),
         ):
             res = self.client.get("/api/speech/model?language=si", headers=self.headers)
-        self.assertEqual(res.json(), {"ready": False, "sizeMb": speech.MODELS["si"].size_mb, "gpu": gpu, "own": True})
+        self.assertEqual(res.json(), {"ready": False, "sizeMb": speech.MODELS["si"].size_mb, "gpu": gpu, "own": True, "keptMb": 250})
 
     def test_model_needed_answers_409(self) -> None:
         def needed(audio, language, progress, gpu, *_):

@@ -4,8 +4,9 @@ Runs entirely in the engine on the user's machine, the translation of the
 transcript's text included. Design notes and measurements:
 docs/desktop/DUB.md; benchmark: bench/dub_bench.py.
 
-Three models, downloaded once after the editor asks, into WIPECLIP_MODELS_DIR,
-each file pinned to a revision and checked against its published hash:
+Three models (the voice one of two), downloaded once after the editor asks,
+into WIPECLIP_MODELS_DIR, each file pinned to a revision and checked against
+its published hash:
 
 - translator: Google's MADLAD-400 3B MT (Apache-2.0), as CTranslate2 int8.
   Text from Sinhala, Tamil, Hindi, Kannada or Telugu to English, one
@@ -16,13 +17,15 @@ each file pinned to a revision and checked against its published hash:
 - separator: Meta's HT-Demucs (fine-tuned) vocals model (MIT), as ONNX. It
   takes the voice out; the background is what's left (voice + background =
   the mix, exactly).
-- voice: Resemble AI's Chatterbox Turbo (MIT), as ONNX: English speech in
-  the voice of a ~10 s sample. Its language model in full precision, the
-  rest 4-bit (all-4-bit dropped and changed words; 8-bit ran ten times
-  slower on an i7-9750H). Several sentences are decoded together: the
-  language model reads its 1.27 GB of weights once per step for all of them.
+- voice, one of two (VOICES), English speech in the voice of a ~10 s sample:
+  - "accurate": Resemble AI's Chatterbox Turbo (MIT), as ONNX. Its
+    language model in full precision, the rest 4-bit (all-4-bit dropped and
+    changed words; 8-bit ran ten times slower on an i7-9750H). 1.7 GB.
+  - "fast": Kyutai's Pocket TTS (weights CC-BY-4.0), as ONNX. 212 MB, about
+    ten times faster, the same words; less close to the speaker.
+  The editor offers the one recommended_voice() picks for the machine.
 
-The translator runs on CTranslate2, the other two on onnxruntime with numpy;
+The translator runs on CTranslate2, the others on onnxruntime with numpy;
 resampling and tempo changes go through the bundled ffmpeg. Nothing is
 uploaded.
 """
@@ -41,7 +44,7 @@ from typing import Callable
 
 import numpy as np
 
-from . import speech
+from . import numbers, speech
 from .speech import Download, Progress, SpeechModel
 
 RATE = 44100  # what the separator takes, and what's handed back
@@ -83,26 +86,155 @@ TRANSLATOR = SpeechModel(
     ),
     converted=False,
 )
-MODELS = (TRANSLATOR, SEPARATOR, VOICE)
-# The languages the transcript can be translated from (the editor's DUB_FROM).
-FROM_LANGUAGES = {"si", "ta", "hi", "kn", "te"}
+_POCKET = ("stephvax/pocket-tts-onnx", "9dd58b75ba672bb75df1c62a493f6db7c80de6d1")
+# The fast voice: Kyutai's Pocket TTS (weights CC-BY-4.0; ONNX conversion
+# made with PocketTTS.cpp), one model per language it speaks. English is the
+# 6-layer 2026-10 model (212 MB); the others are 24-layer (440 MB each).
+# Per file: (size, sha256 of a Git LFS file or git blob id of a small one).
+_POCKET_FILES = {
+    "en": ("english_2026-10", {
+        "bundle.json": (680, "09d63efaf06e27e28aaf76d8c352590f241ef2a1"),
+        "tokenizer.model": (59_339, "d461765ae179566678c93091c5fa6f2984c31bbe990bf1aa62d92c64d91bc3f6"),
+        "bos_before_voice.npy": (4_224, "ba091d858b647e7a1d7e57f3436ecbb03d97bb250fdeae61368d4cd1b6f3d5ea"),
+        "text_conditioner.onnx": (16_388_310, "3573df3fe6d0b1e72588ed5b021ab11514e67a4432c20a2bea783170260f5020"),
+        "mimi_encoder.onnx": (39_269_324, "27a8ae66061b389bab09f18083005c2e4d5be6f4eaa34c8db8988f52fd6acc55"),
+        "flow_lm_main_int8.onnx": (75_865_936, "2a14cf05cac01461aa596229a05bda4378b135004048ef1ec1db728b4d1ab958"),
+        "flow_lm_flow.onnx": (39_081_891, "91f757089899345b548ed9d99bcf07988fe544cf4e9466a85d9ff4a0fbfd0489"),
+        "mimi_decoder.onnx": (41_422_037, "4fb0145caba7e554419426a68535e3b411c1ed0e182057186770c924d71ad4d1"),
+    }),
+    "fr": ("french_24l", {
+        "bundle.json": (979, "9b3f4a4610b9c0fb1a01d52eb15fb2ac4223a150"),
+        "tokenizer.model": (60_690, "dd8dc8cfad3c4b3711a8629ede27d5be934eb98bcb00462bf91ed40fb8f6f38a"),
+        "bos_before_voice.npy": (4_224, "6090fda20037a969d94aadfead53d29cf7bdb088365f548dfd4715f046a4441b"),
+        "text_conditioner.onnx": (16_388_310, "d5bcb347e0dfde1a7a196b18e6640b71505a0717f2ce5167b3d6f9744ab85d4a"),
+        "mimi_encoder.onnx": (39_261_982, "4165b6a1b83ca22f73f2f82433dac5bb3cb4b78e49da95f1a4f139c3d9ce2aae"),
+        "flow_lm_main_int8.onnx": (303_347_168, "30c9c88bc82e7d69c09400c6c8f0c9fc80c7dfc1b7acc401a38f61075e12e549"),
+        "flow_lm_flow.onnx": (39_081_891, "75c829d567a0195e1fd66367af1652b03a991411db257bec64fef5a63ea9b126"),
+        "mimi_decoder.onnx": (41_414_681, "dc65d4f0a1fa2ff2b9892efbce1f277222886a889ba73780ee180ccdb4c00d85"),
+    }),
+    "de": ("german_24l", {
+        "bundle.json": (1_003, "1623b960b7c74e34cb717a89a0151f3ae371e872"),
+        "tokenizer.model": (60_347, "b3d6fb751a0bbc0b18df78687a03c11e4f2fbb0fa4b8f85e83064cd9d80ee34b"),
+        "bos_before_voice.npy": (4_224, "39694b2b0fe32e4a1f61190b2b0630f4cbcd5065c37078132765166bc783966d"),
+        "text_conditioner.onnx": (16_388_310, "73140539231ef523105d5d3ea7f008c0d1863ee195eae53199281b4350d9c4a9"),
+        "mimi_encoder.onnx": (39_269_324, "b4fcaeab1c4c41793a58825098d5f34e958d128ef4cbdd151bef0f579ecbf3a4"),
+        "flow_lm_main_int8.onnx": (303_347_168, "769378926449ba8dc8a797e4d1e2478c306d1e9cad8323e2d4721d5902a8f639"),
+        "flow_lm_flow.onnx": (39_081_891, "8cc94022cb47d3bc1dde7e2c002a40bbc158daefec2e12fb4116a1ea4bc8d3c3"),
+        "mimi_decoder.onnx": (41_422_037, "f4d0a2d56bb2956ae19ae492b4dbda7cf6c1f4c306f3cff1c9614285e4efdbfd"),
+    }),
+    "es": ("spanish_24l", {
+        "bundle.json": (1_023, "ead01ce82f3a7a9c5279b5bea8cb119a54245430"),
+        "tokenizer.model": (61_063, "9714c8ce180d8147ab4c1406cd759619828f95d7000c87c41dc9ccec527a3e89"),
+        "bos_before_voice.npy": (4_224, "c99a5035f90cd31d3e16cbbc51ed101c67a237a15002ccc59326bb21f1bc1b25"),
+        "text_conditioner.onnx": (16_388_310, "f082f15f915e3ab948c2e092a9ea4b5ee22e036b375566bc91d2c28903ec7764"),
+        "mimi_encoder.onnx": (39_269_324, "c0bb4491187c0c6314aa6a8c6ab734106a7aba4257e3bef81c1a10f3e4063641"),
+        "flow_lm_main_int8.onnx": (303_347_168, "b751f3a068fe8255bb060efcd5afd53be8ad11e6f4a72b80686ab42068b6558b"),
+        "flow_lm_flow.onnx": (39_081_891, "4722755c7aad8bf4ba6ce4edca6956db3d2d8bcb8412527031ddb4a14bab958a"),
+        "mimi_decoder.onnx": (41_422_037, "43805c76c0366e052ac1036427ee0ead58f80b398c91a47859b232ad3a779cd6"),
+    }),
+    "it": ("italian_24l", {
+        "bundle.json": (987, "58568efd7c7d71495d8662dc0892d1cd0358ccd6"),
+        "tokenizer.model": (60_905, "1ef32ed65d0264239fb9d9ecb36a089a637f6e6c5c5a1a8e7df37ce486ec21da"),
+        "bos_before_voice.npy": (4_224, "e8daccbcd0783e66684ff51e9cc20928704408aa1b7261de16815cbaffde3444"),
+        "text_conditioner.onnx": (16_388_310, "ec34e6160521f8e72b10b820018a1262a9ec78eb8cbf3f87871035936aab5bc6"),
+        "mimi_encoder.onnx": (39_269_324, "da2fb72ad85db311c21316d416d516297853c025c8ff0abdc26e007d633c2600"),
+        "flow_lm_main_int8.onnx": (303_347_168, "7ed90dafce36b4d0553dcdf749f30356a67b85418b16e13b3a512400a3a2e2af"),
+        "flow_lm_flow.onnx": (39_081_891, "8b4668cfe0f97801083dd6c3cbf7ede88a95ecfd377ab6f7247c89613f8b875b"),
+        "mimi_decoder.onnx": (41_422_037, "6b203a81b4150a27e7689d0d7bf9a2a808ae3eabbf8c2a0d9e2ad9afed3041bb"),
+    }),
+}  # fmt: skip
 
 
-def models_status() -> dict:
+def _pocket(lang: str) -> SpeechModel:
+    folder, files = _POCKET_FILES[lang]
+    return SpeechModel(
+        "voice-fast" if lang == "en" else f"voice-fast-{lang}",
+        tuple(
+            Download(*_POCKET, f"onnx/{folder}/{name}", size, **{"git_oid" if len(digest) == 40 else "sha256": digest})
+            for name, (size, digest) in files.items()
+        ),
+        converted=False,
+    )
+
+
+def pocket_dir(lang: str) -> str:
+    """The fast voice's folder for `lang` inside its model folder."""
+    return f"onnx/{_POCKET_FILES[lang][0]}/"
+
+
+FAST_VOICES = {lang: _pocket(lang) for lang in _POCKET_FILES}
+FAST_VOICE = FAST_VOICES["en"]
+# The voices the editor can pick, by the languages they speak: "accurate"
+# (Chatterbox Turbo, English only) or "fast" (every target).
+VOICES: dict[str, dict[str, SpeechModel]] = {"accurate": {"en": VOICE}, "fast": FAST_VOICES}
+# The languages the transcript can be translated from (the editor's
+# DUB_FROM), and into (DUB_TO). The European ones are written in Latin script.
+EUROPEAN = {"en", "fr", "de", "es", "it"}
+FROM_LANGUAGES = {"si", "ta", "hi", "kn", "te"} | EUROPEAN
+TO_LANGUAGES = set(FAST_VOICES)
+
+
+def _models(voice: str, target: str = "en") -> tuple[SpeechModel, ...]:
+    return (TRANSLATOR, SEPARATOR, VOICES[voice][target])
+
+
+def voice_for(voice: str | None, target: str) -> str:
+    """`voice` if it speaks `target`, else the recommended one if it does,
+    else the fast one (which speaks every target)."""
+    for v in (voice, recommended_voice()):
+        if v in VOICES and target in VOICES[v]:
+            return v
+    return "fast"
+
+
+def recommended_voice() -> str:
+    """The voice to offer first on this machine: see _ACCURATE_NEEDS."""
+    memory = total_memory()
+    if memory is not None and memory < _ACCURATE_NEEDS[0]:
+        return "fast"
+    if speech._cpu_threads() < _ACCURATE_NEEDS[1]:
+        return "fast"
+    return "accurate"
+
+
+def models_status(voice: str | None = None, target: str = "en") -> dict:
+    """Whether the models for `voice` (default: the recommended one) saying
+    `target` are here and what's left to download, and the same for each
+    voice that speaks `target`."""
+    target = target if target in TO_LANGUAGES else "en"
+    voice = voice_for(voice, target)
+
+    def status(v: str) -> dict:
+        ms = _models(v, target)
+        return {"ready": all(speech.is_ready(m) for m in ms), "sizeMb": sum(m.size_mb for m in ms if not speech.is_ready(m))}
+
     return {
-        "ready": all(speech.is_ready(m) for m in MODELS),
-        "sizeMb": sum(m.size_mb for m in MODELS if not speech.is_ready(m)),
+        **status(voice),
+        "voice": voice,
+        "target": target,
+        "recommended": voice_for(None, target),
+        "voices": {v: status(v) for v in VOICES if target in VOICES[v]},
     }
 
 
-def _download_all(progress: Progress) -> None:
-    """Every model, with one download progress across them."""
-    missing = [m for m in MODELS if not speech.is_ready(m)]
+def _download_all(progress: Progress, voice: str = "accurate", target: str = "en") -> None:
+    """Every model `voice` needs to say `target`, with one download progress
+    across them."""
+    missing = [m for m in _models(voice, target) if not speech.is_ready(m)]
     total = sum(m.size_mb for m in missing) or 1
     done = 0
     for m in missing:
         speech.ensure_model(m, lambda stage, v, m=m, done=done: progress(stage, (done + v * m.size_mb) / total))
         done += m.size_mb
+
+
+# The accurate voice is offered first with 12 GB of memory installed and 6
+# physical cores; otherwise the fast one is. On an i7-9750H (6 cores) the
+# accurate voice speaks at 3.6x real time and the fast one at 0.35x, so a
+# 49 s video took 206 s against 88 s in all (docs/desktop/DUB.md). Peak
+# memory is the same (5.3 GB, the translator), but the accurate voice's
+# sessions hold 2.2 GB while kept.
+_ACCURATE_NEEDS = (12 << 30, 6)
 
 
 def _session(path, threads: int):
@@ -131,6 +263,15 @@ _release_timer: threading.Timer | None = None
 
 def available_memory() -> int | None:
     """Physical memory free now, in bytes, or None if it can't be told."""
+    return _memory(total=False)
+
+
+def total_memory() -> int | None:
+    """Physical memory installed, in bytes, or None if it can't be told."""
+    return _memory(total=True)
+
+
+def _memory(total: bool) -> int | None:
     if sys.platform == "win32":
         import ctypes
 
@@ -142,9 +283,11 @@ def available_memory() -> int | None:
 
         st = _Status()
         st.dwLength = ctypes.sizeof(st)
-        return int(st.ullAvailPhys) if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)) else None
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+            return None
+        return int(st.ullTotalPhys if total else st.ullAvailPhys)
     try:
-        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+        return os.sysconf("SC_PHYS_PAGES" if total else "SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
     except (ValueError, OSError, AttributeError):
         return None
 
@@ -203,6 +346,17 @@ _RETRY_BEAM = 4
 # range widened by a quarter below and 30% above.
 _WORD_RATIO = {"si": (0.59, 1.81), "hi": (0.35, 1.33), "kn": (0.65, 2.08), "ta": (0.71, 2.29), "te": (0.57, 1.98)}
 _ANY_RATIO = (0.35, 2.29)
+# The same for European pairs (source, target), from MADLAD's output on 40
+# FLORES-200 devtest sentences per pair (bench/dub_bench.py translate,
+# retries off; chrF++ 53.5-72.1, docs/desktop/DUB.md), each range widened
+# as above. Other European pairs: the widest of these.
+_PAIR_RATIO: dict[tuple[str, str], tuple[float, float]] = {
+    ("fr", "en"): (0.49, 1.39), ("en", "fr"): (0.68, 1.89), ("de", "en"): (0.58, 1.60), ("en", "de"): (0.56, 1.57),
+    ("es", "en"): (0.52, 1.30), ("en", "es"): (0.61, 1.98), ("it", "en"): (0.54, 1.40), ("en", "it"): (0.64, 1.90),
+    ("fr", "de"): (0.45, 1.44), ("de", "fr"): (0.64, 1.81), ("fr", "es"): (0.49, 1.47), ("es", "fr"): (0.56, 1.89),
+    ("fr", "it"): (0.52, 1.42), ("it", "fr"): (0.62, 1.53),
+}  # fmt: skip
+_EUROPEAN_RATIO = (0.45, 1.98)
 # Beam 2, retries at beam 4 (FLORES-200, 40 sentences x 5 languages, chrF++
 # against the human English): beam 1 scored 59.6 in 0.76 of the time, beam
 # 2 60.0 (with retries 60.2), beam 4 60.6 in 1.4 times the time; reading
@@ -250,11 +404,21 @@ def clean_english(text: str) -> str:
     """MADLAD writes some of its English the way its training text was
     tokenized: "&apos;s", "nuclei ,", "do n't". Said by the voice model as
     written, so put back as plain English."""
+    return clean_output(text, "en")
+
+
+def clean_output(text: str, target: str) -> str:
+    """A translation as plain text: entities decoded, no space before
+    punctuation or inside brackets; in English, contractions joined ("do
+    n't"); in French and Italian, elisions ("l' homme")."""
     t = html.unescape(html.unescape(text))
     t = re.sub(r"\s+([.,!?;:%)\]}])", r"\1", t)
     t = re.sub(r"([(\[{])\s+", r"\1", t)
-    t = re.sub(r"(\w)\s+'(s|re|ve|ll|d|m|t)\b", r"\1'\2", t)
-    t = re.sub(r"(\w)\s+n't\b", r"\1n't", t)
+    if target == "en":
+        t = re.sub(r"(\w)\s+'(s|re|ve|ll|d|m|t)\b", r"\1'\2", t)
+        t = re.sub(r"(\w)\s+n't\b", r"\1n't", t)
+    elif target in ("fr", "it"):
+        t = re.sub(r"\b(\w{1,5})\s*['’]\s+(?=\w)", r"\1'", t)
     return " ".join(t.split())
 
 
@@ -262,24 +426,31 @@ _NUM = re.compile(r"\d+(?:[.,]\d+)*")
 _LATIN_WORD = re.compile(r"(?<![A-Za-z])[A-Za-z][A-Za-z0-9+#_.-]*[A-Za-z0-9+#]")
 
 
-def check_translation(src: str, out: str, ratio: tuple[float, float], glossary: list[dict] | None = None) -> list[str]:
+def check_translation(src: str, out: str, ratio: tuple[float, float], glossary: list[dict] | None = None, latin_source: bool = False) -> list[str]:
     """What looks wrong with one translation, from evidence in the two
     texts: "empty"; "encoding" (an undecodable character); "untranslated"
-    (over a fifth of its letters not Latin); "repeated" (a phrase three
-    times, or a word four times in a row); "short"/"long" (English words per
-    source word outside `ratio`, for sources of 4 words or more); "number"
-    (a number in the source missing); "term" (a Latin-script word of 3+
-    letters in the source missing); "glossary" (a glossary entry whose
-    source term is in the sentence, without its English)."""
+    (over a fifth of its letters not Latin; from a Latin-script source
+    (`latin_source`), 80% of its words, of 5 or more, the source's own);
+    "repeated" (a phrase three times, or a word four times in a row);
+    "short"/"long" (words per source word outside `ratio`, for sources of 4
+    words or more); "number" (a number in the source missing); "term" (from
+    a non-Latin source only: a Latin-script word of 3+ letters in the source
+    missing); "glossary" (a glossary entry whose source term is in the
+    sentence, without its translation)."""
     o = out.strip()
     if not o:
         return ["empty"]
     flags = []
     if "�" in o:
         flags.append("encoding")
-    letters = [ch for ch in o if ch.isalpha()]
-    if letters and sum(1 for ch in letters if not ("a" <= ch.lower() <= "z")) / len(letters) > 0.2:
-        flags.append("untranslated")
+    if latin_source:
+        own, said = set(re.findall(r"\w+", src.lower())), re.findall(r"\w+", o.lower())
+        if len(said) >= 5 and sum(1 for w in said if w in own) / len(said) >= 0.8:
+            flags.append("untranslated")
+    else:
+        letters = [ch for ch in o if ch.isalpha()]
+        if letters and sum(1 for ch in letters if not _is_latin(ch)) / len(letters) > 0.2:
+            flags.append("untranslated")
     words = re.findall(r"\w+", o.lower())
     grams = [tuple(words[i : i + 3]) for i in range(len(words) - 2)]
     if any(c >= 3 for c in _counts(grams)) or re.search(r"\b(\w+)(\W+\1\b){3,}", o.lower()):
@@ -295,7 +466,7 @@ def check_translation(src: str, out: str, ratio: tuple[float, float], glossary: 
     if any(re.sub(r"[.,]", "", x) not in have for x in _NUM.findall(src)):
         flags.append("number")
     low = o.lower()
-    if any(len(w) >= 3 and not _term_kept(w, low) for w in _LATIN_WORD.findall(src)):
+    if not latin_source and any(len(w) >= 3 and not _term_kept(w, low) for w in _LATIN_WORD.findall(src)):
         flags.append("term")
     for g in glossary or ():
         if g.get("source") and g.get("target") and g["source"].lower() in src.lower() and g["target"].lower() not in low:
@@ -316,6 +487,10 @@ def _term_kept(word: str, english: str) -> bool:
     w = word.lower()
     stem = w[:-1] if w.endswith("s") and len(w) > 3 else w
     return w in english or stem in english or any(sym in english for sym in _TERM_SYMBOLS.get(stem, ()))
+
+
+def _is_latin(ch: str) -> bool:
+    return ("a" <= ch.lower() <= "z") or unicodedata.name(ch, "").startswith("LATIN")
 
 
 def _counts(items) -> list[int]:
@@ -348,10 +523,11 @@ def translate(
     retry: bool = True,
     context: list[int | None] | None = None,
     loaded: Callable[[], None] = lambda: None,
+    target: str = "en",
 ) -> list[Translation]:
-    """Each text in English, same order, by MADLAD-400 on the CPU. The
-    source language needs no tag: the model tells it from the text
-    (`language` sets what counts as an unusual length). Translations that
+    """Each text in `target` (English by default), same order, by
+    MADLAD-400 on the CPU. The source language needs no tag: the model tells
+    it from the text (`language` sets what counts as an unusual length). Translations that
     look wrong (check_translation) are tried again with a wider beam and a
     stronger repetition penalty; the attempt with fewer problems is kept,
     the first one on a tie.
@@ -363,7 +539,9 @@ def translate(
     and it is kept unless it looks worse than the one translated alone."""
     model, tokenizer = _load_translator()
     loaded()
-    ratio = _WORD_RATIO.get(language or "", _ANY_RATIO)
+    ratio = _WORD_RATIO.get(language or "", _ANY_RATIO) if target == "en" else _ANY_RATIO
+    latin = language in EUROPEAN
+    ratio = _PAIR_RATIO.get((language or "", target)) or (_EUROPEAN_RATIO if latin else ratio)
     sources = [normalize_source(t) for t in texts]
     steps = 2 if context else 1
 
@@ -372,7 +550,7 @@ def translate(
         out = []
         for i in range(0, len(items), batch):
             part = items[i : i + batch]
-            tokens = [tokenizer.encode("<2en> " + t).tokens for t, _ in part]
+            tokens = [tokenizer.encode(f"<2{target}> " + t).tokens for t, _ in part]
             prefixes = [pre for _, pre in part]
             results = model.translate_batch(
                 tokens,
@@ -385,12 +563,12 @@ def translate(
             for (_, pre), r in zip(part, results):
                 hyp = r.hypotheses[0][len(pre or []) :]
                 ids = [tokenizer.token_to_id(t) for t in hyp]
-                out.append((clean_english(tokenizer.decode([x for x in ids if x is not None], skip_special_tokens=True)), hyp))
+                out.append((clean_output(tokenizer.decode([x for x in ids if x is not None], skip_special_tokens=True), target), hyp))
             done(i + len(part))
         return out
 
     def better(i: int, text: str) -> bool:
-        flags = check_translation(sources[i], text, ratio, glossary)
+        flags = check_translation(sources[i], text, ratio, glossary, latin)
         if len(flags) < len(res[i].flags) or (prefer_new and len(flags) == len(res[i].flags)):
             res[i] = Translation(text, flags, res[i].retried)
             return True
@@ -402,7 +580,7 @@ def translate(
         res = [Translation("", ["empty"]) for _ in sources]
         tokens: list[list[str]] = [[] for _ in sources]
         for i, (text, toks) in zip(todo, first):
-            res[i] = Translation(text, check_translation(sources[i], text, ratio, glossary))
+            res[i] = Translation(text, check_translation(sources[i], text, ratio, glossary, latin))
             tokens[i] = toks
         if context:
             # Both sentences together stay well inside what the model reads.
@@ -616,10 +794,64 @@ def _trim(wav: np.ndarray, seconds: float) -> np.ndarray:
     return out
 
 
-class Voice:
-    """The voice model, conditioned once on a speaker sample."""
+class _Speaker:
+    """What both voices share: texts said in pieces, checked for length and
+    said again in halves. A voice gives `_speak`: texts (a batch of
+    _VOICE_BATCH at most) to waveforms at VOICE_RATE."""
 
-    def __init__(self, sample: np.ndarray) -> None:
+    def _speak(self, texts: list[str], cancelled: Callable[[], None]) -> list[np.ndarray]:
+        raise NotImplementedError
+
+    def say(self, text: str, cancelled: Callable[[], None]) -> np.ndarray:
+        """`text` spoken, at 24 kHz."""
+        return self.say_all([text], cancelled)[0][0]
+
+    def say_all(self, texts: list[str], cancelled: Callable[[], None], progress: Callable[[float], None] = lambda v: None) -> tuple[list[np.ndarray], list[int]]:
+        """Each text spoken at 24 kHz, and the indices of those that still
+        came out too short or too long after one retry (in two halves); what
+        is still too long is cut at a pause.
+        Texts over _MAX_CHARS are said in pieces; pieces are decoded
+        _VOICE_BATCH at a time, those of similar length together."""
+        pieces = [(i, p) for i, t in enumerate(texts) for p in _pieces(t)]
+        order = sorted(range(len(pieces)), key=lambda k: len(pieces[k][1]))
+        wavs: list[np.ndarray | None] = [None] * len(pieces)
+        done = 0
+        for g in range(0, len(order), _VOICE_BATCH):
+            group = order[g : g + _VOICE_BATCH]
+            for k, wav in zip(group, self._speak([pieces[k][1] for k in group], cancelled)):
+                wavs[k] = wav
+            done += sum(len(pieces[k][1]) for k in group)
+            progress(done / max(1, sum(len(p) for _, p in pieces)))
+        bad = set()
+        for k, (i, text) in enumerate(pieces):
+            if not _bad_length(text, len(wavs[k]) / VOICE_RATE):
+                continue
+            halves = _halves(text)
+            if len(halves) == 2:
+                # Each on its own: decoded together they'd be padded (_VOICE_BATCH).
+                again = [self._speak([t], cancelled)[0] for t in halves]
+                gap = np.zeros(int(0.12 * VOICE_RATE), np.float32)
+                joined = np.concatenate([again[0], gap, again[1]])
+                if not _bad_length(text, len(joined) / VOICE_RATE) or abs(len(joined) / VOICE_RATE - _expected_seconds(text)) < abs(len(wavs[k]) / VOICE_RATE - _expected_seconds(text)):
+                    wavs[k] = joined
+            if _bad_length(text, len(wavs[k]) / VOICE_RATE):
+                bad.add(i)
+                wavs[k] = _trim(wavs[k], _longest(text))  # a babbling tail cut off at a pause
+        gap = np.zeros(int(0.12 * VOICE_RATE), np.float32)
+        out = []
+        for i in range(len(texts)):
+            mine = [wavs[k] for k, (j, _) in enumerate(pieces) if j == i]
+            out.append(np.concatenate([x for w in mine for x in (w, gap)][:-1]) if mine else np.zeros(0, np.float32))
+        return out, sorted(bad)
+
+
+class Voice(_Speaker):
+    """The accurate voice (Chatterbox Turbo), conditioned once on a speaker
+    sample."""
+
+    def __init__(self, sample: np.ndarray, target: str = "en") -> None:
+        if target != "en":
+            raise ValueError("the accurate voice speaks English only")
         from tokenizers import Tokenizer
 
         path = speech._model_path(VOICE)
@@ -654,47 +886,8 @@ class Voice:
             self._vectors.update(zip(missing, vectors))
         return np.stack([self._vectors[i] for i in ids])
 
-    def say(self, text: str, cancelled: Callable[[], None]) -> np.ndarray:
-        """`text` spoken, at 24 kHz."""
-        return self.say_all([text], cancelled)[0][0]
-
-    def say_all(self, texts: list[str], cancelled: Callable[[], None], progress: Callable[[float], None] = lambda v: None) -> tuple[list[np.ndarray], list[int]]:
-        """Each text spoken at 24 kHz, and the indices of those that still
-        came out too short or too long after one retry (in two halves); what
-        is still too long is cut at a pause.
-        Texts over _MAX_CHARS are said in pieces; pieces are decoded
-        _VOICE_BATCH at a time, those of similar length together."""
-        pieces = [(i, p) for i, t in enumerate(texts) for p in _pieces(t)]
-        order = sorted(range(len(pieces)), key=lambda k: len(pieces[k][1]))
-        wavs: list[np.ndarray | None] = [None] * len(pieces)
-        done = 0
-        for g in range(0, len(order), _VOICE_BATCH):
-            group = order[g : g + _VOICE_BATCH]
-            for k, tokens in zip(group, self._tokens([pieces[k][1] for k in group], cancelled)):
-                wavs[k] = self._wave(tokens)
-            done += sum(len(pieces[k][1]) for k in group)
-            progress(done / max(1, sum(len(p) for _, p in pieces)))
-        bad = set()
-        for k, (i, text) in enumerate(pieces):
-            if not _bad_length(text, len(wavs[k]) / VOICE_RATE):
-                continue
-            halves = _halves(text)
-            if len(halves) == 2:
-                # Each on its own: decoded together they'd be padded (_VOICE_BATCH).
-                again = [self._wave(self._tokens([t], cancelled)[0]) for t in halves]
-                gap = np.zeros(int(0.12 * VOICE_RATE), np.float32)
-                joined = np.concatenate([again[0], gap, again[1]])
-                if not _bad_length(text, len(joined) / VOICE_RATE) or abs(len(joined) / VOICE_RATE - _expected_seconds(text)) < abs(len(wavs[k]) / VOICE_RATE - _expected_seconds(text)):
-                    wavs[k] = joined
-            if _bad_length(text, len(wavs[k]) / VOICE_RATE):
-                bad.add(i)
-                wavs[k] = _trim(wavs[k], _longest(text))  # a babbling tail cut off at a pause
-        gap = np.zeros(int(0.12 * VOICE_RATE), np.float32)
-        out = []
-        for i in range(len(texts)):
-            mine = [wavs[k] for k, (j, _) in enumerate(pieces) if j == i]
-            out.append(np.concatenate([x for w in mine for x in (w, gap)][:-1]) if mine else np.zeros(0, np.float32))
-        return out, sorted(bad)
+    def _speak(self, texts: list[str], cancelled: Callable[[], None]) -> list[np.ndarray]:
+        return [self._wave(tokens) for tokens in self._tokens(texts, cancelled)]
 
     def _tokens(self, texts: list[str], cancelled: Callable[[], None]) -> list[list[int]]:
         """Speech tokens for each text, decoded together: greedy, with the
@@ -748,6 +941,120 @@ class Voice:
         speech_tokens = np.concatenate([self.prompt, np.array([tokens], np.int64), np.full((1, 3), _SILENCE, np.int64)], axis=1)
         wav = self.decoder.run(None, dict(speech_tokens=speech_tokens, speaker_embeddings=self.speaker, speaker_features=self.features))[0]
         return np.asarray(wav, np.float32).reshape(-1)
+
+
+# The fast voice's own settings, from its export's bundle.json and the
+# reference wrapper: an end-of-speech logit over -4 ends the text, decoding
+# stops 3 steps later (that frame and 2 more kept, 0.24 s), and latents are
+# sampled at temperature 0.3 with one flow step.
+_FAST_EOS = -4.0
+_FAST_AFTER_EOS = 3
+_FAST_DECODE = 12  # latent frames decoded per run
+_FAST_THREADS = 2
+
+
+class FastVoice(_Speaker):
+    """The fast voice (Pocket TTS): a 100M-parameter model whose language
+    model predicts one 32-number latent per 80 ms frame, which a flow step
+    samples and the audio codec's decoder turns into 24 kHz sound. Its state
+    (attention caches, codec buffers) has a fixed size, given by the graphs'
+    inputs: flags start true, the rest at zero. The speaker sample is read
+    once into that state, which each text starts from."""
+
+    def __init__(self, sample: np.ndarray, target: str = "en") -> None:
+        import json
+
+        import sentencepiece
+
+        self.target = target
+        path = speech._model_path(FAST_VOICES[target]) / pocket_dir(target)
+        self.bundle = json.loads((path / "bundle.json").read_text(encoding="utf-8"))
+        threads = speech._cpu_threads()
+        self.encoder = _kept_session(path / "mimi_encoder.onnx", threads)
+        self.text = _kept_session(path / "text_conditioner.onnx", threads)
+        # Run frame by frame on tiny inputs: 2 threads spoke at 0.37x real
+        # time, 4 at 0.35x (i7-9750H), so it leaves the editor the rest.
+        self.lm = _kept_session(path / "flow_lm_main_int8.onnx", min(threads, _FAST_THREADS))
+        self.flow = _kept_session(path / "flow_lm_flow.onnx", min(threads, _FAST_THREADS))
+        self.decoder = _kept_session(path / "mimi_decoder.onnx", threads)
+        self.tokenizer = sentencepiece.SentencePieceProcessor(model_file=str(path / self.bundle["tokenizer_file"]))
+        self.latent, self.width = int(self.bundle["latent_dim"]), int(self.bundle["conditioning_dim"])
+        self.lm_state = [i.name for i in self.lm.get_inputs()[2:]]
+        self.dec_state = [i.name for i in self.decoder.get_inputs()[1:]]
+        voice = self.encoder.run(None, {"audio": sample.astype(np.float32)[None, None]})[0].reshape(1, -1, self.width)
+        if self.bundle.get("insert_bos_before_voice"):
+            bos = np.load(path / self.bundle["bos_before_voice_file"]).astype(np.float32).reshape(1, 1, -1)
+            voice = np.concatenate([bos, voice], axis=1)
+        _, _, self.base = self._step(np.zeros((1, 0, self.latent), np.float32), voice, _fresh(self.lm, 2))
+
+    def _step(self, sequence: np.ndarray, text: np.ndarray, state: dict) -> tuple[np.ndarray, float, dict]:
+        out = self.lm.run(None, {"sequence": sequence, "text_embeddings": text, **state})
+        return out[0], float(np.asarray(out[1]).reshape(-1)[0]), dict(zip(self.lm_state, out[2:]))
+
+    def _prepare(self, text: str) -> str:
+        # The French, German, Spanish and Italian voices say digits as noise
+        # ("250 euros" said wrong by all 6 test speakers, measured).
+        text = numbers.spell_numbers(" ".join(text.split()), getattr(self, "target", "en"))
+        for a, b in self.bundle.get("replace_characters", {}).items():
+            text = text.replace(a, b)
+        if self.bundle.get("remove_semicolons"):
+            text = text.replace(";", ",")
+        text = " ".join(text.split())
+        if text:
+            text = text[0].upper() + text[1:]
+            if text[-1].isalnum():
+                text += "."
+        return text
+
+    def _speak(self, texts: list[str], cancelled: Callable[[], None]) -> list[np.ndarray]:
+        return [self._one(t, cancelled) for t in texts]
+
+    def _one(self, text: str, cancelled: Callable[[], None]) -> np.ndarray:
+        import zlib
+
+        text = self._prepare(text)
+        ids = self.tokenizer.encode(text)
+        if len(ids) > int(self.bundle.get("max_token_per_chunk") or 50) and len(halves := _halves(text)) == 2:
+            gap = np.zeros(int(0.12 * VOICE_RATE), np.float32)
+            return np.concatenate([self._one(halves[0], cancelled), gap, self._one(halves[1], cancelled)])
+        # The same text says the same thing every time.
+        rng = np.random.default_rng(zlib.crc32(text.encode("utf-8")))
+        embedded = self.text.run(None, {"token_ids": np.array([ids], np.int64)})[0]
+        _, _, state = self._step(np.zeros((1, 0, self.latent), np.float32), embedded, dict(self.base))
+        no_text = np.zeros((1, 0, self.width), np.float32)
+        frame = np.full((1, 1, self.latent), np.nan, np.float32)  # the start
+        temperature = float(self.bundle.get("default_temperature") or 0.3)
+        limit = int((len(ids) / 3.0 + 2.0) * float(self.bundle["frame_rate"]))
+        frames, ended = [], None
+        zero, one = np.zeros((1, 1), np.float32), np.ones((1, 1), np.float32)
+        for step in range(limit):
+            cancelled()
+            cond, eos, state = self._step(frame, no_text, state)
+            if ended is None and eos > _FAST_EOS:
+                ended = step
+            if ended is not None and step >= ended + _FAST_AFTER_EOS:
+                break
+            x = rng.normal(0, np.sqrt(temperature), (1, self.latent)).astype(np.float32)
+            x = x + self.flow.run(None, {"c": cond.reshape(-1).astype(np.float32), "s": zero, "t": one, "x": x})[0]
+            frame = x.reshape(1, 1, self.latent)
+            frames.append(frame)
+        codec = _fresh(self.decoder, 1)
+        audio = []
+        for g in range(0, len(frames), _FAST_DECODE):
+            out = self.decoder.run(None, {"latent": np.concatenate(frames[g : g + _FAST_DECODE], axis=1), **codec})
+            audio.append(np.asarray(out[0], np.float32).reshape(-1))
+            codec = dict(zip(self.dec_state, out[1:]))
+        return np.concatenate(audio) if audio else np.zeros(0, np.float32)
+
+
+def _fresh(session, skip: int) -> dict:
+    """A graph's state inputs (all but its first `skip`) at their start:
+    flags true, everything else zero."""
+    state = {}
+    for i in session.get_inputs()[skip:]:
+        dtype = {"tensor(bool)": bool, "tensor(int64)": np.int64, "tensor(float16)": np.float16}.get(i.type, np.float32)
+        state[i.name] = np.ones(i.shape, bool) if dtype is bool else np.zeros(i.shape, dtype)
+    return state
 
 
 def _pieces(text: str) -> list[str]:
@@ -858,26 +1165,39 @@ def sentence_levels(targets: list[float], fallback: float = 0.1) -> list[float]:
 _lock = threading.Lock()
 
 
-def render(mix: np.ndarray, sentences: list[dict], progress: Progress, language: str | None = None, glossary: list[dict] | None = None) -> tuple[np.ndarray, np.ndarray, dict]:
+def render(
+    mix: np.ndarray,
+    sentences: list[dict],
+    progress: Progress,
+    language: str | None = None,
+    glossary: list[dict] | None = None,
+    voice: str = "accurate",
+    target: str = "en",
+) -> tuple[np.ndarray, np.ndarray, dict]:
     """English voice (mono) and background (stereo) for `mix` (2, n) at 44.1
     kHz, and a report (the editor's DubReport). `sentences`: [{start, end,
     text}] - the source sentence's times (seconds of `mix`) and its text in
     the source language; report indices count them in this order. Progress
     stages: "download", "load", "translate", "separate", "voice", "speak",
-    "fit"."""
+    "fit". `voice`: "accurate" or "fast" (VOICES); `target`: the language
+    said (TO_LANGUAGES), which the voice must speak."""
+    if target not in TO_LANGUAGES or target not in VOICES.get(voice, {}):
+        raise ValueError(f"no {voice!r} voice for {target!r}")
     with _lock:
         try:
-            return _render(mix, sentences, progress, language, glossary)
+            return _render(mix, sentences, progress, language, glossary, voice, target)
         finally:
             _keep()  # also after a failure or a cancel
 
 
-def _render(mix: np.ndarray, sentences: list[dict], progress: Progress, language: str | None, glossary: list[dict] | None) -> tuple[np.ndarray, np.ndarray, dict]:
-    """render() under its lock."""
-    _download_all(progress)
+def _render(
+    mix: np.ndarray, sentences: list[dict], progress: Progress, language: str | None, glossary: list[dict] | None, speaker: str, target: str
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    """render() under its lock; `speaker`: render()'s `voice`."""
+    _download_all(progress, speaker, target)
     progress("load", 0.0)
     found = translate(
-        [s["text"] for s in sentences], lambda v: progress("translate", v), language=language, glossary=glossary, loaded=lambda: progress("translate", 0.0)
+        [s["text"] for s in sentences], lambda v: progress("translate", v), language=language, glossary=glossary, loaded=lambda: progress("translate", 0.0), target=target
     )
     said = [i for i, t in enumerate(found) if t.text]
     if not said:
@@ -891,7 +1211,7 @@ def _render(mix: np.ndarray, sentences: list[dict], progress: Progress, language
     progress("voice", 0.0)
     spans = [(float(sentences[i]["start"]), float(sentences[i]["end"])) for i in said]
     sample, sample_seconds = voice_sample(mono, spans, background.mean(axis=0))
-    model = Voice(sample)
+    model = (FastVoice if speaker == "fast" else Voice)(sample, target)
     progress("speak", 0.0)
     last = [0.0]
 
@@ -934,5 +1254,7 @@ def _render(mix: np.ndarray, sentences: list[dict], progress: Progress, language
         "spedUp": sum(1 for _, t in places if t > 1.001),
         "overflowSeconds": round(over, 2),
         "sampleSeconds": round(sample_seconds, 1),
+        "voice": speaker,
+        "target": target,
     }
     return np.clip(english, -1, 1), background, report

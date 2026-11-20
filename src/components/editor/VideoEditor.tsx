@@ -101,9 +101,32 @@ import {
   type GainPoint,
 } from "@/lib/editor/types";
 import { presetTone } from "@/lib/editor/voiceTone";
-import { ApiError, cleanAudio, type CleanStage, ContentBlockedError, engineAudioModels, engineDubModels, engineMatte, enginePeaks, ModelNeededError, probeVideo } from "@/lib/toolsApi";
+import {
+  ApiError,
+  cleanAudio,
+  type CleanStage,
+  ContentBlockedError,
+  type DubModels,
+  type DubVoice,
+  engineAudioModels,
+  engineDubModels,
+  engineMatte,
+  enginePeaks,
+  ModelNeededError,
+  probeVideo,
+} from "@/lib/toolsApi";
 import { ensureMatte, fullMatte, matteJobKey, matteUnsupported, setMatteEngine, useMatteJob } from "@/lib/editor/matte";
-import { DUB_FROM, dubReportMessage, dubTimeline, type DubProgress } from "@/lib/editor/dub";
+import {
+  DUB_FROM,
+  dubLanguageLabel,
+  dubReportMessage,
+  dubTargetFor,
+  dubTimeline,
+  dubVoiceWanted,
+  setDubTargetWanted,
+  setDubVoiceWanted,
+  type DubProgress,
+} from "@/lib/editor/dub";
 import type { RecordingBundle } from "@/lib/recorder/bundle";
 import { recordingToSources } from "@/lib/recorder/editorImport";
 import { planRecordingProject, type ImportedTrack } from "@/lib/recorder/importPlan";
@@ -1761,21 +1784,30 @@ export default function VideoEditor({
     }
   }, [transcribeTimeline, apply, say]);
 
-  // --- voice translation (desktop): the speech said again in English in
-  // the speaker's voice (lib/editor/dub.ts). Lands as two audio tracks, the
-  // English voice and the background, with the original speech muted - one
-  // undo step.
+  // --- voice translation (desktop): the speech said again in another
+  // language in the speaker's voice (lib/editor/dub.ts). Lands as two audio
+  // tracks, the translated voice and the background, with the original
+  // speech muted - one undo step.
   const [dubbing, setDubbing] = useState(false);
-  const [dubModels, setDubModels] = useState<{ ready: boolean; sizeMb: number } | null>(null);
+  const [dubModels, setDubModels] = useState<DubModels | null>(null);
+  // The language to say it in: picked here, else the one remembered.
+  const [dubTargetPick, setDubTargetPick] = useState<string | null>(null);
+  const dubSource = project.transcript?.language ?? "";
+  const dubTarget = dubTargetPick && dubTargetPick !== dubSource ? dubTargetPick : dubTargetFor(dubSource);
+  // The voice picked on this device, if it speaks the target; else the
+  // engine's choice for it (its recommendation, or the one that speaks it).
+  const [dubVoice, setDubVoice] = useState<DubVoice | null>(dubVoiceWanted);
+  const voiceForDub: DubVoice | undefined =
+    dubVoice && (!dubModels?.voices || dubModels.voices[dubVoice]) ? dubVoice : (dubModels?.voice ?? dubModels?.recommended);
   const dubAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     if (tool !== "transcript" || !IS_DESKTOP) return;
     let cancelled = false;
-    void engineDubModels().then((m) => !cancelled && setDubModels(m));
+    void engineDubModels(dubTarget).then((m) => !cancelled && setDubModels(m));
     return () => {
       cancelled = true;
     };
-  }, [tool, dubbing]);
+  }, [tool, dubbing, dubTarget]);
   const runDub = useCallback(async () => {
     const transcript = project.transcript;
     if (!transcript || !transcriptCurrent(transcript, lay)) return;
@@ -1801,22 +1833,22 @@ export default function VideoEditor({
         case "voice":
           return "Learning the speaker's voice…";
         case "speak":
-          return `Speaking in English…${pct}`;
+          return `Speaking in ${dubLanguageLabel(dubTarget)}…${pct}`;
         case "fit":
-          return "Timing and mixing the English voice…";
+          return `Timing and mixing the ${dubLanguageLabel(dubTarget)} voice…`;
         case "add":
           return "Adding the tracks…";
       }
     };
     try {
-      const res = await dubTimeline(lay, project, sources, transcript, (p) => setBusy(label(p)), abort.signal);
+      const res = await dubTimeline(lay, project, sources, transcript, (p) => setBusy(label(p)), abort.signal, voiceForDub, dubTarget);
       const track = (file: File, label: string): { src: MediaSource; clip: AudioClip } => {
         const src: MediaSource = { id: newId("snd"), kind: "audio", file, url: URL.createObjectURL(file), duration: lay.total, width: 0, height: 0, fps: 0, hasAudio: true };
         const clip: AudioClip = { id: newId("aud"), sourceId: src.id, label, start: 0, offset: 0, duration: lay.total, volume: 1, fadeIn: 0, fadeOut: 0, muted: false };
         return { src, clip };
       };
       const background = track(res.background, "Background (voice removed)");
-      const voice = { ...track(res.voice, "English voice") };
+      const voice = { ...track(res.voice, `${dubLanguageLabel(dubTarget)} voice`) };
       voice.clip.captions = "speech";
       voice.clip.dub = true;
       background.clip.captions = "music";
@@ -1833,7 +1865,7 @@ export default function VideoEditor({
       const overPlan = dubMax !== null && lay.total > dubMax + 0.5;
       const found = dubReportMessage(res.report);
       say(
-        "Added the English voice and the background as audio tracks; the original speech is muted. Undo to go back." +
+        `Added the ${dubLanguageLabel(dubTarget)} voice and the background as audio tracks; the original speech is muted. Undo to go back.` +
           (found ? ` ${found}` : "") +
           (overPlan
             ? ` Your ${TIER_LABELS[tier]} plan exports up to ${dubMax >= 60 ? `${Math.round(dubMax / 60)} min` : `${dubMax} s`} of translated voice; listen to it all here, and upgrade to export it.`
@@ -1851,7 +1883,7 @@ export default function VideoEditor({
       setBusy(null);
       setDubbing(false);
     }
-  }, [project, lay, sources, addSource, apply, say, tier]);
+  }, [project, lay, sources, addSource, apply, say, tier, voiceForDub, dubTarget]);
 
   /** Cuts the transcript words `indices` out of the video (one undo step);
    * captions, if any, are rebuilt from the words that are left. */
@@ -3911,7 +3943,23 @@ export default function VideoEditor({
         onDelete={cutByWords}
         dub={
           IS_DESKTOP && project.transcript && DUB_FROM.has(project.transcript.language)
-            ? { models: dubModels, busy: dubbing, onStart: () => void runDub(), onCancel: () => dubAbort.current?.abort() }
+            ? {
+                models: dubModels,
+                source: dubSource,
+                target: dubTarget,
+                onTarget: (t: string) => {
+                  setDubTargetPick(t);
+                  setDubTargetWanted(t);
+                },
+                voice: voiceForDub,
+                onVoice: (v: DubVoice) => {
+                  setDubVoice(v);
+                  setDubVoiceWanted(v);
+                },
+                busy: dubbing,
+                onStart: () => void runDub(),
+                onCancel: () => dubAbort.current?.abort(),
+              }
             : null
         }
         onClose={() => setTool(null)}

@@ -49,7 +49,7 @@ hiddenimports += collect_submodules("uvicorn")
 # ctranslate2's converter specs are loaded by name.
 hiddenimports += collect_submodules("faster_whisper") + collect_submodules("ctranslate2")
 # Voice translation (app/pipeline/dub.py): onnxruntime runs its models.
-hiddenimports += ["onnxruntime", "tokenizers"]
+hiddenimports += ["onnxruntime", "tokenizers", "sentencepiece"]  # sentencepiece: the fast voice's tokenizer
 
 a = Analysis(
     ["desktop_engine.py"],

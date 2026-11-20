@@ -24,4 +24,6 @@ faster-whisper==1.2.1
 ctranslate2>=4.5,<5
 # Voice translation (app/pipeline/dub.py): its separator and voice models.
 onnxruntime>=1.20,<2
+# The fast voice's tokenizer (SentencePiece; dub.FastVoice).
+sentencepiece>=0.2,<0.3
 pyinstaller>=6.6

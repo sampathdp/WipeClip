@@ -599,21 +599,25 @@ def quality(case: dict, mix: np.ndarray, english: np.ndarray, background: np.nda
 
 # --- translation only --------------------------------------------------------------
 
-FLORES = {"si": "sin_Sinh", "hi": "hin_Deva", "kn": "kan_Knda", "ta": "tam_Taml", "te": "tel_Telu"}
+FLORES = {"si": "sin_Sinh", "hi": "hin_Deva", "kn": "kan_Knda", "ta": "tam_Taml", "te": "tel_Telu",
+          "en": "eng_Latn", "fr": "fra_Latn", "de": "deu_Latn", "es": "spa_Latn", "it": "ita_Latn"}
 
 
 def run_translate(data: Path, out: Path, n: int, opts: dict, label: str, langs: list[str]) -> dict:
     from app.pipeline import dub
 
     root = data / "flores" / "flores200_dataset" / "devtest"
-    eng = (root / "eng_Latn.devtest").read_text(encoding="utf-8").split("\n")[:n]
     res = {"label": label, "n": n, "opts": opts, "langs": {}}
     total_t = 0.0
-    for lang in langs:
+    for spec in langs:  # "si" (into English) or "fr-de" (source-target)
+        lang, target = spec.split("-") if "-" in spec else (spec, "en")
+        eng = (root / f"{FLORES[target]}.devtest").read_text(encoding="utf-8").split("\n")[:n]
         src = (root / f"{FLORES[lang]}.devtest").read_text(encoding="utf-8").split("\n")[:n]
         t = time.perf_counter()
         if hasattr(dub, "schedule"):  # 2.0: checks need the language
             o = dict(opts)
+            if target != "en":
+                o["target"] = target
             if o.get("context") is True:  # FLORES devtest runs article by article: the sentence before
                 o["context"] = [None] + list(range(len(src) - 1))
             raw = dub.translate(src, lambda *_: None, language=lang, **o)
@@ -629,7 +633,7 @@ def run_translate(data: Path, out: Path, n: int, opts: dict, label: str, langs: 
             a, b = numbers_kept(s, h)
             want, got = want + a, got + b
         ratio = [len(h.split()) / max(1, len(r.split())) for h, r in zip(hyp, eng)]
-        res["langs"][lang] = {
+        res["langs"][spec] = {
             "chrf_pp": round(chrf_pp(hyp, eng), 1),
             "seconds": round(dt, 1),
             "empty": sum(1 for h in hyp if not h.strip()),
@@ -640,8 +644,8 @@ def run_translate(data: Path, out: Path, n: int, opts: dict, label: str, langs: 
             "retried": retried,
             "ratio_p1_p99": [round(float(np.percentile([len(h.split()) / max(1, len(s.split())) for h, s in zip(hyp, src)], q)), 2) for q in (1, 99)],
         }
-        print(lang, res["langs"][lang], flush=True)
-        (out / f"translate-{label}-{lang}.txt").write_text("\n".join(hyp), encoding="utf-8")
+        print(spec, res["langs"][spec], flush=True)
+        (out / f"translate-{label}-{spec}.txt").write_text("\n".join(hyp), encoding="utf-8")
     res["seconds"] = round(total_t, 1)
     res["chrf_pp_mean"] = round(float(np.mean([v["chrf_pp"] for v in res["langs"].values()])), 1)
     (out / f"translate-{label}.json").write_text(json.dumps(res, indent=1), encoding="utf-8")

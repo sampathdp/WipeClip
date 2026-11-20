@@ -1476,7 +1476,7 @@ export function SpeechModelNotice({
   busy,
   onConsent,
 }: {
-  model?: { sizeMb: number; gpu: boolean; engine?: boolean; language?: string } | null;
+  model?: { sizeMb: number; gpu: boolean; engine?: boolean; language?: string; keptMb?: number } | null;
   busy: boolean;
   onConsent: () => void;
 }) {
@@ -1485,7 +1485,9 @@ export function SpeechModelNotice({
       <p className="font-semibold text-foreground">Speech model needed (one time)</p>
       <p>
         {model?.language
-          ? `${CAPTION_LANGUAGES.find((l) => l.code === model.language)?.label ?? "Language"} speech model, about ${model.sizeMb} MB to download, prepared once on this computer (about 250 MB kept). Transcribing uses the processor and around 1 GB of memory.`
+          ? `${CAPTION_LANGUAGES.find((l) => l.code === model.language)?.label ?? "Language"} speech model, about ${model.sizeMb} MB to download, ${
+              (model.keptMb ?? 250) < model.sizeMb ? `prepared once on this computer (about ${model.keptMb ?? 250} MB kept)` : "kept on this computer"
+            }. Transcribing uses the processor and around 1 GB of memory.`
           : model?.engine
             ? `High-accuracy speech model, about ${model.sizeMb} MB, downloaded once and kept on this computer. Transcribing uses the processor and around 2 GB of memory.`
             : model?.gpu

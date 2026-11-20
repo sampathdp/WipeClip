@@ -65,7 +65,7 @@ test("the engine's report becomes a short note, numbered from 1", () => {
   const note = dubReportMessage({ ...base, empty: [2], flagged: [{ index: 4, flags: ["number"] }], shortSpeech: [4, 6], overflowSeconds: 1.26, sampleSeconds: 2.1 });
   assert.match(note, /Sentence 3 couldn't be translated and stays silent\./);
   assert.match(note, /Check sentences 5, 7:/);
-  assert.match(note, /last 1\.3 s of English runs past the end/);
+  assert.match(note, /last 1\.3 s of the translation runs past the end/);
   assert.match(note, /little clear speech/);
   const many = dubReportMessage({ ...base, flagged: [0, 1, 2, 3, 4, 5, 6].map((index) => ({ index, flags: ["short"] })) });
   assert.match(many, /1, 2, 3, 4, 5 and 2 more/);

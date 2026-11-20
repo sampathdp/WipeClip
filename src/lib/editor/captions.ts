@@ -231,8 +231,11 @@ export interface SpeechModel {
   gpu: boolean;
   /** Run by the desktop app's engine (backend/app/pipeline/speech.py). */
   engine?: boolean;
-  /** The engine's model of this language's own (its code): Sinhala, Tamil, ... */
+  /** The engine's model of this language's own (its code): Sinhala, Tamil,
+   * French (the European model), ... */
   language?: string;
+  /** What the engine keeps on disk of it (a converted model is smaller). */
+  keptMb?: number;
   /** The engine's NVIDIA graphics card support. */
   cuda?: EngineGpu;
 }
@@ -349,7 +352,16 @@ function rememberSlowGpu(): void {
  * WebGPU adapter, small otherwise. */
 export async function speechModel(language = "auto"): Promise<SpeechModel> {
   const engine = await engineSpeechModel(language);
-  if (engine) return { id: `engine:${language}`, sizeMb: engine.sizeMb, gpu: false, engine: true, language: engine.own ? language : undefined, cuda: engine.gpu };
+  if (engine)
+    return {
+      id: `engine:${language}`,
+      sizeMb: engine.sizeMb,
+      gpu: false,
+      engine: true,
+      language: engine.own ? language : undefined,
+      keptMb: engine.keptMb,
+      cuda: engine.gpu,
+    };
   return browserModel();
 }
 
