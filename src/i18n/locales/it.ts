@@ -389,7 +389,7 @@ const it: Dict = {
   },
 
   hero: {
-    badge: "Novità: traduzione vocale con la tua voce",
+    badge: "Novità: doppiaggio e sottotitoli in francese, tedesco, spagnolo e italiano",
     h1: ["L'editor video ", "desktop ", "per i creator"],
     intro:
       "Taglia, accorcia e disponi i clip, aggiungi transizioni, testo, sticker, filtri e musica, poi esporta in orizzontale, verticale o quadrato. Gratis per Windows e Mac, con registratore dello schermo integrato. Sottotitoli automatici e picture-in-picture inclusi.",
@@ -398,6 +398,28 @@ const it: Dict = {
     trust: ["Piano gratuito per sempre", "Nessun account per iniziare", "Windows e Mac"],
     marquee: ["MP4", "MOV", "WEBM", "TAGLIA · DIVIDI · TRANSIZIONI", "SOTTOTITOLI AUTOMATICI", "PICTURE-IN-PICTURE", "TESTO · STICKER · MUSICA", "FILTRI", "ORIZZONTALE · VERTICALE · QUADRATO"],
     videoLabel: "Anteprima dell'editor video",
+  },
+
+  languageLaunch: {
+    badge: "Novità",
+    kicker: "Traduzione vocale e sottotitoli per l'Europa",
+    title: "La tua voce, ",
+    titleHighlight: "in cinque lingue",
+    intro: "Traduci il parlato del tuo video tra inglese, francese, tedesco, spagnolo e italiano, in qualsiasi direzione, ridetto con la tua stessa voce sopra la musica e i suoni del video. I sottotitoli in francese, tedesco, spagnolo e italiano ora sono più veloci e più precisi. Tutto avviene sul tuo computer.",
+    // English, French, German, Spanish, Italian - in this order.
+    languages: ["Inglese", "Francese", "Tedesco", "Spagnolo", "Italiano"],
+    yourVoice: "La tua voce",
+    yourVoiceDetail: "Registrata una volta, in una delle cinque lingue",
+    stats: [
+      { value: "20", label: "coppie di lingue, in qualsiasi direzione" },
+      { value: "4–5×", label: "sottotitoli più veloci in francese, tedesco, spagnolo e italiano" },
+      { value: "−44%", label: "di parole sbagliate nei sottotitoli in italiano, −27% in tedesco" },
+      { value: "0", label: "caricamenti: traduzione, voce e sottotitoli girano sul tuo PC" },
+    ],
+    fastVoice: "Nuova voce Veloce: circa dieci volte più rapida e abbastanza leggera per i portatili di tutti i giorni. Sui computer più potenti scegli Precisa, per una voce ancora più vicina alla tua in inglese.",
+    download: "Scarica gratis",
+    changelog: "Scopri le novità",
+    footnote: "Misurato su registrazioni di prova pubbliche, su un portatile a 6 core. I risultati dipendono dalla tua registrazione e dal tuo computer.",
   },
 
   whatsNew: {

@@ -34,7 +34,7 @@ const en = {
   },
 
   hero: {
-    badge: "New: voice translation in your own voice",
+    badge: "New: dub and caption in French, German, Spanish and Italian",
     h1: ["Desktop Video ", "Editor ", "for Creators"],
     intro:
       "Trim, cut and arrange clips, add transitions, text, stickers, filters and music, then export in landscape, vertical or square. Free for Windows and Mac, with a built-in screen recorder. Auto captions and picture-in-picture included.",
@@ -43,6 +43,28 @@ const en = {
     trust: ["Free forever plan", "No account to start", "Windows & Mac"],
     marquee: ["MP4", "MOV", "WEBM", "TRIM · CUT · TRANSITIONS", "AUTO CAPTIONS", "PICTURE-IN-PICTURE", "TEXT · STICKERS · MUSIC", "FILTERS", "LANDSCAPE · VERTICAL · SQUARE"],
     videoLabel: "Video editor preview",
+  },
+
+  languageLaunch: {
+    badge: "New",
+    kicker: "Voice translation & captions for Europe",
+    title: "Your voice, ",
+    titleHighlight: "in five languages",
+    intro: "Translate the speech in your video between English, French, German, Spanish and Italian, in any direction, said again in your own voice over the video's own music and sounds. French, German, Spanish and Italian captions are now faster and more accurate. All of it runs on your computer.",
+    // English, French, German, Spanish, Italian - in this order.
+    languages: ["English", "French", "German", "Spanish", "Italian"],
+    yourVoice: "Your voice",
+    yourVoiceDetail: "Recorded once, in any of the five",
+    stats: [
+      { value: "20", label: "language pairs, in any direction" },
+      { value: "4–5×", label: "faster captions in French, German, Spanish and Italian" },
+      { value: "−44%", label: "fewer wrong words in Italian captions, −27% in German" },
+      { value: "0", label: "uploads: translation, voice and captions run on your PC" },
+    ],
+    fastVoice: "New Fast voice: about ten times quicker and light enough for everyday laptops. Stronger computers can pick Accurate, for a voice even closer to yours in English.",
+    download: "Download free",
+    changelog: "See what's new",
+    footnote: "Measured on public test recordings on a 6-core laptop. Results depend on your recording and your computer.",
   },
 
   whatsNew: {

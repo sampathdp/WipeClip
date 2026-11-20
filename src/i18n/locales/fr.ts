@@ -389,7 +389,7 @@ const fr: Dict = {
   },
 
   hero: {
-    badge: "Nouveau : traduction vocale avec votre propre voix",
+    badge: "Nouveau : doublage et sous-titres en français, allemand, espagnol et italien",
     h1: ["L'éditeur vidéo ", "de bureau ", "pour créateurs"],
     intro:
       "Coupez et organisez vos clips, ajoutez transitions, texte, stickers, filtres et musique, puis exportez en paysage, vertical ou carré. Gratuit pour Windows et Mac, avec un enregistreur d'écran intégré. Sous-titres automatiques et image dans l'image inclus.",
@@ -398,6 +398,28 @@ const fr: Dict = {
     trust: ["Offre gratuite pour toujours", "Sans compte pour commencer", "Windows et Mac"],
     marquee: ["MP4", "MOV", "WEBM", "COUPER · DIVISER · TRANSITIONS", "SOUS-TITRES AUTO", "IMAGE DANS L'IMAGE", "TEXTE · STICKERS · MUSIQUE", "FILTRES", "PAYSAGE · VERTICAL · CARRÉ"],
     videoLabel: "Aperçu de l'éditeur vidéo",
+  },
+
+  languageLaunch: {
+    badge: "Nouveau",
+    kicker: "Traduction vocale et sous-titres pour l'Europe",
+    title: "Votre voix, ",
+    titleHighlight: "en cinq langues",
+    intro: "Traduisez la parole de votre vidéo entre l'anglais, le français, l'allemand, l'espagnol et l'italien, dans tous les sens, redite avec votre propre voix sur la musique et les sons de la vidéo. Les sous-titres en français, allemand, espagnol et italien sont désormais plus rapides et plus précis. Tout se passe sur votre ordinateur.",
+    // English, French, German, Spanish, Italian - in this order.
+    languages: ["Anglais", "Français", "Allemand", "Espagnol", "Italien"],
+    yourVoice: "Votre voix",
+    yourVoiceDetail: "Enregistrée une fois, dans l'une des cinq langues",
+    stats: [
+      { value: "20", label: "paires de langues, dans tous les sens" },
+      { value: "4–5×", label: "plus rapide pour les sous-titres en français, allemand, espagnol et italien" },
+      { value: "−44 %", label: "de mots erronés dans les sous-titres en italien, −27 % en allemand" },
+      { value: "0", label: "envoi : traduction, voix et sous-titres tournent sur votre PC" },
+    ],
+    fastVoice: "Nouvelle voix Rapide : environ dix fois plus vive et assez légère pour un ordinateur portable ordinaire. Sur un ordinateur plus puissant, choisissez Précise pour une voix encore plus proche de la vôtre en anglais.",
+    download: "Télécharger gratuitement",
+    changelog: "Voir les nouveautés",
+    footnote: "Mesuré sur des enregistrements de test publics, sur un portable à 6 cœurs. Les résultats dépendent de votre enregistrement et de votre ordinateur.",
   },
 
   whatsNew: {

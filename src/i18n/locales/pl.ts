@@ -389,7 +389,7 @@ const pl: Dict = {
   },
 
   hero: {
-    badge: "Nowość: tłumaczenie mowy Twoim własnym głosem",
+    badge: "Nowość: dubbing i napisy po francusku, niemiecku, hiszpańsku i włosku",
     h1: ["Edytor wideo ", "na komputer ", "dla twórców"],
     intro:
       "Przycinaj, tnij i układaj klipy, dodawaj przejścia, tekst, naklejki, filtry i muzykę, a potem eksportuj w poziomie, pionie lub kwadracie. Za darmo na Windows i Mac, z wbudowanym rejestratorem ekranu. Automatyczne napisy i obraz w obrazie w zestawie.",
@@ -398,6 +398,28 @@ const pl: Dict = {
     trust: ["Plan darmowy na zawsze", "Bez konta na start", "Windows i Mac"],
     marquee: ["MP4", "MOV", "WEBM", "PRZYCINANIE · CIĘCIE · PRZEJŚCIA", "AUTOMATYCZNE NAPISY", "OBRAZ W OBRAZIE", "TEKST · NAKLEJKI · MUZYKA", "FILTRY", "POZIOMO · PIONOWO · KWADRAT"],
     videoLabel: "Podgląd edytora wideo",
+  },
+
+  languageLaunch: {
+    badge: "Nowość",
+    kicker: "Tłumaczenie głosu i napisy dla Europy",
+    title: "Twój głos, ",
+    titleHighlight: "w pięciu językach",
+    intro: "Tłumacz mowę w swoim filmie między angielskim, francuskim, niemieckim, hiszpańskim i włoskim, w dowolnym kierunku, wypowiedzianą ponownie Twoim własnym głosem na tle muzyki i dźwięków filmu. Napisy po francusku, niemiecku, hiszpańsku i włosku są teraz szybsze i dokładniejsze. Wszystko działa na Twoim komputerze.",
+    // English, French, German, Spanish, Italian - in this order.
+    languages: ["Angielski", "Francuski", "Niemiecki", "Hiszpański", "Włoski"],
+    yourVoice: "Twój głos",
+    yourVoiceDetail: "Nagrany raz, w jednym z pięciu języków",
+    stats: [
+      { value: "20", label: "par językowych, w dowolnym kierunku" },
+      { value: "4–5×", label: "szybsze napisy po francusku, niemiecku, hiszpańsku i włosku" },
+      { value: "−44%", label: "błędnych słów w napisach po włosku, −27% po niemiecku" },
+      { value: "0", label: "przesyłania: tłumaczenie, głos i napisy działają na Twoim PC" },
+    ],
+    fastVoice: "Nowy szybki głos: mniej więcej dziesięć razy szybszy i na tyle lekki, że działa na zwykłych laptopach. Na mocniejszych komputerach wybierz Dokładny, aby po angielsku brzmieć jeszcze bardziej jak Ty.",
+    download: "Pobierz za darmo",
+    changelog: "Zobacz nowości",
+    footnote: "Zmierzone na publicznych nagraniach testowych na laptopie z 6 rdzeniami. Wyniki zależą od Twojego nagrania i komputera.",
   },
 
   whatsNew: {

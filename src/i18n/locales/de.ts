@@ -389,7 +389,7 @@ const de: Dict = {
   },
 
   hero: {
-    badge: "Neu: Sprachübersetzung mit deiner eigenen Stimme",
+    badge: "Neu: Vertonung und Untertitel auf Französisch, Deutsch, Spanisch und Italienisch",
     h1: ["Desktop-", "Videoeditor ", "für Creator"],
     intro:
       "Clips schneiden, kürzen und anordnen, Übergänge, Text, Sticker, Filter und Musik hinzufügen und im Quer-, Hoch- oder Quadratformat exportieren. Kostenlos für Windows und Mac, mit integriertem Bildschirmrekorder. Automatische Untertitel und Bild-in-Bild inklusive.",
@@ -398,6 +398,28 @@ const de: Dict = {
     trust: ["Dauerhaft kostenloser Plan", "Ohne Konto starten", "Windows & Mac"],
     marquee: ["MP4", "MOV", "WEBM", "SCHNEIDEN · KÜRZEN · ÜBERGÄNGE", "AUTO-UNTERTITEL", "BILD-IN-BILD", "TEXT · STICKER · MUSIK", "FILTER", "QUER · HOCH · QUADRAT"],
     videoLabel: "Vorschau des Videoeditors",
+  },
+
+  languageLaunch: {
+    badge: "Neu",
+    kicker: "Sprachübersetzung und Untertitel für Europa",
+    title: "Deine Stimme, ",
+    titleHighlight: "in fünf Sprachen",
+    intro: "Übersetze die Sprache in deinem Video zwischen Englisch, Französisch, Deutsch, Spanisch und Italienisch, in jede Richtung, neu gesprochen mit deiner eigenen Stimme über der Musik und den Geräuschen des Videos. Untertitel auf Französisch, Deutsch, Spanisch und Italienisch sind jetzt schneller und genauer. Alles läuft auf deinem Computer.",
+    // English, French, German, Spanish, Italian - in this order.
+    languages: ["Englisch", "Französisch", "Deutsch", "Spanisch", "Italienisch"],
+    yourVoice: "Deine Stimme",
+    yourVoiceDetail: "Einmal aufgenommen, in einer der fünf Sprachen",
+    stats: [
+      { value: "20", label: "Sprachpaare, in jede Richtung" },
+      { value: "4–5×", label: "schnellere Untertitel auf Französisch, Deutsch, Spanisch und Italienisch" },
+      { value: "−44 %", label: "falsche Wörter in italienischen Untertiteln, −27 % auf Deutsch" },
+      { value: "0", label: "Uploads: Übersetzung, Stimme und Untertitel laufen auf deinem PC" },
+    ],
+    fastVoice: "Neue schnelle Stimme: etwa zehnmal flotter und leicht genug für normale Laptops. Auf stärkeren Computern wählst du Genau, für eine Stimme, die auf Englisch noch näher an deiner ist.",
+    download: "Kostenlos herunterladen",
+    changelog: "Neuigkeiten ansehen",
+    footnote: "Gemessen an öffentlichen Testaufnahmen auf einem Laptop mit 6 Kernen. Die Ergebnisse hängen von deiner Aufnahme und deinem Computer ab.",
   },
 
   whatsNew: {

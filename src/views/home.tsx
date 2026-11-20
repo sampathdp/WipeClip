@@ -10,6 +10,7 @@ import DesktopPromo from "@/components/DesktopPromo";
 import FreeTools from "@/components/FreeTools";
 import FeatureTour from "@/components/FeatureTour";
 import WhatsNew from "@/components/WhatsNew";
+import LanguageLaunch from "@/components/LanguageLaunch";
 import Reveal from "@/components/Reveal";
 import { FocusMock, RecorderMock, ReviewMock, TutorialFrameMock } from "@/components/download/Mockups";
 import Faq from "@/components/Faq";
@@ -81,6 +82,7 @@ export default function HomeView({ lang }: { lang: Lang }) {
       <FreeToolsBanner />
       <main className="flex-1">
         <Hero lang={lang} />
+        <LanguageLaunch lang={lang} />
         <WhatsNew lang={lang} />
         <FeatureTourSection lang={lang} />
         <DesktopPromo lang={lang} />

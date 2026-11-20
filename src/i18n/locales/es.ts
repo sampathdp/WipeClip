@@ -389,7 +389,7 @@ const es: Dict = {
   },
 
   hero: {
-    badge: "Nuevo: traducción de voz con tu propia voz",
+    badge: "Nuevo: doblaje y subtítulos en francés, alemán, español e italiano",
     h1: ["El editor de vídeo ", "de escritorio ", "para creadores"],
     intro:
       "Recorta, corta y ordena clips, añade transiciones, texto, stickers, filtros y música, y exporta en horizontal, vertical o cuadrado. Gratis para Windows y Mac, con grabador de pantalla integrado. Subtítulos automáticos e imagen en imagen incluidos.",
@@ -398,6 +398,28 @@ const es: Dict = {
     trust: ["Plan gratis para siempre", "Sin cuenta para empezar", "Windows y Mac"],
     marquee: ["MP4", "MOV", "WEBM", "RECORTAR · CORTAR · TRANSICIONES", "SUBTÍTULOS AUTOMÁTICOS", "IMAGEN EN IMAGEN", "TEXTO · STICKERS · MÚSICA", "FILTROS", "HORIZONTAL · VERTICAL · CUADRADO"],
     videoLabel: "Vista previa del editor de vídeo",
+  },
+
+  languageLaunch: {
+    badge: "Nuevo",
+    kicker: "Traducción de voz y subtítulos para Europa",
+    title: "Tu voz, ",
+    titleHighlight: "en cinco idiomas",
+    intro: "Traduce el habla de tu vídeo entre inglés, francés, alemán, español e italiano, en cualquier dirección, dicha de nuevo con tu propia voz sobre la música y los sonidos del vídeo. Los subtítulos en francés, alemán, español e italiano ahora son más rápidos y precisos. Todo funciona en tu ordenador.",
+    // English, French, German, Spanish, Italian - in this order.
+    languages: ["Inglés", "Francés", "Alemán", "Español", "Italiano"],
+    yourVoice: "Tu voz",
+    yourVoiceDetail: "Grabada una vez, en cualquiera de los cinco",
+    stats: [
+      { value: "20", label: "pares de idiomas, en cualquier dirección" },
+      { value: "4–5×", label: "subtítulos más rápidos en francés, alemán, español e italiano" },
+      { value: "−44 %", label: "de palabras erróneas en subtítulos en italiano, −27 % en alemán" },
+      { value: "0", label: "subidas: traducción, voz y subtítulos funcionan en tu PC" },
+    ],
+    fastVoice: "Nueva voz Rápida: unas diez veces más ágil y lo bastante ligera para portátiles normales. En ordenadores más potentes, elige Precisa para una voz aún más parecida a la tuya en inglés.",
+    download: "Descargar gratis",
+    changelog: "Ver las novedades",
+    footnote: "Medido con grabaciones de prueba públicas en un portátil de 6 núcleos. Los resultados dependen de tu grabación y tu ordenador.",
   },
 
   whatsNew: {

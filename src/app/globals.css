@@ -422,6 +422,91 @@ body {
   -webkit-text-stroke-color: rgba(124, 92, 255, 0.22);
 }
 
+/* Homepage language launch (LanguageLaunch.tsx): five greetings in one
+   place, each shown for 2 s of a 10 s loop; the language chips light up in
+   step with them; the waveform bars bounce; a light runs along the beam. */
+@keyframes ll-word {
+  0% {
+    opacity: 0;
+    transform: translateY(0.35em) scale(0.92);
+    filter: blur(8px);
+  }
+  4%,
+  16% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+  20%,
+  100% {
+    opacity: 0;
+    transform: translateY(-0.35em) scale(1.04);
+    filter: blur(8px);
+  }
+}
+.ll-word {
+  opacity: 0;
+  animation: ll-word 10s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+@keyframes ll-chip {
+  0%,
+  20%,
+  100% {
+    transform: none;
+    box-shadow: none;
+  }
+  4%,
+  16% {
+    transform: translateX(-6px) scale(1.03);
+    box-shadow:
+      0 0 0 1px rgba(124, 92, 255, 0.55),
+      0 0 35px rgba(124, 92, 255, 0.35);
+  }
+}
+.ll-chip {
+  animation: ll-chip 10s ease-in-out infinite;
+}
+@keyframes ll-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.ll-bar {
+  transform-origin: center;
+  animation: ll-bar 1.2s ease-in-out infinite;
+}
+@keyframes ll-beam {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: 200% 50%;
+  }
+}
+.ll-beam {
+  background-size: 200% 100%;
+  animation: ll-beam 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ll-word,
+  .ll-chip,
+  .ll-bar,
+  .ll-beam {
+    animation: none;
+  }
+  .ll-word {
+    opacity: 0;
+  }
+  .ll-word:nth-child(2) {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-blob,
   .animate-marquee {

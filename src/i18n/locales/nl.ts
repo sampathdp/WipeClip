@@ -389,7 +389,7 @@ const nl: Dict = {
   },
 
   hero: {
-    badge: "Nieuw: spraakvertaling met je eigen stem",
+    badge: "Nieuw: nasynchronisatie en ondertitels in het Frans, Duits, Spaans en Italiaans",
     h1: ["De desktop-", "video-editor ", "voor makers"],
     intro:
       "Knip, kort in en orden clips, voeg overgangen, tekst, stickers, filters en muziek toe en exporteer liggend, staand of vierkant. Gratis voor Windows en Mac, met ingebouwde schermrecorder. Automatische ondertitels en beeld-in-beeld inbegrepen.",
@@ -398,6 +398,28 @@ const nl: Dict = {
     trust: ["Altijd gratis abonnement", "Geen account nodig om te starten", "Windows & Mac"],
     marquee: ["MP4", "MOV", "WEBM", "KNIPPEN · INKORTEN · OVERGANGEN", "AUTOMATISCHE ONDERTITELS", "BEELD-IN-BEELD", "TEKST · STICKERS · MUZIEK", "FILTERS", "LIGGEND · STAAND · VIERKANT"],
     videoLabel: "Voorbeeld van de video-editor",
+  },
+
+  languageLaunch: {
+    badge: "Nieuw",
+    kicker: "Spraakvertaling en ondertitels voor Europa",
+    title: "Jouw stem, ",
+    titleHighlight: "in vijf talen",
+    intro: "Vertaal de spraak in je video tussen Engels, Frans, Duits, Spaans en Italiaans, in elke richting, opnieuw uitgesproken met je eigen stem over de muziek en geluiden van de video. Franse, Duitse, Spaanse en Italiaanse ondertitels zijn nu sneller en nauwkeuriger. Alles draait op je eigen computer.",
+    // English, French, German, Spanish, Italian - in this order.
+    languages: ["Engels", "Frans", "Duits", "Spaans", "Italiaans"],
+    yourVoice: "Jouw stem",
+    yourVoiceDetail: "Eén keer opgenomen, in een van de vijf talen",
+    stats: [
+      { value: "20", label: "taalparen, in elke richting" },
+      { value: "4–5×", label: "snellere ondertitels in het Frans, Duits, Spaans en Italiaans" },
+      { value: "−44%", label: "foute woorden in Italiaanse ondertitels, −27% in het Duits" },
+      { value: "0", label: "uploads: vertaling, stem en ondertitels draaien op je pc" },
+    ],
+    fastVoice: "Nieuwe snelle stem: zo'n tien keer vlotter en licht genoeg voor gewone laptops. Op krachtigere computers kies je Nauwkeurig, voor een stem die in het Engels nog meer op de jouwe lijkt.",
+    download: "Gratis downloaden",
+    changelog: "Bekijk wat er nieuw is",
+    footnote: "Gemeten op openbare testopnamen op een laptop met 6 kernen. De resultaten hangen af van je opname en je computer.",
   },
 
   whatsNew: {
