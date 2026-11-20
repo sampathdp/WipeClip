@@ -1,5 +1,12 @@
 {
-  "next": [],
+  "next": [
+    "New voice translation for Europe: translate the speech in your video between English, French, German, Spanish and Italian, in any direction, said again in your own voice over the video's own music and sounds. Pick the language under Into in the Transcript panel.",
+    "Faster, more accurate European captions: French, German, Spanish and Italian captions now use a new speech model made for European languages. In our tests it was 4 to 5 times faster, with fewer wrong words: 44% fewer in Italian, 27% fewer in German. It downloads once (670 MB) the first time you pick one of these languages.",
+    "New Fast voice: a lighter voice for translations that speaks about ten times quicker and runs well on everyday laptops. Choose Fast or Accurate under Translate voice - the app suggests the one that suits your computer.",
+    "Numbers said right: in French, German, Spanish and Italian, numbers, prices and percentages are now spoken as words, so \"250 €\" is said \"deux cent cinquante euros\" instead of being mumbled.",
+    "Quiet recordings: French, German, Spanish and Italian captions no longer miss words when the voice was recorded quietly.",
+    "Translations checked in every language: sentences whose numbers changed, that came out untranslated, too short or too long are tried again, and the note after translating tells you which ones to check."
+  ],
   "releases": [
     {
       "version": "1.0.11",
